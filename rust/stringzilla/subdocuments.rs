@@ -4,6 +4,7 @@
 //!
 //! File: rust/stringzilla/subdocuments.rs
 //! Author: Ash Vardanian
+//! Date: October 14, 2026
 
 use core::ffi::{c_char, c_void};
 use core::mem::{ManuallyDrop, MaybeUninit};

@@ -25,9 +25,9 @@ extern "C" {
 #endif
 
 /** Peels the tile's first @p emit_count matches with a @c __lasx_xvperm_w left-pack, 4 lanes per
- *  sub-block. Each sub-block gathers its set `(position + lane, length)` pairs to the front, with
+ *  sub-block. Each sub-block gathers its set <tt>(position + lane, length)</tt> pairs to the front, with
  *  the same dword-index table as @ref sz_utf8_iterate_peel_haswell_, and element-stores
- *  `min(popcount, remaining)` at the advancing cursor. */
+ *  <tt>min(popcount, remaining)</tt> at the advancing cursor. */
 STRINGZILLA_INLINE void sz_utf8_iterate_peel_loongsonasx_(                     //
     sz_u32_t start_bits, sz_u32_t two_byte_starts, sz_u32_t three_byte_starts, //
     sz_size_t emit_count, sz_size_t position,                                  //
@@ -263,7 +263,7 @@ STRINGZILLA_INLINE __m256i sz_delimiter_lookup32_loongsonasx_(sz_u8_t const *tab
     return __lasx_xvshuf_b(high_half_u8x32, low_half_u8x32, index_u8x32);
 }
 
-/** Per-lane single-bit test `(bitmap_byte >> (low & 7)) & 1`, as 0x00/0xFF lanes. */
+/** Per-lane single-bit test <tt>(bitmap_byte >> (low & 7)) & 1</tt>, as 0x00/0xFF lanes. */
 STRINGZILLA_INLINE __m256i sz_delimiter_test_bit_loongsonasx_(__m256i bitmap_byte_u8x32, __m256i low_u8x32) {
     static sz_u8_t const bit_for_low3[32] = {1, 2, 4, 8, 16, 32, 64, 128, 0, 0, 0, 0, 0, 0, 0, 0,
                                              1, 2, 4, 8, 16, 32, 64, 128, 0, 0, 0, 0, 0, 0, 0, 0};

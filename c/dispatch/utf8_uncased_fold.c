@@ -4,7 +4,7 @@
  *  @date November 23, 2025
  *  @brief The UTF-8 case folding capability list, dispatch point and finder.
  *
- *  Split from the uncased find and order unit, `utf8_uncased.c`, so the cheap folding kernels
+ *  Split from the uncased find and order unit, <tt>utf8_uncased.c</tt>, so the cheap folding kernels
  *  compile as their own translation unit, in parallel with the heavy AVX-512 find.
  */
 #include <stringzilla/utf8_uncased_fold.h> // `sz_utf8_uncased_fold_*`

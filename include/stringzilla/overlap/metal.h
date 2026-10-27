@@ -11,7 +11,7 @@
  *
  *  The verbs keep the CUDA tier's shape, with an @c id<MTLCommandQueue> as the stream. Every block
  *  the kernels read, the forest, the round block, the candidates' tape and the matches, must come
- *  from @ref sz_allocator_init_unified_metal on that stream's device; memory outside the device's
+ *  from @c sz_allocator_init_unified_metal on that stream's device; memory outside the device's
  *  registry draws @c sz_device_memory_mismatch_k.
  *
  *  The kernels read the tape itself, since Metal has no device function pointers to call an

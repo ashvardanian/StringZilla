@@ -59,20 +59,20 @@ STRINGZILLA_INLINE v128_t sz_ascii_fold_v128_(v128_t bytes_u8x16) {
     return wasm_i8x16_add(bytes_u8x16, wasm_v128_and(is_upper_u8x16, wasm_i8x16_splat(0x20)));
 }
 
-/** Shifts lanes up by one: `result[0] = 0`, `result[i] = vector[i-1]`. The constant-shuffle twin
- *  of RVV `vslide1up(vector, 0)`. */
+/** Shifts lanes up by one: <tt>result[0] = 0</tt>, <tt>result[i] = vector[i-1]</tt>. The constant-shuffle twin
+ *  of RVV <tt>vslide1up(vector, 0)</tt>. */
 STRINGZILLA_INLINE v128_t sz_utf8_slide1up_v128_(v128_t vector_u8x16) {
     return wasm_i8x16_shuffle(vector_u8x16, wasm_i8x16_splat(0), 16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
 }
 
-/** Shifts lanes down by one: `result[i] = vector[i+1]`, `result[15] = carry`. The twin of RVV
- *  `vslide1down(vector, carry)`. */
+/** Shifts lanes down by one: <tt>result[i] = vector[i+1]</tt>, <tt>result[15] = carry</tt>. The twin of RVV
+ *  <tt>vslide1down(vector, carry)</tt>. */
 STRINGZILLA_INLINE v128_t sz_utf8_slide1down_v128_(v128_t vector_u8x16, sz_u8_t carry) {
     return wasm_i8x16_shuffle(vector_u8x16, wasm_i8x16_splat((sz_i8_t)carry), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
                               14, 15, 16);
 }
 
-/** 0xFF where `(byte - start)` is unsigned-`< length`, i.e. @c byte in `[start, start+length)`. */
+/** 0xFF where <tt>(byte - start)</tt> is unsigned-<tt>< length</tt>, i.e. @c byte in <tt>[start, start+length)</tt>. */
 STRINGZILLA_INLINE v128_t sz_utf8_in_range_v128_(v128_t bytes_u8x16, sz_u8_t start, sz_u8_t length) {
     return wasm_u8x16_lt(wasm_i8x16_sub(bytes_u8x16, wasm_i8x16_splat((sz_i8_t)start)),
                          wasm_i8x16_splat((sz_i8_t)length));

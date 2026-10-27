@@ -73,14 +73,14 @@ STRINGZILLA_INLINE sz_cptr_t sz_rfind_byte_rvv_(sz_cptr_t haystack, sz_size_t ha
 /**
  *  @brief Build a per-lane byteset membership mask for a vector strip.
  *
- *  Mirrors the NEON `_u8s[c >> 3] & (1 << (c & 7))` formulation. The set byte is fetched with an
- *  indexed memory load, @c vluxei8, straight from the 32-byte @c _u8s table, so the index `c >> 3`
+ *  Mirrors the NEON <tt>_u8s[c >> 3] & (1 << (c & 7))</tt> formulation. The set byte is fetched with an
+ *  indexed memory load, @c vluxei8, straight from the 32-byte @c _u8s table, so the index <tt>c >> 3</tt>
  *  in [0, 31] is valid at any @c VLEN: no register-group capacity ceiling and no serial fallback.
  *
  *  @param[in] haystack_u8m8 Vector of bytes to test.
  *  @param[in] set_u8s The 32-byte byteset in memory.
  *  @param[in] vector_length Vector length for this strip.
- *  @return Predicate mask where lane @c i is set if `haystack_u8m8[i]` is in the set.
+ *  @return Predicate mask where lane @c i is set if <tt>haystack_u8m8[i]</tt> is in the set.
  */
 STRINGZILLA_INLINE vbool1_t sz_find_byteset_mask_m8_rvv_(vuint8m8_t haystack_u8m8, sz_u8_t const *set_u8s,
                                                          sz_size_t vector_length) {

@@ -32,9 +32,11 @@ extern "C" {
  *  @param[out] count Number of words written, at most @p capacity.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
  *  @note No zero-length words are emitted; @p length == 0 yields no words.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_best(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
                                                     sz_size_t capacity, sz_size_t *count, sz_capability_t capabilities,
@@ -95,9 +97,14 @@ STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, 
 
 /**
  *  @brief Finds the UTF-8 word break kernel of @p kind, from the best of @p capabilities.
+ *  @param[in] kind The verb whose kernel to find.
+ *  @param[in] capabilities The mask to pick the best capability from.
  *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
  *  @param[out] capability The capability the kernel belongs to, or zero.
- *  @return @c sz_success_k, @c sz_missing_kernel_k, or @c sz_missing_library_k when header-only.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k
+ *  - @c sz_missing_library_k Header-only.
  */
 STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
                                                            sz_kernel_punned_t *kernel, sz_capability_t *capability);

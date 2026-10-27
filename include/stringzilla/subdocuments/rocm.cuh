@@ -3,7 +3,7 @@
  *  @author Ash Vardanian
  *  @date October 13, 2026
  *  @brief ROCm host side of path queries: the warp walk, the round block the walks run out of, the
- *      launches, and the @c _rocm exports, over the kernels of `subdocuments/simt.cuh`.
+ *      launches, and the @c _rocm exports, over the kernels of <tt>subdocuments/simt.cuh</tt>.
  *
  *  A routing launch settles which documents of the batch are large. Both verbs read back once their
  *  counting walks end, which joins the stream: a malformed document fails the call as it does on

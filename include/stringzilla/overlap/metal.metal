@@ -13,7 +13,7 @@
  *  @sa include/stringzilla/overlap/simt.cuh, the CUDA sibling this mirrors step for step
  *  @sa include/stringzilla/types.metal, the prelude compiled ahead of this source
  *
- *  The CUDA kernel reaches the serial helpers through `--expt-relaxed-constexpr`; MSL cannot
+ *  The CUDA kernel reaches the serial helpers through @c --expt-relaxed-constexpr; MSL cannot
  *  include the C headers, whose pointers carry no address space, so the four helpers this needs -
  *  the branch step, the leaf step, the tree's level bases and the misses bound - are mirrored here,
  *  and the tests hold every count to serial's.
@@ -203,7 +203,7 @@ inline bool sz_overlap_unreachable_metal_(device uint const *widths, ulong width
  *  before it, since a window needs all of its bytes, so every window is counted by exactly one
  *  thread, from the same residues serial computes.
  *
- *  Each width rolls its own hash a byte at a time, `H' = H * 256 + in - out * 256^w`, the byte
+ *  Each width rolls its own hash a byte at a time, <tt>H' = H * 256 + in - out * 256^w</tt>, the byte
  *  leaving the window read again from the text, so no width is too wide for a thread to hold. An
  *  engine with more widths than one walk rolls walks the segment once per group of them.
  */

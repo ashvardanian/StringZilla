@@ -8,10 +8,10 @@
  *  The VSX twin of the AVX2 (Haswell), Ice Lake, NEON, and RVV kernels: no path scalar-walks
  *  codepoints or spills a vector to the stack to call the serial oracle.
  *
- *  Each 64-byte window lives as four `__vector unsigned char` quarters (the codepoint substrate
+ *  Each 64-byte window lives as four <tt>__vector unsigned char</tt> quarters (the codepoint substrate
  *  twin of NEON's four @c uint8x16_t quarters); every per-codepoint BMP Word_Break property
  *  resolves through the shared page-compressed flat table via
- *  @ref sz_utf8_rune_flat_lookup_powervsx_ (the page LUT and the leaf both by a bounded scalar L1
+ *  @c sz_utf8_rune_flat_lookup_powervsx_ (the page LUT and the leaf both by a bounded scalar L1
  *  walk, VSX having no gather), and the Supplementary Plane through a nibble cascade whose 16-byte
  *  rows are gathered by one @c vec_perm each, bit-identical to @c sz_rune_word_break_property over
  *  the whole code space.
@@ -21,7 +21,7 @@
  *  cross-window bridge shadow / RI parity / left-context carry / WB3c neighbour coupling) run once
  *  in portable @c sz_u64_t bit algebra. Boundary-mask compaction avoids @c vpcompressb/pext (and
  *  the banned scalar @c ctz/popcount): set lanes left-pack through the substrate @c vec_perm
- *  shuffle-LUT of @ref sz_utf8_compress_starts_powervsx_.
+ *  shuffle-LUT of @c sz_utf8_compress_starts_powervsx_.
  *
  *  Little-endian only: the substrate movemasks and @c vec_perm indexing assume the little-endian
  *  element order (CI is ppc64le). The big-endian entry falls back to the serial reference, so no
@@ -69,7 +69,7 @@ STRINGZILLA_INLINE __vector unsigned char sz_utf8_word_break_byte_mask_from_bits
 }
 
 /** Word_Break class byte for sixteen BMP codepoints (per-lane high = cp>>8, low = cp&0xFF) from the
- *  flat page-compressed table via @ref sz_utf8_rune_flat_lookup_powervsx_, the VSX twin of
+ *  flat page-compressed table via @c sz_utf8_rune_flat_lookup_powervsx_, the VSX twin of
  *  @ref sz_utf8_word_break_bmp_class_neon_. Bit-exact with @c sz_rune_word_break_property over the
  *  whole BMP. Addresses one quarter; the caller iterates the four quarters. */
 STRINGZILLA_INLINE __vector unsigned char sz_utf8_word_break_bmp_class_powervsx_(
@@ -175,7 +175,7 @@ STRINGZILLA_INLINE void sz_utf8_word_break_bmp_compact_powervsx_(sz_u64_t bmp_st
 }
 
 /** Per-window byte-lane classification for VSX: the Word_Break class byte per lane as four
- *  quarters of `__vector unsigned char`, valid only on codepoint-start lanes (the engine reads
+ *  quarters of <tt>__vector unsigned char</tt>, valid only on codepoint-start lanes (the engine reads
  *  classes only at starts). The VSX twin of @ref sz_utf8_word_break_classify_window_neon_,
  *  bit-identical on every start lane. ASCII through the property table, BMP through the flat
  *  lookup, 4-byte leads through the astral cascade with the codepoint high/low/plane reconstructed
@@ -284,7 +284,7 @@ STRINGZILLA_INLINE sz_u64_t sz_utf8_word_break_byte_ge_powervsx_(__vector unsign
     return sz_utf8_mask_combine_powervsx_(ge_u8x16);
 }
 
-/** Per-quarter "(high,low) 16-bit value in `[lo, hi]`" membership for one range, the VSX unsigned
+/** Per-quarter "(high,low) 16-bit value in <tt>[lo, hi]</tt>" membership for one range, the VSX unsigned
  *  16-bit window-compare building block of @ref sz_utf8_word_break_range16_mask_powervsx_.
  *  @c vec_cmpge/vec_cmplt are native, so no @c max_epu8 emulation is needed. */
 STRINGZILLA_INLINE __vector unsigned char sz_utf8_word_break_range16_one_powervsx_(__vector unsigned char high_u8x16,
@@ -307,7 +307,7 @@ STRINGZILLA_INLINE __vector unsigned char sz_utf8_word_break_range16_one_powervs
     return vec_and(not_below_u8x16, not_above_u8x16);
 }
 
-/** A 64-bit "(high,low) 16-bit value in any sorted `[lo, hi]` range" lane mask over the four window
+/** A 64-bit "(high,low) 16-bit value in any sorted <tt>[lo, hi]</tt> range" lane mask over the four window
  *  quarters, the VSX twin of @ref sz_utf8_word_break_range16_mask_neon_ (WSegSpace /
  *  Extended_Pictographic). */
 STRINGZILLA_INLINE sz_u64_t sz_utf8_word_break_range16_mask_powervsx_( //
@@ -481,7 +481,7 @@ STRINGZILLA_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_p
 
 #pragma region Forward driver
 
-/** Forward UAX-29 word segmentation over `[0, length)` (POWER VSX, little-endian): the overlap-free
+/** Forward UAX-29 word segmentation over <tt>[0, length)</tt> (POWER VSX, little-endian): the overlap-free
  *  advancing driver, mirroring @ref sz_utf8_wordbreaks_neon over the VSX
  *  window/classify/partition/decide/drain leaves. Bit-exact with @c sz_utf8_wordbreaks_serial and
  *  every other windowed backend. */

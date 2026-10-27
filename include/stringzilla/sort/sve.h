@@ -33,8 +33,8 @@ extern "C" {
  *      around the pivot.
  *  @sa Identical to @b Skylake implementation, but uses variable length SVE registers.
  *
- *  @param[inout] initial_pgrams Source pgram array; updated in place after copy-back.
- *  @param[inout] initial_order Corresponding order array; updated in place after copy-back.
+ *  @param[in,out] initial_pgrams Source pgram array; updated in place after copy-back.
+ *  @param[in,out] initial_order Corresponding order array; updated in place after copy-back.
  *  @param[out] partitioned_pgrams Temporary output buffer for the three-way partitioned pgrams.
  *  @param[out] partitioned_order Temporary output buffer for the corresponding order entries.
  *  @param[in] start_in_strings First index (inclusive) of the range to partition.
@@ -132,8 +132,8 @@ STRINGZILLA_INLINE void sz_sort_3way_partition_sve_(sz_pgram_t *const initial_pg
  *      @c sz_sort_pgrams_sve_, and using the @c sz_sort_3way_partition_sve_ under the hood.
  *  @sa Identical to @b Skylake implementation, but uses variable length SVE registers.
  *
- *  @param[inout] initial_pgrams Pgram array to sort in place.
- *  @param[inout] initial_order Corresponding order array, permuted in sync with @p initial_pgrams.
+ *  @param[in,out] initial_pgrams Pgram array to sort in place.
+ *  @param[in,out] initial_order Corresponding order array, permuted in sync with @p initial_pgrams.
  *  @param[out] temporary_pgrams Scratch buffer of the same size as @p initial_pgrams,
  *      used during partitioning.
  *  @param[out] temporary_order Scratch buffer of the same size as @p initial_order,
@@ -199,8 +199,8 @@ STRINGZILLA_INLINE sz_status_t sz_sort_pgrams_sve_(sz_pgram_t *pgrams, sz_size_t
  *  Identical to the @b Skylake implementation, but uses variable length SVE registers.
  *
  *  @param[in] strings The collection of strings to sort.
- *  @param[inout] global_pgrams Working pgram array, length at least `strings->count`.
- *  @param[inout] global_order Current permutation array, updated in place.
+ *  @param[in,out] global_pgrams Working pgram array, length at least @c strings->count.
+ *  @param[in,out] global_order Current permutation array, updated in place.
  *  @param[out] temporary_pgrams Scratch buffer of the same size as @p global_pgrams.
  *  @param[out] temporary_order Scratch buffer of the same size as @p global_order.
  *  @param[in] start_in_strings First index (inclusive) of the range to process.

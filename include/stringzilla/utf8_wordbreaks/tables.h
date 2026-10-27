@@ -6,7 +6,7 @@
  *      @c sz_utf8_word_break_t values (see the walk in @c sz_rune_word_break_property).
  *
  *  ! The SIMD kernels resolve the BMP through the page-compressed flat table in the !
- *  `Flat BMP classifier tables` region (one indexed lookup per codepoint, @c vpgatherdd on x86). !
+ *  <tt>Flat BMP classifier tables</tt> region (one indexed lookup per codepoint, @c vpgatherdd on x86). !
  *  The tables below feed the serial oracle and the SIMD astral cascade.
  *
  *  Derived from the UCD WordBreakProperty.txt, linked below, by:
@@ -47,11 +47,11 @@
  *  astral_stage2_low = [value for row in stage1 for value in row]
  *  astral_s2 = [value for row in stage2 for value in row]
  *  astral_leaf = [value for row in leaf for value in row]  # word-break class indexed by (offset & 0xF)
- *  # The Ice Lake astral cascade loads astral_stage1/stage2_low/s2/leaf as 64-byte tiles straight from `.rodata`, so each is
- *  # stored `sz_align_(64)` and zero-padded to a multiple of 64 bytes (no per-call table materialization):
+ *  # The Ice Lake astral cascade loads astral_stage1/stage2_low/s2/leaf as 64-byte tiles straight from .rodata, so each is
+ *  # stored sz_align_(64) and zero-padded to a multiple of 64 bytes (no per-call table materialization):
  *  pad64 = lambda values: values + [0] * ((-len(values)) % 64)
  *  # The Word_Break class fits in 4 bits, so the Ice Lake astral leaf is stored two cells per byte (half the tiles);
- *  # the nibble cascade reconstructs `(idx & 1) ? byte >> 4 : byte & 0xF` (the serial astral path uses the range list):
+ *  # the nibble cascade reconstructs <tt>(idx &amp; 1) &#63; byte >> 4 : byte &amp; 0xF</tt> (the serial astral path uses the range list):
  *  leaf_cells = pad64(astral_leaf)
  *  astral_leaf_packed = pad64([leaf_cells[2 * i] | (leaf_cells[2 * i + 1] << 4) for i in range(len(leaf_cells) // 2)])
  *  @endcode
@@ -71,7 +71,7 @@ extern "C" {
  *  @brief Unicode TR29 Word_Break property values (4-bit encoding, 0-15).
  *
  *  These values correspond to the Word_Break property from Unicode TR29, used by
- *  `sz_rune_word_break_property()` for full TR29-compliant boundary detection.
+ *  <tt>sz_rune_word_break_property()</tt> for full TR29-compliant boundary detection.
  */
 enum sz_utf8_word_break_t {
 
@@ -774,7 +774,7 @@ static const sz_u8_t sz_utf8_word_break_astral_cls_[476] = {
 /**
  *  @brief SIMD Word_Break lookup tables, bit-exact with @c sz_rune_word_break_property.
  *
- *  @c bmp_page_lut_ maps `cp >> 8` to a page index and doubles as the page LUT of the flat BMP
+ *  @c bmp_page_lut_ maps <tt>cp >> 8</tt> to a page index and doubles as the page LUT of the flat BMP
  *  classifier below; the astral 5-nibble @c vpshufb cascade classifies cp − 0x10000 in-register.
  *
  *  @code{.py}
@@ -1042,8 +1042,8 @@ static const sz_u8_t sz_utf8_word_break_astral_stage4_groups_[3328] = {
  *  @brief Flat Word_Break classifier table, bit-exact with @c sz_rune_word_break_property across
  *      the BMP by construction.
  *
- *  The page index `bmp_page_lut_[cp >> 8]` selects one of 52 distinct 256-byte pages, then
- *  `flat_bmp_[page * 256 + (cp & 0xFF)]` is the descriptor, one indexed lookup per codepoint, read
+ *  The page index <tt>bmp_page_lut_[cp >> 8]</tt> selects one of 52 distinct 256-byte pages, then
+ *  <tt>flat_bmp_[page * 256 + (cp & 0xFF)]</tt> is the descriptor, one indexed lookup per codepoint, read
  *  by @c vpgatherdd on x86, @c svld1_gather on SVE2, @c vluxei16 on RVV, and a bounded scalar leaf
  *  walk on NEON, WASM, LASX, and POWER VSX, which have no gathers. The page LUT is @c bmp_page_lut_
  *  itself, reused rather than duplicated. Derived by:

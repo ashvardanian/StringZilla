@@ -483,7 +483,7 @@ STRINGZILLA_INLINE __m256i sz_hash_state_short_x4_finalize_icelake_(
 
 /**
  *  @brief Absorbs four 128-bit blocks (one per hash lane) into the 4-wide minimal hash state.
- *  @param[inout] state Pointer to the 4-wide minimal hash state.
+ *  @param[in,out] state Pointer to the 4-wide minimal hash state.
  *  @param[in] blocks_u8x64 512-bit register containing four 128-bit data blocks, one per lane.
  */
 STRINGZILLA_INLINE void sz_hash_state_short_x4_update_icelake_(sz_hash_state_aligned_for_short_x4_t *state,
@@ -500,7 +500,7 @@ STRINGZILLA_INLINE void sz_hash_state_short_x4_update_icelake_(sz_hash_state_ali
  *  four different strings, this seeds each lane differently to hash one string under four seeds.
  *
  *  @param[out] state Pointer to the 4-wide minimal hash state to initialize.
- *  @param[in] seeds_u64x8 Four seeds spread as `[s0,s0,s1,s1,s2,s2,s3,s3]` across the register.
+ *  @param[in] seeds_u64x8 Four seeds spread as <tt>[s0,s0,s1,s1,s2,s2,s3,s3]</tt> across the register.
  */
 STRINGZILLA_INLINE void sz_hash_multiseed_x4_init_icelake_(sz_hash_state_aligned_for_short_x4_t *state,
                                                            __m512i seeds_u64x8) {
@@ -519,7 +519,7 @@ STRINGZILLA_INLINE void sz_hash_multiseed_x4_init_icelake_(sz_hash_state_aligned
  *  @brief Finalizes the 4-wide parallel minimal state, folding in the input length.
  *  @param[in] state Pointer to the (const) 4-wide minimal hash state.
  *  @param[in] lengths_u64x8 The length addend broadcast into each seed-lane's key low half, i.e.
- *      `[0, length, 0, length, 0, length, 0, length]`. Seed-independent, so the caller builds it
+ *      <tt>[0, length, 0, length, 0, length, 0, length]</tt>. Seed-independent, so the caller builds it
  *      once and reuses it across all seed groups.
  *  @return 256-bit vector with four 64-bit hashes, one per lane.
  */

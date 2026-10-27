@@ -1,20 +1,19 @@
-//
-//  swift/StringProtocol+StringZilla.swift
-//  Extension of StringProtocol to interface with StringZilla functionalities.
-//
-//  Docs:
-//  - Accessing immutable UTF8-range:
-//    https://developer.apple.com/documentation/swift/string/utf8view
-//
-//  More reading materials:
-//  - String’s ABI and UTF-8. Nov 2018
-//    https://forums.swift.org/t/string-s-abi-and-utf-8/17676
-//  - Stable pointer into a C string without copying it? Aug 2021
-//    https://forums.swift.org/t/stable-pointer-into-a-c-string-without-copying-it/51244/1
-//
-//  - Author: Ash Vardanian
-//  - Date: January 21, 2024
-//
+/**
+ *  @file swift/StringProtocol+StringZilla.swift
+ *  @author Ash Vardanian
+ *  @date January 21, 2024
+ *  @brief Extension of StringProtocol to interface with StringZilla functionalities.
+ *
+ *  Docs:
+ *  - Accessing immutable UTF8-range:
+ *    https://developer.apple.com/documentation/swift/string/utf8view
+ *
+ *  More reading materials:
+ *  - String’s ABI and UTF-8. Nov 2018
+ *    https://forums.swift.org/t/string-s-abi-and-utf-8/17676
+ *  - Stable pointer into a C string without copying it? Aug 2021
+ *    https://forums.swift.org/t/stable-pointer-into-a-c-string-without-copying-it/51244/1
+ */
 
 import StringZillaC
 

@@ -6,7 +6,7 @@
  *      and Galois/counter modes.
  *
  *  The fourteen rounds are written out rather than looped, for the reason
- *  `cipher/icelake.h` spells out.
+ *  <tt>cipher/icelake.h</tt> spells out.
  *
  *  @sa include/stringzilla/cipher.h
  */
@@ -276,9 +276,9 @@ STRINGZILLA_INLINE void sz_ghash_store_westmere_(__m128i value_u8x16, sz_u8_t *b
  *  @brief Accumulates the 256-bit carry-less product of two reflected blocks into a running triple.
  *  @param[in] multiplicand_u8x16 One reflected operand.
  *  @param[in] multiplier_u8x16 The other reflected operand.
- *  @param[inout] low_u8x16 Accumulates the product of the two low halves.
- *  @param[inout] middle_u8x16 Accumulates both cross products.
- *  @param[inout] high_u8x16 Accumulates the product of the two high halves.
+ *  @param[in,out] low_u8x16 Accumulates the product of the two low halves.
+ *  @param[in,out] middle_u8x16 Accumulates both cross products.
+ *  @param[in,out] high_u8x16 Accumulates the product of the two high halves.
  *
  *  Splitting the schoolbook product from its reduction is what lets several blocks share one
  *  reduction: the field is linear, so the partial products of a whole group may be summed
@@ -484,7 +484,7 @@ STRINGZILLA_INLINE void sz_aes256_gcm_associate_westmere_(sz_aes256_gcm_state_t 
 
 /**
  *  @brief Spends what is left of the keystream block the state carries, one byte at a time.
- *  @param[inout] state The state, whose two sixteen-byte counters advance together here.
+ *  @param[in,out] state The state, whose two sixteen-byte counters advance together here.
  *  @param[in] input The bytes to transform.
  *  @param[out] output Receives the transformed bytes.
  *  @param[in] count Bytes to consume, never more than the keystream block has left.
@@ -523,7 +523,7 @@ STRINGZILLA_INLINE __m128i sz_aes256_gcm_spend_westmere_(sz_aes256_gcm_state_t *
 
 /**
  *  @brief Transforms a chunk and absorbs its ciphertext, whichever side of the call that is.
- *  @param[inout] state The state.
+ *  @param[in,out] state The state.
  *  @param[in] text The chunk to transform.
  *  @param[in] length Bytes in the chunk.
  *  @param[out] output Receives the transformed bytes.

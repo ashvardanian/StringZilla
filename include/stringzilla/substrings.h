@@ -25,7 +25,7 @@
  *  - @ref sz_substrings_find_kernel → the kernel any of them would run, for a caller that keeps it.
  *
  *  Each verb runs the kernel of the capability its engine was compiled for, on the host or enqueued
- *  on a stream of that engine's device. The engine and its types live in `substrings/serial.h`.
+ *  on a stream of that engine's device. The engine and its types live in <tt>substrings/serial.h</tt>.
  *
  *  The engine is a plain struct of flat arrays over two owned blocks, so a caller driving its own
  *  loops binds @ref sz_substrings_step and walks it directly, and a device backend passes it to a
@@ -71,13 +71,15 @@ extern "C" {
  *      be host-writable, as the host writes the automaton there.
  *  @param[in] stream Null on the CPU. On a GPU, the stream to queue on, also naming the device:
  *      a @c cudaStream_t, a @c hipStream_t, or an @c id<MTLCommandQueue>; null for the default.
- *  @return @c sz_success_k once the vocabulary compiled; @c sz_missing_kernel_k when no capability
- *      of the mask has an init; @c sz_bad_alloc_k if memory allocation failed;
- *      @c sz_overflow_risk_k if the vocabulary exceeds a 32-bit state id; @c sz_invalid_utf8_k for
- *      a malformed needle under @ref sz_uncased_k; @c sz_unexpected_dimensions_k if the vocabulary
- *      or one of its needles was empty; or on a device @c sz_device_memory_mismatch_k for a block
- *      or a @p stream it cannot use, and @c sz_missing_gpu_k when it doesn't answer.
+ *
  *  @note May join @p stream; no compute verb ever does.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability of the mask has an init.
+ *  - @c sz_overflow_risk_k The vocabulary exceeds a 32-bit state id.
+ *  - @c sz_invalid_utf8_k A malformed needle under @ref sz_uncased_k.
+ *  - @c sz_unexpected_dimensions_k The vocabulary or one of its needles was empty.
+ *  - @c sz_device_memory_mismatch_k On a device, a block or a @p stream it cannot use.
  */
 STRINGZILLA_API sz_status_t sz_substrings_engine_init(sz_substrings_engine_t *engine, sz_strings_view_t const *needles,
                                                       sz_case_sensitivity_t case_sensitivity,
@@ -99,9 +101,11 @@ STRINGZILLA_API void sz_substrings_engine_free(sz_substrings_engine_t *engine, s
  *  @param[out] contained One bit per haystack, eight to a byte, the lowest bit first: set when that
  *      haystack matches, with the bits past the last haystack written as zero.
  *  @param[in] stream As @ref sz_substrings_counts takes it.
- *  @return @c sz_success_k once the haystacks were marked; @c sz_missing_kernel_k for an empty
- *      engine; or @c sz_device_memory_mismatch_k if a device got an argument or a @p stream that
- *      it has no way to use.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k An empty engine.
+ *  - @c sz_device_memory_mismatch_k A device got an argument or a @p stream that it has no
+ *    way to use.
  */
 STRINGZILLA_API sz_status_t sz_substrings_contains(sz_substrings_engine_t *engine, sz_strings_view_t const *haystacks,
                                                    sz_u1x8_t *contained, sz_stream_t stream);
@@ -119,15 +123,16 @@ STRINGZILLA_API sz_status_t sz_substrings_contains(sz_substrings_engine_t *engin
  *  @param[in] haystacks The texts to search; their bytes are read in place and never copied. Any
  *      layout on the CPU, and on a device a tape @ref sz_strings_to_tape_best wrote into a unified
  *      allocator, as every verb takes its haystacks and replacements.
- *  @param[out] counts The per-haystack counts, haystack h at `counts[h * stride]`.
+ *  @param[out] counts The per-haystack counts, haystack h at <tt>counts[h * stride]</tt>.
  *  @param[in] counts_stride Entries from one haystack's count to the next, at least one, so a
  *      strided call writes one column of a @b [haystacks, vocabularies] feature matrix.
  *  @param[in] stream Null on the CPU. On a GPU, the stream to queue on, which also names the device
  *      the round runs on; null for the default.
- *  @return @c sz_success_k once the haystacks were counted, or on a device the counting enqueued;
- *      @c sz_unexpected_dimensions_k if @p counts_stride is zero; @c sz_missing_kernel_k for an
- *      empty engine; or @c sz_device_memory_mismatch_k if a device got an argument or a @p stream
- *      it cannot use.
+ *
+ *  @par Statuses:
+ *  - @c sz_unexpected_dimensions_k @p counts_stride is zero.
+ *  - @c sz_missing_kernel_k An empty engine.
+ *  - @c sz_device_memory_mismatch_k A device got an argument or a @p stream it cannot use.
  */
 STRINGZILLA_API sz_status_t sz_substrings_counts(sz_substrings_engine_t *engine, sz_strings_view_t const *haystacks,
                                                  sz_size_t *counts, sz_size_t counts_stride, sz_stream_t stream);
@@ -143,12 +148,13 @@ STRINGZILLA_API sz_status_t sz_substrings_counts(sz_substrings_engine_t *engine,
  *  @param[out] matches_offsets One boundary per haystack into @p matches plus one, the last being
  *      the total; filled whether or not the matches fit, which is what sizes the next call.
  *  @param[in] stream As @ref sz_substrings_counts takes it.
- *  @return @c sz_success_k once every match was reported, or on a device the reporting enqueued;
- *      @c sz_missing_kernel_k for an empty engine; or @c sz_device_memory_mismatch_k if a device
- *      got an unaddressable argument.
  *
  *  A capacity too small is not an error: the report's @c matches_emitted names the true total and
  *  @c shortfall names what did not fit, so a sizing call and a filling call need no walk between.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k An empty engine.
+ *  - @c sz_device_memory_mismatch_k A device got an unaddressable argument.
  */
 STRINGZILLA_API sz_status_t sz_substrings_find(sz_substrings_engine_t *engine, sz_strings_view_t const *haystacks,
                                                sz_match_t *matches, sz_size_t matches_capacity,
@@ -168,13 +174,15 @@ STRINGZILLA_API sz_status_t sz_substrings_find(sz_substrings_engine_t *engine, s
  *  @param[out] offsets One rewritten boundary per haystack plus one, the last being the total;
  *      filled whether or not the target held the result, which is what sizes the next call.
  *  @param[in] stream As @ref sz_substrings_counts takes it.
- *  @return @c sz_success_k once every haystack was rewritten, or on a device the rewrite enqueued;
- *      @c sz_unexpected_dimensions_k if @p replacements lacks one entry per needle;
- *      @c sz_status_unknown_k if the policy leaves no cover; @c sz_missing_kernel_k for an empty
- *      engine; or @c sz_device_memory_mismatch_k for an argument no device kernel can address.
  *
  *  A target too small is not an error: the report's @c target_length names the bytes the rewrite
  *  needs and @c shortfall names what did not fit, leaving the contents of @p target unspecified.
+ *
+ *  @par Statuses:
+ *  - @c sz_unexpected_dimensions_k @p replacements lacks one entry per needle.
+ *  - @c sz_status_unknown_k The policy leaves no cover.
+ *  - @c sz_missing_kernel_k An empty engine.
+ *  - @c sz_device_memory_mismatch_k An argument no device kernel can address.
  */
 STRINGZILLA_API sz_status_t sz_substrings_replace(sz_substrings_engine_t *engine, sz_strings_view_t const *haystacks,
                                                   sz_strings_view_t const *replacements, sz_ptr_t target,
@@ -195,17 +203,18 @@ STRINGZILLA_API sz_status_t sz_substrings_replace(sz_substrings_engine_t *engine
  *      @c average_document_length, or @c STRINGZILLA_NULL to use each haystack's byte length.
  *  @param[in] parameters BM25's continuous parameters.
  *  @param[in] needle_weights One weight per needle of the engine.
- *  @param[out] scores The per-haystack scores, haystack h at `scores[h * stride]`.
+ *  @param[out] scores The per-haystack scores, haystack h at <tt>scores[h * stride]</tt>.
  *  @param[in] scores_stride Entries from one haystack's score to the next, at least one, so a
  *      strided call writes one column of a @b [haystacks, vocabularies] feature matrix.
  *  @param[in] stream As @ref sz_substrings_counts takes it.
- *  @return @c sz_success_k once every haystack was scored, or on a device the scoring enqueued;
- *      @c sz_unexpected_dimensions_k for invalid arguments, as below; @c sz_missing_kernel_k for an
- *      empty engine; @c sz_bad_alloc_k if a device engine's first call could not grow its arena; or
- *      @c sz_device_memory_mismatch_k for an argument or grown arena a device cannot address.
  *
  *  The arguments are invalid when @p needle_weights is @c STRINGZILLA_NULL, @p scores_stride is
  *  zero, or @c length_normalization is positive while @c average_document_length is not.
+ *
+ *  @par Statuses:
+ *  - @c sz_unexpected_dimensions_k Invalid arguments, as above.
+ *  - @c sz_missing_kernel_k An empty engine.
+ *  - @c sz_device_memory_mismatch_k An argument or grown arena a device cannot address.
  */
 STRINGZILLA_API sz_status_t sz_substrings_bm25_scores(sz_substrings_engine_t *engine,
                                                       sz_strings_view_t const *haystacks,
@@ -214,7 +223,31 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores(sz_substrings_engine_t *en
                                                       sz_f32_t const *needle_weights, sz_f32_t *scores,
                                                       sz_size_t scores_stride, sz_stream_t stream);
 
-/** @copydoc sz_substrings_engine_init */
+/**
+ *  @brief Compiles @p needles for the serial kernels.
+ *  @param[out] engine Left untouched unless the call succeeds.
+ *  @param[in] needles The vocabulary; an empty needle is refused rather than skipped, as it would
+ *      match at every position and dropping it would shift every later needle's reported index.
+ *      Read on the host.
+ *  @param[in] case_sensitivity Whether both sides are folded before they meet, or compared as is.
+ *  @param[in] overlap_policy The cover every round runs, as the arena is sized for that one alone.
+ *  @param[in] hot_states States to keep in the dense hot rows, or
+ *      @ref STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO to fill a fixed byte budget, which holds more
+ *      states the fewer classes the vocabulary spells.
+ *  @param[in] matches_budget Matches one round may emit, read by a device tier only; the serial
+ *      walk goes straight into the caller's output and ignores it.
+ *  @param[in] haystacks_budget Haystacks one round may carry, read by a device tier only; the
+ *      serial walk ignores it.
+ *  @param[in] allocator Where both blocks come from, or @c STRINGZILLA_NULL for
+ *      @c sz_allocator_init_unified_serial. Stored by value, so
+ *      @ref sz_substrings_engine_free needs none and cannot get the wrong one.
+ *  @param[in] stream Null on the CPU.
+ *
+ *  @par Statuses:
+ *  - @c sz_overflow_risk_k The vocabulary exceeds a 32-bit state id.
+ *  - @c sz_invalid_utf8_k A malformed needle under @ref sz_uncased_k.
+ *  - @c sz_unexpected_dimensions_k The vocabulary or one of its needles was empty.
+ */
 STRINGZILLA_API sz_status_t sz_substrings_engine_init_serial(
     sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
@@ -640,9 +673,14 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_metal(sz_substrings_engine
 
 /**
  *  @brief Finds the substrings kernel of @p kind, from the best of @p capabilities.
+ *  @param[in] kind The verb whose kernel to find.
+ *  @param[in] capabilities The mask to pick the best capability from.
  *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
  *  @param[out] capability The capability the kernel belongs to, or zero.
- *  @return @c sz_success_k, @c sz_missing_kernel_k, or @c sz_missing_library_k when header-only.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k
+ *  - @c sz_missing_library_k Header-only.
  */
 STRINGZILLA_API sz_status_t sz_substrings_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
                                                       sz_kernel_punned_t *kernel, sz_capability_t *capability);

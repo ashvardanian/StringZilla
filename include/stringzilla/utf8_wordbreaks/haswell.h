@@ -8,8 +8,8 @@
  *  stack to call the serial oracle.
  *
  *  Each 64-byte window lives as two @c __m256i halves. The BMP property is one indexed lookup per
- *  codepoint into a page-compressed flat table - `bmp_page_lut_[cp >> 8]` picks one of 52 distinct
- *  256-byte pages, then `flat_bmp_[page * 256 + (cp & 0xFF)]` is the class - fetched with
+ *  codepoint into a page-compressed flat table - <tt>bmp_page_lut_[cp >> 8]</tt> picks one of 52 distinct
+ *  256-byte pages, then <tt>flat_bmp_[page * 256 + (cp & 0xFF)]</tt> is the class - fetched with
  *  @c vpgatherdd; the Supplementary Plane still rides a @c vpshufb nibble cascade. Both are
  *  bit-identical to @c sz_rune_word_break_property.
  *
@@ -58,10 +58,10 @@ STRINGZILLA_INLINE __m256i sz_utf8_word_break_bmp_class_haswell_(__m256i high_by
                                              high_bytes_u8x32, low_bytes_u8x32);
 }
 
-/** Word_Break class byte for thirty-two astral codepoints over the 20-bit `offset = cp - 0x10000`
+/** Word_Break class byte for thirty-two astral codepoints over the 20-bit <tt>offset = cp - 0x10000</tt>
  *  (5-nibble cascade), the AVX2 twin of @c sz_utf8_word_break_classify_astral16_icelake_. Per-lane
- *  bytes: @p plane_off_u8x32 holds `(offset >> 16) & 0xFF` (low nibble meaningful), @p high_u8x32
- *  holds `(offset >> 8) & 0xFF`, and @p low_u8x32 holds `offset & 0xFF`. The result is bit-exact
+ *  bytes: @p plane_off_u8x32 holds <tt>(offset >> 16) & 0xFF</tt> (low nibble meaningful), @p high_u8x32
+ *  holds <tt>(offset >> 8) & 0xFF</tt>, and @p low_u8x32 holds <tt>offset & 0xFF</tt>. The result is bit-exact
  *  with @c sz_rune_word_break_property over the Supplementary Planes. */
 STRINGZILLA_INLINE __m256i sz_utf8_word_break_astral_class_haswell_(__m256i plane_off_u8x32, __m256i high_u8x32,
                                                                     __m256i low_u8x32) {
@@ -261,13 +261,13 @@ STRINGZILLA_INLINE sz_u64_t sz_utf8_word_break_byte_equal_haswell_(__m256i low_h
                                          _mm256_cmpeq_epi8(high_half_u8x32, v_u8x32));
 }
 
-/** Per-half unsigned `value >= bound` mask (AVX2 has no unsigned compare):
- *  `max_epu8(value,bound)==value`. */
+/** Per-half unsigned <tt>value >= bound</tt> mask (AVX2 has no unsigned compare):
+ *  <tt>max_epu8(value,bound)==value</tt>. */
 STRINGZILLA_INLINE __m256i sz_utf8_word_break_cmpge_epu8_haswell_(__m256i value_u8x32, __m256i bound_u8x32) {
     return _mm256_cmpeq_epi8(_mm256_max_epu8(value_u8x32, bound_u8x32), value_u8x32);
 }
 
-/** Per-half "(high,low) 16-bit value in `[lo, hi]`" membership for one range (the AVX2 unsigned
+/** Per-half "(high,low) 16-bit value in <tt>[lo, hi]</tt>" membership for one range (the AVX2 unsigned
  *  16-bit window-compare building block of @ref sz_utf8_word_break_range16_mask_haswell_). */
 STRINGZILLA_INLINE __m256i sz_utf8_word_break_range16_one_haswell_(__m256i high_u8x32, __m256i low_u8x32, sz_u16_t lo,
                                                                    sz_u16_t hi) {
@@ -287,7 +287,7 @@ STRINGZILLA_INLINE __m256i sz_utf8_word_break_range16_one_haswell_(__m256i high_
     return _mm256_and_si256(not_below_u8x32, not_above_u8x32);
 }
 
-/** A 64-bit "(high,low) 16-bit value in any sorted `[lo, hi]` range" lane mask over both window
+/** A 64-bit "(high,low) 16-bit value in any sorted <tt>[lo, hi]</tt> range" lane mask over both window
  *  halves, the AVX2 twin of @ref sz_utf8_word_break_range16_mask_icelake_ (WSegSpace /
  *  Extended_Pictographic). */
 STRINGZILLA_INLINE sz_u64_t sz_utf8_word_break_range16_mask_haswell_( //
@@ -501,7 +501,7 @@ STRINGZILLA_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_h
 
 #pragma region Forward driver
 
-/** Forward UAX-29 word segmentation over `[0, length)` (Haswell AVX2): the overlap-free advancing
+/** Forward UAX-29 word segmentation over <tt>[0, length)</tt> (Haswell AVX2): the overlap-free advancing
  *  driver, mirroring @ref sz_utf8_wordbreaks_icelake over the AVX2
  *  window/classify/partition/decide/drain leaves. Bit-exact with @c sz_utf8_wordbreaks_serial and
  *  @c sz_utf8_wordbreaks_icelake. */

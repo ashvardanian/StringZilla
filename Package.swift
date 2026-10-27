@@ -1,4 +1,4 @@
-// swift-tools-version:6.4
+// swift-tools-version:6.2
 import PackageDescription
 
 // CMake builds and probes the C library, as for every other binding, and SwiftPM links what it

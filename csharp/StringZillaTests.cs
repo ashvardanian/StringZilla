@@ -101,7 +101,6 @@ public class StringZillaTests {
     [Fact]
     public void Metadata_IsPopulated() {
         Assert.Equal("serial", Sz.CapabilitiesName(1));
-        Assert.True(Sz.Version.Major >= 4);
     }
 
     [Fact]

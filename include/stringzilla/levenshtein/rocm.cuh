@@ -3,9 +3,9 @@
  *  @author Ash Vardanian
  *  @date October 3, 2026
  *  @brief ROCm host side of Levenshtein distances: the rung buckets, the launch geometry and the
- *      @c _rocm exports, over the walks and kernels of `levenshtein/simt.cuh`.
+ *      @c _rocm exports, over the walks and kernels of <tt>levenshtein/simt.cuh</tt>.
  *
- *  A batch is bucketed by rung key at @ref sz_levenshtein_engine_init_scoped_rocm_, so one launch
+ *  A batch is bucketed by rung key at @c sz_levenshtein_engine_init_scoped_rocm_, so one launch
  *  carries only queries that share an entry point, and the occupancy walk each of those entry
  *  points needs is paid there rather than once per round. The byte planes are built by a kernel
  *  from the queries staged into device-reachable memory; the rune planes are built on the host, an
@@ -468,7 +468,7 @@ static sz_status_t sz_levenshtein_build_masks_rocm_(sz_levenshtein_engine_t *eng
 
 /** Prepares @p queries on the device the caller already made current, for the tier whose
  *  @p entry_points the rounds will launch, which is every step of
- *  @ref sz_levenshtein_engine_init_scoped_rocm_ but the device scope. */
+ *  @c sz_levenshtein_engine_init_scoped_rocm_ but the device scope. */
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_rocm_(sz_levenshtein_engine_t *engine,
                                                                 sz_strings_view_t const *queries,
                                                                 sz_levenshtein_symbol_t symbol,

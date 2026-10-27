@@ -4,6 +4,7 @@
 //!
 //! File: rust/stringzilla/utf8_tokens.rs
 //! Author: Ash Vardanian
+//! Date: August 7, 2026
 
 use core::ffi::c_void;
 use core::marker::PhantomData;

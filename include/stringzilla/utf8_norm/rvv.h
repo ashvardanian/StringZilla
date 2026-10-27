@@ -7,13 +7,13 @@
  *  Like every other backend, this overrides exactly one point of the shared engine: the scan
  *  primitive @c sz_utf8_norm_classify_rvv_, which locates the first non-inert byte for a form. The
  *  two public entry points, @c sz_utf8_norm_rvv and @c sz_utf8_find_denormalized_rvv, reuse the
- *  force-inlined engines from `serial.h`, passing this scanner as the constant function address
+ *  force-inlined engines from <tt>serial.h</tt>, passing this scanner as the constant function address
  *  that devirtualizes the call.
  *
  *  RVV is the cleanest backend of the family: the 64-entry lead lookup @c sz_utf8_norm_lead_lut_
  *  needs no table split, neither a @c vpshufb 16-lane window nor a @c vqtbl4q register quad. A
- *  single indexed @c vluxei8 gather over `byte & 0x3F` reads the family bits straight from memory
- *  at any @c VLEN, the same idiom the word-break classifier in `utf8_wordbreaks/rvv.h` uses for its
+ *  single indexed @c vluxei8 gather over <tt>byte & 0x3F</tt> reads the family bits straight from memory
+ *  at any @c VLEN, the same idiom the word-break classifier in <tt>utf8_wordbreaks/rvv.h</tt> uses for its
  *  ASCII property table. A per-strip ASCII gate, @c vmsgtu for the high bit reduced with @c vfirst,
  *  keeps the dominant inert case off the LUT entirely, and any strip that survives the gate is
  *  handed to the shared scalar verify.
@@ -45,7 +45,7 @@ extern "C" {
  *
  *  Matches @c sz_utf8_norm_classify_serial_ semantics. The hot loop classifies whole @c e8m8
  *  strips: a @c vfirst over the high-bit mask skips all-ASCII strips with zero LUT work, and a
- *  @c vluxei8 gather over `sz_utf8_norm_lead_lut_[byte & 0x3F]` masked by the form flag identifies
+ *  @c vluxei8 gather over <tt>sz_utf8_norm_lead_lut_[byte & 0x3F]</tt> masked by the form flag identifies
  *  any candidate non-inert lead. The cold per-codepoint verify, @c sz_utf8_norm_verify_block_,
  *  carries the combining class across strips and reports order and quick-check violations exactly,
  *  including in the partial final strip.

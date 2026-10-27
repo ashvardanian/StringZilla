@@ -7,7 +7,7 @@
  *  @sa include/stringzilla/utf8_uncased.h
  *
  *  Ports the Ice Lake architecture to 32-byte YMM chunks: the needle classification, match
- *  verification, and danger-zone scanning stay ISA-independent in `serial.h`; per-script fold and
+ *  verification, and danger-zone scanning stay ISA-independent in <tt>serial.h</tt>; per-script fold and
  *  alarm helpers become YMM functions; and the shared force-inlined @c scripted_ driver walks the
  *  haystack in 32-byte steps. AVX-512 k-mask algebra maps onto two AVX2 domains: byte-mask vectors
  *  for folds, which must feed masked adds, and 32-bit @c VPMOVMSKB integers for alarms and probe
@@ -38,8 +38,8 @@ extern "C" {
 /**
  *  @brief Detects bytes in the unsigned range of @p range_length values starting at @p range_start.
  *
- *  The identity `min_epu8(x − start, limit) == x − start` realizes `(x − start) ≤ limit`, as AVX2
- *  has no unsigned byte compares: the wrap-around subtraction maps the range onto `[0, limit]` and
+ *  The identity <tt>min_epu8(x − start, limit) == x − start</tt> realizes <tt>(x − start) ≤ limit</tt>, as AVX2
+ *  has no unsigned byte compares: the wrap-around subtraction maps the range onto <tt>[0, limit]</tt> and
  *  @c VPMINUB with @c VPCMPEQB realize the unsigned ≤ in two single-uop instructions - cheaper and
  *  clearer than the sign-flip @c VPXOR and @c VPCMPGTB alternative.
  */
@@ -52,7 +52,7 @@ STRINGZILLA_INLINE __m256i sz_utf8_uncased_in_byte_range_haswell_(__m256i values
 /**
  *  @brief Shifts the 32 source bytes right by one lane, so lane @c i holds byte i − 1.
  *
- *  Lane 0 receives zero. This is the vector-domain equivalent of Ice Lake's `k-mask << 1` idiom: a
+ *  Lane 0 receives zero. This is the vector-domain equivalent of Ice Lake's <tt>k-mask << 1</tt> idiom: a
  *  continuation byte at lane 0 whose lead sits in the previous chunk stays unfolded in both ports,
  *  and such positions can never start a match anyway, as the needle's folded window always begins
  *  with a full rune, never a continuation byte. AVX2 @c VPALIGNR works per 128-bit lane, so a
@@ -64,13 +64,13 @@ STRINGZILLA_INLINE __m256i sz_utf8_uncased_previous_bytes_haswell_(__m256i sourc
 }
 
 /** Shifts the 32 source bytes left by one lane, so lane @c i holds byte i + 1; lane 31 receives
- *  zero. Vector-domain equivalent of Ice Lake's `k-mask >> 1`. */
+ *  zero. Vector-domain equivalent of Ice Lake's <tt>k-mask >> 1</tt>. */
 STRINGZILLA_INLINE __m256i sz_utf8_uncased_next_bytes_haswell_(__m256i source_u8x32) {
     __m256i carry_u8x32 = _mm256_permute2x128_si256(source_u8x32, source_u8x32, 0x81); // [source.high, zero]
     return _mm256_alignr_epi8(carry_u8x32, source_u8x32, 1);
 }
 
-/** First N bits set; BZHI keeps `n == 32` defined, unlike the `(1 << n) − 1` idiom. */
+/** First N bits set; BZHI keeps <tt>n == 32</tt> defined, unlike the <tt>(1 << n) − 1</tt> idiom. */
 STRINGZILLA_INLINE sz_u32_t sz_utf8_uncased_mask_until_haswell_(sz_size_t n) {
     return (sz_u32_t)_bzhi_u32(0xFFFFFFFFu, (unsigned)n);
 }

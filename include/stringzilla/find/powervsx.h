@@ -31,8 +31,8 @@ extern "C" {
  *      16-bit mask where bit @c i reflects byte @c i, the lowest-addressed byte landing in bit 0.
  *
  *  Implemented with @c vec_vbpermq, which bit-gathers from a source vector using the supplied
- *  big-endian bit indices. On little-endian targets the gathered bits land in element `[1]`.
- *  The indices `(15 - i) * 8` select the MSB (bit 7) of byte @c i, yielding an SSE-like ordering.
+ *  big-endian bit indices. On little-endian targets the gathered bits land in element <tt>[1]</tt>.
+ *  The indices <tt>(15 - i) * 8</tt> select the MSB (bit 7) of byte @c i, yielding an SSE-like ordering.
  *
  *  @param[in] cmp_u8x16 A comparison result vector, 0xFF where matched, else 0x00.
  *  @return 64-bit value with low 16 bits forming the movemask.

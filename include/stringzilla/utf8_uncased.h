@@ -17,7 +17,7 @@
  *
  *  On fast vectorized paths there may be significant algorithmic differences between ISA versions;
  *  the per-script SIMD kernels (Ice Lake, ...) consume the needle analysis produced once by the
- *  ISA-agnostic classifier in `utf8_uncased/serial.h`.
+ *  ISA-agnostic classifier in <tt>utf8_uncased/serial.h</tt>.
  *
  *  @sa include/stringzilla/utf8_uncased_fold.h
  */
@@ -56,7 +56,9 @@ extern "C" {
  *  @param[out] prepared The prepared needle, every field filled.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_needle_init_best(sz_cptr_t needle, sz_size_t needle_length,
                                                              sz_utf8_uncased_needle_t *prepared,
@@ -144,13 +146,15 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_needle_init_best(sz_cptr_t needle, s
  *  @param[out] match_length Number of bytes in the matched region.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
  *  @see ICU String Search: https://unicode-org.github.io/icu/userguide/collation/string-search.html
  *  @see ClickHouse Volnitsky: https://github.com/ClickHouse/ClickHouse/blob/master/src/Common/Volnitsky.h
  *  @see glibc Two-Way Algorithm: https://github.com/lattera/glibc/blob/master/string/str-two-way.h
  *  @see Efficient Parameterized Pattern Matching in Sublinear Space: https://arxiv.org/abs/2306.10714
  *  @see uni-algo: https://github.com/uni-algo/uni-algo
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_search_best(sz_cptr_t haystack, sz_size_t haystack_length,
                                                         sz_utf8_uncased_needle_t const *needle, sz_cptr_t *match,
@@ -193,7 +197,9 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_search_best(sz_cptr_t haystack, sz_s
  *  @param[out] ordering @c sz_less_k if a < b, @c sz_equal_k if a = b, @c sz_greater_k if a > b.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_order_best( //
     sz_cptr_t a, sz_size_t a_length,                    //
@@ -261,16 +267,23 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_order_best( //
  *  @param[out] match The first cased codepoint, or @c STRINGZILLA_NULL_CHAR if all are caseless.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_utf8_find_cased_best(sz_cptr_t text, sz_size_t length, sz_cptr_t *match,
                                                     sz_capability_t capabilities, sz_stream_t stream);
 
 /**
  *  @brief Finds the UTF-8 uncased kernel of @p kind, from the best of @p capabilities.
+ *  @param[in] kind The verb whose kernel to find.
+ *  @param[in] capabilities The mask to pick the best capability from.
  *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
  *  @param[out] capability The capability the kernel belongs to, or zero.
- *  @return @c sz_success_k, @c sz_missing_kernel_k, or @c sz_missing_library_k when header-only.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k
+ *  - @c sz_missing_library_k Header-only.
  */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
                                                         sz_kernel_punned_t *kernel, sz_capability_t *capability);

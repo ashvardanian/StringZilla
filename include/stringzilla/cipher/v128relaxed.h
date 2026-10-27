@@ -4,7 +4,7 @@
  *  @date August 4, 2026
  *  @brief WebAssembly relaxed-SIMD backend for AES-256 in counter and Galois/counter modes.
  *
- *  The round loop stays a loop, for the reason `cipher/v128.h` spells out.
+ *  The round loop stays a loop, for the reason <tt>cipher/v128.h</tt> spells out.
  *
  *  @sa include/stringzilla/cipher.h
  */
@@ -304,7 +304,7 @@ STRINGZILLA_INLINE void sz_aes256_gcm_begin_v128relaxed_(sz_aes256_gcm_state_t *
 
 /**
  *  @brief Transforms a chunk and absorbs its ciphertext, whichever side of the call that is.
- *  @param[inout] state The state.
+ *  @param[in,out] state The state.
  *  @param[in] text The chunk to transform.
  *  @param[in] length Bytes in the chunk.
  *  @param[out] output Receives the transformed bytes.

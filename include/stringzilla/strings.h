@@ -42,21 +42,21 @@ extern "C" {
 /** The text formats that the escape and unescape families convert strings to and from. */
 typedef enum sz_escape_kind_t {
 
-    /** RFC 8259 string bodies: `\"`, `\\`, short forms like `\n`, and `\u00XX` for other bytes
+    /** RFC 8259 string bodies: <tt>\\"</tt>, <tt>\\\\</tt>, short forms like <tt>\\n</tt>, and <tt>\\u00XX</tt> for other bytes
      *  below 0x20. */
     sz_escape_json_k = 0,
 
     /** Two lowercase hexadecimal digits per byte, decoding either case. */
     sz_escape_hex_k = 1,
 
-    /** HTML and XML text and attribute values: `&amp;`, `&lt;`, `&gt;`, `&quot;` and `&#39;`. */
+    /** HTML and XML text and attribute values: <tt>&amp;amp;</tt>, <tt>&amp;lt;</tt>, <tt>&amp;gt;</tt>, <tt>&amp;quot;</tt> and <tt>&amp;#39;</tt>. */
     sz_escape_html_k = 2,
 
-    /** RFC 3986 percent-encoding of every byte outside `A-Z a-z 0-9 - . _ ~`. */
+    /** RFC 3986 percent-encoding of every byte outside <tt>A-Z a-z 0-9 - _ ~</tt> and the dot. */
     sz_escape_url_k = 3,
 
-    /** Terminal-safe logs: short forms like `\n`, `\\` and `\"`, `\xHH` for other C0 control
-     *  bytes, DEL and ill-formed UTF-8, and `\uXXXX` for C1 controls and the bidirectional
+    /** Terminal-safe logs: short forms like <tt>\\n</tt>, <tt>\\\\</tt> and <tt>\\"</tt>, <tt>\\xHH</tt> for other C0 control
+     *  bytes, DEL and ill-formed UTF-8, and <tt>\\uXXXX</tt> for C1 controls and the bidirectional
      *  overrides U+202A to U+202E and U+2066 to U+2069, which reorder what a reader sees. */
     sz_escape_console_k = 4,
 
@@ -64,9 +64,9 @@ typedef enum sz_escape_kind_t {
      *  quote doubled. */
     sz_escape_csv_k = 5,
 
-    /** RFC 8259 string bodies in ASCII alone, as Python's `json.dumps` writes them by default:
+    /** RFC 8259 string bodies in ASCII alone, as Python's <tt>json.dumps</tt> writes them by default:
      *  every codepoint outside printable ASCII without a short form, DEL included, becomes
-     *  `\uXXXX`, a surrogate pair beyond the Basic Multilingual Plane, and every ill-formed byte
+     *  <tt>\\uXXXX</tt>, a surrogate pair beyond the Basic Multilingual Plane, and every ill-formed byte
      *  becomes the escape of U+FFFD. */
     sz_escape_json_ascii_k = 6,
 } sz_escape_kind_t;
@@ -84,10 +84,10 @@ typedef sz_status_t (*sz_kernel_strings_unescape_t)(sz_strings_view_t const *, s
 typedef enum sz_split_kind_t {
 
     /** Every delimiter ends a part, so neighbouring delimiters leave empty parts, as
-     *  `str.split(sep)` does. */
+     *  <tt>str.split(sep)</tt> does. */
     sz_split_each_k = 0,
 
-    /** A run of delimiters ends one part and empty parts are skipped, as `str.split()` does. */
+    /** A run of delimiters ends one part and empty parts are skipped, as <tt>str.split()</tt> does. */
     sz_split_runs_k = 1,
 } sz_split_kind_t;
 
@@ -105,7 +105,7 @@ typedef sz_status_t (*sz_kernel_strings_join_t)(sz_strings_view_t const *, sz_si
                                                 sz_stream_t);
 
 /**
- *  @brief Gathers `strings[order[i]]`, or the first @p count strings without @p order, into a tape.
+ *  @brief Gathers <tt>strings[order[i]]</tt>, or the first @p count strings without @p order, into a tape.
  *
  *  Reads any layout, so it turns accessor-backed strings, slices and permutations into a tape that
  *  GPU kernels and Apache Arrow read directly. The payload and the offsets are two blocks, exactly
@@ -121,10 +121,10 @@ typedef sz_status_t (*sz_kernel_strings_join_t)(sz_strings_view_t const *, sz_si
  *  @param[in] order Indices into @p strings, possibly repeated, or null for the first @p count.
  *  @param[in] count Number of strings to write.
  *  @param[in] allocator Where the blocks of @p tape come from and return to.
- *  @param[inout] tape A zeroed span, one an earlier call produced, or the one @p strings views.
+ *  @param[in,out] tape A zeroed span, one an earlier call produced, or the one @p strings views.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_bad_alloc_k when a block cannot grow.
+ *
  *  @note A GPU call reads the payload size back before allocating, synchronizing @p stream once.
  */
 STRINGZILLA_API sz_status_t sz_strings_to_tape_best(sz_strings_view_t const *strings, sz_size_t const *order,
@@ -233,7 +233,7 @@ STRINGZILLA_API sz_status_t sz_strings_to_tape_metal(sz_strings_view_t const *st
 #endif
 
 /**
- *  @brief Writes `strings[order[i]]`, or the first @p count strings, into NUL-padded rows.
+ *  @brief Writes <tt>strings[order[i]]</tt>, or the first @p count strings, into NUL-padded rows.
  *  @param[in] strings The strings to write, in any layout.
  *  @param[in] order Indices into @p strings, possibly repeated, or null for the first @p count.
  *  @param[in] count Number of rows to write.
@@ -241,7 +241,9 @@ STRINGZILLA_API sz_status_t sz_strings_to_tape_metal(sz_strings_view_t const *st
  *  @param[out] longest Length of the longest string, to retry with wider rows.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_strings_to_rows_best(sz_strings_view_t const *strings, sz_size_t const *order,
                                                     sz_size_t count, sz_strings_rows_t const *rows, sz_size_t *longest,
@@ -349,7 +351,7 @@ STRINGZILLA_API sz_status_t sz_strings_to_rows_metal(sz_strings_view_t const *st
 #endif
 
 /**
- *  @brief Escapes `strings[order[i]]`, or the first @p count strings, for @p kind into a tape.
+ *  @brief Escapes <tt>strings[order[i]]</tt>, or the first @p count strings, for @p kind into a tape.
  *
  *  Allocates and reuses @p tape like @c sz_strings_to_tape_best. When @p strings views all of
  *  @p tape, its payload block grows first, through @c reallocate when the allocator has one, then
@@ -360,10 +362,9 @@ STRINGZILLA_API sz_status_t sz_strings_to_rows_metal(sz_strings_view_t const *st
  *  @param[in] count Number of strings to write.
  *  @param[in] kind The format to escape for.
  *  @param[in] allocator Where the blocks of @p tape come from and return to.
- *  @param[inout] tape A zeroed span, one an earlier call produced, or the one @p strings views.
+ *  @param[in,out] tape A zeroed span, one an earlier call produced, or the one @p strings views.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_bad_alloc_k when a block cannot grow.
  */
 STRINGZILLA_API sz_status_t sz_strings_escape_best(sz_strings_view_t const *strings, sz_size_t const *order,
                                                    sz_size_t count, sz_escape_kind_t kind, sz_allocator_t *allocator,
@@ -475,7 +476,7 @@ STRINGZILLA_API sz_status_t sz_strings_escape_metal(sz_strings_view_t const *str
 #endif
 
 /**
- *  @brief Unescapes `strings[order[i]]`, or the first @p count strings, from @p kind into a tape.
+ *  @brief Unescapes <tt>strings[order[i]]</tt>, or the first @p count strings, from @p kind into a tape.
  *
  *  Allocates and reuses @p tape like @c sz_strings_to_tape_best. Every string is checked before
  *  anything is written, so one malformed string leaves @p tape as it was.
@@ -485,11 +486,13 @@ STRINGZILLA_API sz_status_t sz_strings_escape_metal(sz_strings_view_t const *str
  *  @param[in] count Number of strings to write.
  *  @param[in] kind The format to unescape from.
  *  @param[in] allocator Where the blocks of @p tape come from and return to.
- *  @param[inout] tape A zeroed span, one an earlier call produced, or the one @p strings views.
+ *  @param[in,out] tape A zeroed span, one an earlier call produced, or the one @p strings views.
  *  @param[out] malformed_index The first string holding a malformed sequence, on failure.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, @c sz_bad_alloc_k, or @c sz_invalid_utf8_k for a malformed sequence.
+ *
+ *  @par Statuses:
+ *  - @c sz_invalid_utf8_k A malformed sequence.
  */
 STRINGZILLA_API sz_status_t sz_strings_unescape_best(sz_strings_view_t const *strings, sz_size_t const *order,
                                                      sz_size_t count, sz_escape_kind_t kind, sz_allocator_t *allocator,
@@ -611,8 +614,8 @@ STRINGZILLA_API sz_status_t sz_strings_unescape_metal(sz_strings_view_t const *s
 #endif
 
 /**
- *  @brief Maps every byte of `strings[order[i]]`, or the first @p count strings, through a
- *      256-entry Look-Up Table @b (LUT) into a tape, the same as `for (char &c : text) c = lut[c]`.
+ *  @brief Maps every byte of <tt>strings[order[i]]</tt>, or the first @p count strings, through a
+ *      256-entry Look-Up Table @b (LUT) into a tape, the same as <tt>for (char &c : text) c = lut[c]</tt>.
  *
  *  Allocates and reuses @p tape like @c sz_strings_to_tape_best. The mapping keeps every length, so
  *  a span over the caller's own buffers of matching sizes needs no allocator, and a span that
@@ -625,7 +628,7 @@ STRINGZILLA_API sz_status_t sz_strings_unescape_metal(sz_strings_view_t const *s
  *  Lowercasing a buffer in place, as a tape of one string:
  *
  *  @code{.c}
- *     #include <ctype.h> // for `tolower`
+ *     #include <ctype.h> // for tolower
  *     #include <stringzilla/strings.h>
  *     int main() {
  *          sz_capability_t capabilities;
@@ -649,10 +652,10 @@ STRINGZILLA_API sz_status_t sz_strings_unescape_metal(sz_strings_view_t const *s
  *  @param[in] count Number of strings to write.
  *  @param[in] lut The table to map through, exactly @b 256 bytes long.
  *  @param[in] allocator Where the blocks of @p tape come from and return to.
- *  @param[inout] tape A zeroed span, one an earlier call produced, or the one @p strings views.
+ *  @param[in,out] tape A zeroed span, one an earlier call produced, or the one @p strings views.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_bad_alloc_k when a block cannot grow.
+ *
  *  @see Lookup table: https://en.wikipedia.org/wiki/Lookup_table
  */
 STRINGZILLA_API sz_status_t sz_strings_lookup_best(sz_strings_view_t const *strings, sz_size_t const *order,
@@ -775,7 +778,7 @@ STRINGZILLA_API sz_status_t sz_strings_lookup_metal(sz_strings_view_t const *str
 #endif
 
 /**
- *  @brief Brings `strings[order[i]]`, or the first @p count strings, into the Unicode @p form,
+ *  @brief Brings <tt>strings[order[i]]</tt>, or the first @p count strings, into the Unicode @p form,
  *      writing them into a tape.
  *
  *  @c sz_normal_form_nfkc_casefold_k gives the keys search engines match on: NFKC with full case
@@ -792,10 +795,10 @@ STRINGZILLA_API sz_status_t sz_strings_lookup_metal(sz_strings_view_t const *str
  *  @param[in] count Number of strings to write.
  *  @param[in] form The normalization form to bring every string into.
  *  @param[in] allocator Where the blocks of @p tape come from and return to.
- *  @param[inout] tape A zeroed span, one an earlier call produced, or the one @p strings views.
+ *  @param[in,out] tape A zeroed span, one an earlier call produced, or the one @p strings views.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_bad_alloc_k when a block cannot grow.
+ *
  *  @see UAX #15 Unicode Normalization Forms: https://www.unicode.org/reports/tr15/
  */
 STRINGZILLA_API sz_status_t sz_strings_normalize_best(sz_strings_view_t const *strings, sz_size_t const *order,
@@ -915,8 +918,8 @@ STRINGZILLA_API sz_status_t sz_strings_normalize_metal(sz_strings_view_t const *
  *  @brief Splits @p text at the bytes of @p delimiters into a tape of the parts between them.
  *
  *  With @c sz_split_each_k a text of @c n delimiters always makes @c n + 1 parts, like Python's
- *  `bytes.split(sep)` for a one-byte @c sep, generalized to a set. With @c sz_split_runs_k leading
- *  and trailing runs make no parts, like `bytes.split()` when the set is ASCII whitespace. Measures
+ *  <tt>bytes.split(sep)</tt> for a one-byte @c sep, generalized to a set. With @c sz_split_runs_k leading
+ *  and trailing runs make no parts, like <tt>bytes.split()</tt> when the set is ASCII whitespace. Measures
  *  the parts first, then writes blocks of exactly their sizes, reusing those of @p tape like
  *  @c sz_strings_to_tape_best unless @p text lies in them; like every collection verb it is atomic.
  *
@@ -925,10 +928,9 @@ STRINGZILLA_API sz_status_t sz_strings_normalize_metal(sz_strings_view_t const *
  *  @param[in] delimiters The bytes that separate the parts.
  *  @param[in] kind Whether every delimiter ends a part, or every run of them.
  *  @param[in] allocator Where the blocks of @p tape come from and return to.
- *  @param[inout] tape A zeroed span, or one an earlier call produced.
+ *  @param[in,out] tape A zeroed span, or one an earlier call produced.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null, as only CPUs split.
- *  @return @c sz_success_k, or @c sz_bad_alloc_k when a block cannot grow.
  */
 STRINGZILLA_API sz_status_t sz_strings_split_best(sz_cptr_t text, sz_size_t length, sz_byteset_t const *delimiters,
                                                   sz_split_kind_t kind, sz_allocator_t *allocator,
@@ -959,18 +961,18 @@ STRINGZILLA_API sz_status_t sz_strings_split_neon(sz_cptr_t text, sz_size_t leng
 /**
  *  @brief Splits @p text at Unicode line breaks, CR LF as one, into a tape of lines without breaks.
  *
- *  The breaks are those of Python's `str.splitlines()` over UTF-8: LF, VT, FF, CR, FS, GS, RS,
+ *  The breaks are those of Python's <tt>str.splitlines()</tt> over UTF-8: LF, VT, FF, CR, FS, GS, RS,
  *  CR LF, NEL, LS and PS, and a final break leaves no empty line after it. Allocates and reuses
  *  @p tape like @c sz_strings_split_best, and like every collection verb it is atomic.
  *
  *  @param[in] text The UTF-8 bytes to split, null only when @p length is zero.
  *  @param[in] length Number of bytes in @p text.
  *  @param[in] allocator Where the blocks of @p tape come from and return to.
- *  @param[inout] tape A zeroed span, or one an earlier call produced.
+ *  @param[in,out] tape A zeroed span, or one an earlier call produced.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null, as only CPUs split.
- *  @return @c sz_success_k, or @c sz_bad_alloc_k when a block cannot grow.
- *  @see Python's `str.splitlines`: https://docs.python.org/3/library/stdtypes.html
+ *
+ *  @see Python's <tt>str.splitlines</tt>: https://docs.python.org/3/library/stdtypes.html
  */
 STRINGZILLA_API sz_status_t sz_strings_split_lines_best(sz_cptr_t text, sz_size_t length, sz_allocator_t *allocator,
                                                         sz_strings_span_t *tape, sz_capability_t capabilities,
@@ -996,11 +998,11 @@ STRINGZILLA_API sz_status_t sz_strings_split_lines_neon(sz_cptr_t text, sz_size_
 
 /**
  *  @brief Writes row r of @p columns as
- *      `frames[0] + columns[0][r] + frames[1] + … + columns[n-1][r] + frames[n]`, with @p between
+ *      <tt>frames[0] + columns[0][r] + frames[1] + … + columns[n-1][r] + frames[n]</tt>, with @p between
  *      written between rows, into @p output; a null @p output only measures into @p length.
  *
  *  Serializes columns as CSV lines, JSON arrays or SQL value lists without a string per cell, and
- *  joins one column with an empty frame on each side like Python's `str.join`.
+ *  joins one column with an empty frame on each side like Python's <tt>str.join</tt>.
  *
  *  @param[in] columns The @p columns_count columns of @p rows strings each, in any layouts.
  *  @param[in] columns_count Number of columns, one less than the number of @p frames.
@@ -1008,10 +1010,12 @@ STRINGZILLA_API sz_status_t sz_strings_split_lines_neon(sz_cptr_t text, sz_size_
  *  @param[in] frames The strings written before, between and after the cells of every row.
  *  @param[in] between The string written between consecutive rows.
  *  @param[out] output Room for exactly @p length bytes, or null to measure them.
- *  @param[inout] length The bytes the join takes: written when @p output is null, read otherwise.
+ *  @param[in,out] length The bytes the join takes: written when @p output is null, read otherwise.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null, as only CPUs join.
- *  @return @c sz_success_k, or @c sz_bad_alloc_k when measuring overflows the length.
+ *
+ *  @par Statuses:
+ *  - @c sz_bad_alloc_k Measuring overflows the length.
  */
 STRINGZILLA_API sz_status_t sz_strings_join_best(sz_strings_view_t const *columns, sz_size_t columns_count,
                                                  sz_size_t rows, sz_string_view_t const *frames,
@@ -1044,9 +1048,14 @@ STRINGZILLA_API sz_status_t sz_strings_join_neon(sz_strings_view_t const *column
 
 /**
  *  @brief Finds the strings kernel of @p kind, from the best of @p capabilities.
+ *  @param[in] kind The verb whose kernel to find.
+ *  @param[in] capabilities The mask to pick the best capability from.
  *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
  *  @param[out] capability The capability the kernel belongs to, or zero.
- *  @return @c sz_success_k, @c sz_missing_kernel_k, or @c sz_missing_library_k when header-only.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k
+ *  - @c sz_missing_library_k Header-only.
  */
 STRINGZILLA_API sz_status_t sz_strings_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
                                                    sz_kernel_punned_t *kernel, sz_capability_t *capability);
@@ -1065,7 +1074,9 @@ STRINGZILLA_API sz_status_t sz_strings_find_kernel(sz_kernel_kind_t kind, sz_cap
  *  @param[out] allocator The allocator to initialize.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cuda reports;
  *      its group picks the CPU or a GPU vendor.
- *  @return @c sz_success_k, or @c sz_missing_gpu_k for a GPU vendor this library was built without.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_gpu_k A GPU vendor this library was built without.
  */
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_best(sz_allocator_t *allocator, sz_capability_t capabilities);
 

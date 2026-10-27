@@ -29,10 +29,10 @@ extern "C" {
  *
  *  Unlike the exact substring search kernels, it uses 4 probe positions instead of 3:
  *
- *  - first: implicit at `folded_slice[0]`
+ *  - first: implicit at <tt>folded_slice[0]</tt>
  *  - second: @c probe_second
  *  - third: @c probe_third
- *  - last: implicit at `folded_slice[folded_slice_length - 1]`
+ *  - last: implicit at <tt>folded_slice[folded_slice_length - 1]</tt>
  *
  *  The struct points at the needle rather than copying it, so the needle must outlive it.
  */
@@ -936,7 +936,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_pop_candidate_(sz_u64_t *matches) {
 }
 
 /** Per-codepoint Latin Extended-A fold deltas after a C4/C5 lead, indexed by the continuation
- *  byte's low 6 bits, `text & 0x3F`. Entry value is the in-place add: 0 = identity, 1 = fold by +1.
+ *  byte's low 6 bits, <tt>text & 0x3F</tt>. Entry value is the in-place add: 0 = identity, 1 = fold by +1.
  *  The cross-block irregulars that the case-fold tables flag with 0x80 ('İ' C4 B0, 'Ŀ' C4 BF, 'Ÿ'
  *  C5 B8, 'ſ' C5 BF) are 0 here because the alarm routes them to the danger-zone handler, so the
  *  fold leaves them untouched. The parity matches explicit range checks but resolves in one
@@ -955,7 +955,7 @@ static sz_u8_t const sz_utf8_uncased_central_c5_deltas_lut_[64] = {
 };
 
 /**
- *  @brief Monotonic-Greek second-byte fold deltas after a CE lead, indexed by `text & 0x3F`.
+ *  @brief Monotonic-Greek second-byte fold deltas after a CE lead, indexed by <tt>text & 0x3F</tt>.
  *
  *  The per-rule range-check deltas, resolved in one @c vqtbl4q_u8: 'Ά' (86) +0x26, 'Έ'-'Ί' (88-8A)
  *  +0x25, 'Ύ'/'Ώ' (8E-8F) −1, 'Α'-'Ο' (91-9F) +0x20, 'Π'-'Ω' (A0-A9) and 'Ϊ'/'Ϋ' (AA-AB) −0x20. 'Ό'
@@ -1034,7 +1034,7 @@ STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_uncased_verify_head_(sz_cptr_t needle_st
  *  Walks forward, comparing folded runes. Returns true if the needle exhausts.
  *
  *  @param[in] needle_start Start of needle tail region.
- *  @param[in] needle_end End of needle tail region, equal to `needle + needle_length`.
+ *  @param[in] needle_end End of needle tail region, equal to <tt>needle + needle_length</tt>.
  *  @param[in] haystack_start Start of haystack tail region.
  *  @param[in] haystack_end End of haystack, the upper bound for the forward scan.
  *  @param[out] match_length Haystack bytes consumed by this match.
@@ -2263,10 +2263,10 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_utf8_probe_diversity_score_(sz_u8_t const *da
  *  We then identify the four "probe" positions within the ≤ 16 byte folded safe window, one more
  *  than in exact substring search kernels with Raita heuristics:
  *
- *  1. implicit at `refined->folded_slice[0]`
- *  2. stored in `refined->probe_second` - targets last byte of 2nd character when 4+ chars
- *  3. stored in `refined->probe_third` - targets last byte of 3rd character when 4+ chars
- *  4. implicit at `refined->folded_slice[refined->folded_slice_length - 1]`
+ *  1. implicit at <tt>refined->folded_slice[0]</tt>
+ *  2. stored in @c refined->probe_second - targets last byte of 2nd character when 4+ chars
+ *  3. stored in @c refined->probe_third - targets last byte of 3rd character when 4+ chars
+ *  4. implicit at <tt>refined->folded_slice[refined->folded_slice_length - 1]</tt>
  *
  *  By aiming at the last byte of each UTF-8 codepoint we maximize diversity, as in a Russian text
  *  almost all letters will have the same first byte, but mostly different second byte. The same is

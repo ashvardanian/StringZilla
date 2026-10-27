@@ -180,14 +180,24 @@ test-command = "python -X faulthandler -m pytest -x --parallel-threads=4 --ignor
 test-groups = ["test", "test-parallel"]
 
 [tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
 extend-select = [
+  "D", # pydocstyle (docstrings)
   "E", # pycodestyle errors
   "F", # pyflakes
   "I", # isort
   "TID", # flake8-tidy-imports
 ]
-line-length = 120
-target-version = "py310"
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"!python/**" = ["D"]
+"*.pyi" = ["D", "E501"]  # verbatim copies of the C literals
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"

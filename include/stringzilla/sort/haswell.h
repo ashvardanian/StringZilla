@@ -5,16 +5,16 @@
  *  @brief Haswell (x86 AVX2) backend for sorting string collections.
  *
  *  Mirrors the NEON backend's out-of-place 3-way QuickSort partition: AVX2 has no AVX-512
- *  @c compressstore, so the per-block compaction uses a small `static const` left-pack table fed to
+ *  @c compressstore, so the per-block compaction uses a small <tt>static const</tt> left-pack table fed to
  *  @c vpermd, the @c _mm256_permutevar8x32_epi32 intrinsic. A 4-u64 block is treated as 8 u32, and
- *  row `[m]` of the table holds the 8 dword indices that gather the selected u64 lanes, of 4, to
+ *  row <tt>[m]</tt> of the table holds the 8 dword indices that gather the selected u64 lanes, of 4, to
  *  the front. The 4-wide table is 16 × 32 = 512 bytes, small enough to keep @c const and warm in
  *  cache, versus the 16 KB an 8-wide table would need. Compaction preserves lane order, so the
  *  partition is @b stable, matching the stable-by-default contract, and the recursion, stability,
- *  reverse, top-K and uncased machinery is reused verbatim from `sort/serial.h`.
+ *  reverse, top-K and uncased machinery is reused verbatim from <tt>sort/serial.h</tt>.
  *
  *  AVX2 has only a @b signed 64-bit compare, @c _mm256_cmpgt_epi64, so unsigned pgram keys are
- *  biased by the sign bit, an XOR with `0x8000...`, before comparing, which maps unsigned order
+ *  biased by the sign bit, an XOR with <tt>0x8000...</tt>, before comparing, which maps unsigned order
  *  onto signed order.
  *
  *  @sa include/stringzilla/sort.h

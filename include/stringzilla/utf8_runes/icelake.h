@@ -56,14 +56,14 @@ STRINGZILLA_INLINE __m512i sz_utf8_lane_identity_icelake_(void) {
 }
 
 /** Mask of codepoint-start bytes in a loaded window: every lane that is not a continuation byte
- *  `0x80..0xBF`. Continuation bytes are signed `-128..-65`, so a single signed @c vpcmpgtb against
- *  `-65` selects starts - the one-op form shared by count, find-nth, and the unpack classifier (was
- *  written four different ways). */
+ *  <tt>0x80..0xBF</tt>. Continuation bytes are signed <tt>-128..-65</tt>, so a single signed @c vpcmpgtb against
+ *  @c -65 selects starts - the one-op form shared by count, find-nth, and the unpack classifier
+ *  (was written four different ways). */
 STRINGZILLA_INLINE __mmask64 sz_utf8_rune_start_mask_icelake_(__m512i window_u8x64, __mmask64 load_mask_m64) {
     return _mm512_mask_cmpgt_epi8_mask(load_mask_m64, window_u8x64, _mm512_set1_epi8((char)-65));
 }
 
-/** Emit a window's @p emit delimiter matches in-register via @c vpcompressb and `ceil(emit/8)`
+/** Emit a window's @p emit delimiter matches in-register via @c vpcompressb and <tt>ceil(emit/8)</tt>
  *  masked widen-stores. @c _mm512_alignr_epi64 shifts the compressed registers down between waves,
  *  so @p emit may exceed 8. Per-lane byte length is 1, plus 1 on a 2-byte start, plus 2 on a 3-byte
  *  start (disjoint masks). */
@@ -109,10 +109,10 @@ STRINGZILLA_INLINE __m512i sz_utf8_srl8_icelake_(__m512i value_u8x64, int shift,
  *
  *  Loads up to 64 bytes (masked at the buffer tail) and, treating every lane as a potential
  *  codepoint start, reassembles each codepoint's value via the lead/2nd/3rd-byte arithmetic trick
- *  into byte-domain halves `high = codepoint >> 8` and `low = codepoint & 0xFF`. No codepoint is
+ *  into byte-domain halves <tt>high = codepoint >> 8</tt> and <tt>low = codepoint & 0xFF</tt>. No codepoint is
  *  ever materialized to memory and no gather is issued; downstream classifiers read the halves
  *  directly and address tables from them. The 2-byte and 3-byte BMP cases are blended in-register;
- *  ASCII lanes keep `high == 0`, and 4-byte (SMP) leads leave @c high and @c low holding the low 16
+ *  ASCII lanes keep <tt>high == 0</tt>, and 4-byte (SMP) leads leave @c high and @c low holding the low 16
  *  bits, which the caller resolves through arithmetic ranges.
  */
 typedef struct sz_utf8_rune_window_t {
@@ -120,25 +120,25 @@ typedef struct sz_utf8_rune_window_t {
     /** The raw 64 input bytes (continuation bytes included). */
     __m512i window_u8x64;
 
-    /** Per-lane `codepoint >> 8` for the codepoint that starts at this lane. */
+    /** Per-lane <tt>codepoint >> 8</tt> for the codepoint that starts at this lane. */
     __m512i high_byte_u8x64;
 
-    /** Per-lane `codepoint & 0xFF` for the codepoint that starts at this lane. */
+    /** Per-lane <tt>codepoint & 0xFF</tt> for the codepoint that starts at this lane. */
     __m512i low_byte_u8x64;
 
-    /** Bit @c i is set when lane @c i is a UTF-8 continuation byte `10xxxxxx`. */
+    /** Bit @c i is set when lane @c i is a UTF-8 continuation byte @c 10xxxxxx. */
     __mmask64 continuation;
 
     /** Bit @c i is set when lane @c i begins a codepoint (loaded, non-continuation). */
     __mmask64 codepoint_starts;
 
-    /** Bit @c i is set when lane @c i is a 2-byte lead `110xxxxx`. */
+    /** Bit @c i is set when lane @c i is a 2-byte lead @c 110xxxxx. */
     __mmask64 two_byte_starts;
 
-    /** Bit @c i is set when lane @c i is a 3-byte lead `1110xxxx`. */
+    /** Bit @c i is set when lane @c i is a 3-byte lead @c 1110xxxx. */
     __mmask64 three_byte_starts;
 
-    /** Bit @c i is set when lane @c i is a 4-byte lead `11110xxx`. */
+    /** Bit @c i is set when lane @c i is a 4-byte lead @c 11110xxx. */
     __mmask64 four_byte_starts;
 
     /** Number of bytes actually loaded (at most 64) into lanes [0, loaded). */
@@ -240,8 +240,8 @@ STRINGZILLA_INLINE __m512i sz_utf8_rune_gather_byte_(sz_u8_t const *table, int c
 
 /** 256-entry byte LUT read over a 64-byte-aligned 256-byte @p table, per 32-bit lane
  *  @p index_u32x16 in [0,256). A @c vpermb over the four resident quads; the high two bits of the
- *  index select the quad via masked blends. Tiles load directly from `.rodata` (no per-call
- *  materialization), so the family classifiers stay re-init-free. @p table must be `sz_align_(64)`
+ *  index select the quad via masked blends. Tiles load directly from <tt>.rodata</tt> (no per-call
+ *  materialization), so the family classifiers stay re-init-free. @p table must be <tt>sz_align_(64)</tt>
  *  and exactly 256 bytes. */
 STRINGZILLA_INLINE __m512i sz_utf8_rune_permute256_icelake_(sz_u8_t const *table, __m512i index_u32x16) {
     __m512i const quad0_u8x64 = _mm512_load_si512((void const *)(table + 0 * 64));
@@ -273,9 +273,9 @@ STRINGZILLA_INLINE __m512i sz_utf8_rune_permute256_icelake_(sz_u8_t const *table
  *      bytes, with a per-32-bit-lane byte @p index_dwords_u32x16 in [0, @p tile_count*64).
  *
  *  A @c vpermi2b cascade: each ZMM pair covers 128 byte slots addressed by the low 7 bits; the high
- *  bits select the pair via masked blends. Tiles load directly from the aligned `.rodata` @p table
- *  — no @c luts struct, no per-call init. @p table must be `sz_align_(64)` and zero-padded to
- *  `tile_count * 64` bytes.
+ *  bits select the pair via masked blends. Tiles load directly from the aligned <tt>.rodata</tt> @p table
+ *  — no @c luts struct, no per-call init. @p table must be <tt>sz_align_(64)</tt> and zero-padded to
+ *  <tt>tile_count * 64</tt> bytes.
  *
  *  ! Cost scales with @p tile_count, not with the window: every tile is scanned on the single
  *  ! cross-lane shuffle port. The BMP classifiers use @ref sz_utf8_rune_flat_lookup_icelake_
@@ -301,11 +301,11 @@ STRINGZILLA_INLINE __m512i sz_utf8_rune_lut_cascade_icelake_(sz_u8_t const *tabl
 }
 
 /** Indexed read of a 4-bit-per-cell LUT: @p packed holds two output nibbles per byte (cell @c i is
- *  the low nibble of `packed[i/2]` for even @c i, the high nibble for odd @c i). Halves the table
+ *  the low nibble of <tt>packed[i/2]</tt> for even @c i, the high nibble for odd @c i). Halves the table
  *  and so halves the @c vpermi2b cascade depth vs a byte-per-cell layout, for tables whose outputs
  *  fit in 4 bits (e.g. the grapheme @c stage_sub descriptor index, the word @c astral_leaf class).
  *  @p tile_count counts the packed tiles; @p index_dwords_u32x16 is the unpacked cell index per
- *  32-bit lane. Reads straight from aligned `.rodata`. */
+ *  32-bit lane. Reads straight from aligned <tt>.rodata</tt>. */
 STRINGZILLA_INLINE __m512i sz_utf8_rune_lut_cascade_nibble_icelake_(sz_u8_t const *packed, int tile_count,
                                                                     __m512i index_dwords_u32x16) {
     __m512i const byte_index_u32x16 = _mm512_srli_epi32(index_dwords_u32x16, 1);
@@ -324,8 +324,8 @@ STRINGZILLA_INLINE __m512i sz_utf8_rune_lut_cascade_nibble_icelake_(sz_u8_t cons
 /**
  *  @brief Class byte per lane from a page-compressed flat table.
  *
- *  `page_lut[cp >> 8]` selects a 256-byte page via one @c vpermb, then
- *  `flat[page * 256 + (cp & 0xFF)]` is fetched by one @c vpgatherdd at native
+ *  <tt>page_lut[cp >> 8]</tt> selects a 256-byte page via one @c vpermb, then
+ *  <tt>flat[page * 256 + (cp & 0xFF)]</tt> is fetched by one @c vpgatherdd at native
  *  width, riding the load ports instead of the contended cross-lane shuffle
  *  port. @p flat must extend four bytes past its last index, since the dword
  *  gather over-reads three.
@@ -352,13 +352,13 @@ STRINGZILLA_INLINE __m512i sz_utf8_rune_flat_lookup_icelake_( //
  *  @brief Emit one segment length per boundary lane within an effective window via
  *      @c vpcompressb, honoring @p capacity and a carried previous-boundary position.
  *
- *  Effective-window aware: only lanes in `[effective_lo, effective_hi]` (those with full
- *  in-register context) are trusted; the caller advances by `effective_step < 64` so edge lanes
+ *  Effective-window aware: only lanes in <tt>[effective_lo, effective_hi]</tt> (those with full
+ *  in-register context) are trusted; the caller advances by <tt>effective_step < 64</tt> so edge lanes
  *  serve as context only and are never re-walked scalar-wise.
  *
  *  The @p boundary mask is pre-masked by the caller to the trusted band. Each set lane @c i closes
- *  a segment whose start is the previous boundary position and whose length reaches `base + i`.
- *  Output is widened to 64-bit `lengths[]` in waves of eight, carrying the open segment across
+ *  a segment whose start is the previous boundary position and whose length reaches <tt>base + i</tt>.
+ *  Output is widened to 64-bit <tt>lengths[]</tt> in waves of eight, carrying the open segment across
  *  waves and windows via @p previous_io.
  */
 STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_forward_( //
@@ -700,7 +700,7 @@ STRINGZILLA_API sz_status_t sz_utf8_seek_icelake(sz_cptr_t text, sz_size_t lengt
  *  path, emitting at most @p runes_capacity runes and returning the resume cursor. Pure ASCII takes
  *  a dedicated @c vpmovzxbd widen lane. The decode is total: clean and dirty bytes are handled
  *  in-vector, one U+FFFD per maximal ill-formed subpart (Unicode 17.0 §3.9 / W3C), bit-exact with
- *  @ref sz_utf8_decode_serial. The step declines (`*runes_count == 0`, cursor unchanged) only
+ *  @ref sz_utf8_decode_serial. The step declines (<tt>*runes_count == 0</tt>, cursor unchanged) only
  *  when the first lead's declared sequence crosses the window edge (a boundary truncation), which
  *  the public entry finalizes without a serial re-decode. */
 STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_once_icelake_( //

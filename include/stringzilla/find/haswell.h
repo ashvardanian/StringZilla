@@ -138,8 +138,8 @@ STRINGZILLA_INLINE sz_cptr_t sz_rfind_haswell_(sz_cptr_t haystack, sz_size_t hay
     return sz_rfind_serial_(haystack, haystack_length, needle, needle_length);
 }
 
-STRINGZILLA_INLINE sz_cptr_t sz_find_byteset_haswell_(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                      sz_byteset_t const *filter) {
+STRINGZILLA_OUTLINED_ sz_cptr_t sz_find_byteset_haswell_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                         sz_byteset_t const *filter) {
 
     // Let's unzip even and odd elements and replicate them into both lanes of the YMM register.
     // That way when we invoke `_mm256_shuffle_epi8` we can use the same mask for both lanes.
@@ -244,8 +244,8 @@ STRINGZILLA_INLINE sz_cptr_t sz_find_byteset_haswell_(sz_cptr_t haystack, sz_siz
     return sz_find_byteset_serial_(haystack, haystack_length, filter);
 }
 
-STRINGZILLA_INLINE sz_cptr_t sz_rfind_byteset_haswell_(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                       sz_byteset_t const *filter) {
+STRINGZILLA_OUTLINED_ sz_cptr_t sz_rfind_byteset_haswell_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                          sz_byteset_t const *filter) {
 
     // Mirror of `sz_find_byteset_haswell` scanning from the end: the same transposed Muła nibble-bitset
     // classifier, but each iteration tests the trailing 32-byte window and resolves the highest matching

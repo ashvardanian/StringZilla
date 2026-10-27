@@ -116,7 +116,7 @@ typedef long (*sz_utf8_uncased_alarm_strip_rvv_t_)(sz_u8_t const *source_ptr, sz
  *  predecessor" convention the candidate re-fold uses, so both agree at every match. */
 #pragma region Per Script Fold Strips
 
-/** ASCII: `c + ((c - 'A' <= 25) * 0x20)`. Pure ASCII never changes byte width, so this is also the
+/** ASCII: <tt>c + ((c - 'A' <= 25) * 0x20)</tt>. Pure ASCII never changes byte width, so this is also the
  *  Georgian-Mkhedruli fold, as Mkhedruli is caseless. */
 STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_ascii_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length,
                                                                  sz_u8_t *destination_ptr) {
@@ -351,7 +351,7 @@ STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_armenian_strip_rvv_(sz_u8_t cons
 
 /** Vietnamese: Latin-1 Supplement +0x20, Latin Extended-A parity, 'Ơ'/'Ư' (C6 A0/AF) +1, and Latin
  *  Extended Additional (E1 B8-BB) even-third +1, all length-preserving, with expanding folds
- *  alarm-routed. Reuses the C4/C5/C6 delta LUTs from `utf8_uncased_fold/rvv.h`, masked to the +1
+ *  alarm-routed. Reuses the C4/C5/C6 delta LUTs from <tt>utf8_uncased_fold/rvv.h</tt>, masked to the +1
  *  bit of each entry. */
 STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_vietnamese_strip_rvv_(sz_u8_t const *source_ptr,
                                                                       sz_size_t vector_length,
@@ -718,7 +718,7 @@ STRINGZILLA_OUTLINED_ long sz_utf8_uncased_alarm_georgian_strip_rvv_(sz_u8_t con
 
 /** Loads up to @p length bytes from @p source into a zeroed 64-byte scratch buffer, returning a
  *  pointer into a caller-provided buffer whose first @p length bytes are the data and the rest
- *  zero. The padding lets the fold and alarm strips read `source_ptr[vector_length]` for their
+ *  zero. The padding lets the fold and alarm strips read <tt>source_ptr[vector_length]</tt> for their
  *  @c next carry and keeps range compares safe-negative. */
 STRINGZILLA_INLINE sz_u8_t const *sz_utf8_uncased_load_padded_rvv_(sz_cptr_t source, sz_size_t length, sz_u8_t *buffer,
                                                                    sz_size_t buffer_capacity) {

@@ -44,8 +44,6 @@ extern "C" {
  *  @param[out] order Output permutation that sorts the elements.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k on success, @c sz_bad_alloc_k if memory allocation failed, or
- *      @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *  @pre The @p order array must fit at least as many integers as @p strings holds.
  *  @post The @p order array will contain a valid permutation of all indices of @p strings.
  *  @post If @p top_count is non-zero and smaller than the count, only the first @p top_count
@@ -76,6 +74,9 @@ extern "C" {
  *  @sa sz_sort_order_serial, sz_sort_order_haswell, sz_sort_order_skylake, sz_sort_order_neon,
  *      sz_sort_order_sve, sz_sort_order_rvv
  *  @sa sz_sort_uncased_order_best
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_sort_order_best(sz_strings_view_t const *strings, sz_size_t top_count, sz_bool_t reverse,
                                                sz_allocator_t *allocator, sz_size_t *order,
@@ -95,8 +96,6 @@ STRINGZILLA_API sz_status_t sz_sort_order_best(sz_strings_view_t const *strings,
  *  @param[out] order Output permutation that sorts the elements.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k on success, @c sz_bad_alloc_k if memory allocation failed, or
- *      @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *  @pre The @p order array must fit at least as many integers as @p strings holds.
  *  @post The @p order array will contain a valid permutation of all indices of @p strings.
  *  @note This algorithm is @b stable: case-folded-equal elements keep their input order.
@@ -107,6 +106,9 @@ STRINGZILLA_API sz_status_t sz_sort_order_best(sz_strings_view_t const *strings,
  *
  *  @sa sz_utf8_uncased_fold, sz_utf8_uncased_order
  *  @sa sz_sort_uncased_order_serial
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_sort_uncased_order_best(sz_strings_view_t const *strings, sz_size_t top_count,
                                                        sz_bool_t reverse, sz_allocator_t *allocator, sz_size_t *order,
@@ -191,9 +193,14 @@ STRINGZILLA_API sz_status_t sz_sort_uncased_order_rvv(sz_strings_view_t const *s
 
 /**
  *  @brief Finds the sorting kernel of @p kind, from the best of @p capabilities.
+ *  @param[in] kind The verb whose kernel to find.
+ *  @param[in] capabilities The mask to pick the best capability from.
  *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
  *  @param[out] capability The capability the kernel belongs to, or zero.
- *  @return @c sz_success_k, @c sz_missing_kernel_k, or @c sz_missing_library_k when header-only.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k
+ *  - @c sz_missing_library_k Header-only.
  */
 STRINGZILLA_API sz_status_t sz_sort_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
                                                 sz_kernel_punned_t *kernel, sz_capability_t *capability);

@@ -30,7 +30,7 @@ extern "C" {
  *  @brief Produce an AVX2-style 32-bit movemask from a LASX 256-bit comparison result.
  *
  *  Bit @c i reflects byte @c i of the comparison, set for 0xFF and clear for 0x00. See
- *  `compare/loongsonasx.h` for the rationale: @c __lasx_xvmskltz_b packs the sign bit of each byte
+ *  <tt>compare/loongsonasx.h</tt> for the rationale: @c __lasx_xvmskltz_b packs the sign bit of each byte
  *  into a per-128-bit-lane 16-bit mask, word 0 for the low lane and word 4 for the high one.
  *  Recombining matches the byte order of @c _mm256_movemask_epi8, so @c ctz and @c clz index bytes
  *  identically to the Haswell backend.

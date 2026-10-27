@@ -5,13 +5,13 @@
  *  @brief RISC-V Vector (RVV 1.0) backend for sorting string collections.
  *
  *  Mirrors the SVE backend's length-agnostic, out-of-place 3-way QuickSort partition. RVV has an
- *  exact `__riscv_vcompress_vm_u64m*` (the analogue of SVE's @c svcompact_u64), so each
+ *  exact <tt>__riscv_vcompress_vm_u64m*</tt> (the analogue of SVE's @c svcompact_u64), so each
  *  @c vsetvl strip's smaller / equal / greater lanes are packed to the front and stored
  *  contiguously with no left-pack table and no region slack (unlike NEON's @c vqtbl2q
  *  compaction). @c __riscv_vcpop_m_b64 counts the surviving lanes for the cursor advance.
  *  Compaction preserves lane order, so the partition is @b stable - matching the
  *  stable-by-default contract - and the recursion / stability / reverse / top-K / uncased
- *  machinery is reused verbatim from `sort/serial.h`.
+ *  machinery is reused verbatim from <tt>sort/serial.h</tt>.
  *
  *  Vector-length-agnostic: correct at VLEN 128 / 256 / 512 / 1024, because every strip is bounded
  *  by @c __riscv_vsetvl_e64m1 and stores are masked to the per-strip surviving count.
@@ -45,8 +45,8 @@ extern "C" {
  *  @sa Identical in shape to the @b SVE implementation, but uses variable-length RVV @c vsetvl
  *      strips and the @c __riscv_vcompress_vm_u64m1 primitive in place of @c svcompact_u64.
  *
- *  @param[inout] initial_pgrams Source pgram array; updated in place after copy-back.
- *  @param[inout] initial_order Corresponding order array; updated in place after copy-back.
+ *  @param[in,out] initial_pgrams Source pgram array; updated in place after copy-back.
+ *  @param[in,out] initial_order Corresponding order array; updated in place after copy-back.
  *  @param[out] partitioned_pgrams Temporary output buffer for the three-way partitioned pgrams.
  *  @param[out] partitioned_order Temporary output buffer for the corresponding order entries.
  *  @param[in] start_in_strings First index (inclusive) of the range to partition.
@@ -148,8 +148,8 @@ STRINGZILLA_INLINE void sz_sort_3way_partition_rvv_(sz_pgram_t *const initial_pg
  *  @sa Identical in shape to the @b SVE implementation, but uses variable-length RVV
  *      @c vsetvl strips.
  *
- *  @param[inout] initial_pgrams Pgram array to sort in place.
- *  @param[inout] initial_order Corresponding order array, permuted in sync with @p initial_pgrams.
+ *  @param[in,out] initial_pgrams Pgram array to sort in place.
+ *  @param[in,out] initial_order Corresponding order array, permuted in sync with @p initial_pgrams.
  *  @param[out] temporary_pgrams Scratch buffer of the same size as @p initial_pgrams,
  *      used during partitioning.
  *  @param[out] temporary_order Scratch buffer of the same size as @p initial_order,
@@ -215,8 +215,8 @@ STRINGZILLA_INLINE sz_status_t sz_sort_pgrams_rvv_(sz_pgram_t *pgrams, sz_size_t
  *  Identical in shape to the @b SVE implementation, but uses variable-length RVV @c vsetvl strips.
  *
  *  @param[in] strings The collection of strings to sort.
- *  @param[inout] global_pgrams Working pgram array, length at least `strings->count`.
- *  @param[inout] global_order Current permutation array, updated in place.
+ *  @param[in,out] global_pgrams Working pgram array, length at least @c strings->count.
+ *  @param[in,out] global_order Current permutation array, updated in place.
  *  @param[out] temporary_pgrams Scratch buffer of the same size as @p global_pgrams.
  *  @param[out] temporary_order Scratch buffer of the same size as @p global_order.
  *  @param[in] start_in_strings First index (inclusive) of the range to process.

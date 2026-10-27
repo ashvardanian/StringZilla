@@ -6,7 +6,7 @@
  *      streaming Myers' bit-parallel recurrence against a batch of queries prepared once into match
  *      masks the whole grid shares.
  *
- *  The step is the serial tier's, reached from the device through `--expt-relaxed-constexpr`, so
+ *  The step is the serial tier's, reached from the device through @c --expt-relaxed-constexpr, so
  *  the distances are the same integers rather than merely close ones. Myers is add-with-carry and
  *  bitwise operations over @c u64 words, all of which the device runs at its integer rate; there is
  *  nothing here for the DPX three-way maxima to accelerate, since those serve the score-based
@@ -320,9 +320,9 @@ sz_static_assert_((sz_size_t)sz_levenshtein_thread_words_max_simt_k >=
  *  @param[in] score_word The lane's word holding the query's last symbol, out of range on every
  *      other lane, so the score moves only on the lane that owns it.
  *  @param[in] tracking Whether to move @p score at all; a literal false costs nothing per step.
- *  @param[inout] positive_carry The positive delta entering the lane's first word, and on return
+ *  @param[in,out] positive_carry The positive delta entering the lane's first word, and on return
  *      the one leaving its last.
- *  @param[inout] negative_carry The negative delta, entering and leaving the same way.
+ *  @param[in,out] negative_carry The negative delta, entering and leaving the same way.
  */
 STRINGZILLA_DEVICE void sz_levenshtein_group_step_simt_(sz_u64_t *positive, sz_u64_t *negative, sz_u64_t const *masks,
                                                         sz_size_t words_per_lane, sz_size_t live_words,
@@ -1377,7 +1377,7 @@ STRINGZILLA_DEVICE sz_u32_t sz_levenshtein_min3_simt_(sz_u32_t first, sz_u32_t s
  *  @param[in] shared_left The tile's 128 incoming left-boundary cells, staged once per tile-row.
  *  @param[in] tile_corner The cell diagonally above the tile's top-left cell.
  *  @param[in] target_chars This lane's four target characters, constant down the whole tile-column.
- *  @param[inout] carry_top The four cells directly above this lane's micro-tile.
+ *  @param[in,out] carry_top The four cells directly above this lane's micro-tile.
  *  @param[out] row_frontier One cell per DP row; the rightmost lane publishes the tile's right
  *      column into it.
  *  @param[out] distance Written once, by the thread that computes the matrix corner.
@@ -1489,7 +1489,7 @@ STRINGZILLA_DEVICE void sz_levenshtein_march_tile_simt_(                        
  *  @param[in] shorter_length Its length, at most 2³² less @ref sz_levenshtein_tiled_padding_simt_k.
  *  @param[in] longer_text Text along the column axis, device-reachable, @p longer_length bytes.
  *  @param[in] longer_length Its length, at most 2³² less @ref sz_levenshtein_tiled_padding_simt_k.
- *  @param[out] row_frontier Scratch of `round_up(shorter_length, 128) + 1` unseeded cells.
+ *  @param[out] row_frontier Scratch of <tt>round_up(shorter_length, 128) + 1</tt> unseeded cells.
  *  @param[out] progress One counter per tile-column, zeroed before the launch.
  *  @param[out] distance The pair's distance, written once by the thread owning the matrix corner.
  *  @param[in] bound The largest distance written exactly; a farther pair writes @p bound + 1.

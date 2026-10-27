@@ -1,8 +1,9 @@
 /**
- *  @brief Zero-copy Java bindings for the StringZilla core C library, via the Foreign Function &
- *         Memory API (FFM, JDK 22+). No JNI.
  *  @file java/src/main/java/com/stringzilla/StringZilla.java
  *  @author Ash Vardanian
+ *  @date June 29, 2026
+ *  @brief Zero-copy Java bindings for the StringZilla core C library, via the Foreign Function &
+ *      Memory API (FFM, JDK 22+). No JNI.
  *
  *  Exposes the core single-string operations over UTF-8 byte buffers:
  *

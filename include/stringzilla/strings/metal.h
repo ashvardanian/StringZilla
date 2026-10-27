@@ -2,10 +2,10 @@
  *  @file include/stringzilla/strings/metal.h
  *  @author Ash Vardanian
  *  @date October 4, 2026
- *  @brief Metal host side of the string collection kernels in `strings/metal.metal`: the bindings,
+ *  @brief Metal host side of the string collection kernels in <tt>strings/metal.metal</tt>: the bindings,
  *      the scratch, the one readback a verb waits for, and the @c _metal exports.
  *
- *  Every block a verb reads or keeps must come from @ref sz_allocator_init_unified_metal on the
+ *  Every block a verb reads or keeps must come from @c sz_allocator_init_unified_metal on the
  *  device of its stream, and the strings it reads must be tapes. A verb measures in one command
  *  buffer, waits for it, reads the payload size straight out of the shared scratch, takes the
  *  output's blocks, and writes in a second command buffer, which it leaves running. The output
@@ -209,9 +209,9 @@ STRINGZILLA_INLINE sz_status_t sz_strings_scan_metal_(sz_metal_call_t *call, voi
     return status;
 }
 
-/** Measures `arguments->count` strings with kernel @p measure into a fresh shared @p scratch, scans
- *  the lengths into offsets, and reads back how many strings precede the first malformed one and
- *  the payload they take, synchronizing @p stream once. */
+/** Measures @c arguments->count strings with kernel @p measure into a fresh shared @p scratch,
+ *  scans the lengths into offsets, and reads back how many strings precede the first malformed one
+ *  and the payload they take, synchronizing @p stream once. */
 STRINGZILLA_INLINE sz_status_t sz_strings_measure_metal_(char const *measure,
                                                          sz_strings_arguments_metal_t const *arguments,
                                                          sz_strings_view_t const *strings, sz_size_t const *order,
@@ -250,8 +250,8 @@ STRINGZILLA_INLINE sz_status_t sz_strings_measure_metal_(char const *measure,
     return status;
 }
 
-/** Writes `arguments->count` strings with kernel @p write over @p groups threadgroups into @p tape,
- *  a span of @p payload bytes, from the offsets in @p scratch. */
+/** Writes @c arguments->count strings with kernel @p write over @p groups threadgroups into
+ *  @p tape, a span of @p payload bytes, from the offsets in @p scratch. */
 STRINGZILLA_INLINE sz_status_t sz_strings_write_metal_(char const *write, sz_size_t groups,
                                                        sz_strings_arguments_metal_t const *arguments,
                                                        sz_strings_view_t const *strings, sz_size_t const *order,
@@ -354,7 +354,7 @@ STRINGZILLA_INLINE sz_status_t sz_strings_map_metal_(sz_strings_view_t const *st
     return status;
 }
 
-/** Reads offsets `[0]` and `[count]` of the tape @p strings views, once @p stream drains. */
+/** Reads offsets <tt>[0]</tt> and <tt>[count]</tt> of the tape @p strings views, once @p stream drains. */
 STRINGZILLA_INLINE sz_status_t sz_strings_bounds_metal_(sz_strings_view_t const *strings, sz_size_t count,
                                                         sz_size_t *first, sz_size_t *end, sz_stream_t stream) {
     sz_bool_t const wide = (sz_bool_t)(strings->layout == sz_strings_u64_tape_k);

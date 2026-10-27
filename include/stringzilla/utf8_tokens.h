@@ -22,7 +22,7 @@ extern "C" {
  *  Enumerates every newline delimiter in a single sweep: writes the byte offset and byte length of
  *  each match into the parallel @p match_offsets and @p match_lengths arrays, a @c "\r\n" CRLF
  *  being one match of length 2, and their number into @p matches_count. A caller resuming from
- *  `text + *bytes_consumed` after a full output obtains the identical remainder.
+ *  <tt>text + *bytes_consumed</tt> after a full output obtains the identical remainder.
  *
  *  Here are all the UTF-8 newline characters we are looking for (7 characters + CRLF):
  *  - single-byte chars (4 total):
@@ -52,7 +52,9 @@ extern "C" {
  *      @p matches_capacity, the end of the last match, or zero with no capacity; else @p length.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_utf8_newlines_best(                                  //
     sz_cptr_t text, sz_size_t length,                                               //
@@ -71,7 +73,7 @@ STRINGZILLA_API sz_status_t sz_utf8_newlines_best(                              
  *
  *  Implements the Unicode White_Space property, 25 characters in total. Per the Unicode standard,
  *  whitespace includes all newline characters plus horizontal spaces. Matches the behavior of ICU's
- *  `u_isspace()` and Python's `str.isspace()`.
+ *  <tt>u_isspace()</tt> and Python's <tt>str.isspace()</tt>.
  *
  *  - single-byte chars (6 total):
  *    - U+0009 tab @c "\t" (CHARACTER TABULATION)
@@ -109,7 +111,7 @@ STRINGZILLA_API sz_status_t sz_utf8_newlines_best(                              
  *
  *  - U+001C, U+001D, U+001E, U+001F (FILE/GROUP/RECORD/UNIT SEPARATOR) are data structure
  *    delimiters for formats like USV (Unicode Separated Values). Only Java's
- *    `Character.isWhitespace()` includes them; Unicode, ICU, and Python do not.
+ *    <tt>Character.isWhitespace()</tt> includes them; Unicode, ICU, and Python do not.
  *  - U+200B, U+200C, U+200D (ZERO WIDTH SPACE/NON-JOINER/JOINER) are Format characters, not
  *    whitespace. They have no width and affect rendering rather than spacing.
  *
@@ -123,7 +125,9 @@ STRINGZILLA_API sz_status_t sz_utf8_newlines_best(                              
  *      @p matches_capacity, the end of the last match, or zero with no capacity; else @p length.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_utf8_whitespaces_best(                               //
     sz_cptr_t text, sz_size_t length,                                               //
@@ -151,7 +155,9 @@ STRINGZILLA_API sz_status_t sz_utf8_whitespaces_best(                           
  *      @p matches_capacity, the end of the last match, or zero with no capacity; else @p length.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_utf8_delimiters_best(                                //
     sz_cptr_t text, sz_size_t length,                                               //
@@ -161,9 +167,14 @@ STRINGZILLA_API sz_status_t sz_utf8_delimiters_best(                            
 
 /**
  *  @brief Finds the UTF-8 tokens kernel of @p kind, from the best of @p capabilities.
+ *  @param[in] kind The verb whose kernel to find.
+ *  @param[in] capabilities The mask to pick the best capability from.
  *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
  *  @param[out] capability The capability the kernel belongs to, or zero.
- *  @return @c sz_success_k, @c sz_missing_kernel_k, or @c sz_missing_library_k when header-only.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k
+ *  - @c sz_missing_library_k Header-only.
  */
 STRINGZILLA_API sz_status_t sz_utf8_tokens_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
                                                        sz_kernel_punned_t *kernel, sz_capability_t *capability);

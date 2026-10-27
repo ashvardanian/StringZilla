@@ -156,7 +156,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_fold_stop_boundary_serial_(sz_u64_t stop_la
  *  @brief Fold a Unicode codepoint to its case-folded form (Unicode 17.0).
  *
  *  Optimization strategy:
- *  - Single-comparison range checks: `(sz_u32_t)(rune - base) <= size` instead of two comparisons
+ *  - Single-comparison range checks: <tt>(sz_u32_t)(rune - base) <= size</tt> instead of two comparisons
  *  - Combined upper+lower ranges: check both cases, apply offset only for uppercase (branchless)
  *  - Combined even/odd ranges: check full range, apply +1 only for uppercase parity
  *  - Hierarchical by UTF-8 byte width for early exit on common cases
@@ -1539,7 +1539,7 @@ typedef struct {
     /** Source codepoint that produced the buffered runes, which @c ptr has already left. */
     sz_cptr_t codepoint_begin;
 
-    /** Its length in bytes, so its span is `[begin, begin + length)`. */
+    /** Its length in bytes, so its span is <tt>[begin, begin + length)</tt>. */
     sz_size_t codepoint_length;
 } sz_utf8_folded_iter_t;
 

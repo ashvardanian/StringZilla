@@ -39,8 +39,8 @@ extern "C" {
                    "lzcnt")
 #endif
 
-STRINGZILLA_INLINE sz_cptr_t sz_find_byteset_icelake_(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                      sz_byteset_t const *filter) {
+STRINGZILLA_OUTLINED_ sz_cptr_t sz_find_byteset_icelake_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                         sz_byteset_t const *filter) {
 
     // Before initializing the AVX-512 vectors, we may want to run the sequential code for the first few bytes.
     // In practice, that only hurts, even when we have matches every 5-ish bytes.
@@ -164,8 +164,8 @@ STRINGZILLA_API sz_status_t sz_find_byteset_icelake(sz_cptr_t haystack, sz_size_
     return sz_success_k;
 }
 
-STRINGZILLA_INLINE sz_cptr_t sz_rfind_byteset_icelake_(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                       sz_byteset_t const *filter) {
+STRINGZILLA_OUTLINED_ sz_cptr_t sz_rfind_byteset_icelake_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                          sz_byteset_t const *filter) {
 
     // Reverse mirror of `sz_find_byteset_icelake`: identical membership computation, but we scan
     // 64-byte windows from the end of the buffer and take the highest set bit, the one closest to

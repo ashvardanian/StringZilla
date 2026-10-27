@@ -115,7 +115,7 @@ STRINGZILLA_INLINE sz_bool_t sz_aes256_tag_equal_rvvcrypto_(sz_u8_t const *first
  *  @brief Byte offsets that replicate a 16-byte element group across every group of
  *      a wide register.
  *  @param[in] vector_length Active lanes, always a multiple of four.
- *  @return Lane @c i holds `(i mod 4) * 4`, the byte offset of its word within a single block.
+ *  @return Lane @c i holds <tt>(i mod 4) * 4</tt>, the byte offset of its word within a single block.
  */
 STRINGZILLA_INLINE vuint32m4_t sz_aes256_broadcast_offsets_rvvcrypto_(sz_size_t vector_length) {
     vuint32m4_t const lane_index_u32m4 = __riscv_vid_v_u32m4(vector_length);
@@ -543,7 +543,7 @@ STRINGZILLA_INLINE void sz_aes256_gcm_associate_rvvcrypto_(sz_aes256_gcm_state_t
 
 /**
  *  @brief Absorbs whatever @c partial holds, zero padded to a full block, and empties it.
- *  @param[inout] state The state, whose @c buffered count is cleared.
+ *  @param[in,out] state The state, whose @c buffered count is cleared.
  *  @param[in] accumulator_u32m1 The running hash.
  *  @param[in] subkey_u32m1 The hash subkey @c H.
  *  @return The updated hash, unchanged when nothing was pending.
@@ -560,7 +560,7 @@ STRINGZILLA_INLINE vuint32m1_t sz_aes256_gcm_flush_partial_rvvcrypto_(sz_aes256_
 
 /**
  *  @brief Transforms a chunk and absorbs its ciphertext, whichever side of the call that is.
- *  @param[inout] state The state.
+ *  @param[in,out] state The state.
  *  @param[in] text The chunk to transform.
  *  @param[in] length Bytes in the chunk.
  *  @param[out] output Receives the transformed bytes.

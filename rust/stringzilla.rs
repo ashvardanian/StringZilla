@@ -6,6 +6,7 @@
 //!
 //! File: rust/stringzilla.rs
 //! Author: Ash Vardanian
+//! Date: January 22, 2024
 
 mod cipher;
 mod compare;

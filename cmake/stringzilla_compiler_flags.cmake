@@ -1,7 +1,7 @@
-# cmake/sz_compiler_flags.cmake — per-target compiler-flag helpers shared by every StringZilla target: warnings,
-# optimization, standards, architecture baselines, and the per-capability `STRINGZILLA_TARGET_*` stamps. Included after
-# the option block: the helpers read `STRINGZILLA_BUILD_SANITIZERS`, `STRINGZILLA_BUILD_COVERAGE`, and the
-# `stringzilla_arch_*_` platform facts at call time.
+# cmake/stringzilla_compiler_flags.cmake — per-target compiler-flag helpers shared by every StringZilla target:
+# warnings, optimization, standards, architecture baselines, and the per-capability `STRINGZILLA_TARGET_*` stamps.
+# Included after the option block: the warnings read `STRINGZILLA_WERROR`, and the helpers read
+# `STRINGZILLA_BUILD_SANITIZERS`, `STRINGZILLA_BUILD_COVERAGE`, and the `stringzilla_arch_*_` platform facts at call time.
 
 # Flags follow each source's language and compiler, as one target may mix C, C++, CUDA and HIP. `COMPILE_LANG_AND_ID`
 # takes one language, hence the `OR`s; "GCC-style" means every compiler but MSVC and NVCC.
@@ -18,43 +18,55 @@ set(stringzilla_clang_link_
 set(stringzilla_msvc_link_ "$<OR:$<LINK_LANG_AND_ID:C,MSVC>,$<LINK_LANG_AND_ID:CXX,MSVC>>")
 set(stringzilla_gcc_style_link_ "$<NOT:$<OR:${stringzilla_msvc_link_},$<LINK_LANG_AND_ID:CUDA,NVIDIA>>>")
 
-# Maximum warnings level & warnings as error. MSVC uses numeric values: > 4068 for "unknown pragmas",
-# > 4146 for "unary minus operator applied to unsigned type"; `/utf-8` keeps UTF-8 symbols in tests intact.
-function (stringzilla_set_warning_flags target_)
-    # `-Wno-error=array-bounds`: GCC 12+ false-positives on StringZilla's intentional wide reads (u32/u64/ vector
-    # loads near a buffer end) when an ISA kernel is inlined into a string-literal-sized caller. Keep it a visible
-    # warning, not a build-breaking error.
-    set(gnu_warnings_
-        "-Wall;-Wextra;-Werror;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function;-Wno-sign-conversion;-Wno-error=array-bounds"
+# Maximum warnings level, linked by every target `stringzilla_set_compiler_flags` configures, so fetched dependencies
+# build with their own flags. MSVC uses numeric values: > 4068 for "unknown pragmas", > 4146 for "unary minus operator
+# applied to unsigned type"; `/utf-8` keeps UTF-8 symbols in tests intact.
+add_library(stringzilla_warnings INTERFACE)
+# `-Wno-error=array-bounds`: GCC 12+ false-positives on StringZilla's intentional wide reads (u32/u64/ vector loads near
+# a buffer end) when an ISA kernel is inlined into a string-literal-sized caller. Keep it a visible warning, not a
+# build-breaking error.
+set(stringzilla_gnu_warnings_
+    "-Wall;-Wextra;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function;-Wno-sign-conversion;-Wno-error=array-bounds"
+)
+set(stringzilla_clang_warnings_
+    "-Wall;-Wextra;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-sign-conversion;-Wdocumentation"
+)
+set(stringzilla_msvc_warnings_
+    "/Bt" # Display build timings
+    "/wd4068" # Disable warning: unknown pragma
+    "/wd5030" # Disable warning: attribute is not recognized
+    "/wd5051" # Disable warning: attribute requires a newer standard (e.g. [[maybe_unused]] in C++11/14)
+    "/wd4146" # Disable warning: unary minus operator applied to unsigned type
+    "/wd4996" # Disable warning: 'unsafe' functions like getenv, fopen (use _s variants)
+    "/wd4244" # Disable warning: conversion with possible loss of data (e.g., float to int)
+    "/wd4267" # Disable warning: conversion from 'size_t' to smaller type, possible loss of data
+    "/utf-8" # Set source and execution character sets to UTF-8
+)
+# NVCC forwards the host flags to the C++ compiler it drives.
+if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+    set(stringzilla_nvcc_warnings_
+        "-Xcompiler=/Zc:preprocessor;-Xcompiler=/Zc:__cplusplus;-Xcompiler=/W3;-Xcompiler=/wd4068;-Xcompiler=/wd5030;-Xcompiler=/wd5051;-Xcompiler=/wd4146;-Xcompiler=/wd4996;-Xcompiler=/wd4244;-Xcompiler=/wd4267;-Xcompiler=/utf-8"
     )
-    set(clang_warnings_ "-Wall;-Wextra;-Werror;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-sign-conversion")
-    set(msvc_warnings_
-        "/Bt" # Display build timings
-        "/wd4068" # Disable warning: unknown pragma
-        "/wd5030" # Disable warning: attribute is not recognized
-        "/wd5051" # Disable warning: attribute requires a newer standard (e.g. [[maybe_unused]] in C++11/14)
-        "/wd4146" # Disable warning: unary minus operator applied to unsigned type
-        "/wd4996" # Disable warning: 'unsafe' functions like getenv, fopen (use _s variants)
-        "/wd4244" # Disable warning: conversion with possible loss of data (e.g., float to int)
-        "/wd4267" # Disable warning: conversion from 'size_t' to smaller type, possible loss of data
-        "/utf-8" # Set source and execution character sets to UTF-8
-        "/WX" # Treat warnings as errors
+    set(stringzilla_nvcc_werror_ "-Xcompiler=/WX")
+else ()
+    set(stringzilla_nvcc_warnings_
+        "-Xcompiler=-Wfatal-errors;-Xcompiler=-Wall;-Xcompiler=-Wextra;-Xcompiler=-Wno-error=array-bounds;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function"
     )
-    # NVCC forwards the host flags to the C++ compiler it drives.
-    if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-        set(nvcc_warnings_
-            "-Xcompiler=/Zc:preprocessor;-Xcompiler=/Zc:__cplusplus;-Xcompiler=/W3;-Xcompiler=/WX;-Xcompiler=/wd4068;-Xcompiler=/wd5030;-Xcompiler=/wd5051;-Xcompiler=/wd4146;-Xcompiler=/wd4996;-Xcompiler=/wd4244;-Xcompiler=/wd4267;-Xcompiler=/utf-8"
-        )
-    else ()
-        set(nvcc_warnings_
-            "-Xcompiler=-Wfatal-errors;-Xcompiler=-Wall;-Xcompiler=-Wextra;-Xcompiler=-Wno-error=array-bounds;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function"
-        )
-    endif ()
+    set(stringzilla_nvcc_werror_ "")
+endif ()
+target_compile_options(
+    stringzilla_warnings
+    INTERFACE "$<${stringzilla_gnu_}:${stringzilla_gnu_warnings_}>"
+              "$<${stringzilla_clang_}:${stringzilla_clang_warnings_}>"
+              "$<${stringzilla_msvc_}:${stringzilla_msvc_warnings_}>"
+              "$<${stringzilla_nvcc_}:${stringzilla_nvcc_warnings_}>"
+)
+if (STRINGZILLA_WERROR)
     target_compile_options(
-        ${target_} PRIVATE "$<${stringzilla_gnu_}:${gnu_warnings_}>" "$<${stringzilla_clang_}:${clang_warnings_}>"
-                           "$<${stringzilla_msvc_}:${msvc_warnings_}>" "$<${stringzilla_nvcc_}:${nvcc_warnings_}>"
+        stringzilla_warnings INTERFACE "$<${stringzilla_gcc_style_}:-Werror>" "$<${stringzilla_msvc_}:/WX>"
+                                       "$<${stringzilla_nvcc_}:${stringzilla_nvcc_werror_}>"
     )
-endfunction ()
+endif ()
 
 # Optimization, debug-info, and runtime-check flags. Everything keys on `$<CONFIG:...>` generator
 # expressions rather than `CMAKE_BUILD_TYPE`, which is empty under multi-config generators like Visual
@@ -161,7 +173,7 @@ function (stringzilla_set_compiler_flags target_ cpp_standard_ target_arch_)
     # Make sure CUDA C++ allows calling `constexpr` from device code
     target_compile_options(${target_} PRIVATE "$<${stringzilla_nvcc_}:--expt-relaxed-constexpr>")
 
-    stringzilla_set_warning_flags(${target_})
+    target_link_libraries(${target_} PRIVATE $<BUILD_INTERFACE:stringzilla_warnings>)
     stringzilla_set_optimization_flags(${target_} "${target_type_}")
 
     # Avoid builtin functions where we know what we are doing.
@@ -248,19 +260,21 @@ function (stringzilla_set_compiler_flags target_ cpp_standard_ target_arch_)
         ${target_} PRIVATE "STRINGZILLA_ARCH_BIG_ENDIAN_=$<STREQUAL:${CMAKE_C_BYTE_ORDER},BIG_ENDIAN>"
     )
 
-    # Sanitizer options for Debug mode; NVCC can't handle them:
+    # Sanitizers, which NVCC can't handle:
     # https://stackoverflow.com/questions/75590579/cuda-fails-to-initialise-when-address-sanitizer-is-enabled
     target_compile_definitions(${target_} PRIVATE "$<IF:$<CONFIG:Debug>,STRINGZILLA_DEBUG=1,STRINGZILLA_DEBUG=0>")
-    if (STRINGZILLA_BUILD_SANITIZERS AND NOT target_type_ STREQUAL "SHARED_LIBRARY")
+    if (STRINGZILLA_BUILD_SANITIZERS STREQUAL "address" AND NOT target_type_ STREQUAL "SHARED_LIBRARY")
         target_compile_options(
-            ${target_}
-            PRIVATE "$<$<AND:${stringzilla_msvc_},$<CONFIG:Debug>>:/fsanitize=address;/fsanitize=leak>"
-                    "$<$<AND:${stringzilla_gcc_style_},$<CONFIG:Debug>>:-fsanitize=address;-fsanitize=undefined>"
+            ${target_} PRIVATE "$<${stringzilla_msvc_}:/fsanitize=address;/fsanitize=leak>"
+                               "$<${stringzilla_gcc_style_}:-fsanitize=address;-fsanitize=undefined>"
         )
         target_link_options(
-            ${target_} PRIVATE "$<$<AND:${stringzilla_msvc_link_},$<CONFIG:Debug>>:/fsanitize=address;/fsanitize=leak>"
-            "$<$<AND:${stringzilla_gcc_style_link_},$<CONFIG:Debug>>:-fsanitize=address;-fsanitize=undefined>"
+            ${target_} PRIVATE "$<${stringzilla_msvc_link_}:/fsanitize=address;/fsanitize=leak>"
+            "$<${stringzilla_gcc_style_link_}:-fsanitize=address;-fsanitize=undefined>"
         )
+    elseif (STRINGZILLA_BUILD_SANITIZERS STREQUAL "thread" AND NOT target_type_ STREQUAL "SHARED_LIBRARY")
+        target_compile_options(${target_} PRIVATE "$<${stringzilla_gcc_style_}:-fsanitize=thread>")
+        target_link_options(${target_} PRIVATE "$<${stringzilla_gcc_style_link_}:-fsanitize=thread>")
     endif ()
 
     if (STRINGZILLA_BUILD_COVERAGE)

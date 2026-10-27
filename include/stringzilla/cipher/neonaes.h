@@ -5,7 +5,7 @@
  *  @brief Arm NEON crypto-extension backend for AES-256 in counter and Galois/counter modes.
  *
  *  The fourteen rounds are written out rather than looped, for the reason
- *  `cipher/icelake.h` spells out.
+ *  <tt>cipher/icelake.h</tt> spells out.
  *
  *  @sa include/stringzilla/cipher.h
  */
@@ -74,7 +74,7 @@ STRINGZILLA_INLINE uint8x16_t sz_aes256_key_rotate_neonaes_(uint8x16_t broadcast
  *  @param[in] broadcast_u8x16 The word to substitute, repeated in every lane.
  *  @return The substituted word, repeated in every lane.
  *
- *  Against a zero round key @c AESE is exactly `ShiftRows(SubBytes(state))`, and the row shift
+ *  Against a zero round key @c AESE is exactly <tt>ShiftRows(SubBytes(state))</tt>, and the row shift
  *  permutes bytes between columns only.
  */
 STRINGZILLA_INLINE uint8x16_t sz_aes256_key_substitute_neonaes_(uint8x16_t broadcast_u8x16) {
@@ -224,7 +224,7 @@ STRINGZILLA_INLINE void sz_aes256_blocks_round_neonaes_(uint8x16_t *blocks_u8x16
 /**
  *  @brief Encrypts eight blocks with the expanded schedule, in place.
  *  @param[in] key The expanded schedule.
- *  @param[inout] blocks_u8x16 Eight plaintext blocks, replaced by their ciphertext.
+ *  @param[in,out] blocks_u8x16 Eight plaintext blocks, replaced by their ciphertext.
  *
  *  The fused round instruction has several cycles of latency and issues every cycle, so a single
  *  chain of fourteen dependent rounds leaves most of that throughput idle.
@@ -421,9 +421,9 @@ STRINGZILLA_INLINE uint8x16_t sz_ghash_product_polynomial_neonaes_(uint8x16_t va
  *  @brief Accumulates the 256-bit carry-less product of two reflected blocks into a running triple.
  *  @param[in] multiplicand_u8x16 One reflected operand.
  *  @param[in] multiplier_u8x16 The other reflected operand.
- *  @param[inout] low_u8x16 Accumulates the product of the two low halves.
- *  @param[inout] middle_u8x16 Accumulates both cross products.
- *  @param[inout] high_u8x16 Accumulates the product of the two high halves.
+ *  @param[in,out] low_u8x16 Accumulates the product of the two low halves.
+ *  @param[in,out] middle_u8x16 Accumulates both cross products.
+ *  @param[in,out] high_u8x16 Accumulates the product of the two high halves.
  *
  *  Splitting the schoolbook product from its reduction is what lets several blocks share one
  *  reduction: the field is linear, so the partial products of a whole group may be summed
@@ -518,7 +518,7 @@ STRINGZILLA_INLINE void sz_ghash_descending_powers_neonaes_(sz_u8_t const *power
  *  @param[in] powers_u8x16 The reflected powers H⁸ through H¹.
  *  @return The updated running hash, reflected.
  *
- *  The hash is a chain, `Y = (Y ^ X) * H`, and a chain of reductions would run at the latency of
+ *  The hash is a chain, <tt>Y = (Y ^ X) * H</tt>, and a chain of reductions would run at the latency of
  *  one multiply per block.
  */
 STRINGZILLA_INLINE uint8x16_t sz_ghash_absorb_eight_neonaes_(uint8x16_t accumulator_u8x16,
@@ -639,7 +639,7 @@ STRINGZILLA_INLINE void sz_aes256_gcm_associate_neonaes_(sz_aes256_gcm_state_t *
 
 /**
  *  @brief Spends what is left of the keystream block the state carries, one byte at a time.
- *  @param[inout] state The state, whose two sixteen-byte counters advance together here.
+ *  @param[in,out] state The state, whose two sixteen-byte counters advance together here.
  *  @param[in] input The bytes to transform.
  *  @param[out] output Receives the transformed bytes.
  *  @param[in] count Bytes to consume, never more than the keystream block has left.
@@ -679,7 +679,7 @@ STRINGZILLA_INLINE uint8x16_t sz_aes256_gcm_spend_neonaes_(sz_aes256_gcm_state_t
 
 /**
  *  @brief Transforms a chunk and absorbs its ciphertext, whichever side of the call that is.
- *  @param[inout] state The state.
+ *  @param[in,out] state The state.
  *  @param[in] text The chunk to transform.
  *  @param[in] length Bytes in the chunk.
  *  @param[out] output Receives the transformed bytes.

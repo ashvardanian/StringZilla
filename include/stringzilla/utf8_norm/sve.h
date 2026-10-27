@@ -7,14 +7,14 @@
  *  This backend overrides exactly one point of the shared engine: the scan primitive
  *  @c sz_utf8_norm_classify_sve_, which locates the first non-inert byte for a form. The two public
  *  entry points, @c sz_utf8_norm_sve and @c sz_utf8_find_denormalized_sve, reuse the force-inlined
- *  engines from `serial.h`, passing this scanner as the constant function address that
+ *  engines from <tt>serial.h</tt>, passing this scanner as the constant function address that
  *  devirtualizes the call.
  *
  *  The scanner is the vector-length-agnostic sibling of the NEON kernel: a @c svtbl_u8
  *  lead-classify behind a per-vector ASCII/inert gate, with a cold per-codepoint verify. Because
  *  SVE's @c svtbl_u8 indexes only the bottom slice of a scalable vector, the 64-entry
  *  @c sz_utf8_norm_lead_lut_ is resolved with the proven 4-way @c svsel_u8 range-blend from
- *  `memory/sve.h`: four sub-tables for the index ranges 0-15, 16-31, 32-47 and 48-63, blended by
+ *  <tt>memory/sve.h</tt>: four sub-tables for the index ranges 0-15, 16-31, 32-47 and 48-63, blended by
  *  the @c svcmplt and @c svcmpge predicates. For a 64-byte or wider vector the upper predicates
  *  fold away to a single @c svtbl_u8.
  *

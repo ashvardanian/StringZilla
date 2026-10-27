@@ -28,7 +28,7 @@ extern "C" {
  *
  *  @section utf8_uncased_fold_buffer_sizing Buffer Sizing
  *
- *  The target buffer must be at least `source_length * 3` bytes to guarantee sufficient space for
+ *  The target buffer must be at least <tt>source_length * 3</tt> bytes to guarantee sufficient space for
  *  worst-case expansion. The maximum expansion ratio is 3:1, which occurs with Greek characters
  *  that expand to three codepoints under case folding. For example, 'ΐ' (U+0390, CE 90) folds to
  *  "ΐ" (U+03B9 U+0308 U+0301, CE B9 CC 88 CC 81), so 2 bytes → 6 bytes, and a string of N such
@@ -59,11 +59,14 @@ extern "C" {
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU. On a GPU, the stream to queue on, which also names the
  *      device; null for the default.
- *  @return @c sz_success_k, @c sz_missing_kernel_k when no capability in @p capabilities has it,
- *      and on a GPU @c sz_device_memory_mismatch_k for a buffer or a @p stream the device cannot
- *      use or @c sz_unexpected_dimensions_k for a text whose folded length cannot be counted.
+ *
  *  @warning The caller must ensure the target buffer is large enough. No bounds checking is
- *      performed. Use `source_length * 3` for safety.
+ *      performed. Use <tt>source_length * 3</tt> for safety.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
+ *  - @c sz_device_memory_mismatch_k On a GPU, a buffer or a @p stream the device cannot use.
+ *  - @c sz_unexpected_dimensions_k On a GPU, a text whose folded length cannot be counted.
  */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_best( //
     sz_cptr_t source, sz_size_t source_length,         //
@@ -72,9 +75,14 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_best( //
 
 /**
  *  @brief Finds the UTF-8 case folding kernel of @p kind, from the best of @p capabilities.
+ *  @param[in] kind The verb whose kernel to find.
+ *  @param[in] capabilities The mask to pick the best capability from.
  *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
  *  @param[out] capability The capability the kernel belongs to, or zero.
- *  @return @c sz_success_k, @c sz_missing_kernel_k, or @c sz_missing_library_k when header-only.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k
+ *  - @c sz_missing_library_k Header-only.
  */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
                                                              sz_kernel_punned_t *kernel, sz_capability_t *capability);

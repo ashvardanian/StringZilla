@@ -50,7 +50,7 @@ extern "C" {
  *      @c sz_rune_line_break_property.
  *
  *  Per lane, @p high_u8x32 holds cp >> 8 and @p low_u8x32 holds cp & 0xFF. The @c bmp_page_lut_
- *  page LUT selects one of the 67 distinct 256-byte pages, then `flat_bmp_[page * 256 + low]` is
+ *  page LUT selects one of the 67 distinct 256-byte pages, then <tt>flat_bmp_[page * 256 + low]</tt> is
  *  fetched by four @c vpgatherdd. The leaf byte indexes @c sz_utf8_line_break_flat_palette_, not
  *  the 62-entry cascade palette. Covers the whole BMP.
  */
@@ -70,7 +70,7 @@ STRINGZILLA_INLINE __m256i sz_line_break_bit_mask_haswell_(__m256i bytes_u8x32, 
  *  @brief Split thirty-two flat-palette indices into the low and high byte of their
  *      16-bit Line_Break descriptors.
  *
- *  Four scale-2 @c vpgatherdd read `flat_palette_[index]` eight lanes at a time - the AVX2 stand-in
+ *  Four scale-2 @c vpgatherdd read <tt>flat_palette_[index]</tt> eight lanes at a time - the AVX2 stand-in
  *  for icelake's @c vpermi2w over the two palette tiles, as AVX2 has no cross-lane word permute -
  *  and the shared @c pack4_u32_to_u8_haswell_ narrows each descriptor byte back into lane order.
  *  Every index originates in the flat leaf, so it is always below 56 and the scale-2 gather stays
@@ -203,7 +203,7 @@ STRINGZILLA_INLINE __m256i sz_line_break_classify_astral_haswell_(__m256i plane_
 }
 
 /** Per-half unsigned @p value_u8x32 ≥ @p bound_u8x32 mask, since AVX2 has no unsigned compare:
- *  `max_epu8(value, bound) == value`. */
+ *  <tt>max_epu8(value, bound) == value</tt>. */
 STRINGZILLA_INLINE __m256i sz_line_break_cmpge_epu8_haswell_(__m256i value_u8x32, __m256i bound_u8x32) {
     return _mm256_cmpeq_epi8(_mm256_max_epu8(value_u8x32, bound_u8x32), value_u8x32);
 }
@@ -211,8 +211,8 @@ STRINGZILLA_INLINE __m256i sz_line_break_cmpge_epu8_haswell_(__m256i value_u8x32
 /**
  *  @brief Per-half unsigned @p value_u8x32 < @p bound_u8x32 mask: the complement of the ≥ mask.
  *
- *  The @c min_epu8 form, `min_epu8(value, bound) == value && value != bound`, is awkward, and
- *  the ≥ negation via `min_epu8(value, bound - 1) == value` is fragile at a zero bound; instead
+ *  The @c min_epu8 form, <tt>min_epu8(value, bound) == value && value != bound</tt>, is awkward, and
+ *  the ≥ negation via <tt>min_epu8(value, bound - 1) == value</tt> is fragile at a zero bound; instead
  *  AND-NOT the ≥ mask against ones, which keeps it branch- and bias-free.
  */
 STRINGZILLA_INLINE __m256i sz_line_break_cmplt_epu8_haswell_(__m256i value_u8x32, __m256i bound_u8x32) {
@@ -297,8 +297,8 @@ typedef struct sz_line_break_classified_haswell_t {
     sz_size_t loaded;
 } sz_line_break_classified_haswell_t;
 
-/** Compute the third forward neighbour `next3[i] = window[i+3]` over all 64 lanes with mod-64 wrap,
- *  the AVX2 twin of icelake's `_mm512_permutexvar_epi8(lane_identity+3)`. Same idiom as the
+/** Compute the third forward neighbour <tt>next3[i] = window[i+3]</tt> over all 64 lanes with mod-64 wrap,
+ *  the AVX2 twin of icelake's <tt>_mm512_permutexvar_epi8(lane_identity+3)</tt>. Same idiom as the
  *  substrate @c forward_neighbours_haswell_: @c permute2x128 brings the successor 128-bit block in,
  *  then @c alignr shifts by 3. */
 STRINGZILLA_INLINE void sz_line_break_next3_haswell_(__m256i window_lo_u8x32, __m256i window_hi_u8x32,

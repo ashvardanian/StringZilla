@@ -2,6 +2,7 @@
 //!
 //! File: rust/stringzilla/regex.rs
 //! Author: Ash Vardanian
+//! Date: October 14, 2026
 
 use core::ffi::c_void;
 use core::mem::MaybeUninit;

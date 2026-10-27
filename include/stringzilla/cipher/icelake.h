@@ -60,7 +60,7 @@ extern "C" {
  *  @param[in] assisted_u8x16 The substituted word, already broadcast across all four lanes.
  *  @return The next four schedule words.
  *
- *  FIPS 197 writes `w[i] = w[i - 8] ^ temp` with @c temp carried forward through the
+ *  FIPS 197 writes <tt>w[i] = w[i - 8] ^ temp</tt> with @c temp carried forward through the
  *  quadruple, which is the cumulative exclusive-or that three byte-wise doublings of
  *  @c _mm_slli_si128 produce.
  */
@@ -200,7 +200,7 @@ STRINGZILLA_INLINE __m512i sz_aes256_rounds_wide_icelake_(__m512i block_u8x64, s
     return _mm512_aesenclast_epi128(block_u8x64, wide_keys_vec[14].zmm);
 }
 
-/** Lane identity `{0, 1, ..., 15}`, the base a byte-offset permutation is built from. */
+/** Lane identity <tt>{0, 1, ..., 15}</tt>, the base a byte-offset permutation is built from. */
 STRINGZILLA_INLINE __m128i sz_aes256_lane_iota_icelake_(void) {
     return _mm_setr_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
 }
@@ -218,7 +218,7 @@ STRINGZILLA_INLINE sz_u8_t const *sz_aes256_counter_swap_icelake_(void) {
  *  @brief Builds four consecutive counter blocks, the trailing 32-bit field kept little-endian.
  *  @param[in] nonce The 12 nonce bytes.
  *  @param[in] block_index Index of the first of the four blocks.
- *  @return Counters for blocks @p block_index through `block_index + 3`.
+ *  @return Counters for blocks @p block_index through <tt>block_index + 3</tt>.
  */
 STRINGZILLA_INLINE __m512i sz_aes256_counters_icelake_(sz_u8_t const *nonce, sz_u32_t block_index) {
     // Only twelve bytes are readable, and a masked load suppresses the fault on the rest while zeroing
@@ -451,7 +451,7 @@ STRINGZILLA_INLINE __m128i sz_ghash_fold_lanes_icelake_(__m512i value_u8x64) {
  *  @param[in] eighth_power_u8x16 H⁸ alone, byte reversed.
  *  @return The running hash after all eight blocks, byte reversed.
  *
- *  The hash is a chain, `Y = (Y ^ X) * H`, and a chain of reductions would run at the latency of
+ *  The hash is a chain, <tt>Y = (Y ^ X) * H</tt>, and a chain of reductions would run at the latency of
  *  one multiply per block.
  */
 STRINGZILLA_INLINE __m128i sz_ghash_stage_icelake_(__m128i accumulator_u8x16, __m512i blocks_low_u8x64,
@@ -499,7 +499,7 @@ STRINGZILLA_INLINE void sz_ghash_powers_icelake_(sz_aes256_gcm_key_t const *key,
 /**
  *  @brief Absorbs whole blocks into a byte-reversed running hash.
  *  @param[in] accumulator_u8x16 The running hash, byte reversed.
- *  @param[in] blocks The bytes to absorb, `count * 16` of them.
+ *  @param[in] blocks The bytes to absorb, <tt>count * 16</tt> of them.
  *  @param[in] count Number of whole blocks.
  *  @param[in] powers_high_u8x64 H⁸ through H⁵, byte reversed, one per lane.
  *  @param[in] powers_low_u8x64 H⁴ through H¹, byte reversed, one per lane.
@@ -644,8 +644,8 @@ STRINGZILLA_INLINE void sz_aes256_gcm_flush_partial_icelake_(sz_aes256_gcm_state
 
 /**
  *  @brief Transforms bytes one at a time, absorbing the ciphertext side into @p accumulator_u8x16.
- *  @param[inout] state The state, whose keystream block and hash block both advance byte by byte.
- *  @param[inout] accumulator_u8x16 The running hash, byte reversed, updated in place.
+ *  @param[in,out] state The state, whose keystream block and hash block both advance byte by byte.
+ *  @param[in,out] accumulator_u8x16 The running hash, byte reversed, updated in place.
  *  @param[in] subkey_u8x16 H¹, byte reversed.
  *  @param[in] reverse_u8x16 The byte reversal pattern.
  *  @param[in] text The bytes to transform.
@@ -714,9 +714,9 @@ STRINGZILLA_INLINE void sz_aes256_gcm_bytes_icelake_(sz_aes256_gcm_state_t *stat
 /**
  *  @brief Encrypts whole blocks and absorbs their ciphertext, the hash trailing the cipher
  *      by one stage.
- *  @param[inout] counters_out_u8x64 Four consecutive counter blocks, advanced past everything
+ *  @param[in,out] counters_out_u8x64 Four consecutive counter blocks, advanced past everything
  *      the call consumed.
- *  @param[inout] accumulator_u8x16 The running hash, byte reversed, updated in place.
+ *  @param[in,out] accumulator_u8x16 The running hash, byte reversed, updated in place.
  *  @param[in] wide_keys_vec The fifteen round keys, each broadcast across four lanes.
  *  @param[in] powers_high_u8x64 H⁸ through H⁵, byte reversed, one per lane.
  *  @param[in] powers_low_u8x64 H⁴ through H¹, byte reversed, one per lane.
@@ -813,7 +813,7 @@ STRINGZILLA_INLINE void sz_aes256_gcm_stride_icelake_(__m512i *counters_out_u8x6
 
 /**
  *  @brief Transforms a chunk and absorbs its ciphertext, whichever side of the call that is.
- *  @param[inout] state The state.
+ *  @param[in,out] state The state.
  *  @param[in] text The chunk to transform.
  *  @param[in] length Bytes in the chunk.
  *  @param[out] output Receives the transformed bytes.

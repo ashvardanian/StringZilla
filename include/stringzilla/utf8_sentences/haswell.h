@@ -7,8 +7,8 @@
  *  The AVX2 twin of the Ice Lake Sentence_Break classifier: a contiguous run of codepoints resolves
  *  to per-codepoint Sentence_Break class bytes with no per-lane scalar loop and no serial deferral.
  *  Each 64-byte window lives as two @c __m256i halves. The BMP is one indexed lookup per codepoint
- *  into a page-compressed flat table - `bmp_page_lut_[cp >> 8]` picks one of 57 distinct 256-byte
- *  pages, then `flat_bmp_[page * 256 + (cp & 0xFF)]` is the class - fetched with @c vpgatherdd;
+ *  into a page-compressed flat table - <tt>bmp_page_lut_[cp >> 8]</tt> picks one of 57 distinct 256-byte
+ *  pages, then <tt>flat_bmp_[page * 256 + (cp & 0xFF)]</tt> is the class - fetched with @c vpgatherdd;
  *  4-byte leads still ride a 4-stage astral @c vpshufb cascade. Both emit the Sentence_Break class
  *  byte directly, bit-identical with @c sz_rune_sentence_break_property over the entire code space.
  *
@@ -97,7 +97,7 @@ STRINGZILLA_INLINE __m256i sz_utf8_sentence_break_astral_class_haswell_(__m256i 
  *      zero-scalar: the AVX2 twin of @ref sz_utf8_sentence_break_classify_window_icelake_.
  *
  *  The decoded window only carries the 2- and 3-byte high and low reconstruction; this leaf
- *  rebuilds the ASCII codepoint bytes, `low_u8x32 = raw_u8x32` and `high_u8x32 = 0`, and the
+ *  rebuilds the ASCII codepoint bytes, <tt>low_u8x32 = raw_u8x32</tt> and <tt>high_u8x32 = 0</tt>, and the
  *  4-byte ones, @c high_u8x32 and @c low_u8x32 from the four-byte formula, before the cascade,
  *  exactly as the Ice Lake driver reconstructs them. BMP lanes go through the BMP cascade; 4-byte
  *  lanes are routed by reconstructed plane through the astral cascade. The class on
@@ -216,8 +216,8 @@ STRINGZILLA_INLINE void sz_utf8_sentence_break_bmp_highlow_haswell_( //
     *out_high_u8x32 = high_u8x32, *out_low_u8x32 = low_u8x32;
 }
 
-/** Third forward neighbour `next3[i] = window[i+3]` over all 64 lanes with mod-64 wrap, the
- *  AVX2 twin of the Ice Lake `_mm512_permutexvar_epi8(lane_identity+3)`, the idiom of the
+/** Third forward neighbour <tt>next3[i] = window[i+3]</tt> over all 64 lanes with mod-64 wrap, the
+ *  AVX2 twin of the Ice Lake <tt>_mm512_permutexvar_epi8(lane_identity+3)</tt>, the idiom of the
  *  substrate @c forward_neighbours_. */
 STRINGZILLA_INLINE void sz_utf8_sentence_break_next3_haswell_(__m256i window_lo_u8x32, __m256i window_hi_u8x32,
                                                               __m256i *next3_lo_u8x32, __m256i *next3_hi_u8x32) {

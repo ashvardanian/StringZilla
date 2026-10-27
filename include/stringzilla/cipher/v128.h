@@ -58,7 +58,7 @@ STRINGZILLA_INLINE sz_u8_t const *sz_aes256_tower_forward_high_v128_(void) {
  *  @brief The way out of the tower field composed with the affine map, indexed by the
  *      inverse's low nibble.
  *
- *  Leaving the tower field and applying the map of FIPS 197 are both linear over `GF(2)`, so their
+ *  Leaving the tower field and applying the map of FIPS 197 are both linear over <tt>GF(2)</tt>, so their
  *  composition is one linear map and needs one pair of tables rather than two.
  */
 STRINGZILLA_INLINE sz_u8_t const *sz_aes256_substituted_low_v128_(void) {
@@ -215,7 +215,7 @@ STRINGZILLA_INLINE v128_t sz_aes256_key_carry_v128_(v128_t words_u8x16) {
  *  @param[in] substituted_u8x16 The substituted word, already broadcast across all four lanes.
  *  @return The next four schedule words.
  *
- *  FIPS 197 writes `w[i] = w[i - 8] ^ temp` with @c temp carried forward through the
+ *  FIPS 197 writes <tt>w[i] = w[i - 8] ^ temp</tt> with @c temp carried forward through the
  *  quadruple, and that carry is exactly the cumulative exclusive-or three word-wise shifts
  *  produce in one register.
  */
@@ -326,7 +326,7 @@ STRINGZILLA_INLINE v128_t sz_aes256_shift_rows_v128_(v128_t bytes_u8x16) {
  *  @param[in] bytes_u8x16 The row-shifted state.
  *  @return The mixed state.
  *
- *  Written as `s[j] ^ parity ^ xtime(s[j] ^ s[j + 1])`, the transform needs only the column's
+ *  Written as <tt>s[j] ^ parity ^ xtime(s[j] ^ s[j + 1])</tt>, the transform needs only the column's
  *  total parity and the doubled difference of adjacent entries, so three immediate shuffles
  *  supply every neighbour a lane could want and the doubling is a shift against a mask of the
  *  bytes that overflow.
@@ -584,7 +584,7 @@ STRINGZILLA_INLINE void sz_aes256_gcm_associate_v128_(sz_aes256_gcm_state_t *sta
 
 /**
  *  @brief Spends what is left of the keystream block the state carries, one byte at a time.
- *  @param[inout] state The state, whose two sixteen-byte counters advance together here.
+ *  @param[in,out] state The state, whose two sixteen-byte counters advance together here.
  *  @param[in] input The bytes to transform.
  *  @param[out] output Receives the transformed bytes.
  *  @param[in] count Bytes to consume, never more than the keystream block has left.
@@ -622,7 +622,7 @@ STRINGZILLA_INLINE v128_t sz_aes256_gcm_spend_v128_(sz_aes256_gcm_state_t *state
 
 /**
  *  @brief Transforms a chunk and absorbs its ciphertext, whichever side of the call that is.
- *  @param[inout] state The state.
+ *  @param[in,out] state The state.
  *  @param[in] text The chunk to transform.
  *  @param[in] length Bytes in the chunk.
  *  @param[out] output Receives the transformed bytes.

@@ -3,7 +3,7 @@
  *  @author Ash Vardanian
  *  @date October 8, 2026
  *  @brief CUDA host side of multi-state SHA-256: the residency checks, the launches and the
- *      @c _cuda exports, over the kernels of `hash/simt.cuh`.
+ *      @c _cuda exports, over the kernels of <tt>hash/simt.cuh</tt>.
  *
  *  @sa include/stringzilla/hash/simt.cuh
  */

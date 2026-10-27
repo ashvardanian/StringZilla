@@ -3,7 +3,7 @@
  *  @author Ash Vardanian
  *  @date October 3, 2026
  *  @brief ROCm host side of Unicode normalization: the tables' upload, the tiles a round cuts a
- *      text into, its one launch, and the @c _rocm export, over the kernel of `utf8_norm/simt.cuh`.
+ *      text into, its one launch, and the @c _rocm export, over the kernel of <tt>utf8_norm/simt.cuh</tt>.
  *
  *  @sa include/stringzilla/utf8_norm/simt.cuh
  *  @sa include/stringzilla/utf8_norm/cuda.cuh

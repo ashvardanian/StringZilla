@@ -412,8 +412,8 @@ STRINGZILLA_CONSTEXPR sz_pgram_t const *sz_strings_partitioning_pivot_(sz_pgram_
  *  to the pivot into the left and right partitions. Instead we use the Dutch National Flag @b 3-way
  *  partitioning, outputting the range of values equal to the pivot.
  *
- *  @param[inout] global_pgrams Pgram array to partition in place.
- *  @param[inout] global_order Corresponding order array, permuted in sync with @c global_pgrams.
+ *  @param[in,out] global_pgrams Pgram array to partition in place.
+ *  @param[in,out] global_order Corresponding order array, permuted in sync with @c global_pgrams.
  *  @param[in] start_in_strings First index (inclusive) of the range to partition.
  *  @param[in] end_in_strings One-past-the-last index of the range to partition.
  *  @param[out] first_pivot_offset Receives the index of the first element equal to the pivot.
@@ -472,15 +472,15 @@ STRINGZILLA_CONSTEXPR void sz_sort_3way_partition_serial_(            //
  *  @brief Recursive Quick-Sort implementation backing both the @c sz_sort_order_best and
  *      @c sz_sort_pgrams_serial_, and using the @c sz_sort_3way_partition_serial_ under the hood.
  *
- *  @param[inout] global_pgrams Pgram array to sort in place.
- *  @param[inout] global_order Corresponding order array, permuted in sync with @p global_pgrams.
+ *  @param[in,out] global_pgrams Pgram array to sort in place.
+ *  @param[in,out] global_order Corresponding order array, permuted in sync with @p global_pgrams.
  *  @param[in] start_in_strings First index (inclusive) of the range to sort.
  *  @param[in] end_in_strings One-past-the-last index of the range to sort.
  *  @param[in] top_count Global cut-off: partitions starting at or beyond this index are left
  *      unsorted. Pass 0 to fully sort the range.
  *
  *  With the complement trick the wanted elements, the smallest or the largest under reverse, always
- *  fall in `[0, top_count)`, so one cut-off serves both directions.
+ *  fall in <tt>[0, top_count)</tt>, so one cut-off serves both directions.
  */
 STRINGZILLA_CONSTEXPR void sz_sort_quicksort_pgrams_serial_(        //
     sz_pgram_t *const global_pgrams, sz_size_t *const global_order, //
@@ -509,8 +509,8 @@ STRINGZILLA_CONSTEXPR void sz_sort_quicksort_pgrams_serial_(        //
  *  @c sz_sort_quicksort_pgrams_serial_, then recurses into every group of equal pgrams.
  *
  *  @param[in] strings The collection of strings to sort.
- *  @param[inout] global_pgrams Working pgram array, length at least `strings->count`.
- *  @param[inout] global_order Current permutation array, updated in place.
+ *  @param[in,out] global_pgrams Working pgram array, length at least @c strings->count.
+ *  @param[in,out] global_order Current permutation array, updated in place.
  *  @param[in] start_in_strings First index (inclusive) of the range to process.
  *  @param[in] end_in_strings One-past-the-last index of the range to process.
  *  @param[in] start_character Byte offset into each string for the current pgram window.
@@ -578,7 +578,7 @@ STRINGZILLA_CONSTEXPR void sz_sort_byte_windows_serial_(              //
  *  Not part of the stable, public ordering contract and not dispatched - the per-backend variants
  *  exist for direct benchmarking of the integer-sort core.
  *
- *  @param[inout] pgrams Continuous buffer of unsigned integers to sort in place.
+ *  @param[in,out] pgrams Continuous buffer of unsigned integers to sort in place.
  *  @param[in] count Number of elements in the array.
  *  @param[in] allocator Optional memory allocator for temporary storage.
  *  @param[out] order Output permutation that sorts the elements.
@@ -596,7 +596,7 @@ STRINGZILLA_INLINE sz_status_t sz_sort_pgrams_serial_(sz_pgram_t *pgrams, sz_siz
 
 #pragma region Case Insensitive
 
-/** Bit-width of one packed folded code-point: `code-point + 1` for any Unicode
+/** Bit-width of one packed folded code-point: <tt>code-point + 1</tt> for any Unicode
  *  scalar (<= U+10FFFF). */
 #define sz_argsort_casefold_field_bits_ ((sz_size_t)21)
 
@@ -607,8 +607,8 @@ STRINGZILLA_INLINE sz_status_t sz_sort_pgrams_serial_(sz_pgram_t *pgrams, sz_siz
  *  @brief Uncased counterpart of @c sz_sort_export_byte_window_serial_.
  *
  *  Packs the folded @b code-points of each string at recursion depth @p folded_skip_count into a
- *  pgram: three 21-bit fields on 64-bit targets, MSB-first, each holding `code-point + 1` so a zero
- *  field means "no code-point here". Because `0` sorts below every real `code-point + 1`, a string
+ *  pgram: three 21-bit fields on 64-bit targets, MSB-first, each holding <tt>code-point + 1</tt> so a zero
+ *  field means "no code-point here". Because @c 0 sorts below every real <tt>code-point + 1</tt>, a string
  *  that ends sorts before a longer one sharing its prefix, with no length byte or byte-reversal.
  *
  *  Like the byte sort's @c start_character, @p folded_skip_count is the shared recursion depth,
@@ -754,9 +754,9 @@ STRINGZILLA_CONSTEXPR void sz_sort_casefold_windows_serial_(          //
  *  @param[in] second_indices Corresponding index array for the second input.
  *  @param[in] second_count Number of elements in the second input.
  *  @param[out] result_pgrams Output array for merged pgrams; must hold at least
- *      `first_count + second_count` entries.
+ *      <tt>first_count + second_count</tt> entries.
  *  @param[out] result_indices Output array for merged indices; must hold at least
- *      `first_count + second_count` entries.
+ *      <tt>first_count + second_count</tt> entries.
  *  @see https://en.cppreference.com/w/cpp/algorithm/set_union
  */
 STRINGZILLA_CONSTEXPR void sz_sort_pgrams_union_serial_(                                      //

@@ -4,8 +4,8 @@
  *  @date January 16, 2024
  *  @brief The capability lists' shape and the kernel selection every dispatch unit shares.
  *
- *  The @c STRINGZILLA_TARGET_* verdicts come from the probes in `CMakeLists.txt`, which every
- *  binding builds through or links the output of. Builds that pass none get them from `types.h`,
+ *  The @c STRINGZILLA_TARGET_* verdicts come from the probes in <tt>CMakeLists.txt</tt>, which every
+ *  binding builds through or links the output of. Builds that pass none get them from <tt>types.h</tt>,
  *  which reads the compiler flags.
  */
 #ifndef STRINGZILLA_DISPATCH_H_

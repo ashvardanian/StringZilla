@@ -112,7 +112,7 @@ STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_word_break_is_mid_quotes_(sz_u8_t proper
  *  The Word_Break rules WB5-WB16 operate on these elements, not raw codepoints: WB4 folds every
  *  Extend, Format, and ZWJ into the preceding base, except when that base is sot, CR, LF, or a
  *  Newline (then the ignorable is "de-ignored" and starts its own element). @c ends_in_zwj records
- *  whether the element's last codepoint is a ZWJ, which is all WB3c (`ZWJ x Extended_Pictographic`)
+ *  whether the element's last codepoint is a ZWJ, which is all WB3c (<tt>ZWJ x Extended_Pictographic</tt>)
  *  needs. @c valid is false for the sot/eot sentinels.
  */
 typedef struct sz_word_element_t {
@@ -756,8 +756,8 @@ STRINGZILLA_CONSTEXPR sz_u64_t sz_utf8_word_break_ri_join_( //
 
 /** Per-lane class membership of one decoded 64-byte window, precomputed by a per-ISA extractor so
  *  the portable rule engine sources every mask from @c sz_u64_t words without touching the
- *  codepoint vectors. Every class mask is raw (not yet `& start_bytes`); the truncated-edge U+FFFD
- *  reclassify has already been applied by the builder, so the masks (and @ref classes_byte) reflect
+ *  codepoint vectors. Every class mask is raw (not yet <tt>& start_bytes</tt>); the truncated-edge U+FFFD
+ *  reclassify has already been applied by the builder, so the masks (and @c classes_byte) reflect
  *  post-truncation classes. The WB3c (Extended_Pictographic), WB3d (WSegSpace), and Single_Quote /
  *  Double_Quote distinctions live outside the 4-bit class model and arrive as their own
  *  raw-membership masks. */
@@ -811,7 +811,7 @@ typedef struct sz_utf8_word_break_frame_t {
     /** Bytes with the high bit set (within @c loaded). */
     sz_u64_t non_ascii_lanes;
 
-    /** WSegSpace raw membership, not yet masked by `& start_bytes & ~truncated`. */
+    /** WSegSpace raw membership, not yet masked by <tt>& start_bytes & ~truncated</tt>. */
     sz_u64_t wseg;
 
     /** Raw window byte == U+0022 (within @c loaded). */
@@ -820,7 +820,7 @@ typedef struct sz_utf8_word_break_frame_t {
     /** Raw window byte == U+0027 (within @c loaded). */
     sz_u64_t single_quote_byte;
 
-    /** Extended_Pictographic raw membership, not yet masked by `& start_bytes & ~truncated`. */
+    /** Extended_Pictographic raw membership, not yet masked by <tt>& start_bytes & ~truncated</tt>. */
     sz_u64_t pictographic;
 
     /** Post-truncation Word_Break class byte per lane (for the carry edge reads). */

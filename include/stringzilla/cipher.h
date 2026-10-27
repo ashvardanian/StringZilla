@@ -6,8 +6,8 @@
  *
  *  Two mode names appear throughout, each in both of its usual spellings, because the standards and
  *  the symbol names here disagree about which to use. @b Counter @b mode is abbreviated @b CTR, and
- *  appears in symbols as `sz_aes256_ctr_*`. @b Galois/counter @b mode is abbreviated @b GCM, and
- *  appears as `sz_aes256_gcm_*`. The Galois hash inside the latter is also called @b GHASH.
+ *  appears in symbols as <tt>sz_aes256_ctr_*</tt>. @b Galois/counter @b mode is abbreviated @b GCM, and
+ *  appears as <tt>sz_aes256_gcm_*</tt>. The Galois hash inside the latter is also called @b GHASH.
  *
  *  Includes core APIs with hardware-specific backends:
  *
@@ -44,7 +44,7 @@
  *  mode nonce seals at most 2^36 - 32 bytes, past which its 32-bit block counter would wrap.
  *
  *  The AES round instructions are those @c sz_hash_best and @c sz_fill_random_best already use, so
- *  the tier structure matches `hash.h`. Carry-less multiplication for the Galois hash is new;
+ *  the tier structure matches <tt>hash.h</tt>. Carry-less multiplication for the Galois hash is new;
  *  platforms lacking it - WebAssembly, base RISC-V vector, LoongArch - use a constant-time
  *  shift-and-add reduction rather than a subkey-indexed table, which would leak the key through
  *  the data cache.
@@ -83,7 +83,6 @@ extern "C" {
  *  @param[in] secret The 32 secret bytes.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
  *  Expanding an all-zero secret:
  *
@@ -101,6 +100,9 @@ extern "C" {
  *  @sa sz_aes256_key_init_serial, sz_aes256_key_init_westmere, sz_aes256_key_init_icelake,
  *      sz_aes256_key_init_neonaes, sz_aes256_key_init_sve2aes, sz_aes256_key_init_rvvcrypto,
  *      sz_aes256_key_init_v128, sz_aes256_key_init_v128relaxed, sz_aes256_key_init_powervsx
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_aes256_key_init_best(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)],
                                                     sz_capability_t capabilities, sz_stream_t stream);
@@ -116,7 +118,6 @@ STRINGZILLA_API sz_status_t sz_aes256_key_init_best(sz_aes256_key_t *key, sz_u8_
  *  @param[out] target Receives @p length bytes; may equal @p text, or must not overlap it at all.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
  *  Counter mode is its own inverse, so one call serves both directions. The counter block is the
  *  nonce followed by a big-endian 32-bit block index that starts at zero, so block n covers bytes
@@ -143,6 +144,9 @@ STRINGZILLA_API sz_status_t sz_aes256_key_init_best(sz_aes256_key_t *key, sz_u8_
  *  @sa sz_aes256_ctr_xor_serial, sz_aes256_ctr_xor_westmere, sz_aes256_ctr_xor_icelake,
  *      sz_aes256_ctr_xor_neonaes, sz_aes256_ctr_xor_sve2aes, sz_aes256_ctr_xor_rvvcrypto,
  *      sz_aes256_ctr_xor_v128, sz_aes256_ctr_xor_v128relaxed, sz_aes256_ctr_xor_powervsx
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_aes256_ctr_xor_best(    //
     sz_aes256_key_t const *key,                        //
@@ -158,12 +162,14 @@ STRINGZILLA_API sz_status_t sz_aes256_ctr_xor_best(    //
  *  @param[in] secret The 32 secret bytes.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
  *  The backends are sz_aes256_gcm_key_init_serial, sz_aes256_gcm_key_init_westmere,
  *  sz_aes256_gcm_key_init_icelake, sz_aes256_gcm_key_init_neonaes, sz_aes256_gcm_key_init_sve2aes,
  *  sz_aes256_gcm_key_init_rvvcrypto, sz_aes256_gcm_key_init_v128,
  *  sz_aes256_gcm_key_init_v128relaxed and sz_aes256_gcm_key_init_powervsx, one per target.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_aes256_gcm_key_init_best(sz_aes256_gcm_key_t *key,
                                                         sz_u8_t const secret[sz_at_least_(32)],
@@ -183,7 +189,6 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_key_init_best(sz_aes256_gcm_key_t *key
  *  @param[out] tag Receives the 16-byte authentication tag.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
  *  Sealing a short message and opening it again:
  *
@@ -207,6 +212,9 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_key_init_best(sz_aes256_gcm_key_t *key
  *      sz_aes256_gcm_encrypt_neonaes, sz_aes256_gcm_encrypt_sve2aes,
  *      sz_aes256_gcm_encrypt_rvvcrypto, sz_aes256_gcm_encrypt_v128,
  *      sz_aes256_gcm_encrypt_v128relaxed, sz_aes256_gcm_encrypt_powervsx
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_aes256_gcm_encrypt_best( //
     sz_aes256_gcm_key_t const *key,                     //
@@ -230,9 +238,6 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_encrypt_best( //
  *  @param[in] tag The 16-byte tag to check.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k when the tag matched and @p target holds the plaintext,
- *      @c sz_authentication_failed_k when it did not and @p target is zeroed, or
- *      @c sz_missing_kernel_k when no capability in @p capabilities has it and nothing was written.
  *
  *  The comparison runs in time independent of where the tag first differs, and the output is
  *  cleared rather than left holding the unauthenticated plaintext, so a caller who ignores the
@@ -244,6 +249,10 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_encrypt_best( //
  *      sz_aes256_gcm_decrypt_neonaes, sz_aes256_gcm_decrypt_sve2aes,
  *      sz_aes256_gcm_decrypt_rvvcrypto, sz_aes256_gcm_decrypt_v128,
  *      sz_aes256_gcm_decrypt_v128relaxed, sz_aes256_gcm_decrypt_powervsx
+ *
+ *  @par Statuses:
+ *  - @c sz_authentication_failed_k The tag did not match and @p target is zeroed.
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it and nothing was written.
  */
 STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_best( //
     sz_aes256_gcm_key_t const *key,                     //
@@ -261,7 +270,6 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_best( //
  *  @param[in] nonce The 12 nonce bytes, which must never repeat under one key.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
  *  Sealing an eight-byte buffer in place:
  *
@@ -286,6 +294,9 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_best( //
  *  sz_aes256_gcm_encryptor_init_sve2aes, sz_aes256_gcm_encryptor_init_rvvcrypto,
  *  sz_aes256_gcm_encryptor_init_v128, sz_aes256_gcm_encryptor_init_v128relaxed and
  *  sz_aes256_gcm_encryptor_init_powervsx.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_init_best(sz_aes256_gcm_encryptor_t *encryptor,
                                                               sz_aes256_gcm_key_t const *key,
@@ -295,14 +306,16 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_init_best(sz_aes256_gcm_encr
 /**
  *  @brief Absorbs associated data into a seal, authenticated but not encrypted.
  *
- *  @param[inout] encryptor The encryptor.
+ *  @param[in,out] encryptor The encryptor.
  *  @param[in] text The associated bytes.
  *  @param[in] length Number of associated bytes.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *  @note All associated data must be absorbed before the first call transforming message bytes.
  *  @sa sz_aes256_gcm_encryptor_associate_serial
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_associate_best(sz_aes256_gcm_encryptor_t *encryptor, sz_cptr_t text,
                                                                    sz_size_t length, sz_capability_t capabilities,
@@ -311,14 +324,16 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_associate_best(sz_aes256_gcm
 /**
  *  @brief Encrypts one chunk and absorbs its ciphertext into the running tag.
  *
- *  @param[inout] encryptor The encryptor.
+ *  @param[in,out] encryptor The encryptor.
  *  @param[in] text The plaintext chunk.
  *  @param[in] length Number of bytes in the chunk.
  *  @param[out] target Receives @p length ciphertext bytes, at @p text or not overlapping it at all.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *  @sa sz_aes256_gcm_encryptor_update_serial
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_update_best(sz_aes256_gcm_encryptor_t *encryptor, sz_cptr_t text,
                                                                 sz_size_t length, sz_ptr_t target,
@@ -331,8 +346,10 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_update_best(sz_aes256_gcm_en
  *  @param[out] tag Receives the 16 tag bytes.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *  @sa sz_aes256_gcm_encryptor_digest_serial
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_digest_best(sz_aes256_gcm_encryptor_t const *encryptor,
                                                                 sz_u8_t tag[sz_at_least_(16)],
@@ -346,8 +363,10 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_digest_best(sz_aes256_gcm_en
  *  @param[in] nonce The 12 nonce bytes the message was sealed under.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *  @sa sz_aes256_gcm_decryptor_init_serial
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_init_best(sz_aes256_gcm_decryptor_t *decryptor,
                                                               sz_aes256_gcm_key_t const *key,
@@ -357,14 +376,16 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_init_best(sz_aes256_gcm_decr
 /**
  *  @brief Absorbs associated data into an open, authenticated but not encrypted.
  *
- *  @param[inout] decryptor The decryptor.
+ *  @param[in,out] decryptor The decryptor.
  *  @param[in] text The associated bytes.
  *  @param[in] length Number of associated bytes.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *  @note All associated data must be absorbed before the first call transforming message bytes.
  *  @sa sz_aes256_gcm_decryptor_associate_serial
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_associate_best(sz_aes256_gcm_decryptor_t *decryptor, sz_cptr_t text,
                                                                    sz_size_t length, sz_capability_t capabilities,
@@ -373,19 +394,21 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_associate_best(sz_aes256_gcm
 /**
  *  @brief Decrypts one chunk and absorbs its ciphertext into the running tag.
  *
- *  @param[inout] decryptor The decryptor.
+ *  @param[in,out] decryptor The decryptor.
  *  @param[in] text The ciphertext chunk.
  *  @param[in] length Number of bytes in the chunk.
  *  @param[out] target Receives @p length plaintext bytes, at @p text or not overlapping it at all.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *  @warning The emitted bytes are @b not yet authenticated.
  *  @sa sz_aes256_gcm_decryptor_update_unverified_serial
  *
  *  Nothing has verified that this ciphertext is genuine, and a caller that acts on the output
  *  before @c sz_aes256_gcm_decryptor_verify_best succeeds is trusting an attacker's data. Buffer
  *  it, or accept that risk knowingly: a streaming decryption cannot avoid it, so the name says so.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_update_unverified_best(sz_aes256_gcm_decryptor_t *decryptor,
                                                                            sz_cptr_t text, sz_size_t length,
@@ -400,14 +423,15 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_update_unverified_best(sz_ae
  *  @param[in] tag The 16 tag bytes to check.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k when the tag matched every byte the decryptor absorbed,
- *      @c sz_authentication_failed_k when it did not, or @c sz_missing_kernel_k when no
- *      capability in @p capabilities has it.
  *  @sa sz_aes256_gcm_decryptor_verify_serial
  *
  *  The comparison runs in time independent of where the tag first differs, so a caller cannot leak
  *  the expected tag by timing repeated attempts. Emitting the expected tag and letting the caller
  *  compare it would hand that guarantee to code this library does not own.
+ *
+ *  @par Statuses:
+ *  - @c sz_authentication_failed_k The tag did not match every byte the decryptor absorbed.
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_verify_best(sz_aes256_gcm_decryptor_t const *decryptor,
                                                                 sz_u8_t const tag[sz_at_least_(16)],
@@ -1063,9 +1087,14 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_verify_powervsx(sz_aes256_gc
 
 /**
  *  @brief Finds the cipher kernel of @p kind, from the best of @p capabilities.
+ *  @param[in] kind The verb whose kernel to find.
+ *  @param[in] capabilities The mask to pick the best capability from.
  *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
  *  @param[out] capability The capability the kernel belongs to, or zero.
- *  @return @c sz_success_k, @c sz_missing_kernel_k, or @c sz_missing_library_k when header-only.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k
+ *  - @c sz_missing_library_k Header-only.
  */
 STRINGZILLA_API sz_status_t sz_cipher_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
                                                   sz_kernel_punned_t *kernel, sz_capability_t *capability);

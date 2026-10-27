@@ -279,9 +279,9 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_whitespaces_sve2_( //
 }
 
 /** Membership of each byte-lane @p value_u8x in a 32-byte (256-bit) bitmap held in two zero-padded
- *  16-byte table vectors: the byte at `value >> 3` rides two @c svtbl tables - the second addressed
- *  at `index - 16`, where the wrap past the zero-padded table reads zero at any vector length - and
- *  the bit `value & 7` decides. The in-register alternative to a gathered two-level walk. */
+ *  16-byte table vectors: the byte at <tt>value >> 3</tt> rides two @c svtbl tables - the second addressed
+ *  at <tt>index - 16</tt>, where the wrap past the zero-padded table reads zero at any vector length - and
+ *  the bit <tt>value & 7</tt> decides. The in-register alternative to a gathered two-level walk. */
 STRINGZILLA_INLINE svbool_t sz_utf8_delimiter_bitmap32_sve2_(svbool_t pg_b8x, svuint8_t table_low_u8x,
                                                              svuint8_t table_high_u8x, svuint8_t value_u8x) {
     svuint8_t const byte_index_u8x = svlsr_n_u8_x(pg_b8x, value_u8x, 3);

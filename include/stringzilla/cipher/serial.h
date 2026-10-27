@@ -308,7 +308,7 @@ STRINGZILLA_INLINE void sz_aes256_counter_block_serial_(sz_u8_t const *nonce, sz
 
 /**
  *  @brief Multiplies @p accumulator by @p subkey in the Galois field the tag is built over.
- *  @param[inout] accumulator The running hash, replaced by the product.
+ *  @param[in,out] accumulator The running hash, replaced by the product.
  *  @param[in] subkey One of the precomputed powers of the hash subkey.
  *
  *  Deliberately branch free and table free.
@@ -347,7 +347,7 @@ STRINGZILLA_CONSTEXPR void sz_ghash_absorb_serial_(sz_u8_t *accumulator, sz_u8_t
 
 /**
  *  @brief Compares two authentication tags in time that does not depend on their contents.
- *  @return `sz_true_k` when all sixteen bytes match.
+ *  @return @c sz_true_k when all sixteen bytes match.
  *
  *  Accumulates every difference instead of returning at the first one, so an attacker cannot
  *  recover a forged tag byte by byte from how long the comparison ran.
@@ -466,7 +466,7 @@ STRINGZILLA_INLINE void sz_aes256_gcm_hash_byte_serial_(sz_aes256_gcm_state_t *s
 
 /**
  *  @brief Transforms a chunk and absorbs its ciphertext, whichever side of the call that is.
- *  @param[inout] state The state.
+ *  @param[in,out] state The state.
  *  @param[in] text The chunk to transform.
  *  @param[in] length Bytes in the chunk.
  *  @param[out] output Receives the transformed bytes.

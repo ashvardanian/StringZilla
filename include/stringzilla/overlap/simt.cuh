@@ -6,11 +6,11 @@
  *      chunks of equal bytes, one per thread, each width's window hash rolled through a chunk in
  *      one pass, and one prepared query's B-tree probed per block row.
  *
- *  The arithmetic is the serial tier's, reached from the device through `--expt-relaxed-constexpr`,
- *  so the counts are exactly serial's rather than merely close. Integers, not doubles: both factors
- *  are below 2^32, so the product fits one @c u64 and the remainder by a constant lowers to a
- *  multiply-high - where an @c f64 reduction would run at the device's double-precision rate, a
- *  sixty-fourth of its single-precision one on consumer parts.
+ *  The arithmetic is the serial tier's, reached from the device through
+ *  @c --expt-relaxed-constexpr, so the counts are exactly serial's rather than merely close.
+ *  Integers, not doubles: both factors are below 2^32, so the product fits one @c u64 and the
+ *  remainder by a constant lowers to a multiply-high - where an @c f64 reduction would run at the
+ *  device's double-precision rate, a sixty-fourth of its single-precision one on consumer parts.
  *
  *  A chain of hashes is a dependent recurrence, but a window's hash depends only on its own bytes,
  *  so a candidate can be cut anywhere: a chunk primes itself from the widest window's bytes before
@@ -34,7 +34,7 @@
  *  time, through the same roll and probe.
  *
  *  Only device code lives here; each vendor wraps the walk in its own kernel and prepares the
- *  forest, sizes the grid and launches from its own host side, in `cuda.cuh` and `rocm.cuh`.
+ *  forest, sizes the grid and launches from its own host side, in <tt>cuda.cuh</tt> and <tt>rocm.cuh</tt>.
  *
  *  @sa include/stringzilla/overlap.h
  *  @sa include/stringzilla/overlap/cuda.cuh
@@ -130,7 +130,7 @@ STRINGZILLA_DEVICE sz_size_t sz_overlap_btree_probe_simt_(sz_overlap_btree_simt_
     return sz_overlap_entry_simt_(leaf, sz_overlap_rank_simt_(leaf, key, staged), staged) == (sz_u32_t)key;
 }
 
-/** One byte's step of a rolling window hash, `H' = H * 256 + incoming - outgoing * 256^w`, with
+/** One byte's step of a rolling window hash, <tt>H' = H * 256 + incoming - outgoing * 256^w</tt>, with
  *  @p power being 256^w and the bytes before a text counting as zeros. The residues are the serial
  *  tier's, as both are exact modulo the same prime. */
 STRINGZILLA_DEVICE sz_u32_t sz_overlap_roll_step_simt_(sz_u32_t hash, sz_u32_t incoming, sz_u32_t outgoing,
@@ -149,7 +149,7 @@ STRINGZILLA_DEVICE sz_u32_t sz_overlap_roll_step_simt_(sz_u32_t hash, sz_u32_t i
  *  instead of three. The first @p warm_bytes endings only prime the hashes, and a window not yet
  *  full is never probed. A caller resumes a walk by passing the @p hashes this one left.
  *
- *  @param[inout] hashes, matches One entry per width, up to @ref sz_overlap_gpu_widths_per_walk_k.
+ *  @param[in,out] hashes, matches One entry per width, up to @ref sz_overlap_gpu_widths_per_walk_k.
  */
 STRINGZILLA_DEVICE void sz_overlap_roll_simt_(sz_u8_t const *walk, sz_size_t from, sz_size_t until,
                                               sz_size_t warm_bytes, sz_u32_t const *widths, sz_u32_t const *powers,

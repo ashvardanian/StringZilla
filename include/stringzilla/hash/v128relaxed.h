@@ -479,7 +479,7 @@ STRINGZILLA_API sz_status_t sz_fill_random_v128relaxed(sz_ptr_t target, sz_size_
 
 /**
  *  @brief Replays prepared text-lanes through the relaxed-SIMD minimal AES state for a single seed.
- *  @return 64-bit hash, bit-identical to `sz_hash_v128relaxed(text, length, seed)`
+ *  @return 64-bit hash, bit-identical to <tt>sz_hash_v128relaxed(text, length, seed)</tt>
  *      (hence to serial).
  */
 STRINGZILLA_INLINE sz_u64_t sz_hash_multiseed_replay_v128relaxed_(sz_u512_vec_t const *text_lanes_vec,

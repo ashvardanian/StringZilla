@@ -2,6 +2,7 @@
 //!
 //! File: rust/stringzilla/substrings.rs
 //! Author: Ash Vardanian
+//! Date: September 24, 2026
 
 use core::ffi::c_void;
 use core::mem::MaybeUninit;

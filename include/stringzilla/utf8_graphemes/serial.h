@@ -17,7 +17,7 @@ extern "C" {
 
 #pragma region UAX 29 Grapheme Cluster Boundaries
 
-/** Returns the packed Grapheme_Cluster_Break descriptor, `gcb | incb << 4 | extpict << 6`,
+/** Returns the packed Grapheme_Cluster_Break descriptor, <tt>gcb | incb << 4 | extpict << 6</tt>,
  *  for a codepoint. */
 STRINGZILLA_CONSTEXPR sz_u8_t sz_rune_grapheme_break_property(sz_rune_t rune) {
     if (rune >= 0xAC00u && rune <= 0xD7A3u)
@@ -54,9 +54,9 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_grapheme_break_next_start_(sz_cptr_t text, sz
  *  @brief Grapheme_Cluster_Break descriptor of the codepoint starting at @p start, decoded blindly
  *      to mirror the Ice Lake @c sz_grapheme_classify_window_ value reconstruction byte-for-byte.
  *
- *  Dispatches on the value. The lead's strict length class selects the fold width: ASCII `< 0x80`
+ *  Dispatches on the value. The lead's strict length class selects the fold width: ASCII <tt>< 0x80</tt>
  *  stays the raw byte, 3-byte @c 1110xxxx and 4-byte @c 11110xxx use their reconstruction, and
- *  every other non-ASCII lead, whether a 2-byte @c 110xxxxx, a stray `0xF8..0xFF`, or an isolated
+ *  every other non-ASCII lead, whether a 2-byte @c 110xxxxx, a stray <tt>0xF8..0xFF</tt>, or an isolated
  *  @c 0xC0 or @c 0xC1, folds through the 2-byte formula exactly as the SIMD window does. There is
  *  no continuation, overlong, or surrogate validation and no U+FFFD substitution: the class is
  *  dispatched on the decoded value so the serial and Ice Lake backends agree bit-for-bit on
@@ -479,7 +479,7 @@ STRINGZILLA_CONSTEXPR sz_grapheme_carry_t sz_grapheme_carry_empty_(void) {
  *  packed descriptor bytes. */
 typedef struct sz_grapheme_window_masks_t {
 
-    /** Bit i of `class_bit[c]` set → dense codepoint i is grapheme class c. */
+    /** Bit i of <tt>class_bit[c]</tt> set → dense codepoint i is grapheme class c. */
     sz_u64_t class_bit[14];
 
     sz_u64_t extended_pictographic;

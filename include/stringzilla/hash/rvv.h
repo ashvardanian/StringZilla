@@ -140,7 +140,7 @@ STRINGZILLA_INLINE vuint8m1_t sz_gf16_mul_rvv_(vuint8m1_t a_u8m1, vuint8m1_t b_u
 
 /**
  *  @brief Bit-exact RVV emulation of a single @c _mm_aesenc_si128 round.
- *  @return Result of `MixColumns(SubBytes(ShiftRows(state))) ^ round_key`, identical to
+ *  @return Result of <tt>MixColumns(SubBytes(ShiftRows(state))) ^ round_key</tt>, identical to
  *      @c sz_emulate_aesenc_si128_serial_.
  *  @see Mike Hamburg, "Accelerating AES with Vector Permute Instructions", CHES 2009: https://shiftleft.org/papers/vector_aes/vector_aes.pdf
  */
@@ -260,15 +260,15 @@ STRINGZILLA_INLINE sz_u64_t sz_hash_state_short_finalize_rvv_(sz_hash_state_alig
     return mixed_in_register_vec.u64s[0];
 }
 
-/** Vector-copy a single AES block (`sizeof(sz_u128_vec_t)` bytes) from @p source into
- *  `target_vec->u8s`, replacing a scalar byte loop. @p source must have a full block
+/** Vector-copy a single AES block (<tt>sizeof(sz_u128_vec_t)</tt> bytes) from @p source into
+ *  @c target_vec->u8s, replacing a scalar byte loop. @p source must have a full block
  *  of readable bytes. */
 STRINGZILLA_INLINE void sz_hash_load_block_rvv_(sz_u128_vec_t *target_vec, sz_cptr_t source) {
     sz_size_t vector_length = __riscv_vsetvl_e8m1(sizeof(target_vec->u8s));
     __riscv_vse8_v_u8m1(target_vec->u8s, __riscv_vle8_v_u8m1((sz_u8_t const *)source, vector_length), vector_length);
 }
 
-/** Vector-copy a single AES block (`sizeof(sz_u128_vec_t)` bytes) from @p source_vec to
+/** Vector-copy a single AES block (<tt>sizeof(sz_u128_vec_t)</tt> bytes) from @p source_vec to
  *  @p target, the store counterpart of @c sz_hash_load_block_rvv_. @p target must have a full
  *  block of writable bytes. */
 STRINGZILLA_INLINE void sz_hash_store_block_rvv_(sz_ptr_t target, sz_u128_vec_t source_vec) {

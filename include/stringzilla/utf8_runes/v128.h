@@ -96,7 +96,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_seek_v128_(sz_cptr_t text, sz_size_t length
 #pragma region Shared SIMD leaf substrate
 
 /** The decoded 64-byte window for the v128 backend. The 64 bytes live as four @c v128_t quarters
- *  (`window[0]` = lanes [0, 16), ... `window[3]` = lanes [48, 64)); the per-lane byte-domain
+ *  (<tt>window[0]</tt> = lanes [0, 16), ... <tt>window[3]</tt> = lanes [48, 64)); the per-lane byte-domain
  *  codepoint halves @c high and @c low share that shape. Masks are @c sz_u64_t (one bit per
  *  byte-lane: the v128 bitmask of each quarter placed at bit positions
  *  [0,16)/[16,32)/[32,48)/[48,64)). Field names and semantics match @ref sz_utf8_rune_window_neon_t
@@ -106,25 +106,25 @@ typedef struct sz_utf8_rune_window_v128_t {
     /** Raw input bytes for lanes [16*q, 16*q+16). */
     v128_t window_u8x16s[4];
 
-    /** Per-lane `codepoint >> 8`. */
+    /** Per-lane <tt>codepoint >> 8</tt>. */
     v128_t high_byte_u8x16s[4];
 
-    /** Per-lane `codepoint & 0xFF`. */
+    /** Per-lane <tt>codepoint & 0xFF</tt>. */
     v128_t low_byte_u8x16s[4];
 
-    /** Bit @c i is set when lane @c i is a continuation byte `10xxxxxx`. */
+    /** Bit @c i is set when lane @c i is a continuation byte @c 10xxxxxx. */
     sz_u64_t continuation;
 
     /** Bit @c i is set when lane @c i begins a codepoint (loaded, non-continuation). */
     sz_u64_t codepoint_starts;
 
-    /** Bit @c i is set when lane @c i is a 2-byte lead `110xxxxx`. */
+    /** Bit @c i is set when lane @c i is a 2-byte lead @c 110xxxxx. */
     sz_u64_t two_byte_starts;
 
-    /** Bit @c i is set when lane @c i is a 3-byte lead `1110xxxx`. */
+    /** Bit @c i is set when lane @c i is a 3-byte lead @c 1110xxxx. */
     sz_u64_t three_byte_starts;
 
-    /** Bit @c i is set when lane @c i is a 4-byte lead `11110xxx`. */
+    /** Bit @c i is set when lane @c i is a 4-byte lead @c 11110xxx. */
     sz_u64_t four_byte_starts;
 
     /** Number of bytes actually loaded (at most 64). */
@@ -155,7 +155,7 @@ STRINGZILLA_INLINE sz_u64_t sz_utf8_mask_combine_v128_( //
 }
 
 /** Masked 64-byte load into four quarters; bytes [loaded, 64) read as zero. A zero-initialized
- *  vector union stages the partial tail so we never read past `text + loaded`. Mirrors
+ *  vector union stages the partial tail so we never read past <tt>text + loaded</tt>. Mirrors
  *  @ref sz_utf8_load_window_neon_. */
 STRINGZILLA_INLINE void sz_utf8_rune_load_window_v128_(sz_u8_t const *text, sz_size_t loaded, v128_t *out_u8x16) {
     if (loaded >= 64) {
@@ -175,11 +175,11 @@ STRINGZILLA_INLINE void sz_utf8_rune_load_window_v128_(sz_u8_t const *text, sz_s
     out_u8x16[3] = window_vec.u128s[3].v128;
 }
 
-/** Forward neighbours `next1[i] = window[i+1]`, `next2[i] = window[i+2]`,
- *  `next3[i] = window[i+3]` over all 64 lanes, with the lanes past the window
+/** Forward neighbours <tt>next1[i] = window[i+1]</tt>, <tt>next2[i] = window[i+2]</tt>,
+ *  <tt>next3[i] = window[i+3]</tt> over all 64 lanes, with the lanes past the window
  *  wrapping modulo 64 to match Ice Lake's @c _mm512_permutexvar_epi8, so
- *  `next1[63]==window[0]`, etc. @c wasm_i8x16_shuffle takes immediate indices, so
- *  per quarter `here = window[q]` is concatenated with `succ = window[(q+1)&3]`,
+ *  <tt>next1[63]==window[0]</tt>, etc. @c wasm_i8x16_shuffle takes immediate indices, so
+ *  per quarter <tt>here = window[q]</tt> is concatenated with <tt>succ = window[(q+1)&3]</tt>,
  *  quarter 3 wrapping to 0, and the shifted span extracted. The three neighbour
  *  distances are provided because the family classifiers of 4-byte sequences need
  *  up to @c next3. */
@@ -276,8 +276,8 @@ STRINGZILLA_INLINE sz_utf8_rune_window_v128_t sz_utf8_rune_decode_window_v128_( 
 }
 
 /** One nibble-cascade stage with a sub-256 selector:
- *  `result[lane] = table[selector_u8x16[lane]*16 + within_u8x16[lane]]` when
- *  `selector_u8x16 < tile_count`, else 0. Each 16-byte row (one selector value) fits
+ *  <tt>result[lane] = table[selector_u8x16[lane]*16 + within_u8x16[lane]]</tt> when
+ *  <tt>selector_u8x16 < tile_count</tt>, else 0. Each 16-byte row (one selector value) fits
  *  @c wasm_i8x16_swizzle's 16-B reach, so each row is loaded and shuffled by
  *  @p within_u8x16, then blended in where @p selector_u8x16 picks it; the final
  *  @c wasm_u8x16_lt clamp reproduces the all-zero result for selectors past the table.
@@ -306,10 +306,10 @@ STRINGZILLA_INLINE v128_t sz_utf8_rune_lut256_v128_(sz_u8_t const *group_base, v
     return wasm_v128_load(out_lanes);
 }
 
-/** Class byte per lane from a page-compressed flat table: `page_lut[high]` selects one 256-byte
- *  page, then `flat[page * 256 + low]` is read per lane. The page LUT resolves via the in-register
+/** Class byte per lane from a page-compressed flat table: <tt>page_lut[high]</tt> selects one 256-byte
+ *  page, then <tt>flat[page * 256 + low]</tt> is read per lane. The page LUT resolves via the in-register
  *  scalar @c lut256 walk; the leaf read is a bounded scalar L1 walk over fused 16-bit indices
- *  `(page << 8) | low`. Lanes whose page index reaches @p page_count return zero. The v128 twin of
+ *  <tt>(page << 8) | low</tt>. Lanes whose page index reaches @p page_count return zero. The v128 twin of
  *  @ref sz_utf8_rune_flat_lookup_neon_. */
 STRINGZILLA_INLINE v128_t sz_utf8_rune_flat_lookup_v128_( //
     sz_u8_t const *page_lut, sz_u8_t const *flat, int page_count, v128_t high_bytes_u8x16, v128_t low_bytes_u8x16) {
@@ -328,7 +328,7 @@ STRINGZILLA_INLINE v128_t sz_utf8_rune_flat_lookup_v128_( //
  *  Emits one segment length per set boundary lane (ascending), honoring @p capacity and the
  *  carried previous-boundary via @p previous_io; bit-exact with the Ice Lake leaf.
  *  Consumption is inherently scalar (one length per set lane), so each set lane is isolated
- *  with the `63 - clz(mask & -mask)` first-set idiom and cleared with `mask & (mask - 1)` —
+ *  with the <tt>63 - clz(mask & -mask)</tt> first-set idiom and cleared with <tt>mask & (mask - 1)</tt> —
  *  the cost scales with the boundary count, and no @c ctz or @c popcount builtin is used. */
 STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_forward_v128_( //
     sz_u64_t boundary, sz_size_t base, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
@@ -353,7 +353,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_forward_v128_( //
 
 /** Gather 16 bytes from the 64-byte window held in @p regs_u8x16 at the per-lane byte offsets
  *  @p index (in [0,64)), gather-free. @c wasm_i8x16_swizzle reaches only one 16-byte register
- *  (index ≥ 16 → 0), so each quarter is swizzled by `index - 16*q` and the four disjoint results
+ *  (index ≥ 16 → 0), so each quarter is swizzled by <tt>index - 16*q</tt> and the four disjoint results
  *  OR-ed: for any lane exactly one quarter holds the offset in range, the others contribute 0.
  *  Offsets past the window (≥ 64) read as 0 (discarded downstream). The v128 twin of
  *  @ref sz_utf8_gather16_powervsx_. */
@@ -369,8 +369,8 @@ STRINGZILLA_INLINE v128_t sz_utf8_rune_gather16_v128_(v128_t const *regs_u8x16, 
 }
 
 /** Zero-extend the four byte lanes [4*quarter, 4*quarter+4) of @p bytes_u8x16 into a @c u32x4. The
- *  base selector `{0,-,-,-,1,-,-,-,2,-,-,-,3,-,-,-}` (unused lanes 0x10 → swizzle 0) is biased by
- *  `4*quarter`; the biased filler lanes stay ≥ 16 so they still swizzle to 0, so one
+ *  base selector <tt>{0,-,-,-,1,-,-,-,2,-,-,-,3,-,-,-}</tt> (unused lanes 0x10 → swizzle 0) is biased by
+ *  <tt>4*quarter</tt>; the biased filler lanes stay ≥ 16 so they still swizzle to 0, so one
  *  @c wasm_i8x16_swizzle widens the quarter. */
 STRINGZILLA_INLINE v128_t sz_utf8_rune_widen4_v128_(v128_t bytes_u8x16, int quarter, v128_t base_selector_u8x16) {
     v128_t const selector_u8x16 = wasm_i8x16_add(base_selector_u8x16, wasm_i8x16_splat((sz_i8_t)(quarter * 4)));
@@ -382,7 +382,7 @@ STRINGZILLA_INLINE v128_t sz_utf8_rune_widen4_v128_(v128_t bytes_u8x16, int quar
  *      four 16-byte @p regs_u8x16) into sequential UTF-32 runes, the v128 sibling of
  *      @ref sz_utf8_rune_drain_powervsx_.
  *
- *  The start byte-offsets are left-packed by one first-set (`63 - clz(mask & -mask)`) bit walk —
+ *  The start byte-offsets are left-packed by one first-set (<tt>63 - clz(mask & -mask)</tt>) bit walk —
  *  no @c ctz or @c popcount builtin — then a 16-lane-block loop gathers the lead + up to three
  *  trailing bytes with @ref sz_utf8_rune_gather16_v128_ and width-blends each codepoint in
  *  @c u32x4 lanes; the wider 3rd/4th bytes are gathered and blended conditionally, in sibling
@@ -504,7 +504,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_v128_( //
  *  blend U+FFFD path, the v128 sibling of @ref sz_utf8_decode_once_powervsx_. The decode is total:
  *  clean and dirty bytes are handled in-vector, one U+FFFD per maximal ill-formed subpart (Unicode
  *  17.0 §3.9 / W3C), bit-exact with @ref sz_utf8_decode_serial. The step declines, leaving
- *  `*runes_count == 0` and the cursor unchanged, only when the first decodable lead's declared
+ *  <tt>*runes_count == 0</tt> and the cursor unchanged, only when the first decodable lead's declared
  *  sequence crosses the window edge (a boundary truncation), which the public entry finalizes
  *  without a serial re-decode. */
 STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_once_v128_( //

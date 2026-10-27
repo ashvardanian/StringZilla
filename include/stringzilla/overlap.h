@@ -65,12 +65,13 @@ extern "C" {
  *      @ref sz_overlap_engine_free needs no allocator of its own.
  *  @param[in] stream Null on the CPU. On a GPU, the stream to queue on, also naming the device:
  *      a @c cudaStream_t, a @c hipStream_t, or an @c id<MTLCommandQueue>; null for the default.
- *  @return @c sz_success_k; @c sz_missing_kernel_k when no capability of the mask has an init;
- *      @c sz_unexpected_dimensions_k for zero widths; @c sz_bad_alloc_k when the forest's block
- *      cannot be taken; or on a device @c sz_device_memory_mismatch_k for memory or a @p stream it
- *      cannot use, @c sz_missing_gpu_k when it doesn't answer, or @c sz_device_code_mismatch_k when
- *      a kernel fails to build.
+ *
  *  @note May join @p stream; no scoring verb ever does.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability of the mask has an init.
+ *  - @c sz_unexpected_dimensions_k Zero widths.
+ *  - @c sz_device_memory_mismatch_k On a device, memory or a @p stream it cannot use.
  */
 STRINGZILLA_API sz_status_t sz_overlap_engine_init(sz_overlap_engine_t *engine, sz_strings_view_t const *queries,
                                                    sz_size_t const *window_widths, sz_size_t window_widths_count,
@@ -109,11 +110,7 @@ STRINGZILLA_API void sz_overlap_engine_free(sz_overlap_engine_t *engine, sz_stre
  *      engine was prepared at.
  *  @param[in] stream Null on the CPU. On a GPU, the stream to queue on, which also names the device
  *      the round runs on; null for the default.
- *  @return @c sz_success_k, on a device once enqueued; @c sz_unexpected_dimensions_k when either
- *      stride is under the axis it spans; @c sz_bad_alloc_k when a host round's block cannot be
- *      grown; @c sz_missing_kernel_k for an empty engine; or on a device
- *      @c sz_device_memory_mismatch_k for an engine, an output, an accessor, a tape or a stream
- *      the device of @p stream cannot use, and @c sz_device_code_mismatch_k for a refused launch.
+ *
  *  @note Asymmetric: a candidate's window occurrences count against a query's distinct windows, so
  *      swapping sides changes the count when either repeats a window.
  *  @note Never joins, so the caller joins @p stream before reading @p matches.
@@ -123,12 +120,33 @@ STRINGZILLA_API void sz_overlap_engine_free(sz_overlap_engine_t *engine, sz_stre
  *  @verbatim
  *  matches[q * matches_query_stride + c * matches_candidate_stride + w]
  *  @endverbatim
+ *
+ *  @par Statuses:
+ *  - @c sz_unexpected_dimensions_k Either stride is under the axis it spans.
+ *  - @c sz_missing_kernel_k An empty engine.
+ *  - @c sz_device_memory_mismatch_k On a device, an engine, an output, an accessor, a tape or a
+ *    stream the device of @p stream cannot use.
  */
 STRINGZILLA_API sz_status_t sz_overlap_scores(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
                                               sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
                                               sz_size_t matches_candidate_stride, sz_stream_t stream);
 
-/** @copydoc sz_overlap_engine_init */
+/**
+ *  @brief Prepares @p queries into one block from @p allocator, for the serial kernels.
+ *  @param[out] engine Left untouched unless the call succeeds.
+ *  @param[in] queries The texts whose windows are sorted into the forest; read on the host.
+ *  @param[in] window_widths Window widths in bytes; a width past a text scores zero for its pairs.
+ *  @param[in] window_widths_count Number of widths, which is the last axis of every output.
+ *  @param[in] candidates_budget Candidates one round may carry; the serial rounds keep no state per
+ *      candidate and ignore it.
+ *  @param[in] allocator Source of the forest's block, or @c STRINGZILLA_NULL for
+ *      @c sz_allocator_init_unified_serial; stored by value, so @ref sz_overlap_engine_free needs
+ *      no allocator of its own.
+ *  @param[in] stream Null on the CPU.
+ *
+ *  @par Statuses:
+ *  - @c sz_unexpected_dimensions_k Zero widths.
+ */
 STRINGZILLA_API sz_status_t sz_overlap_engine_init_serial(sz_overlap_engine_t *engine, sz_strings_view_t const *queries,
                                                           sz_size_t const *window_widths, sz_size_t window_widths_count,
                                                           sz_size_t candidates_budget, sz_allocator_t *allocator,
@@ -230,9 +248,14 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_metal(sz_overlap_engine_t *engine,
 
 /**
  *  @brief Finds the overlap kernel of @p kind, from the best of @p capabilities.
+ *  @param[in] kind The verb whose kernel to find.
+ *  @param[in] capabilities The mask to pick the best capability from.
  *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
  *  @param[out] capability The capability the kernel belongs to, or zero.
- *  @return @c sz_success_k, @c sz_missing_kernel_k, or @c sz_missing_library_k when header-only.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k
+ *  - @c sz_missing_library_k Header-only.
  */
 STRINGZILLA_API sz_status_t sz_overlap_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
                                                    sz_kernel_punned_t *kernel, sz_capability_t *capability);

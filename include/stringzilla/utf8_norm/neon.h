@@ -7,12 +7,12 @@
  *  This backend overrides exactly one point of the shared engine: the scan primitive
  *  @c sz_utf8_norm_classify_neon_, which locates the first non-inert byte for a form. The two
  *  public entry points, @c sz_utf8_norm_neon and @c sz_utf8_find_denormalized_neon, reuse the
- *  force-inlined engines from `serial.h`, passing this scanner as the constant function address
+ *  force-inlined engines from <tt>serial.h</tt>, passing this scanner as the constant function address
  *  that devirtualizes the call.
  *
- *  The scanner is a clean port of the proven `utf8_tokens/sz_utf8_find_denormalized_neon` hot loop,
+ *  The scanner is a clean port of the proven <tt>utf8_tokens/sz_utf8_find_denormalized_neon</tt> hot loop,
  *  a @c vqtbl4q_u8 lead-classify behind a 64-byte ASCII/inert gate with a cold per-codepoint exact
- *  verify, reading the unified `utf8_norm/tables.h` record set in place of the legacy
+ *  verify, reading the unified <tt>utf8_norm/tables.h</tt> record set in place of the legacy
  *  denormalization tables.
  *
  *  @sa include/stringzilla/utf8_norm.h

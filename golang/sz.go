@@ -18,6 +18,7 @@
 //
 // File: golang/sz.go
 // Author: Ash Vardanian
+// Date: September 24, 2026
 package sz
 
 // #cgo CFLAGS: -O3 -I${SRCDIR}/../include

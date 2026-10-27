@@ -12,7 +12,7 @@
  *  @sa include/stringzilla/utf8_uncased_fold/metal.metal, the folding steps embedded ahead of it
  *
  *  A haystack owns one slot per byte and one more ahead of them: a haystack with first slot @c V
- *  marks a match starting at byte @c p in slot `V + p`, which is also the slot of byte `p - 1`. The
+ *  marks a match starting at byte @c p in slot <tt>V + p</tt>, which is also the slot of byte <tt>p - 1</tt>. The
  *  corpus spans the tape's bytes plus its count in slots, chunks cut that span evenly, so one long
  *  haystack and a million short ones fill the device alike, and a slot finds its haystack by binary
  *  search over the tape offsets. A round covers one segment of slots at a time, which bounds the
@@ -23,7 +23,7 @@
  *  collapse within a few bytes; the end walks that reach the edge; and the leftmost-first chain,
  *  whose first candidate in every chunk is found from the chunk before it. Position sets and
  *  lookaround passes hand sets across chunk edges as affine maps of the undecided elements, which
- *  compose by pointer doubling too, as `regex/simt.cuh` describes. The PikeVM walks every candidate
+ *  compose by pointer doubling too, as <tt>regex/simt.cuh</tt> describes. The PikeVM walks every candidate
  *  without links instead. A chunk whose priming or flow stays wide past a few kilobytes is settled
  *  by one walk from the nearest exact state upstream, never past its segment.
  *
@@ -496,7 +496,7 @@ inline uint sz_regex_pattern_metal_(thread sz_regex_automata_metal_t const &auto
     return automata.forward_patterns[(state - arguments.forward_accepts_begin) / arguments.stride];
 }
 
-/** Whether @p unit, a byte or the end of input, is an ASCII word byte, which `\b` and `\B` test. */
+/** Whether @p unit, a byte or the end of input, is an ASCII word byte, which <tt>\\b</tt> and <tt>\\B</tt> test. */
 inline bool sz_regex_is_word_metal_(uint unit) {
     return (unit >= '0' && unit <= '9') || (unit >= 'A' && unit <= 'Z') || (unit >= 'a' && unit <= 'z') || unit == '_';
 }
@@ -720,7 +720,7 @@ inline ulong sz_regex_boundary_metal_(device uchar const *text, ulong length, ul
 }
 
 /** Walks @p state right to left over the folds of the units of @p text ending in
- *  `(stop, at]`, the text's first boundary in @p first; only the last fold of a unit crosses
+ *  <tt>(stop, at]</tt>, the text's first boundary in @p first; only the last fold of a unit crosses
  *  its boundary's lookarounds. */
 inline uint sz_regex_walk_folded_back_metal_(thread sz_regex_table_metal_t const &table, uint state,
                                              device uchar const *text, ulong first, ulong at, ulong stop) {
@@ -906,8 +906,8 @@ inline void sz_regex_positions_step_metal_(thread sz_regex_automata_metal_t cons
 
 /**
  *  @brief Steps the position set at @p state over the units of @p haystack that end in
- *      `(stop, from]`, right to left, as @c sz_regex_positions_walk_simt_ does, marking in @p bits
- *      every start it finds in slots `[low, high)` when @p marking.
+ *      <tt>(stop, from]</tt>, right to left, as @c sz_regex_positions_walk_simt_ does, marking in @p bits
+ *      every start it finds in slots <tt>[low, high)</tt> when @p marking.
  *  @return The set holding the result, @p state or @p next.
  */
 inline device ulong *sz_regex_positions_walk_metal_(
@@ -965,7 +965,7 @@ struct sz_regex_pike_metal_t {
 };
 
 /** The PikeVM of the share of thread @p position among the round's walks, laid out for its capture
- *  slots, as `regex/metal.h` sizes it, reading the round's lookaround table for the haystack whose
+ *  slots, as <tt>regex/metal.h</tt> sizes it, reading the round's lookaround table for the haystack whose
  *  first slot is @c first. */
 inline sz_regex_pike_metal_t sz_regex_pike_carve_metal_(thread sz_regex_round_metal_t const &round,
                                                         constant sz_regex_arguments_metal_t &arguments,
@@ -1168,7 +1168,7 @@ inline bool sz_regex_match_at_metal_(thread sz_regex_table_metal_t const &table,
 }
 
 /** Fills the matched slots of @p pike with the groups of the match of @p pattern over
- *  `[start, end)`, as @c sz_regex_groups_simt_ does. */
+ *  <tt>[start, end)</tt>, as @c sz_regex_groups_simt_ does. */
 inline void sz_regex_groups_metal_(thread sz_regex_table_metal_t const &table,
                                    thread sz_regex_automata_metal_t const &automata,
                                    constant sz_regex_arguments_metal_t &arguments, thread sz_regex_pike_metal_t &pike,
@@ -1353,7 +1353,7 @@ inline uint sz_regex_looks_step_metal_(thread sz_regex_automata_metal_t const &a
     return matched;
 }
 
-/** Walks one level's lookbehind pass over the unit boundaries of @p haystack in `[from, to)`, and
+/** Walks one level's lookbehind pass over the unit boundaries of @p haystack in <tt>[from, to)</tt>, and
  *  its end when @p to passes it, as @c sz_regex_behind_walk_simt_ does. @return The set arriving at
  *  @p to, @p state or @p next. */
 inline device ulong *sz_regex_behind_walk_metal_(thread sz_regex_automata_metal_t const &automata,
@@ -1398,7 +1398,7 @@ inline device ulong *sz_regex_behind_walk_metal_(thread sz_regex_automata_metal_
     return state;
 }
 
-/** Walks one level's lookahead pass over the unit boundaries of @p haystack in `[to, from)`,
+/** Walks one level's lookahead pass over the unit boundaries of @p haystack in <tt>[to, from)</tt>,
  *  right to left, as @c sz_regex_ahead_walk_simt_ does. @return The set past @p to, @p state
  *  or @p next. */
 inline device ulong *sz_regex_ahead_walk_metal_(thread sz_regex_automata_metal_t const &automata,
@@ -1461,7 +1461,7 @@ inline ulong sz_regex_flow_align_metal_(constant sz_regex_arguments_metal_t &arg
                                                : position;
 }
 
-/** Where @p haystack 's piece of the chunk of slots `[low, high)` hands sets across, as
+/** Where @p haystack 's piece of the chunk of slots <tt>[low, high)</tt> hands sets across, as
  *  @c sz_regex_flow_piece_simt_ finds it. */
 inline void sz_regex_flow_piece_metal_(constant sz_regex_arguments_metal_t &arguments,
                                        thread sz_regex_haystack_metal_t const &haystack, ulong low, ulong high,

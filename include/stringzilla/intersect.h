@@ -41,8 +41,6 @@ extern "C" {
  *  @param[out] second_positions Offset positions of the matching strings from @p second_strings.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k on success, @c sz_bad_alloc_k if memory allocation failed, or
- *      @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *  @pre The @p first_positions array must fit as many items as the smaller collection holds.
  *  @pre The @p second_positions array must fit as many items as the smaller collection holds.
  *
@@ -70,6 +68,9 @@ extern "C" {
  *  @see SQL joins: https://en.wikipedia.org/wiki/Join_(SQL)
  *
  *  @sa sz_intersect_serial, sz_intersect_westmere, sz_intersect_icelake, sz_intersect_neonaes
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_intersect_best(                                       //
     sz_strings_view_t const *first_strings, sz_strings_view_t const *second_strings, //
@@ -274,9 +275,14 @@ STRINGZILLA_API sz_status_t sz_intersect_neonaes(                               
 
 /**
  *  @brief Finds the intersection kernel of @p kind, from the best of @p capabilities.
+ *  @param[in] kind The verb whose kernel to find.
+ *  @param[in] capabilities The mask to pick the best capability from.
  *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
  *  @param[out] capability The capability the kernel belongs to, or zero.
- *  @return @c sz_success_k, @c sz_missing_kernel_k, or @c sz_missing_library_k when header-only.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k
+ *  - @c sz_missing_library_k Header-only.
  */
 STRINGZILLA_API sz_status_t sz_intersect_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
                                                      sz_kernel_punned_t *kernel, sz_capability_t *capability);

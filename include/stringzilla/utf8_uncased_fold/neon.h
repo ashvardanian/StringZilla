@@ -188,7 +188,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_caseless_chunk_neon_(uint8x16x
  *  expand, shrink, or fold across blocks), which truncate the superchunk and route one rune to
  *  the serial fallback.
  *
- *  After-lead positions come from `vextq_u8(previous_mask, mask, 15)` - the previous register's
+ *  After-lead positions come from <tt>vextq_u8(previous_mask, mask, 15)</tt> - the previous register's
  *  lane 15 slides into lane 0, so sequences straddling a register boundary still see their
  *  lead's classification. A zero register seeds lane 0 of the first register, which is correct
  *  because superchunks always start on a character boundary.
@@ -637,7 +637,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_armenian_chunk_neon_(uint8x16x
  *  Lowercase Mkhedruli and reserved Georgian (E1 82 80-9F, E1 83 86/88-8C/8E-BF) copy unchanged.
  *
  *  The lead/second rewrites must fire only for the uppercase subset, which is decided by the third
- *  byte - so the lead position reads two bytes forward through `vextq_u8(.., .., 2)` and the
+ *  byte - so the lead position reads two bytes forward through <tt>vextq_u8(.., .., 2)</tt> and the
  *  uppercase flag is carried forward one lane to the second-byte rewrite and a second lane to the
  *  third-byte offset. The two third-byte offsets land on disjoint sequences, so −0x20 (added as
  *  +0xE0 wrap) and +0x20 merge into one add. Every fold here is length-preserving, so full-register

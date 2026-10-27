@@ -39,7 +39,7 @@ extern "C" {
 #pragma region Core Structure
 
 /** The number of bytes a stack-allocated string can hold, including the @c STRINGZILLA_NULL
- *  terminator. It can't be changed from outside, yet an `#error` is avoided, as it may
+ *  terminator. It can't be changed from outside, yet an <tt>\#error</tt> is avoided, as it may
  *  already be set. */
 #undef STRINGZILLA_STRING_INTERNAL_SPACE
 #define STRINGZILLA_STRING_INTERNAL_SPACE (sizeof(sz_size_t) * 3 - 1) // 3 pointers minus one byte for an 8-bit length
@@ -54,7 +54,7 @@ extern "C" {
  *  @section small_string_changing_length Changing Length
  *
  *  One nice thing about this design, is that you can, in many cases, change the length of the
- *  string without any branches, invoking a `+=` or `-=` on the 64-bit @c length field. If the
+ *  string without any branches, invoking a <tt>+=</tt> or <tt>-=</tt> on the 64-bit @c length field. If the
  *  string is on heap, the solution is obvious. If it's on stack, inplace decrement wouldn't affect
  *  the top bytes of the string, only changing the last byte containing the length.
  */
@@ -176,7 +176,7 @@ STRINGZILLA_INLINE sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t
  *  This is beneficial, if several insertions are expected, and we want to minimize allocations.
  *  Reserving less than the current capacity is a harmless no-op, like @c std::string::reserve.
  *
- *  @param[inout] string String to grow.
+ *  @param[in,out] string String to grow.
  *  @param[in] new_capacity The number of characters to reserve space for, including existing ones.
  *  @param[in] allocator Memory allocator to use for the allocation.
  *  @return @c STRINGZILLA_NULL if the operation failed, pointer to the new start of
@@ -191,7 +191,7 @@ STRINGZILLA_INLINE sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new
  *  Would often be used in conjunction with one or more @c memcpy calls to populate the
  *  allocated region. Similar to @c sz_string_reserve, but changes the length of the @p string.
  *
- *  @param[inout] string String to grow.
+ *  @param[in,out] string String to grow.
  *  @param[in] offset Offset of the first byte to reserve space for, capped at the length.
  *  @param[in] added_length The number of new characters to reserve space for.
  *  @param[in] allocator Memory allocator to use for the allocation.
@@ -205,7 +205,7 @@ STRINGZILLA_INLINE sz_ptr_t sz_string_expand( //
  *  @brief Removes a range from a string. Changes the length, but not the capacity. Performs no
  *      allocations or deallocations and can't fail.
  *
- *  @param[inout] string String to clean.
+ *  @param[in,out] string String to clean.
  *  @param[in] offset Offset of the first byte to remove; at or past the length, nothing is removed.
  *  @param[in] length Number of bytes to remove. Out-of-bound ranges will be capped.
  *  @return Number of bytes removed, zero if @p offset ≥ the string length.
@@ -216,7 +216,7 @@ STRINGZILLA_INLINE sz_size_t sz_string_erase(sz_string_t *string, sz_size_t offs
  *  @brief Shrinks the string to fit the current length, if it's allocated on the heap. It's the
  *      reverse operation of @ref sz_string_reserve.
  *
- *  @param[inout] string String to shrink.
+ *  @param[in,out] string String to shrink.
  *  @param[in] allocator Memory allocator to use for the allocation.
  *  @return Whether the operation was successful. The only failures can come from the allocator, and
  *      leave the string unchanged.

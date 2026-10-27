@@ -143,7 +143,7 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x4_step_haswell_(sz_levenshtein_u64x4_
  *  @brief Advances four candidates one symbol through exactly @p words verticals; the score moves
  *      on the last word. A candidate past its text keeps stepping whatever class the transpose
  *      emits; its score is read where its text ends.
- *  @param[in] words Exactly `sz_levenshtein_query_words(query->length)`; a constant keeps the
+ *  @param[in] words Exactly <tt>sz_levenshtein_query_words(query->length)</tt>; a constant keeps the
  *      verticals in registers.
  *  @param[in] classes_vec The four candidates' classes at this position, one gather index each.
  */

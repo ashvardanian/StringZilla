@@ -15,7 +15,7 @@
  *
  *  The functions in this file can be used for both UTF-8 and other inputs. On platforms without
  *  masked loads they use interleaved prefix and suffix vector-loads to avoid scalar code, similar
- *  to the kernels in `memory.h`.
+ *  to the kernels in <tt>memory.h</tt>.
  */
 #ifndef STRINGZILLA_COMPARE_H_
 #define STRINGZILLA_COMPARE_H_
@@ -30,7 +30,7 @@ extern "C" {
 #pragma region Core API
 
 /**
- *  @brief Checks if two strings are equal, like `memcmp(a, b, length) == 0`, or `a == b` in STL.
+ *  @brief Checks if two strings are equal, like <tt>memcmp(a, b, length) == 0</tt>, or <tt>a == b</tt> in STL.
  *
  *  @param[in] a First string to compare.
  *  @param[in] b Second string to compare.
@@ -38,7 +38,6 @@ extern "C" {
  *  @param[out] equal @c sz_true_k if the strings are equal, @c sz_false_k if they differ.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *  @see memcmp: https://en.cppreference.com/w/c/string/byte/memcmp
  *
  *  Telling an equal pair from a different one:
@@ -58,6 +57,9 @@ extern "C" {
  *  @sa sz_equal_serial, sz_equal_westmere, sz_equal_haswell, sz_equal_skylake,
  *      sz_equal_neon, sz_equal_sve, sz_equal_v128, sz_equal_v128relaxed, sz_equal_rvv,
  *      sz_equal_loongsonasx, sz_equal_powervsx
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_equal_best(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal,
                                           sz_capability_t capabilities, sz_stream_t stream);
@@ -73,7 +75,6 @@ STRINGZILLA_API sz_status_t sz_equal_best(sz_cptr_t a, sz_cptr_t b, sz_size_t le
  *      @c sz_equal_k if the strings are identical.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *  @see memcmp: https://en.cppreference.com/w/c/string/byte/memcmp
  *
  *  Mostly used in sorting and associative containers, and can be used for @b UTF-8 inputs. This
@@ -99,6 +100,9 @@ STRINGZILLA_API sz_status_t sz_equal_best(sz_cptr_t a, sz_cptr_t b, sz_size_t le
  *  @sa sz_order_serial, sz_order_westmere, sz_order_haswell, sz_order_skylake,
  *      sz_order_neon, sz_order_sve, sz_order_v128, sz_order_v128relaxed, sz_order_rvv,
  *      sz_order_loongsonasx, sz_order_powervsx
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_order_best(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
                                           sz_ordering_t *ordering, sz_capability_t capabilities, sz_stream_t stream);
@@ -223,9 +227,14 @@ STRINGZILLA_API sz_status_t sz_order_powervsx(sz_cptr_t a, sz_size_t a_length, s
 
 /**
  *  @brief Finds the comparison kernel of @p kind, from the best of @p capabilities.
+ *  @param[in] kind The verb whose kernel to find.
+ *  @param[in] capabilities The mask to pick the best capability from.
  *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
  *  @param[out] capability The capability the kernel belongs to, or zero.
- *  @return @c sz_success_k, @c sz_missing_kernel_k, or @c sz_missing_library_k when header-only.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k
+ *  - @c sz_missing_library_k Header-only.
  */
 STRINGZILLA_API sz_status_t sz_compare_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
                                                    sz_kernel_punned_t *kernel, sz_capability_t *capability);

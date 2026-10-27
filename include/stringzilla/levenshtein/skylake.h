@@ -26,12 +26,12 @@ extern "C" {
 #if STRINGZILLA_ARCH_X8664_SKYLAKE_
 #pragma region Skylake Implementation
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
-#pragma clang attribute push(__attribute__((target("avx,avx512f,bmi,popcnt,evex512"))), apply_to = function)
+#pragma clang attribute push(__attribute__((target("avx,avx512f,bmi,bmi2,popcnt,evex512"))), apply_to = function)
 #elif defined(__clang__)
-#pragma clang attribute push(__attribute__((target("avx,avx512f,bmi,popcnt"))), apply_to = function)
+#pragma clang attribute push(__attribute__((target("avx,avx512f,bmi,bmi2,popcnt"))), apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("avx", "avx512f", "bmi", "popcnt")
+#pragma GCC target("avx", "avx512f", "bmi", "bmi2", "popcnt")
 #endif
 
 /** Eight candidates' running scores, one per 64-bit ZMM position. */

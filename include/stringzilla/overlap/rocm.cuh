@@ -3,7 +3,7 @@
  *  @author Ash Vardanian
  *  @date October 3, 2026
  *  @brief ROCm host side of window overlap: the forest laid out on the host, the launch geometry
- *      resolved once per engine, and the @c _rocm exports, over the walk of `overlap/simt.cuh`.
+ *      resolved once per engine, and the @c _rocm exports, over the walk of <tt>overlap/simt.cuh</tt>.
  *
  *  The trees are laid out by the host, because a sort is neither a scan nor a map and a
  *  hand-written device radix sort would replace a host sort of a few tens of thousands of keys.

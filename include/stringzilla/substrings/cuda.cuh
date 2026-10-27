@@ -4,7 +4,7 @@
  *  @date October 3, 2026
  *  @brief CUDA host side of multi-pattern search: the arena a round runs out of, the launches that
  *      walk, cover, rewrite and score, and the @c _cuda exports, over the kernels of
- *      `substrings/simt.cuh`.
+ *      <tt>substrings/simt.cuh</tt>.
  *
  *  No compute verb joins the stream. Every size a launch needs is either fixed when the engine is
  *  built - the chunk and match budgets - or derived on the device from one the host never sees, and
@@ -497,7 +497,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_arena_clear_cuda_(sz_substrings_eng
  *  Every size this needs is either fixed at construction or derived on the device from one the host
  *  never sees, so the whole pass enqueues without a single join: the corpus total feeds a chunk
  *  width the device computes, the chunk count is bounded by the engine's own budget, and the
- *  emitted count reaches the later launches through `engine->report`, not through a copy back.
+ *  emitted count reaches the later launches through @c engine->report, not through a copy back.
  *
  *  @param[in] wanted Whether the caller reads the matches, since an overlapping count answers from
  *      the boundaries its sizing walk already scanned and never touches the match arena at all,

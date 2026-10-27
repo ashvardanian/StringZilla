@@ -8,12 +8,12 @@
  *  codepoints resolves to per-codepoint Sentence_Break class bytes with no per-lane scalar loop and
  *  no serial deferral.
  *
- *  Each 64-byte window lives as four @c uint8x16_t quarters, `window[0]` holding lanes [0,16)
- *  through `window[3]` holding lanes [48,64), instead of the two Haswell halves; every per-lane
+ *  Each 64-byte window lives as four @c uint8x16_t quarters, <tt>window[0]</tt> holding lanes [0,16)
+ *  through <tt>window[3]</tt> holding lanes [48,64), instead of the two Haswell halves; every per-lane
  *  class compare is @c vceqq_u8 per quarter, the four boolean quarters OR-collapsed to a
  *  @c sz_u64_t via @c mask_combine_neon_. The per-lane high and low codepoint byte pair reads the
- *  shared page-compressed flat table via @ref sz_utf8_rune_flat_lookup_neon_ over the whole BMP,
- *  and a 5-nibble @c vqtbl astral cascade for 4-byte leads. Both emit the Sentence_Break class byte
+ *  shared page-compressed flat table via @c sz_utf8_rune_flat_lookup_neon_ over the whole BMP, and
+ *  a 5-nibble @c vqtbl astral cascade for 4-byte leads. Both emit the Sentence_Break class byte
  *  directly, bit-identical with @c sz_rune_sentence_break_property over the entire code space.
  */
 #ifndef STRINGZILLA_UTF8_SENTENCES_NEON_H_
@@ -94,12 +94,12 @@ STRINGZILLA_INLINE uint8x16_t sz_sentence_break_byte_mask_from_bits_neon_(sz_u64
  *      from edge-masked forward neighbours: the NEON twin of
  *      @ref sz_utf8_sentence_break_bmp_highlow_haswell_.
  *
- *  The shared rune-window decode built `window.{high,low}` from its own mod-64-wrapping
+ *  The shared rune-window decode built <tt>window.{high,low}</tt> from its own mod-64-wrapping
  *  neighbours, so a 2- or 3-byte lead straddling the loaded edge would read a wrapped byte as its
  *  missing continuation. That is the truncated trailing lead at end-of-input, where
- *  @c complete_limit does not trim because of `!more_text`. Recomputing from the driver's
+ *  @c complete_limit does not trim because of <tt>!more_text</tt>. Recomputing from the driver's
  *  neighbours masked by @c keep makes those missing continuations read as zero, exactly like the
- *  serial blind decode, where `text[start+k]` past the input reads 0. Lanes that are neither a 2-
+ *  serial blind decode, where <tt>text[start+k]</tt> past the input reads 0. Lanes that are neither a 2-
  *  nor a 3-byte lead keep @p raw_u8x16 as the low byte and zero as the high byte; the classifier
  *  re-seats raw and 4-byte lanes anyway.
  */
@@ -131,7 +131,7 @@ STRINGZILLA_INLINE void sz_utf8_sentence_break_bmp_highlow_neon_( //
 }
 
 /** Sentence_Break class byte for sixteen BMP codepoints, with per-lane high = cp >> 8 and low =
- *  cp & 0xFF, from the flat page-compressed table via @ref sz_utf8_rune_flat_lookup_neon_, the
+ *  cp & 0xFF, from the flat page-compressed table via @c sz_utf8_rune_flat_lookup_neon_, the
  *  NEON twin of @ref sz_utf8_sentence_break_bmp_class_haswell_. Bit-exact with
  *  @c sz_rune_sentence_break_property over the whole BMP. Operates on one quarter; the caller
  *  iterates the four quarters. */
@@ -141,10 +141,10 @@ STRINGZILLA_INLINE uint8x16_t sz_utf8_sentence_break_bmp_class_neon_(uint8x16_t 
                                           (int)sz_utf8_sentence_break_flat_pages_k, high_bytes_u8x16, low_bytes_u8x16);
 }
 
-/** Sentence_Break class byte for sixteen astral codepoints over the 20-bit `offset = cp - 0x10000`
+/** Sentence_Break class byte for sixteen astral codepoints over the 20-bit <tt>offset = cp - 0x10000</tt>
  *  with a 5-nibble cascade, the NEON twin of @ref sz_utf8_sentence_break_astral_class_haswell_.
- *  Per-lane bytes: @p plane holds `(offset >> 16) & 0xFF`, of which only the low nibble matters,
- *  @p high holds `(offset >> 8) & 0xFF`, and @p low holds `offset & 0xFF`. Operates on one quarter
+ *  Per-lane bytes: @p plane holds <tt>(offset >> 16) & 0xFF</tt>, of which only the low nibble matters,
+ *  @p high holds <tt>(offset >> 8) & 0xFF</tt>, and @p low holds <tt>offset & 0xFF</tt>. Operates on one quarter
  *  and is bit-exact with @c sz_rune_sentence_break_property over all of the astral planes. */
 STRINGZILLA_INLINE uint8x16_t sz_utf8_sentence_break_astral_class_neon_(uint8x16_t plane_u8x16, uint8x16_t high_u8x16,
                                                                         uint8x16_t low_u8x16) {
@@ -184,7 +184,7 @@ STRINGZILLA_INLINE uint8x16_t sz_utf8_sentence_break_astral_class_neon_(uint8x16
  *      zero-scalar: the NEON twin of @ref sz_utf8_sentence_break_classify_half_haswell_.
  *
  *  The decoded window only carries the 2- and 3-byte high and low reconstruction; this leaf
- *  rebuilds the ASCII codepoint bytes, `low = raw` and `high = 0`, and the 4-byte ones, high and
+ *  rebuilds the ASCII codepoint bytes, <tt>low = raw</tt> and <tt>high = 0</tt>, and the 4-byte ones, high and
  *  low from the four-byte formula, before the cascade, exactly as the Haswell driver reconstructs
  *  them. BMP lanes go through the BMP cascade; 4-byte lanes are routed by reconstructed plane
  *  through the astral cascade. The class on non-codepoint-start lanes is irrelevant, as the dense

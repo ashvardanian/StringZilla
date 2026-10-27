@@ -29,34 +29,34 @@
  *
  *  @section regex_syntax Syntax
  *
- *  Patterns are RE2's: UTF-8 literals, escaped metacharacters, `\n \t \r \f \v \a`, `\xHH` and
- *  `\x{H…}` naming codepoints, `.` for any codepoint but a line feed, bracketed classes with
- *  ranges, negation and ASCII POSIX names, the ASCII Perl classes `\d \D \w \W \s \S`, the anchors
- *  `^ $ \A \z`, the ASCII word boundaries `\b \B`, plain, non-capturing and named groups, `|`,
- *  greedy and lazy `* + ? {n} {n,} {n,m}`, and the flags `(?s)`, `(?m)` and `(?U)`, set for the
- *  rest of a group or scoped as `(?s:…)`. Plain and named groups capture, numbered from one per
+ *  Patterns are RE2's: UTF-8 literals, escaped metacharacters, <tt>\\n \\t \\r \\f \\v \\a</tt>, <tt>\\xHH</tt> and
+ *  <tt>\\x{H…}</tt> naming codepoints, <tt>.</tt> for any codepoint but a line feed, bracketed classes with
+ *  ranges, negation and ASCII POSIX names, the ASCII Perl classes <tt>\\d \\D \\w \\W \\s \\S</tt>, the anchors
+ *  <tt>^ $ \\A \\z</tt>, the ASCII word boundaries <tt>\\b \\B</tt>, plain, non-capturing and named groups, <tt>|</tt>,
+ *  greedy and lazy <tt>* + ? {n} {n,} {n,m}</tt>, and the flags <tt>(?s)</tt>, <tt>(?m)</tt> and <tt>(?U)</tt>, set for the
+ *  rest of a group or scoped as <tt>(?s:…)</tt>. Plain and named groups capture, numbered from one per
  *  pattern by their opening parenthesis, as @ref sz_regex_engine_t::patterns_groups records.
  *
- *  Beyond RE2, the lookaheads `(?=…)` and `(?!…)` and the lookbehinds `(?<=…)` and `(?<!…)` test
+ *  Beyond RE2, the lookaheads <tt>(?=…)</tt> and <tt>(?!…)</tt> and the lookbehinds <tt>(?&lt;=…)</tt> and <tt>(?&lt;!…)</tt> test
  *  whether their body matches from or up to a position, whatever its width, and nest freely; a body
  *  holds no capturing group, and a vocabulary holds at most 26 of them. Up to six, nested ones
  *  included, become columns of both DFAs; a vocabulary of more walks slower automata instead.
  *
  *  Refused with @c sz_invalid_syntax_k: backreferences, a capturing group inside a lookaround or
- *  more lookarounds than that, inline `(?i)`, `\p` and `\P`, possessive and atomic forms, `\Z`,
- *  `\G`, `\C`, `\Q`, malformed UTF-8, unbalanced groups, more than a thousand nested counted
- *  repetitions, and the forms RE2 and `regex-syntax` read apart: a brace that opens no counted
- *  repetition, a quantifier on a quantifier, and a class holding a nested class or the `&&`, `--`
- *  and `~~` operators.
+ *  more lookarounds than that, inline <tt>(?i)</tt>, <tt>\\p</tt> and <tt>\\P</tt>, possessive and atomic forms, <tt>\\Z</tt>,
+ *  <tt>\\G</tt>, <tt>\\C</tt>, <tt>\\Q</tt>, malformed UTF-8, unbalanced groups, more than a thousand nested counted
+ *  repetitions, and the forms RE2 and @c regex-syntax read apart: a brace that opens no counted
+ *  repetition, a quantifier on a quantifier, and a class holding a nested class or the <tt>&&</tt>, @c --
+ *  and <tt>~~</tt> operators.
  *
  *  @section regex_uncased Case Folding
  *
  *  An @c sz_uncased_k engine folds its patterns once and every haystack as it walks, with the
- *  full `CaseFolding.txt` folding @c substrings uses, so `ß` matches @c ss and the Kelvin sign
+ *  full <tt>CaseFolding.txt</tt> folding @c substrings uses, so @c ß matches @c ss and the Kelvin sign
  *  matches @c k. A class holds the folds of its members, a member folding to several codepoints
- *  joining as an alternative after it, so `[ß]` matches @c ss; a negated class, `.` among them,
+ *  joining as an alternative after it, so <tt>[ß]</tt> matches @c ss; a negated class, <tt>.</tt> among them,
  *  complements the single-codepoint folds of its members, so it matches one folded codepoint.
- *  Anchors, `\b` and lookarounds are judged on the folded text, lookarounds only between whole
+ *  Anchors, <tt>\\b</tt> and lookarounds are judged on the folded text, lookarounds only between whole
  *  codepoints, as none holds inside the folds of one. A match starting or ending inside the folds
  *  of one codepoint snaps outward to the whole codepoint, the search resuming past it, and an
  *  empty match is never reported there.
@@ -90,11 +90,12 @@ extern "C" {
  *      @ref sz_regex_engine_free needs none and cannot get the wrong one. Scratch grows to the
  *      widest call seen, so a warm engine allocates nothing.
  *  @param[in] stream Null on the CPU, or the device stream the call is enqueued on.
- *  @return @c sz_success_k once the vocabulary compiled; @c sz_invalid_syntax_k for an empty
- *      vocabulary or a pattern outside the syntax above; @c sz_missing_kernel_k when no capability
- *      of the mask has an init; @c sz_bad_alloc_k if memory allocation failed;
- *      @c sz_overflow_risk_k if an NFA exceeds a 32-bit state id; or
- *      @c sz_device_memory_mismatch_k for a @p stream or @p allocator its capability cannot use.
+ *
+ *  @par Statuses:
+ *  - @c sz_invalid_syntax_k An empty vocabulary or a pattern outside the syntax above.
+ *  - @c sz_missing_kernel_k No capability of the mask has an init.
+ *  - @c sz_overflow_risk_k An NFA exceeds a 32-bit state id.
+ *  - @c sz_device_memory_mismatch_k A @p stream or @p allocator its capability cannot use.
  */
 STRINGZILLA_API sz_status_t sz_regex_engine_init(sz_regex_engine_t *engine, sz_strings_view_t const *patterns,
                                                  sz_case_sensitivity_t case_sensitivity, sz_size_t *malformed_index,
@@ -116,9 +117,10 @@ STRINGZILLA_API void sz_regex_engine_free(sz_regex_engine_t *engine, sz_stream_t
  *  @param[out] contained One bit per haystack, eight to a byte, the lowest bit first: set when that
  *      haystack matches, with the bits past the last haystack written as zero.
  *  @param[in] stream Null on the CPU, or the device stream the call is enqueued on.
- *  @return @c sz_success_k once the haystacks were marked; @c sz_missing_kernel_k for an empty
- *      engine; @c sz_bad_alloc_k if the round scratch could not grow; or
- *      @c sz_device_memory_mismatch_k for a @p stream the engine's capability cannot use.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k An empty engine.
+ *  - @c sz_device_memory_mismatch_k A @p stream the engine's capability cannot use.
  */
 STRINGZILLA_API sz_status_t sz_regex_contains(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
                                               sz_u1x8_t *contained, sz_stream_t stream);
@@ -129,14 +131,15 @@ STRINGZILLA_API sz_status_t sz_regex_contains(sz_regex_engine_t *engine, sz_stri
  *  @param[in] engine A compiled vocabulary, whose round scratch grows to the longest haystack.
  *  @param[in] haystacks The texts to search, in any layout; their bytes are read in place.
  *      Malformed UTF-8 is searched as is: no class or literal matches a malformed byte.
- *  @param[out] counts The per-haystack counts, haystack h at `counts[h * stride]`.
+ *  @param[out] counts The per-haystack counts, haystack h at <tt>counts[h * stride]</tt>.
  *  @param[in] counts_stride Entries from one haystack's count to the next, at least one, so a
  *      strided call writes one column of a @b [haystacks, vocabularies] feature matrix.
  *  @param[in] stream Null on the CPU, or the device stream the call is enqueued on.
- *  @return @c sz_success_k once the haystacks were counted; @c sz_unexpected_dimensions_k if
- *      @p counts_stride is zero; @c sz_missing_kernel_k for an empty engine;
- *      @c sz_bad_alloc_k if the round scratch could not grow; or
- *      @c sz_device_memory_mismatch_k for a @p stream the engine's capability cannot use.
+ *
+ *  @par Statuses:
+ *  - @c sz_unexpected_dimensions_k @p counts_stride is zero.
+ *  - @c sz_missing_kernel_k An empty engine.
+ *  - @c sz_device_memory_mismatch_k A @p stream the engine's capability cannot use.
  */
 STRINGZILLA_API sz_status_t sz_regex_counts(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
                                             sz_size_t *counts, sz_size_t counts_stride, sz_stream_t stream);
@@ -156,9 +159,10 @@ STRINGZILLA_API sz_status_t sz_regex_counts(sz_regex_engine_t *engine, sz_string
  *  @param[out] matches_offsets One boundary per haystack into the full list of matches plus one,
  *      the last being the total; true whether or not the matches fit, which sizes the next call.
  *  @param[in] stream Null on the CPU, or the device stream the call is enqueued on.
- *  @return @c sz_success_k once every match was counted and those that fit were written;
- *      @c sz_missing_kernel_k for an empty engine; @c sz_bad_alloc_k if the round scratch could not
- *      grow; or @c sz_device_memory_mismatch_k for a @p stream the engine's capability cannot use.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k An empty engine.
+ *  - @c sz_device_memory_mismatch_k A @p stream the engine's capability cannot use.
  */
 STRINGZILLA_API sz_status_t sz_regex_find(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
                                           sz_match_t *matches, sz_size_t matches_capacity, sz_size_t *matches_offsets,
@@ -168,10 +172,10 @@ STRINGZILLA_API sz_status_t sz_regex_find(sz_regex_engine_t *engine, sz_strings_
  *  @brief Rewrites every haystack, substituting each match with its pattern's replacement,
  *      into one @p target.
  *
- *  A replacement is copied as written, except that `$$` stands for one dollar and `$N`, `${N}` and
- *  `${name}` for the text of that group of the match's pattern, `$0` being the whole match; a group
+ *  A replacement is copied as written, except that <tt>$$</tt> stands for one dollar and <tt>$N</tt>, <tt>${N}</tt> and
+ *  <tt>${name}</tt> for the text of that group of the match's pattern, <tt>$0</tt> being the whole match; a group
  *  that took no part in the match or does not exist is empty, and a dollar starting no reference
- *  stands for itself, so `$1a` is group one followed by @c a. Groups are read only for the matches
+ *  stands for itself, so <tt>$1a</tt> is group one followed by @c a. Groups are read only for the matches
  *  whose replacement names them, by a PikeVM over each such match's own span.
  *
  *  @param[in] engine A compiled vocabulary.
@@ -183,10 +187,11 @@ STRINGZILLA_API sz_status_t sz_regex_find(sz_regex_engine_t *engine, sz_strings_
  *  @param[out] offsets One rewritten boundary per haystack plus one, the last being the total;
  *      true whether or not the target held the result, which sizes the next call.
  *  @param[in] stream Null on the CPU, or the device stream the call is enqueued on.
- *  @return @c sz_success_k once every haystack was rewritten; @c sz_unexpected_dimensions_k if
- *      @p replacements lacks one entry per pattern; @c sz_missing_kernel_k for an empty engine;
- *      @c sz_bad_alloc_k if the round scratch could not grow; or @c sz_device_memory_mismatch_k for
- *      a @p stream the engine's capability cannot use.
+ *
+ *  @par Statuses:
+ *  - @c sz_unexpected_dimensions_k @p replacements lacks one entry per pattern.
+ *  - @c sz_missing_kernel_k An empty engine.
+ *  - @c sz_device_memory_mismatch_k A @p stream the engine's capability cannot use.
  */
 STRINGZILLA_API sz_status_t sz_regex_replace(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
                                              sz_strings_view_t const *replacements, sz_ptr_t target,
@@ -194,7 +199,7 @@ STRINGZILLA_API sz_status_t sz_regex_replace(sz_regex_engine_t *engine, sz_strin
 
 /**
  *  @brief Locates the groups of each haystack's first match of @p pattern_index, as Pandas
- *      `str.extract` reads them.
+ *      <tt>str.extract</tt> reads them.
  *
  *  A haystack with such a match gets one row for the whole match, @c needle_index zero, then one
  *  row per group that took part, @c needle_index naming the group; a haystack without one gets no
@@ -210,16 +215,35 @@ STRINGZILLA_API sz_status_t sz_regex_replace(sz_regex_engine_t *engine, sz_strin
  *  @param[out] groups_offsets One boundary per haystack plus one, the last being the total;
  *      true whether or not @p groups held them, which sizes the next call.
  *  @param[in] stream Null on the CPU, or the device stream the call is enqueued on.
- *  @return @c sz_success_k once every row was counted and those that fit were written;
- *      @c sz_unexpected_dimensions_k if @p pattern_index is past the vocabulary;
- *      @c sz_missing_kernel_k for an empty engine; @c sz_bad_alloc_k if the round scratch could not
- *      grow; or @c sz_device_memory_mismatch_k for a @p stream the engine's capability cannot use.
+ *
+ *  @par Statuses:
+ *  - @c sz_unexpected_dimensions_k @p pattern_index is past the vocabulary.
+ *  - @c sz_missing_kernel_k An empty engine.
+ *  - @c sz_device_memory_mismatch_k A @p stream the engine's capability cannot use.
  */
 STRINGZILLA_API sz_status_t sz_regex_extract(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
                                              sz_size_t pattern_index, sz_match_t *groups, sz_size_t groups_capacity,
                                              sz_size_t *groups_offsets, sz_stream_t stream);
 
-/** @copydoc sz_regex_engine_init */
+/**
+ *  @brief Compiles @p patterns for the serial kernels.
+ *  @param[out] engine Left untouched unless the call succeeds.
+ *  @param[in] patterns The vocabulary, read on the host; a pattern's index is the @c needle_index
+ *      its matches report, and the lower index wins between patterns matching at one position.
+ *  @param[in] case_sensitivity Whether patterns match bytes as written, or both sides are folded
+ *      first, as the section on case folding describes.
+ *  @param[out] malformed_index Where the index of the first refused pattern is written, only when
+ *      the call returns @c sz_invalid_syntax_k; may be @c STRINGZILLA_NULL.
+ *  @param[in] allocator Where both blocks come from, or @c STRINGZILLA_NULL for
+ *      @c sz_allocator_init_unified_serial. Stored by value, so @ref sz_regex_engine_free needs
+ *      none and cannot get the wrong one. Scratch grows to the widest call seen, so a warm
+ *      engine allocates nothing.
+ *  @param[in] stream Null on the CPU.
+ *
+ *  @par Statuses:
+ *  - @c sz_invalid_syntax_k An empty vocabulary or a pattern outside the syntax above.
+ *  - @c sz_overflow_risk_k An NFA exceeds a 32-bit state id.
+ */
 STRINGZILLA_API sz_status_t sz_regex_engine_init_serial(sz_regex_engine_t *engine, sz_strings_view_t const *patterns,
                                                         sz_case_sensitivity_t case_sensitivity,
                                                         sz_size_t *malformed_index, sz_allocator_t *allocator,
@@ -405,9 +429,14 @@ STRINGZILLA_API sz_status_t sz_regex_extract_metal(sz_regex_engine_t *engine, sz
 
 /**
  *  @brief Finds the regex kernel of @p kind, from the best of @p capabilities.
+ *  @param[in] kind The verb whose kernel to find.
+ *  @param[in] capabilities The mask to pick the best capability from.
  *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
  *  @param[out] capability The capability the kernel belongs to, or zero.
- *  @return @c sz_success_k, @c sz_missing_kernel_k, or @c sz_missing_library_k when header-only.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k
+ *  - @c sz_missing_library_k Header-only.
  */
 STRINGZILLA_API sz_status_t sz_regex_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
                                                  sz_kernel_punned_t *kernel, sz_capability_t *capability);

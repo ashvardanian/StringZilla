@@ -35,7 +35,7 @@ extern "C" {
  *  @brief Unicode UAX-29 Sentence_Break property values (4-bit encoding, 0-14).
  *
  *  These values correspond to the Sentence_Break property from Unicode UAX-29. Used by
- *  `sz_rune_sentence_break_property()` for full UAX-29-compliant sentence boundary detection.
+ *  <tt>sz_rune_sentence_break_property()</tt> for full UAX-29-compliant sentence boundary detection.
  */
 enum sz_sentence_break_t {
 
@@ -516,7 +516,7 @@ static const sz_u8_t sz_utf8_sentence_break_astral_cls_[550] = {
 /**
  *  @brief SIMD Sentence_Break lookup tables, bit-exact with @ref sz_rune_sentence_break_property.
  *
- *  @c bmp_page_lut_ maps `cp >> 8` to a page index and doubles as the page LUT of the flat BMP
+ *  @c bmp_page_lut_ maps <tt>cp >> 8</tt> to a page index and doubles as the page LUT of the flat BMP
  *  classifier below; the astral 5-nibble @c vpshufb cascade classifies cp - 0x10000 in-register,
  *  emitting the class byte directly.
  *
@@ -806,8 +806,8 @@ static const sz_u8_t sz_utf8_sentence_break_astral_stage4_groups_[3840] = {
 // clang-format off
 
 /**
- *  @brief Flat Sentence_Break classifier table: `bmp_page_lut_[cp >> 8]` selects one of 57 distinct
- *      256-byte pages, then `flat_bmp_[page * 256 + (cp & 0xFF)]` is the descriptor.
+ *  @brief Flat Sentence_Break classifier table: <tt>bmp_page_lut_[cp >> 8]</tt> selects one of 57 distinct
+ *      256-byte pages, then <tt>flat_bmp_[page * 256 + (cp & 0xFF)]</tt> is the descriptor.
  *
  *  One indexed lookup per codepoint, read by @c vpgatherdd on x86, @c svld1_gather on SVE2, and a
  *  bounded scalar leaf walk on NEON, which has no gather. The page LUT is @c bmp_page_lut_ itself,

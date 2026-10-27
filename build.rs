@@ -3,6 +3,7 @@
 //!
 //! File: build.rs
 //! Author: Ash Vardanian
+//! Date: January 22, 2024
 
 use std::env;
 use std::path::{Path, PathBuf};

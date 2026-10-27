@@ -274,7 +274,7 @@ jobs:
               while IFS=$'\t' read -r path triples; do
                 cmake -D STRINGZILLA_SWIFT_ARCHIVE="$part/$path" -D STRINGZILLA_SWIFT_HEADERS="$part/include" \
                   -D STRINGZILLA_SWIFT_DIRECTORY="$PWD/merged" -D STRINGZILLA_SWIFT_TRIPLES="$triples" \
-                  -D STRINGZILLA_SWIFT_VERSION="$version" -P cmake/sz_swift_artifact.cmake
+                  -D STRINGZILLA_SWIFT_VERSION="$version" -P cmake/stringzilla_swift_artifact.cmake
               done
           done
           (cd merged && zip -qry ../StringZillaC.artifactbundle.zip StringZillaC.artifactbundle)

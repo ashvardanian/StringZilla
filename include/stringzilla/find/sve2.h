@@ -25,8 +25,8 @@ extern "C" {
 #pragma GCC target("+sve+sve2")
 #endif
 
-/** Byte-set membership for one predicated vector: the serial `set->_u8s[c >> 3] & (1 << (c & 7))`
- *  test rides two 16-byte @c svtbl tables — the second addressed at `index - 16`, where the wrap
+/** Byte-set membership for one predicated vector: the serial <tt>set->_u8s[c >> 3] & (1 << (c & 7))</tt>
+ *  test rides two 16-byte @c svtbl tables — the second addressed at <tt>index - 16</tt>, where the wrap
  *  past the zero-padded table reads zero at any vector length. */
 STRINGZILLA_INLINE svbool_t sz_find_byteset_matches_sve2_(svbool_t progress_b8x, svuint8_t haystack_u8x,
                                                           svuint8_t set_low_u8x, svuint8_t set_high_u8x) {

@@ -37,7 +37,7 @@ STRINGZILLA_INLINE v128_t sz_utf8_rotate2_v128_(v128_t bytes_u8x16) {
  *      lanes per block.
  *
  *  Walks the 16-lane @p start_bits mask in four ascending 4-lane sub-blocks, gathering each block's
- *  set `(position + lane, length)` pairs to the front of a 16-wide stack scratch via one swizzle
+ *  set <tt>(position + lane, length)</tt> pairs to the front of a 16-wide stack scratch via one swizzle
  *  from @c compact_lut, then copies the low @p emit_count entries out in ascending lane order,
  *  byte-exact, with no per-match @c ctz.
  */
@@ -283,7 +283,7 @@ STRINGZILLA_INLINE v128_t sz_delimiter_lookup32_v128_(sz_u8_t const *table, v128
                         wasm_i8x16_swizzle(high_half_u8x16, wasm_i8x16_sub(index_u8x16, wasm_i8x16_splat(16))));
 }
 
-/** Per-lane single-bit test `(bitmap_byte >> (low & 7)) & 1`, returned as 0x00/0xFF lanes. */
+/** Per-lane single-bit test <tt>(bitmap_byte >> (low & 7)) & 1</tt>, returned as 0x00/0xFF lanes. */
 STRINGZILLA_INLINE v128_t sz_delimiter_test_bit_v128_(v128_t bitmap_byte_u8x16, v128_t low_u8x16) {
     static sz_u8_t const bit_for_low3[16] = {1, 2, 4, 8, 16, 32, 64, 128, 0, 0, 0, 0, 0, 0, 0, 0};
     v128_t const bit_mask_u8x16 = wasm_i8x16_swizzle(wasm_v128_load(bit_for_low3),
@@ -327,7 +327,7 @@ STRINGZILLA_INLINE v128_t sz_delimiter_bmp_membership_v128_(v128_t window_u8x16,
 }
 
 /** Astral delimiter membership for one quarter as 0x00/0xFF lanes, keyed on the
- *  `(cp >> 16, (cp >> 8) & 0xFF)` pair of each four-byte lead. */
+ *  <tt>(cp >> 16, (cp >> 8) & 0xFF)</tt> pair of each four-byte lead. */
 STRINGZILLA_INLINE v128_t sz_delimiter_astral_membership_v128_(v128_t window_u8x16, v128_t next1_u8x16,
                                                                v128_t next2_u8x16, v128_t next3_u8x16) {
     v128_t const b0_u8x16 = wasm_v128_and(window_u8x16, wasm_i8x16_splat(0x07));

@@ -153,12 +153,11 @@ The per-ISA SIMD kernels and the project's own tests are CI-validated with these
 
 | Toolchain | Recommended Versions |
 | :-------- | :------------------- |
-| GCC       | 12 or newer          |
-| Clang     | 16 or newer          |
+| GCC       | 13 or newer          |
+| Clang     | 18 or newer          |
 | MSVC      | Visual Studio 2022   |
 | NVCC      | CUDA 12+             |
 
-GCC 10 and older miss a conforming STL `insert` and fail to build the tests.
 The RVV kernels need Clang 21 or newer, as older Clang hides the 64-bit vector types from a unit compiled without `v`, and an older compiler builds the libraries without them.
 On macOS, prefer Homebrew Clang over Apple Clang; on Windows, MinGW with GCC works alongside MSVC.
 NVCC with CUDA 12 builds the device backends of the engine families, reached by building an engine with the mask `sz_capabilities_enabled_cuda` reports for a device.
@@ -412,7 +411,7 @@ int main() {
 Each range exposes `begin`/`end`, dereferences to a `sz::string_view_t`, and can be consumed in a single pass.
 When you genuinely need the tokens to outlive the source you can still materialize them into a `std::vector<sz::string_view_t>`, but only then do you pay for storage — the default path stays allocation-free.
 
-## UTF-8 Segmentation
+## Unicode Segmentation
 
 Splitting Unicode text into the units a human actually perceives is deceptively hard, and getting it wrong corrupts data.
 A single emoji can be dozens of bytes and several codepoints yet one perceived character, CJK runs carry no spaces, and a period is not always the end of a sentence.
@@ -483,7 +482,7 @@ In C, `sz_utf8_graphemes_best` and its three tiling siblings write one length pe
 The newline, whitespace and delimiter finders write offsets and lengths of their matches, and after a full batch `bytes_consumed` ends exactly at the last match; otherwise it is the whole input.
 `sz_utf8_decode_best` treats the end of the text as the end of the input, decoding a truncated final sequence to one U+FFFD, so a caller feeding it chunks splits them at a rune boundary.
 
-## Case Insensitive Search and Folding
+## Case Folding and Normalization
 
 Case-insensitive matching across full Unicode is more than ASCII `tolower` — `ß` matches `ss`, accents fold, and the matched byte-length can differ from the needle's.
 `utf8_uncased_search` searches case-insensitively _without pre-folding the haystack_: it folds on the fly, so you never allocate a folded copy of a large document just to search it.
@@ -672,7 +671,7 @@ int main() {
 }
 ```
 
-## Sorting and Intersections
+## Sorting and Sets
 
 These operate on a read-only `sz_strings_view_t` in any layout and never reorder the underlying data — they fill an `order` permutation array instead.
 Sorting is __stable__, so equal elements keep their input order, supports descending order via a `reverse` flag, and supports partial / top-K sorting via `top_count` — pass `0` to sort everything.
@@ -954,7 +953,7 @@ int main() {
 }
 ```
 
-## Runtime Dispatch and Capabilities
+## Runtime Dispatch
 
 Every kernel exists in a serial form plus one or more per-ISA forms, named with a backend suffix (`_serial`, `_westmere`, `_goldmont`, `_haswell`, `_skylake`, `_icelake`, `_neon`, `_neonaes`, `_neonsha`, `_sve`, `_sve2`, `_sve2aes`, `_v128`, `_v128relaxed`, `_rvv`, `_rvvcrypto`, `_loongsonasx`, `_powervsx`), and the engines add one per GPU vendor, `_cuda`, `_rocm` and `_metal`.
 Each verb also has a dispatch point, like `sz_find_best` or `sz_hash_best`, taking the kernels' arguments plus a capability mask before the trailing stream, and running the best capability the mask shares with the verb's list, `serial` first on the CPU.
@@ -1106,7 +1105,7 @@ Aside from a single-byte `char` type, LibC provides `wchar_t`:
   In contrast, UTF-8 is a variable-length encoding, where each character can take from 1 to 4 bytes.
   This fundamental difference means that `wchar_t` and UTF-8 are incompatible.
 
-StringZilla [partially addresses those issues](#utf-8-segmentation).
+StringZilla [partially addresses those issues](#unicode-segmentation).
 
 ## What's Wrong with the C++ Standard Library?
 

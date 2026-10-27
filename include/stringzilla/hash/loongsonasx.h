@@ -276,7 +276,7 @@ STRINGZILLA_INLINE __m128i sz_lsx_gf16_mul_(__m128i factor_a_u8x16, __m128i fact
 /**
  *  @brief AES SubBytes on the ShiftRows-permuted state via tower-field GF((2⁴)²)
  *      inversion + affine.
- *  @return The S-box output (with the `^ 0x63` AES affine constant already applied).
+ *  @return The S-box output (with the <tt>^ 0x63</tt> AES affine constant already applied).
  */
 STRINGZILLA_INLINE __m128i sz_emulate_aes_subbytes_loongsonasx_( //
     __m128i shifted_state_u8x16, __m128i zero_u8x16, __m128i low_nibble_mask_u8x16, __m128i input_transform_low_u8x16,
@@ -310,7 +310,7 @@ STRINGZILLA_INLINE __m128i sz_emulate_aes_subbytes_loongsonasx_( //
 
 /**
  *  @brief AES MixColumns over the four 4-byte columns of the S-box output.
- *  @return `c[j] ^ (col_base^col_rot1^col_rot2^col_rot3) ^ xtime(c[j] ^ c[j+1])` per column.
+ *  @return <tt>c[j] ^ (col_base^col_rot1^col_rot2^col_rot3) ^ xtime(c[j] ^ c[j+1])</tt> per column.
  */
 STRINGZILLA_INLINE __m128i sz_emulate_aes_mixcolumns_loongsonasx_(__m128i sbox_output_u8x16) {
     // Build rotate masks on the fly: add j and (j+1 within group) shuffle indices.
@@ -334,7 +334,7 @@ STRINGZILLA_INLINE __m128i sz_emulate_aes_mixcolumns_loongsonasx_(__m128i sbox_o
 
 /**
  *  @brief Emulates a single @c _mm_aesenc_si128 round on LoongArch LSX (128-bit lanes).
- *  @return Result of `MixColumns(SubBytes(ShiftRows(state))) ^ round_key`, bit-identical to
+ *  @return Result of <tt>MixColumns(SubBytes(ShiftRows(state))) ^ round_key</tt>, bit-identical to
  *          @c sz_emulate_aesenc_si128_serial_.
  */
 STRINGZILLA_INLINE __m128i sz_emulate_aesenc_loongsonasx_(__m128i state_u8x16, __m128i round_key_u8x16) {
@@ -520,7 +520,7 @@ STRINGZILLA_INLINE void sz_hash_state_store_loongsonasx_(sz_hash_state_t *packed
 
 /**
  *  @brief Absorbs the buffered 64-byte block into the aligned state (four 128-bit lanes), in place.
- *  @param[inout] state Pointer to the aligned hash state whose @c ins lanes are consumed.
+ *  @param[in,out] state Pointer to the aligned hash state whose @c ins lanes are consumed.
  */
 STRINGZILLA_INLINE void sz_hash_state_absorb_loongsonasx_(sz_hash_state_aligned_t *state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
@@ -686,13 +686,13 @@ STRINGZILLA_API sz_status_t sz_fill_random_loongsonasx(sz_ptr_t target, sz_size_
  *  Processors". It is validated against the byte-exact oracle
  *  @c sz_sha256_process_block_serial_ in `hash/serial.h`. */
 
-/** Lane-wise SHA-256 lowercase-sigma0: `ROTR(x,7) ^ ROTR(x,18) ^ SHR(x,3)` over 4x u32. */
+/** Lane-wise SHA-256 lowercase-sigma0: <tt>ROTR(x,7) ^ ROTR(x,18) ^ SHR(x,3)</tt> over 4x u32. */
 STRINGZILLA_INLINE __m128i sz_sha256_sigma0_lower_loongsonasx_(__m128i words_u32x4) {
     return __lsx_vxor_v(__lsx_vxor_v(__lsx_vrotri_w(words_u32x4, 7), __lsx_vrotri_w(words_u32x4, 18)),
                         __lsx_vsrli_w(words_u32x4, 3));
 }
 
-/** Lane-wise SHA-256 lowercase-sigma1: `ROTR(x,17) ^ ROTR(x,19) ^ SHR(x,10)` over 4x u32. */
+/** Lane-wise SHA-256 lowercase-sigma1: <tt>ROTR(x,17) ^ ROTR(x,19) ^ SHR(x,10)</tt> over 4x u32. */
 STRINGZILLA_INLINE __m128i sz_sha256_sigma1_lower_loongsonasx_(__m128i words_u32x4) {
     return __lsx_vxor_v(__lsx_vxor_v(__lsx_vrotri_w(words_u32x4, 17), __lsx_vrotri_w(words_u32x4, 19)),
                         __lsx_vsrli_w(words_u32x4, 10));

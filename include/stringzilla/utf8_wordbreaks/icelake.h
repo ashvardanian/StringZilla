@@ -8,16 +8,16 @@
  *  is consumed in 64-byte windows. Each window is decoded by the shared codepoint substrate and
  *  classified to a per-codepoint Word_Break property (ALetter, Numeric, MidLetter, Extend,
  *  Regional_Indicator, ...): an ASCII permute, big arithmetic ranges, a codepoint < 0x800 page LUT,
- *  a page-compressed flat table for the scattered cold BMP residue, and an aligned `.rodata` astral
+ *  a page-compressed flat table for the scattered cold BMP residue, and an aligned <tt>.rodata</tt> astral
  *  trie for the Supplementary Plane. Rules WB3-WB16 then run as branchless 64-lane bit algebra. The
  *  driver emits the boundaries it can fully trust and advances to the last resolved codepoint
  *  start; a small register carry, @ref sz_utf8_word_break_carry_t, threads the cross-window state.
  *
- *  Design note: the cold BMP classifier is `bmp_page_lut_[cp >> 8]` selecting one of 52 distinct
- *  256-byte pages, then `flat_bmp_[page * 256 + (cp & 0xFF)]` fetched by one @c vpgatherdd - a
+ *  Design note: the cold BMP classifier is <tt>bmp_page_lut_[cp >> 8]</tt> selecting one of 52 distinct
+ *  256-byte pages, then <tt>flat_bmp_[page * 256 + (cp & 0xFF)]</tt> fetched by one @c vpgatherdd - a
  *  single indexed lookup, chosen for port pressure over instruction count: cross-lane shuffles are
  *  port-5-only, so any dependent shuffle cascade saturates that one port, while the gather issues
- *  on the load ports and leaves the shuffle port to the decode. The `cp < 0x800` gate means
+ *  on the load ports and leaves the shuffle port to the decode. The <tt>cp < 0x800</tt> gate means
  *  small-page scripts never reach it. Gathers pay off on multi-KB tables in general.
  *
  *  The hard part is that a boundary can depend on bytes beyond the current window. Three
@@ -31,8 +31,8 @@
  *                                ^ is this a boundary?
  *  @endverbatim
  *
- *  The apostrophe bridge (WB6/7, `AHLetter x MidNumLetQ x AHLetter`) at lane 0 of window N needs
- *  the @c t that lives in window N-1. It is carried in `carry.left_property` (plus the
+ *  The apostrophe bridge (WB6/7, <tt>AHLetter x MidNumLetQ x AHLetter</tt>) at lane 0 of window N needs
+ *  the @c t that lives in window N-1. It is carried in <tt>carry.left_property</tt> (plus the
  *  Regional_Indicator parity and the WSegSpace/ZWJ raw-adjacency bits) and injected as a branchless
  *  lane-0 seed, so the next window never re-scans the window edge.
  *
@@ -47,7 +47,7 @@
  *
  *  In-window the bridge is resolved by an Extend-transparent @c fill that runs through the marks.
  *  Only when the open Mid run reaches the 64-byte edge still undecided is @c resolved clamped
- *  before it and the open-shadow run-state carried (`carry.bridge_open` / `carry.bridge_kind`); the
+ *  before it and the open-shadow run-state carried (<tt>carry.bridge_open</tt> / <tt>carry.bridge_kind</tt>); the
  *  next, fully-contextual window re-resolves it. This mirrors the sentence kernel's SB8 mechanism -
  *  no per-word scalar bookkeeping and no deferred emission.
  *
@@ -61,7 +61,7 @@
  *  @endverbatim
  *
  *  The kernel uses the canonical maximal-subpart partition (the serial reference's model). The
- *  common well-formed case collapses to `valid & ~continuation` (O(1)); only a genuinely malformed
+ *  common well-formed case collapses to <tt>valid & ~continuation</tt> (O(1)); only a genuinely malformed
  *  window falls back to a data-dependent reachability fixpoint. The subtlety is telling a benign
  *  window-edge straddle (a valid lead whose continuations spill into the next window, handled by
  *  @c complete_limit) apart from a true end-of-text truncation (a 1-byte replacement char).
@@ -114,7 +114,7 @@ enum {
 
 /** Classify 16 astral codepoints (u32 lanes) into 16 Word_Break classes via the 4-stage astral
  *  trie: @c astral_stage1 → stage1 → stage2 → leaf, addressed by the 8/4/4/4 split of
- *  `offset = codepoint − 0x10000`, every tile read straight from aligned `.rodata` (re-init-free —
+ *  <tt>offset = codepoint − 0x10000</tt>, every tile read straight from aligned <tt>.rodata</tt> (re-init-free —
  *  no per-call @c luts). Byte-identical to @c sz_rune_word_break_property for astral codepoints,
  *  replacing the 476-range linear fold. */
 STRINGZILLA_INLINE __m512i sz_utf8_word_break_classify_astral16_icelake_(__m512i codepoints_u32x16) {
@@ -155,7 +155,7 @@ STRINGZILLA_INLINE sz_u64_t sz_utf8_word_break_class_mask_icelake_(__m512i class
     return _cvtmask64_u64(_mm512_cmpeq_epi8_mask(classes_u8x64, _mm512_set1_epi8((char)value)));
 }
 
-/** 64-lane mask of lanes whose @b (high,low) 16-bit value lies inside any sorted `[lo, hi]` range
+/** 64-lane mask of lanes whose @b (high,low) 16-bit value lies inside any sorted <tt>[lo, hi]</tt> range
  *  (WSegSpace WB3d and Extended_Pictographic WB3c, outside the 4-bit Word_Break model). */
 STRINGZILLA_INLINE sz_u64_t sz_utf8_word_break_range16_mask_icelake_( //
     __m512i high_u8x64, __m512i low_u8x64, sz_u16_t const *lo_table, sz_u16_t const *hi_table, int count) {
@@ -208,7 +208,7 @@ STRINGZILLA_INLINE __m512i sz_utf8_word_break_small_page_icelake_(__m512i high_u
     return _mm512_mask_blend_epi8(page_bit3_m64, candidate_u8x64[0], candidate_u8x64[1]);
 }
 
-/** Classify the 4-byte (astral) lanes of a window via the aligned `.rodata` astral trie. Four
+/** Classify the 4-byte (astral) lanes of a window via the aligned <tt>.rodata</tt> astral trie. Four
  *  16-lane chunks reconstruct the 21-bit codepoint and walk the 4-stage trie; the caller blends the
  *  result onto @c is_four_byte lanes. Bit-exact over the astral planes with
  *  @c sz_rune_word_break_property. */
@@ -243,7 +243,7 @@ STRINGZILLA_INLINE __m512i sz_utf8_word_break_classify_four_byte_icelake_(__m512
     return astral_class_u8x64;
 }
 
-/** Start-compacting flat-lookup classify for the COLD `0x800..0xFFFF` residue (Devanagari, Bengali,
+/** Start-compacting flat-lookup classify for the COLD <tt>0x800..0xFFFF</tt> residue (Devanagari, Bengali,
  *  Thai, Tamil, ...). The rule engine reads classes only at codepoint-start lanes, and every cold
  *  lane is a 3-byte lead, so a 64-byte window holds at most 21 cold starts. Their @c high/low bytes
  *  are @c vpcompressb- compacted into the low lanes, widened to full 32-bit codepoints in up to two
@@ -279,7 +279,7 @@ STRINGZILLA_INLINE __m512i sz_utf8_word_break_cold_compact_icelake_( //
 
 /** Classify a 64-byte window to per-lane Word_Break properties. ASCII through the ASCII permute,
  *  BMP through arithmetic big ranges (Latin / Hangul / CJK) + the codepoint < 0x800 page LUT + the
- *  start-compacted flat table for the residue; 4-byte leads through the aligned `.rodata` astral
+ *  start-compacted flat table for the residue; 4-byte leads through the aligned <tt>.rodata</tt> astral
  *  trie. All cheap paths are rare-class gated. */
 STRINGZILLA_INLINE __m512i sz_utf8_word_break_classify_window_icelake_( //
     __m512i window_u8x64, __m512i high_u8x64, __m512i low_u8x64, __mmask64 is_four_byte_m64, __m512i next1_u8x64,
@@ -500,10 +500,10 @@ STRINGZILLA_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_block_breaks_i
 
 #pragma region Word_Break Forward Driver
 
-/** Forward UAX-29 word segmentation over `[0, length)`, mirroring the sentence driver's
+/** Forward UAX-29 word segmentation over <tt>[0, length)</tt>, mirroring the sentence driver's
  *  clean-advance loop: each iteration decodes one 64-byte window at a codepoint-aligned
  *  @c position, classifies it in-register, resolves the no-break algebra over the
- *  complete-codepoint region, drains the trusted band, and advances by `win.resolved` with the
+ *  complete-codepoint region, drains the trusted band, and advances by <tt>win.resolved</tt> with the
  *  small register carry threaded forward. The only cross-window state is the register carry; there
  *  is no scalar back-walk, no deferred-emission state machine, and no carry re-derivation by
  *  re-reading the text. Every iteration advances at least one codepoint on all inputs. */

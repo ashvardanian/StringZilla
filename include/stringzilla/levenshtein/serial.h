@@ -283,10 +283,13 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_query_prepare_utf8_(sz_cptr_t text
  *  @brief Builds the match masks of the UTF-8 string @p text into @p masks, a host tier's
  *      word-major tables, its rune classes into the page table at @p pages, and points @p query at
  *      both. Classes follow first appearance.
+ *  @param[in] text The UTF-8 bytes of the query.
+ *  @param[in] length Number of bytes in @p text.
  *  @param[out] masks Caller-owned, @c sz_levenshtein_query_mask_entries_utf8(runes) entries for a
  *      query of @c runes runes, of which the first @c words × stride are written.
  *  @param[out] pages Caller-owned, @c sz_levenshtein_utf8_pages_bytes(runes)
  *      bytes, cache-line aligned.
+ *  @param[out] query The prepared query, pointing at @p masks and @p pages.
  *  @return @c sz_success_k, or @c sz_unexpected_dimensions_k for an empty query, whose distance is
  *      every candidate's rune count.
  */
@@ -316,7 +319,7 @@ typedef enum sz_levenshtein_classes_width_t {
  *  A candidate that runs dry inside the transpose writes its exact symbol count to
  *  @p symbol_counts; until then the entry keeps the byte count the caller seeded.
  *
- *  @param[inout] cursors Byte offsets into each candidate's text, advanced past what was emitted.
+ *  @param[in,out] cursors Byte offsets into each candidate's text, advanced past what was emitted.
  *  @param[in] transpose_start The absolute position of the transpose's first symbol.
  *  @param[out] transpose_classes @c positions × candidates class ids, of which the rows filled are
  *      written, @c sz_u32_t for the transposes here.
@@ -804,7 +807,7 @@ STRINGZILLA_INLINE sz_size_t const *sz_levenshtein_engine_decode_(sz_strings_vie
  *      and every sweep reads runes rather than decoding them again.
  *  @param[out] scored The candidates the sweeps read: @p candidates on a byte engine, their decoded
  *      runes on a rune engine.
- *  @param[inout] symbol_counts The caller's counts, which a rune engine replaces by the exact
+ *  @param[in,out] symbol_counts The caller's counts, which a rune engine replaces by the exact
  *      rune counts it decoded.
  *  @param[out] candidate_order The caller's @p order, or the round's own by length.
  */
@@ -1176,7 +1179,9 @@ STRINGZILLA_CONSTEXPR void sz_levenshtein_u64x1_step_masks_serial_(sz_levenshtei
  *  There is no candidate mask: a candidate past its text keeps stepping whatever class the
  *  transpose emits, and its score is read where its text ends.
  *
- *  @param[in] words Exactly `sz_levenshtein_query_words(query->length)`; a constant keeps
+ *  @param[in,out] state The candidate's score and carries, advanced by one symbol.
+ *  @param[in,out] verticals The candidate's vertical deltas, one per word.
+ *  @param[in] words Exactly <tt>sz_levenshtein_query_words(query->length)</tt>; a constant keeps
  *      verticals in registers.
  *  @param[in] query A host tier's query, its word-major tables side by side.
  *  @param[in] class_id The candidate's class at this position, as the transpose emitted it.

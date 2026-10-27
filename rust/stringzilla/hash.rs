@@ -2,6 +2,7 @@
 //!
 //! File: rust/stringzilla/hash.rs
 //! Author: Ash Vardanian
+//! Date: August 7, 2026
 
 use core::ffi::c_void;
 
@@ -502,11 +503,13 @@ impl core::hash::Hasher for Hasher {
 #[cfg(feature = "std")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BuildSzHasher {
+    /// The seed every built hasher starts from.
     pub seed: u64,
 }
 
 #[cfg(feature = "std")]
 impl BuildSzHasher {
+    /// Builds a hasher factory with the given seed.
     #[inline]
     pub const fn with_seed(seed: u64) -> Self {
         Self { seed }

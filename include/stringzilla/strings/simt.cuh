@@ -11,10 +11,10 @@
  *  @c sz_utf8_norm_span_simt_ for the last; copies and lookups run a warp per string, or the whole
  *  grid over one run of bytes when a tape is read in its own order.
  *
- *  The escape helpers repeat those of `serial.h` step for step, with a plain byte-set search in
+ *  The escape helpers repeat those of <tt>serial.h</tt> step for step, with a plain byte-set search in
  *  place of a tier's vectorized one, and decode UTF-8 through the same @c sz_rune_decode.
  *
- *  A verb's scratch holds `count + 1` offsets, which its measuring kernel first fills with lengths,
+ *  A verb's scratch holds <tt>count + 1</tt> offsets, which its measuring kernel first fills with lengths,
  *  then the first malformed position and the payload of the strings before it, then the block sums
  *  of the scan.
  *
@@ -112,7 +112,7 @@ STRINGZILLA_DEVICE sz_bool_t sz_strings_hex_parse_simt_(sz_cptr_t digits, sz_siz
     return sz_true_k;
 }
 
-/** Writes @p rune as `\uXXXX` in lowercase, a surrogate pair beyond U+FFFF, returning 6 or 12. */
+/** Writes @p rune as <tt>\\uXXXX</tt> in lowercase, a surrogate pair beyond U+FFFF, returning 6 or 12. */
 STRINGZILLA_DEVICE sz_size_t sz_strings_write_utf16_simt_(sz_rune_t rune, char *sequence) {
     sz_u32_t units[2] = {rune, 0};
     sz_size_t units_count = 1;
@@ -353,7 +353,7 @@ STRINGZILLA_DEVICE sz_size_t sz_strings_unescape_hex_simt_(sz_cptr_t source, sz_
 }
 
 /** Unescapes the HTML character references of one string into @p target, or measures it, copying
- *  every `&` that starts no reference; it is never malformed. */
+ *  every <tt>&amp;</tt> that starts no reference; it is never malformed. */
 STRINGZILLA_DEVICE sz_size_t sz_strings_unescape_html_simt_(sz_cptr_t source, sz_size_t length, sz_ptr_t target) {
     // `&`
     sz_byteset_t const set = {{0x0000004000000000ull, 0, 0, 0}};
@@ -403,7 +403,7 @@ STRINGZILLA_DEVICE sz_size_t sz_strings_unescape_html_simt_(sz_cptr_t source, sz
 }
 
 /** Decodes the percent-escapes of one string into @p target, or measures it, returning
- *  @c STRINGZILLA_SIZE_MAX for a `%` without two hexadecimal digits. */
+ *  @c STRINGZILLA_SIZE_MAX for a <tt>\%</tt> without two hexadecimal digits. */
 STRINGZILLA_DEVICE sz_size_t sz_strings_unescape_url_simt_(sz_cptr_t source, sz_size_t length, sz_ptr_t target) {
     // `%`
     sz_byteset_t const set = {{0x0000002000000000ull, 0, 0, 0}};

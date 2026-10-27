@@ -8,7 +8,7 @@
  *
  *  Each 64-byte window lives as four @c uint8x16_t quarters (the codepoint substrate twin of
  *  haswell's two @c __m256i halves); every per-codepoint BMP Word_Break property resolves through
- *  the shared page-compressed flat table via @ref sz_utf8_rune_flat_lookup_neon_ (the page LUT
+ *  the shared page-compressed flat table via @c sz_utf8_rune_flat_lookup_neon_ (the page LUT
  *  in-register, the leaf by a bounded scalar L1 walk), and the Supplementary Plane through a
  *  @c vqtbl nibble cascade, bit-identical over the whole code space to
  *  @c sz_rune_word_break_property.
@@ -59,7 +59,7 @@ STRINGZILLA_INLINE uint8x16_t sz_utf8_word_break_byte_mask_from_bits_neon_(sz_u6
 }
 
 /** Word_Break class byte for sixteen BMP codepoints (per-lane high = cp>>8, low = cp&0xFF) from the
- *  flat page-compressed table via @ref sz_utf8_rune_flat_lookup_neon_, the NEON twin of
+ *  flat page-compressed table via @c sz_utf8_rune_flat_lookup_neon_, the NEON twin of
  *  @ref sz_utf8_word_break_bmp_class_haswell_. Bit-exact with @c sz_rune_word_break_property over
  *  the whole BMP. Addresses one quarter; the caller iterates the four quarters. */
 STRINGZILLA_INLINE uint8x16_t sz_utf8_word_break_bmp_class_neon_(uint8x16_t high_bytes_u8x16,
@@ -68,10 +68,10 @@ STRINGZILLA_INLINE uint8x16_t sz_utf8_word_break_bmp_class_neon_(uint8x16_t high
                                           (int)sz_utf8_word_break_flat_pages_k, high_bytes_u8x16, low_bytes_u8x16);
 }
 
-/** Word_Break class byte for sixteen astral codepoints over the 20-bit `offset = cp - 0x10000`
+/** Word_Break class byte for sixteen astral codepoints over the 20-bit <tt>offset = cp - 0x10000</tt>
  *  (5-nibble cascade), the NEON twin of @ref sz_utf8_word_break_astral_class_haswell_. Per-lane
- *  bytes: @p plane_off_u8x16 holds `(offset >> 16) & 0xFF` (low nibble meaningful), @p high_u8x16
- *  holds `(offset >> 8) & 0xFF`, and @p low_u8x16 holds `offset & 0xFF`. The result is bit-exact
+ *  bytes: @p plane_off_u8x16 holds <tt>(offset >> 16) & 0xFF</tt> (low nibble meaningful), @p high_u8x16
+ *  holds <tt>(offset >> 8) & 0xFF</tt>, and @p low_u8x16 holds <tt>offset & 0xFF</tt>. The result is bit-exact
  *  with @c sz_rune_word_break_property over the Supplementary Planes. Addresses one quarter; the
  *  caller iterates the four quarters. */
 STRINGZILLA_INLINE uint8x16_t sz_utf8_word_break_astral_class_neon_(uint8x16_t plane_off_u8x16, uint8x16_t high_u8x16,
@@ -258,7 +258,7 @@ STRINGZILLA_INLINE sz_u64_t sz_utf8_word_break_byte_ge_neon_(uint8x16_t const *q
                                       vcgeq_u8(quarters_u8x16[2], v_u8x16), vcgeq_u8(quarters_u8x16[3], v_u8x16));
 }
 
-/** Per-quarter "(high,low) 16-bit value in `[lo, hi]`" membership for one range, the NEON unsigned
+/** Per-quarter "(high,low) 16-bit value in <tt>[lo, hi]</tt>" membership for one range, the NEON unsigned
  *  16-bit window-compare building block of @ref sz_utf8_word_break_range16_mask_neon_.
  *  @c vcgeq_u8/vcltq_u8 are native, so no @c max_epu8 emulation is needed. */
 STRINGZILLA_INLINE uint8x16_t sz_utf8_word_break_range16_one_neon_(uint8x16_t high_u8x16, uint8x16_t low_u8x16,
@@ -276,7 +276,7 @@ STRINGZILLA_INLINE uint8x16_t sz_utf8_word_break_range16_one_neon_(uint8x16_t hi
     return vandq_u8(not_below_u8x16, not_above_u8x16);
 }
 
-/** A 64-bit "(high,low) 16-bit value in any sorted `[lo, hi]` range" lane mask over the four window
+/** A 64-bit "(high,low) 16-bit value in any sorted <tt>[lo, hi]</tt> range" lane mask over the four window
  *  quarters, the NEON twin of @ref sz_utf8_word_break_range16_mask_haswell_ (WSegSpace /
  *  Extended_Pictographic). */
 STRINGZILLA_INLINE sz_u64_t sz_utf8_word_break_range16_mask_neon_( //
@@ -436,7 +436,7 @@ STRINGZILLA_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_n
 
 #pragma region Forward driver
 
-/** Forward UAX-29 word segmentation over `[0, length)` (NEON AArch64): the overlap-free advancing
+/** Forward UAX-29 word segmentation over <tt>[0, length)</tt> (NEON AArch64): the overlap-free advancing
  *  driver, mirroring @ref sz_utf8_wordbreaks_haswell over the NEON
  *  window/classify/partition/decide/drain leaves. Bit-exact with @c sz_utf8_wordbreaks_serial,
  *  @c sz_utf8_wordbreaks_haswell, and @c sz_utf8_wordbreaks_icelake. */

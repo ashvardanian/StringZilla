@@ -1,7 +1,8 @@
 /**
- *  @brief Zero-copy .NET bindings for the StringZilla core C library.
  *  @file csharp/StringZilla.cs
  *  @author Ash Vardanian
+ *  @date June 29, 2026
+ *  @brief Zero-copy .NET bindings for the StringZilla core C library.
  *
  *  Exposes the core single-string operations over UTF-8 byte spans:
  *

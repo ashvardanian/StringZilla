@@ -3,7 +3,7 @@
  *  @author Ash Vardanian
  *  @date October 3, 2026
  *  @brief CUDA host side of UTF-8 case folding: the tiles a round cuts a text into, its one launch,
- *      and the @c _cuda export, over the kernel of `utf8_uncased_fold/simt.cuh`.
+ *      and the @c _cuda export, over the kernel of <tt>utf8_uncased_fold/simt.cuh</tt>.
  *
  *  @sa include/stringzilla/utf8_uncased_fold/simt.cuh
  *  @sa include/stringzilla/utf8_uncased_fold/rocm.cuh

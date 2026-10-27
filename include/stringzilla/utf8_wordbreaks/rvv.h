@@ -9,7 +9,7 @@
  *  VLMAX is exactly 64 lanes at VLEN=128 (wider machines clamp @c vl to 64) and the maximum data
  *  LMUL admitting the 16-bit indexed @c vluxei16 byte gather. Every per-codepoint BMP Word_Break
  *  property resolves through the shared page-compressed flat table via
- *  @ref sz_utf8_rune_flat_lookup_rvv_ (a real masked vector gather, unlike NEON's bounded scalar
+ *  @c sz_utf8_rune_flat_lookup_rvv_ (a real masked vector gather, unlike NEON's bounded scalar
  *  walk), and the Supplementary Plane through the same 5-nibble cascade as chained indexed loads,
  *  bit-identical to @c sz_rune_word_break_property over the whole code space.
  *
@@ -22,7 +22,7 @@
  *
  *  Mask-domain discipline: the classify leaves stay entirely in @c vbool2_t mask registers,
  *  recomputing the lead classes from the threaded raw window instead of round-tripping the window
- *  struct's @c sz_u64_t fields back through memory. The only @c sz_u64_t → mask raises (`vlm.v`)
+ *  struct's @c sz_u64_t fields back through memory. The only @c sz_u64_t → mask raises (<tt>vlm.v</tt>)
  *  that survive are the genuine engine/portable boundaries: the truncated-edge reclassify (mixes
  *  the scalar @c loaded clamp), the driver's @c forced_other merge (partition-resolver origin), and
  *  the drain's boundary compaction (engine @c breaks origin).
@@ -53,7 +53,7 @@ extern "C" {
 #pragma region In register vectorized classifier
 
 /** Word_Break class byte for the ASCII lanes (cp < 0x80) via the 128-entry property table, one
- *  masked @c vluxei8 gather (index `byte & 0x7F` is always in-bounds); masked-off lanes keep
+ *  masked @c vluxei8 gather (index <tt>byte & 0x7F</tt> is always in-bounds); masked-off lanes keep
  *  @p inactive_u8m4. The window byte equals the codepoint on ASCII lanes. */
 STRINGZILLA_INLINE vuint8m4_t sz_utf8_word_break_ascii_class_rvv_(vuint8m4_t raw_u8m4, vbool2_t active_b2,
                                                                   vuint8m4_t inactive_u8m4) {
@@ -116,7 +116,7 @@ STRINGZILLA_INLINE vuint8m4_t sz_utf8_word_break_astral_class_rvv_( //
  *  The lead-class lane masks are recomputed here in @c vbool2_t registers straight from the
  *  threaded @p raw_u8m4 (four @c vand/vmseq compares), rather than raising the window struct's
  *  @c sz_u64_t fields back through memory — @c vbool2_t is sizeless and cannot ride the struct,
- *  and the compares are cheaper than a `vlm.v` round-trip. The @c loaded clamp is an in-register
+ *  and the compares are cheaper than a <tt>vlm.v</tt> round-trip. The @c loaded clamp is an in-register
  *  compare of @c vid against @c loaded, as lane indices ≤ 63 fit @c u8. ASCII and BMP resolve
  *  through unconditional masked gathers — inactive lanes perform no memory access, and index
  *  safety comes from table totality, never from the mask — so only the rare 4-gather astral
@@ -189,13 +189,13 @@ STRINGZILLA_INLINE sz_u64_t sz_utf8_word_break_byte_ge_rvv_(vuint8m4_t raw_u8m4,
     return sz_utf8_rune_mask_to_bits_rvv_(__riscv_vmsgeu_vx_u8m4_b2(raw_u8m4, bound, 64));
 }
 
-/** Assemble the per-lane BMP codepoint `(high << 8) | low` at @c e16m8 for the 16-bit range
+/** Assemble the per-lane BMP codepoint <tt>(high << 8) | low</tt> at @c e16m8 for the 16-bit range
  *  scans. */
 STRINGZILLA_INLINE vuint16m8_t sz_utf8_word_break_codepoint16_rvv_(vuint8m4_t high_u8m4, vuint8m4_t low_u8m4) {
     return __riscv_vwaddu_wv_u16m8(__riscv_vsll_vx_u16m8(__riscv_vzext_vf2_u16m8(high_u8m4, 64), 8, 64), low_u8m4, 64);
 }
 
-/** A 64-bit "codepoint16 in any sorted `[lo, hi]` range" lane mask, the RVV twin of
+/** A 64-bit "codepoint16 in any sorted <tt>[lo, hi]</tt> range" lane mask, the RVV twin of
  *  @ref sz_utf8_word_break_range16_mask_neon_ over native 16-bit lanes (WSegSpace /
  *  Extended_Pictographic). */
 STRINGZILLA_INLINE sz_u64_t sz_utf8_word_break_range16_mask_rvv_( //
@@ -356,7 +356,7 @@ STRINGZILLA_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_rvv
 
 #pragma region Forward driver
 
-/** Forward UAX-29 word segmentation over `[0, length)` (RVV 1.0): the overlap-free advancing
+/** Forward UAX-29 word segmentation over <tt>[0, length)</tt> (RVV 1.0): the overlap-free advancing
  *  driver, mirroring @ref sz_utf8_wordbreaks_neon over the RVV
  *  window/classify/partition/decide/drain leaves. Bit-exact with @c sz_utf8_wordbreaks_serial and
  *  every other windowed backend. */

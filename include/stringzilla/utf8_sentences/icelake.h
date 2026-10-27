@@ -36,7 +36,7 @@ extern "C" {
 #pragma region Sentence_Break classifier
 
 /**
- *  @brief Start-compacting flat-lookup classify for the cold `0x800..0xFFFF` residue: Devanagari,
+ *  @brief Start-compacting flat-lookup classify for the cold <tt>0x800..0xFFFF</tt> residue: Devanagari,
  *      Bengali, Thai, Tamil, and so on.
  *
  *  Every cold lane is a 3-byte codepoint start, so a 64-byte window holds at most 21 of them: their
@@ -76,7 +76,7 @@ STRINGZILLA_INLINE __m512i sz_utf8_sentence_break_cold_compact_icelake_( //
  *  @brief Classifies up to 64 codepoints, held one per lane in the decoded @p high_u8x64 and
  *      @p low_u8x64 byte halves, into per-lane Sentence_Break properties.
  *
- *  The dominant `cp < 0x800` region, Latin, Greek, Cyrillic, Arabic, and Hebrew, is resolved by an
+ *  The dominant <tt>cp < 0x800</tt> region, Latin, Greek, Cyrillic, Arabic, and Hebrew, is resolved by an
  *  in-register @c vpermi2b page network over @c sz_utf8_sentence_break_flat_lut_0800_; the big
  *  homogeneous OLetter blocks, CJK, Hangul, and so on, by arithmetic range compares with zero data;
  *  the cold 3-byte-BMP residue by a page-compressed flat table read with one @c vpgatherdd per
@@ -90,9 +90,9 @@ STRINGZILLA_INLINE __m512i sz_utf8_sentence_break_cold_compact_icelake_( //
  *  @param[in] raw_next1_u8x64 Byte at lane+1, the first continuation.
  *  @param[in] raw_next2_u8x64 Byte at lane+2.
  *  @param[in] raw_next3_u8x64 Byte at lane+3.
- *  @param[in] high_u8x64 Per-lane high byte of the reconstructed BMP codepoint, `cp >> 8`,
+ *  @param[in] high_u8x64 Per-lane high byte of the reconstructed BMP codepoint, <tt>cp >> 8</tt>,
  *      from the driver.
- *  @param[in] low_u8x64 Per-lane low byte of the reconstructed codepoint, `cp & 0xFF`,
+ *  @param[in] low_u8x64 Per-lane low byte of the reconstructed codepoint, <tt>cp & 0xFF</tt>,
  *      from the driver.
  *  @param[in] four_byte_starts_m64 Lanes that begin a 4-byte UTF-8 sequence, gating the ≥
  *      0x10000 astral test.

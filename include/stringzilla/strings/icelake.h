@@ -77,7 +77,7 @@ STRINGZILLA_INLINE void sz_strings_lookup_bytes_icelake_(sz_ptr_t target, sz_cpt
 }
 
 /** The bytes of @p text_u8x64 in the byteset @p set_u8x64 holds twice over, as bits: @c vpermb
- *  reads only the low 6 bits of an index, so `c >> 3` picks the set's byte and @c c its bit. */
+ *  reads only the low 6 bits of an index, so <tt>c >> 3</tt> picks the set's byte and @c c its bit. */
 STRINGZILLA_INLINE sz_u64_t sz_strings_classify_icelake_(__m512i text_u8x64, __m512i set_u8x64) {
     __m512i const bits_u8x64 = _mm512_set1_epi64((long long)0x8040201008040201ull);
     __m512i const bytes_u8x64 = _mm512_permutexvar_epi8(_mm512_srli_epi16(text_u8x64, 3), set_u8x64);
@@ -184,7 +184,7 @@ STRINGZILLA_INLINE sz_size_t sz_strings_escape_sum_icelake_(__m512i extras_u8x64
     return (sz_size_t)_mm512_reduce_add_epi64(_mm512_sad_epu8(lanes_u8x64, _mm512_setzero_si512()));
 }
 
-/** Percent-encodes the @p lanes bytes of @p text_u8x16, those of @p escaped as `%` and the digits
+/** Percent-encodes the @p lanes bytes of @p text_u8x16, those of @p escaped as <tt>\%</tt> and the digits
  *  of @p high_u8x16 and @p low_u8x16, into @p target exactly, returning the bytes written. Each
  *  byte takes a 4-byte slot of itself and its digits, and keeps 1 or 3 of them. */
 STRINGZILLA_INLINE sz_size_t sz_strings_escape_url_slots_icelake_(__m128i text_u8x16, __m128i high_u8x16,
@@ -202,7 +202,7 @@ STRINGZILLA_INLINE sz_size_t sz_strings_escape_url_slots_icelake_(__m128i text_u
     return written;
 }
 
-/** Percent-encodes the @p lanes bytes of @p text_u8x64, those of @p escaped as `%XY`, into
+/** Percent-encodes the @p lanes bytes of @p text_u8x64, those of @p escaped as <tt>\%XY</tt>, into
  *  @p target exactly, 16 bytes at a time. */
 STRINGZILLA_INLINE void sz_strings_escape_url_emit_icelake_(__m512i text_u8x64, sz_u64_t escaped, sz_size_t lanes,
                                                             sz_u8_t *target) {
@@ -377,7 +377,7 @@ STRINGZILLA_INLINE __m512i sz_strings_hex_values_icelake_(__m512i text_u8x64) {
  *  @brief Unescapes the @p count percent-encoded strings of a tape, read in its own order as one
  *      run of bytes, into fresh blocks: each block decodes its escapes in place and compresses
  *      away their digits.
- *  @return @c sz_invalid_utf8_k with nothing written when a `%` lacks two hexadecimal digits after
+ *  @return @c sz_invalid_utf8_k with nothing written when a <tt>\%</tt> lacks two hexadecimal digits after
  *      it in its string, for the driver to name that string.
  */
 STRINGZILLA_INLINE sz_status_t sz_strings_unescape_url_run_icelake_(sz_strings_view_t const *strings, sz_size_t count,

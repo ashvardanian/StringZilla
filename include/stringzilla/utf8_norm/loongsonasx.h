@@ -7,14 +7,14 @@
  *  This backend overrides exactly one point of the shared engine: the scan primitive
  *  @c sz_utf8_norm_classify_loongsonasx_, which locates the first non-inert byte for a form. The
  *  two public entry points, @c sz_utf8_norm_loongsonasx and
- *  @c sz_utf8_find_denormalized_loongsonasx, reuse the force-inlined engines from `serial.h`,
+ *  @c sz_utf8_find_denormalized_loongsonasx, reuse the force-inlined engines from <tt>serial.h</tt>,
  *  passing this scanner as the constant function address that devirtualizes the call.
  *
  *  The scanner mirrors the Skylake structure at 256-bit width: a 32-byte all-ASCII gate via the
  *  @c sz_xvmovemask_b_utf8_norm_loongsonasx_ reduction, then a lead-byte classify over the shared
  *  64-entry @c sz_utf8_norm_lead_lut_, then the shared cold per-codepoint verify,
  *  @c sz_utf8_norm_verify_block_. LASX has no 64-entry permute, so the lookup uses the even/odd
- *  two-table @c __lasx_xvshuf_b blend from `find/loongsonasx.h`: `xvshuf_b(hi, lo, index)` is a
+ *  two-table @c __lasx_xvshuf_b blend from <tt>find/loongsonasx.h</tt>: <tt>xvshuf_b(hi, lo, index)</tt> is a
  *  32-entry per-128-bit-lane select over two 16-byte tables, keyed on the low five index bits, and
  *  two such selects, for index < 32 and index ≥ 32, are blended by @c __lasx_xvbitsel_v on bit five
  *  of the index to cover all 64 entries.
@@ -43,7 +43,7 @@ extern "C" {
 /**
  *  @brief Packs each byte's sign bit into a 32-bit mask, matching AVX2's @c _mm256_movemask_epi8.
  *
- *  As in `utf8_runes/loongsonasx.h`, @c __lasx_xvmskltz_b packs the sign bits into a 16-bit mask
+ *  As in <tt>utf8_runes/loongsonasx.h</tt>, @c __lasx_xvmskltz_b packs the sign bits into a 16-bit mask
  *  per 128-bit lane, word 0 for the low lane and word 4 for the high one, and this joins the two.
  */
 STRINGZILLA_INLINE sz_u32_t sz_xvmovemask_b_utf8_norm_loongsonasx_(__m256i sign_extended_u8x32) {
@@ -55,11 +55,11 @@ STRINGZILLA_INLINE sz_u32_t sz_xvmovemask_b_utf8_norm_loongsonasx_(__m256i sign_
 
 /**
  *  @brief 64-entry lead lookup without a wide permute: two even/odd @c __lasx_xvshuf_b selects over
- *      the broadcast LUT halves, blended on bit five of the index; `families & form_flag` then
+ *      the broadcast LUT halves, blended on bit five of the index; <tt>families & form_flag</tt> then
  *      picks the form.
  *
- *  @p index_u8x32 holds `byte & 0x3F` per lane. `__lasx_xvshuf_b(high, low, index)` selects, per
- *  128-bit lane, `low[index]` for @c index in [0, 16) and `high[index - 16]` for @c index in [16,
+ *  @p index_u8x32 holds <tt>byte & 0x3F</tt> per lane. <tt>__lasx_xvshuf_b(high, low, index)</tt> selects, per
+ *  128-bit lane, <tt>low[index]</tt> for @c index in [0, 16) and <tt>high[index - 16]</tt> for @c index in [16,
  *  32), reading only the low five index bits. So one select covers the index range [0, 32) over
  *  tables 0..15 and 16..31, and a second covers [32, 64), because the discarded bit five re-bases
  *  the index onto [0, 32) over tables 32..47 and 48..63. @c __lasx_xvbitsel_v then picks the high

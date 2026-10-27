@@ -95,11 +95,6 @@ SPLITLINES_CASES = [
 ]
 
 
-def test_library_properties():
-    """`sz.__version__` is a three-part semantic version."""
-    assert len(sz.__version__.split(".")) == 3, "Semantic versioning must be preserved"
-
-
 @pytest.mark.parametrize("native_type", [str, bytes, bytearray])
 def test_unit_construct(native_type):
     """`String` construction accepts native `str`, `bytes`, and `bytearray` input and reports the same

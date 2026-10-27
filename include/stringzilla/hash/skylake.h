@@ -229,38 +229,38 @@ STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_skylake_(sz_
  *  the select truth table, @c majority is the majority truth table, and the three-way exclusive or
  *  that both sigma families need is the parity truth table. */
 
-/** Evaluates `(state_e & state_f) ^ (~state_e & state_g)` across 16 lanes. */
+/** Evaluates <tt>(state_e & state_f) ^ (~state_e & state_g)</tt> across 16 lanes. */
 STRINGZILLA_INLINE __m512i sz_sha256_choice_skylake_(__m512i state_e_u32x16, __m512i state_f_u32x16,
                                                      __m512i state_g_u32x16) {
     return _mm512_ternarylogic_epi32(state_e_u32x16, state_f_u32x16, state_g_u32x16, 0xCA);
 }
 
-/** Evaluates `(state_a & state_b) ^ (state_a & state_c) ^ (state_b & state_c)` across 16 lanes. */
+/** Evaluates <tt>(state_a & state_b) ^ (state_a & state_c) ^ (state_b & state_c)</tt> across 16 lanes. */
 STRINGZILLA_INLINE __m512i sz_sha256_majority_skylake_(__m512i state_a_u32x16, __m512i state_b_u32x16,
                                                        __m512i state_c_u32x16) {
     return _mm512_ternarylogic_epi32(state_a_u32x16, state_b_u32x16, state_c_u32x16, 0xE8);
 }
 
-/** Evaluates `ror(state_a, 2) ^ ror(state_a, 13) ^ ror(state_a, 22)` across 16 lanes. */
+/** Evaluates <tt>ror(state_a, 2) ^ ror(state_a, 13) ^ ror(state_a, 22)</tt> across 16 lanes. */
 STRINGZILLA_INLINE __m512i sz_sha256_big_sigma0_skylake_(__m512i state_a_u32x16) {
     return _mm512_ternarylogic_epi32(_mm512_ror_epi32(state_a_u32x16, 2), _mm512_ror_epi32(state_a_u32x16, 13),
                                      _mm512_ror_epi32(state_a_u32x16, 22), 0x96);
 }
 
-/** Evaluates `ror(state_e, 6) ^ ror(state_e, 11) ^ ror(state_e, 25)` across 16 lanes. */
+/** Evaluates <tt>ror(state_e, 6) ^ ror(state_e, 11) ^ ror(state_e, 25)</tt> across 16 lanes. */
 STRINGZILLA_INLINE __m512i sz_sha256_big_sigma1_skylake_(__m512i state_e_u32x16) {
     return _mm512_ternarylogic_epi32(_mm512_ror_epi32(state_e_u32x16, 6), _mm512_ror_epi32(state_e_u32x16, 11),
                                      _mm512_ror_epi32(state_e_u32x16, 25), 0x96);
 }
 
-/** Evaluates `ror(word, 7) ^ ror(word, 18) ^ (word >> 3)` across 16 lanes. */
+/** Evaluates <tt>ror(word, 7) ^ ror(word, 18) ^ (word >> 3)</tt> across 16 lanes. */
 STRINGZILLA_INLINE __m512i sz_sha256_small_sigma0_skylake_(__m512i message_word_u32x16) {
     return _mm512_ternarylogic_epi32(_mm512_ror_epi32(message_word_u32x16, 7),
                                      _mm512_ror_epi32(message_word_u32x16, 18),
                                      _mm512_srli_epi32(message_word_u32x16, 3), 0x96);
 }
 
-/** Evaluates `ror(word, 17) ^ ror(word, 19) ^ (word >> 10)` across 16 lanes. */
+/** Evaluates <tt>ror(word, 17) ^ ror(word, 19) ^ (word >> 10)</tt> across 16 lanes. */
 STRINGZILLA_INLINE __m512i sz_sha256_small_sigma1_skylake_(__m512i message_word_u32x16) {
     return _mm512_ternarylogic_epi32(_mm512_ror_epi32(message_word_u32x16, 17),
                                      _mm512_ror_epi32(message_word_u32x16, 19),
@@ -269,9 +269,9 @@ STRINGZILLA_INLINE __m512i sz_sha256_small_sigma1_skylake_(__m512i message_word_
 
 /**
  *  @brief Exchanges eight 16-lane registers with sixteen 8-word lanes, in either direction.
- *  @param[inout] words Eight registers, rewritten in place.
+ *  @param[in,out] words_u32x16 Eight registers, rewritten in place.
  *
- *  Going in, register @c pair_index holds that lane in its low half and lane `pair_index + 8` in
+ *  Going in, register @c pair_index holds that lane in its low half and lane <tt>pair_index + 8</tt> in
  *  its high half; coming out, register @c word_index holds that word from all 16 lanes. The
  *  butterfly is its own inverse, so the same sequence serves the gather and the scatter and there
  *  is only one thing to get right.
@@ -318,8 +318,8 @@ STRINGZILLA_INLINE void sz_sha256_transpose_8x16_skylake_(__m512i words_u32x16[8
 /**
  *  @brief Transposes one 64-byte block from each of 16 lanes into word-major big-endian order.
  *  @param[in] lane_blocks Pointers to 16 message blocks, one per lane.
- *  @param[inout] schedule Loaded with the 16 blocks and rewritten in place, so
- *      `schedule[word_index]` leaves holding that word from all 16 lanes.
+ *  @param[in,out] schedule_u32x16 Loaded with the 16 blocks and rewritten in place, so
+ *      <tt>schedule_u32x16[word_index]</tt> leaves holding that word from all 16 lanes.
  *
  *  Two interleave stages gather 32-bit and then 64-bit neighbours inside each 128-bit sub-lane, two
  *  sub-lane exchange stages then move whole quarters across the register. The big-endian byte swap
@@ -417,12 +417,12 @@ STRINGZILLA_INLINE void sz_sha256_round_skylake_(                               
 /**
  *  @brief Transposes and compresses one 64-byte block for each of 16 lanes into
  *      word-major hash registers.
- *  @param[inout] hashes Eight registers of word-major hash state, updated in place.
+ *  @param[in,out] hashes_u32x16 Eight registers of word-major hash state, updated in place.
  *  @param[in] lane_blocks Pointers to 16 message blocks, one per lane.
  *  @param[in] active_m16 Lanes whose block counts; the rest keep their hash bit-for-bit.
  *
  *  Masking rides on the closing accumulation rather than on a saved copy and a blend. Compression
- *  ends in `hash += working`, so withholding that one add per word is all a lane needs to sit out,
+ *  ends in <tt>hash += working</tt>, so withholding that one add per word is all a lane needs to sit out,
  *  which costs no extra register at a point where eight state and sixteen schedule registers are
  *  already live. The rounds still run for an inactive lane and produce a value nobody reads, so its
  *  block pointer only has to be readable - @c sz_sha256_state_t::block is always 64 valid bytes and
@@ -585,18 +585,18 @@ STRINGZILLA_OUTLINED_ void sz_sha256_compress_skylake_(__m512i hashes_u32x16[8],
 /**
  *  @brief Compresses each lane's own run of whole blocks, plus an optional buffered block
  *      ahead of them.
- *  @param[inout] states The lane states, whose hash words are gathered on entry and
+ *  @param[in,out] states The lane states, whose hash words are gathered on entry and
  *      scattered on exit.
  *  @param[in] active_lanes_count Lanes owning a state, 1 to 16; the rest borrow lane zero
  *      and are discarded.
  *  @param[in] buffered_bitmask Lanes whose @c block the caller has just filled to 64
  *      bytes, compressed first.
- *  @param[inout] cursors Per-lane read positions, advanced past every block consumed.
+ *  @param[in,out] cursors Per-lane read positions, advanced past every block consumed.
  *  @param[in] blocks_per_lane Whole 64-byte blocks each lane owns; the loop runs as far
  *      as the largest.
  *
  *  Lanes retire independently. @p blocks_per_lane rides in a register as a countdown, and two masks
- *  come off it each turn: `counts > 0` says whose accumulation lands, `counts > 1` says whose
+ *  come off it each turn: <tt>counts > 0</tt> says whose accumulation lands, <tt>counts > 1</tt> says whose
  *  cursor steps. Splitting the two is what parks a retiring lane on its @b last full block instead
  *  of on a short tail, so every read stays in bounds with no per-block pointer select. A lane
  *  owning no blocks at all reads its own @c block buffer, which is always 64 valid bytes.

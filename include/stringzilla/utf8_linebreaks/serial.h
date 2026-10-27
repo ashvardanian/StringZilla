@@ -117,7 +117,7 @@ typedef struct sz_line_break_cluster_t {
 } sz_line_break_cluster_t;
 
 /** A fully-zeroed invalid cluster standing in for the start or end of text: every field is set, so
- *  no slot is ever read uninitialized even though `valid == sz_false_k` gates its use. */
+ *  no slot is ever read uninitialized even though <tt>valid == sz_false_k</tt> gates its use. */
 STRINGZILLA_INLINE sz_line_break_cluster_t sz_line_break_cluster_invalid_(void) {
     sz_line_break_cluster_t cluster;
     cluster.byte_start = 0;
@@ -210,7 +210,7 @@ typedef struct sz_line_break_state_serial_t {
     /** the last codepoint decoded was a ZWJ (LB8a; carried into the decoder) */
     sz_bool_t last_codepoint_was_zwj;
 
-    /** index of @c right; the LB8 @c had_space / left-context `≥ 2` guards */
+    /** index of @c right; the LB8 @c had_space / left-context <tt>≥ 2</tt> guards */
     sz_size_t cluster_index;
 } sz_line_break_state_serial_t;
 
@@ -652,13 +652,13 @@ typedef struct sz_line_break_carry_t {
     /** the cluster two before lane 0 is East-Asian F/W/H (LB19 ~prev2EAW) */
     sz_u8_t left2_eaw;
 
-    /** the cluster before lane 0 carries gc=Pf (LB19 `prev_(QU & ~PF)`) */
+    /** the cluster before lane 0 carries gc=Pf (LB19 <tt>prev_(QU & ~PF)</tt>) */
     sz_u8_t left_pf;
 
     /** the cluster before lane 0 is an aksara base AK|AS|DottedCircle (LB28a) */
     sz_u8_t left_aksara;
 
-    /** the cluster two before lane 0 is an aksara base (LB28a `prev_(base_vi)`) */
+    /** the cluster two before lane 0 is an aksara base (LB28a <tt>prev_(base_vi)</tt>) */
     sz_u8_t left2_aksara;
 
     /** the cluster before lane 0 is Extended_Pictographic & unassigned (LB30b) */

@@ -5,7 +5,7 @@
  *  @brief IBM Power VSX backend for AES-256 in counter and Galois/counter modes.
  *
  *  The fourteen rounds are written out rather than looped, for the same reason the eight lanes are
- *  and the one `cipher/icelake.h` spells out.
+ *  and the one <tt>cipher/icelake.h</tt> spells out.
  *
  *  @sa include/stringzilla/cipher.h
  */
@@ -276,7 +276,7 @@ STRINGZILLA_INLINE __vector unsigned char sz_aes256_block_encrypt_powervsx_(sz_a
 /**
  *  @brief Encrypts eight blocks with the expanded schedule.
  *  @param[in] key The expanded schedule.
- *  @param[inout] blocks_u8x16 The eight plaintext blocks, replaced by their ciphertexts.
+ *  @param[in,out] blocks_u8x16 The eight plaintext blocks, replaced by their ciphertexts.
  *
  *  One round instruction has several cycles of latency and issues every cycle, so a single chain of
  *  fourteen dependent rounds leaves most of that throughput idle.
@@ -454,9 +454,9 @@ STRINGZILLA_API sz_status_t sz_aes256_ctr_xor_powervsx(sz_aes256_key_t const *ke
  *  @brief Accumulates the 256-bit carry-less product of two blocks into a running triple.
  *  @param[in] block_u8x16 One operand, in big-endian register order.
  *  @param[in] subkey_u8x16 The other operand, one of the subkey powers.
- *  @param[inout] low_u8x16 Accumulates the product of the two low halves.
- *  @param[inout] middle_u8x16 Accumulates both cross products.
- *  @param[inout] high_u8x16 Accumulates the product of the two high halves.
+ *  @param[in,out] low_u8x16 Accumulates the product of the two low halves.
+ *  @param[in,out] middle_u8x16 Accumulates both cross products.
+ *  @param[in,out] high_u8x16 Accumulates the product of the two high halves.
  *
  *  The polynomial multiplier here sums two doubleword products rather than producing one, which is
  *  a different shape from the single-product multipliers the other backends use.
@@ -781,7 +781,7 @@ STRINGZILLA_INLINE __vector unsigned char sz_aes256_gcm_flush_partial_powervsx_(
 
 /**
  *  @brief Spends what is left of the keystream block the state carries, one byte at a time.
- *  @param[inout] state The state, whose two sixteen-byte counters advance together here.
+ *  @param[in,out] state The state, whose two sixteen-byte counters advance together here.
  *  @param[in] input The bytes to transform.
  *  @param[out] output Receives the transformed bytes.
  *  @param[in] count Bytes to consume, never more than the keystream block has left.
@@ -857,7 +857,7 @@ STRINGZILLA_INLINE __vector unsigned char sz_aes256_gcm_lane_powervsx_(sz_u8_t c
 
 /**
  *  @brief Transforms a chunk and absorbs its ciphertext, whichever side of the call that is.
- *  @param[inout] state The state.
+ *  @param[in,out] state The state.
  *  @param[in] text The chunk to transform.
  *  @param[in] length Bytes in the chunk.
  *  @param[out] output Receives the transformed bytes.

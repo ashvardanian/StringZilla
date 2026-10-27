@@ -13,15 +13,15 @@
  *  first start at or past the cursor, its end, and the cursor moved there. Where every match starts
  *  with a few literal bytes, a search for them replaces the marking.
  *
- *  Both are built the way `regex-automata` builds its dense DFAs, so leftmost-first priority,
+ *  Both are built the way @c regex-automata builds its dense DFAs, so leftmost-first priority,
  *  look-around and empty matches come out exactly as Rust's @c regex reports them: the NFA follows
  *  its Thompson compiler, and a DFA state is an ordered set of NFA states, cut after the first
  *  match under leftmost-first, that reports a match one byte late so look-ahead can resolve.
  *
- *  A start-finding DFA past @ref sz_regex_reverse_budget_k states, which bounded gaps like
- *  `.{0,40}` reach, gives way to a bit-parallel automaton over the same reversed NFA: one bit per
+ *  A start-finding DFA past @c sz_regex_reverse_budget_k states, which bounded gaps like
+ *  <tt>.{0,40}</tt> reach, gives way to a bit-parallel automaton over the same reversed NFA: one bit per
  *  class occurrence, consuming whole codepoints, stepped by shifts and grouped follow sets. An
- *  end-finding DFA past @ref sz_regex_forward_budget_k gives way to a PikeVM over the forward NFA,
+ *  end-finding DFA past @c sz_regex_forward_budget_k gives way to a PikeVM over the forward NFA,
  *  which the engine keeps either way, as groups are read from it.
  *
  *  A lookaround compiles its body into the forward NFA as a sub-vocabulary of its own, and its look
@@ -85,10 +85,10 @@ typedef struct sz_regex_nfa_state_t {
     sz_u32_t target;
 
     /** The capture slot an empty state writes as a walk passes it, twice its group plus one where
-     *  the group closes, or @ref sz_regex_none_k. */
+     *  the group closes, or @c sz_regex_none_k. */
     sz_u32_t slot;
 
-    /** The first outgoing link of a ranges or union state, or @ref sz_regex_none_k. */
+    /** The first outgoing link of a ranges or union state, or @c sz_regex_none_k. */
     sz_u32_t first_link;
 
     /** The last outgoing link, which an appended link follows. */
@@ -98,16 +98,16 @@ typedef struct sz_regex_nfa_state_t {
 /** How a lookaround reads its body around the position it is tested at. */
 typedef enum sz_regex_lookaround_kind_t {
 
-    /** `(?=…)`: the body matches from the position on. */
+    /** <tt>(?=…)</tt>: the body matches from the position on. */
     sz_regex_lookahead_k = 0,
 
-    /** `(?!…)`: the body matches nowhere from the position on. */
+    /** <tt>(?</tt><tt>!</tt>…<tt>)</tt>: the body matches nowhere from the position on. */
     sz_regex_lookahead_negated_k = 1,
 
-    /** `(?<=…)`: the body matches up to the position. */
+    /** <tt>(?</tt><tt>&lt;=…)</tt>: the body matches up to the position. */
     sz_regex_lookbehind_k = 2,
 
-    /** `(?<!…)`: the body matches nowhere up to the position. */
+    /** <tt>(?</tt><tt>&lt;!</tt>…<tt>)</tt>: the body matches nowhere up to the position. */
     sz_regex_lookbehind_negated_k = 3,
 } sz_regex_lookaround_kind_t;
 
@@ -132,7 +132,7 @@ typedef struct sz_regex_lookaround_t {
  *  its lookaround holds a byte per step instead of the PikeVM. */
 typedef struct sz_regex_body_t {
 
-    /** Rows of `classes_count + 1` next states, the last column taken at the far edge of a
+    /** Rows of <tt>classes_count + 1</tt> next states, the last column taken at the far edge of a
      *  haystack, ids being row offsets; null for a body over other lookarounds, of one byte, or
      *  past its budget. */
     sz_u32_t const *rows;
@@ -151,7 +151,7 @@ typedef struct sz_regex_nfa_link_t {
     /** The state the link leads to. */
     sz_u32_t target;
 
-    /** The owner's next link, or @ref sz_regex_none_k. */
+    /** The owner's next link, or @c sz_regex_none_k. */
     sz_u32_t next;
 
     /** The lowest byte a ranges state's link consumes. */
@@ -192,9 +192,9 @@ typedef struct sz_regex_prefixes_t {
 /**
  *  @brief A compiled vocabulary of regular expressions: two automata over one byte-class map.
  *
- *  Both automata are dense tables of `classes_count + 1` columns per block, the last column taken
+ *  Both automata are dense tables of <tt>classes_count + 1</tt> columns per block, the last column taken
  *  at a haystack's edge, and one block per set of lookarounds that may hold at the boundary a step
- *  crosses, as @ref sz_regex_stride_ and @ref sz_regex_looks_block_ lay them out. A state id is its
+ *  crosses, as @c sz_regex_stride_ and @c sz_regex_looks_block_ lay them out. A state id is its
  *  row's offset, so a step is one load with no multiply; the dead state is zero, and accepting
  *  states are numbered last, so acceptance is one compare.
  *
@@ -204,7 +204,7 @@ typedef struct sz_regex_prefixes_t {
  *  boundary times four plus the kind right of it, each zero at the haystack's edge, one for a line
  *  feed, two for a word byte and three otherwise; a mask of them is a 16-bit word.
  *
- *  A lookaround is a look state testing bit `sz_regex_look_lookaround_k << i` of its index @c i,
+ *  A lookaround is a look state testing bit <tt>sz_regex_look_lookaround_k << i</tt> of its index @c i,
  *  which a table of the walk holds per haystack position, as @c lookarounds describes; a DFA step
  *  reads it to pick its block, except within one codepoint's folds, which take the first block.
  *
@@ -217,10 +217,10 @@ typedef struct sz_regex_engine_t {
     sz_u8_t const *byte_to_class;
 
     /** Start-finding automaton: the reversed patterns, unanchored, keeping every match, walked
-     *  right to left. Rows of blocks of `classes_count + 1` next states, the last column taken at
+     *  right to left. Rows of blocks of <tt>classes_count + 1</tt> next states, the last column taken at
      *  the start of a haystack, ids being row offsets. A state at or above @c reverse_accepts_begin
-     *  after the byte at @c i starts a match at `i + 1`; that step takes the block of the
-     *  lookarounds holding at `i + 1`. */
+     *  after the byte at @c i starts a match at <tt>i + 1</tt>; that step takes the block of the
+     *  lookarounds holding at <tt>i + 1</tt>. */
     sz_u32_t const *reverse_rows;
 
     /** End-finding automaton: the patterns anchored and leftmost-first, walked left to right from
@@ -336,8 +336,8 @@ typedef struct sz_regex_engine_t {
     sz_u32_t const *patterns_starts;
 
     /** Per pattern, its first capturing group among all groups numbered pattern after pattern,
-     *  then their total; group @c g of a pattern, counting from one, writes slots `2g` and
-     *  `2g + 1` of a walk. */
+     *  then their total; group @c g of a pattern, counting from one, writes slots @c 2g and
+     *  <tt>2g + 1</tt> of a walk. */
     sz_u32_t const *patterns_groups;
 
     /** Per lookaround, in the order of the look bits naming them, its body's entry into
@@ -425,7 +425,7 @@ enum { sz_regex_kinds_all_k = 0xFFFF };
 /** A link, state or repetition bound that is absent. */
 static sz_u32_t const sz_regex_none_k = 0xFFFFFFFFu;
 
-/** The deepest group nesting a pattern may use, as `regex-syntax` allows. */
+/** The deepest group nesting a pattern may use, as @c regex-syntax allows. */
 enum { sz_regex_depth_limit_k = 250 };
 
 /** The largest product of nested counted repetitions, as RE2 allows. */
@@ -437,26 +437,26 @@ enum { sz_regex_end_of_input_k = 256 };
 /** Look-around assertions, each a bit of one set. */
 typedef enum sz_regex_look_t {
 
-    /** `\A`, and `^` outside `(?m)`. */
+    /** <tt>\\A</tt>, and <tt>^</tt> outside <tt>(?m)</tt>. */
     sz_regex_look_text_start_k = 1,
 
-    /** `\z`, and `$` outside `(?m)`. */
+    /** <tt>\\z</tt>, and <tt>$</tt> outside <tt>(?m)</tt>. */
     sz_regex_look_text_end_k = 2,
 
-    /** `^` under `(?m)`: the haystack's start or just after a line feed. */
+    /** <tt>^</tt> under <tt>(?m)</tt>: the haystack's start or just after a line feed. */
     sz_regex_look_line_start_k = 4,
 
-    /** `$` under `(?m)`: the haystack's end or just before a line feed. */
+    /** <tt>$</tt> under <tt>(?m)</tt>: the haystack's end or just before a line feed. */
     sz_regex_look_line_end_k = 8,
 
-    /** `\b`: one side is an ASCII word byte and the other is not. */
+    /** <tt>\\b</tt>: one side is an ASCII word byte and the other is not. */
     sz_regex_look_word_boundary_k = 16,
 
-    /** `\B`: both sides are ASCII word bytes, or neither is. */
+    /** <tt>\\B</tt>: both sides are ASCII word bytes, or neither is. */
     sz_regex_look_word_inside_k = 32,
 
     /** The first lookaround's bit; lookaround @c i of a vocabulary holds bit
-     *  `sz_regex_look_lookaround_k << i`. */
+     *  <tt>sz_regex_look_lookaround_k << i</tt>. */
     sz_regex_look_lookaround_k = 64,
 } sz_regex_look_t;
 
@@ -467,7 +467,7 @@ enum { sz_regex_lookarounds_limit_k = 26 };
  *  halved budgets keep the tables' bytes; a vocabulary with more walks positions and the PikeVM. */
 enum { sz_regex_columned_lookarounds_k = 6 };
 
-/** Words of @ref sz_regex_engine_t::looks_bytes: the mask of one-byte lookarounds, then two rows of
+/** Words of @c sz_regex_engine_t::looks_bytes: the mask of one-byte lookarounds, then two rows of
  *  256. */
 enum { sz_regex_singles_k = 513 };
 
@@ -486,13 +486,13 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_regex_looks_block_(sz_u32_t classes_count, sz
 /** The flags a group scopes, each a bit of one set. */
 typedef enum sz_regex_flags_t {
 
-    /** `(?s)`: the dot also matches a line feed. */
+    /** <tt>(?s)</tt>: the dot also matches a line feed. */
     sz_regex_flag_dot_all_k = 1,
 
-    /** `(?m)`: `^` and `$` also match around line feeds. */
+    /** <tt>(?m)</tt>: <tt>^</tt> and <tt>$</tt> also match around line feeds. */
     sz_regex_flag_multi_line_k = 2,
 
-    /** `(?U)`: quantifiers are lazy unless marked with `?`. */
+    /** <tt>(?U)</tt>: quantifiers are lazy unless marked with <tt>?</tt>. */
     sz_regex_flag_swap_greed_k = 4,
 } sz_regex_flags_t;
 
@@ -581,7 +581,7 @@ typedef struct sz_regex_node_t {
     /** A repetition's least count. */
     sz_u32_t minimum;
 
-    /** A repetition's greatest count, or @ref sz_regex_none_k when unbounded. */
+    /** A repetition's greatest count, or @c sz_regex_none_k when unbounded. */
     sz_u32_t maximum;
 
     /** The largest product of counted repetitions nested here, which RE2 caps. */
@@ -691,7 +691,7 @@ typedef struct sz_regex_dfa_t {
     sz_size_t *offsets;
     sz_size_t offsets_capacity;
 
-    /** Per state, a row of next states as @ref sz_regex_stride_ sizes it,
+    /** Per state, a row of next states as @c sz_regex_stride_ sizes it,
      *  as indices until publication. */
     sz_u32_t *rows;
     sz_size_t rows_capacity;
@@ -729,7 +729,7 @@ typedef struct sz_regex_position_t {
     /** The empty state every path reaches. */
     sz_u32_t exit;
 
-    /** The class node, or @ref sz_regex_none_k. */
+    /** The class node, or @c sz_regex_none_k. */
     sz_u32_t node;
 } sz_regex_position_t;
 
@@ -844,7 +844,7 @@ typedef struct sz_regex_builder_t {
      *  walks; then the @c sz_regex_singles_k words of @ref sz_regex_engine_t::looks_bytes. */
     sz_u32_t *bodies;
 
-    /** Rows of every body's DFA, `classes_count + 1` columns each, and how many words there are
+    /** Rows of every body's DFA, <tt>classes_count + 1</tt> columns each, and how many words there are
      *  and fit. */
     sz_u32_t *bodies_rows;
     sz_size_t bodies_rows_count, bodies_rows_capacity;
@@ -903,7 +903,7 @@ typedef struct sz_regex_builder_t {
 
 #pragma region Parsing
 
-/** Whether @p byte is an ASCII word byte, which is what `\b` and `\B` test. */
+/** Whether @p byte is an ASCII word byte, which is what <tt>\\b</tt> and <tt>\\B</tt> test. */
 STRINGZILLA_CONSTEXPR sz_bool_t sz_regex_is_word_(sz_u32_t byte) {
     return (sz_bool_t)((byte >= '0' && byte <= '9') || (byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z') ||
                        byte == '_');
@@ -1047,7 +1047,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_add_expansion_(sz_regex_builder_t *build
 }
 
 /**
- *  @brief Appends the codepoints `[first, last]` a pattern spells to the class whose ranges start
+ *  @brief Appends the codepoints <tt>[first, last]</tt> a pattern spells to the class whose ranges start
  *      at @p begin: as written when cased, else their case folds, a fold to several codepoints
  *      pending as an alternative.
  *
@@ -1059,7 +1059,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_add_members_(sz_regex_builder_t *builder
     sz_status_t status = sz_success_k;
     if (builder->case_sensitivity == sz_cased_k) return sz_regex_add_range_(builder, first, last);
     for (sz_u32_t codepoint = first; status == sz_success_k; ++codepoint) {
-        sz_u8_t lead[4];
+        sz_u8_t lead[4] = {0};
         sz_rune_t folds[3];
         sz_u32_t run_last = codepoint;
         sz_size_t folds_count = 1;
@@ -1158,7 +1158,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_push_pending_(sz_regex_builder_t *builde
  *  @brief Pops the children pushed since @p base into one sequence node.
  *
  *  A sequence of one child is that child, and an empty concatenation is the empty node, as
- *  `regex-syntax` simplifies them.
+ *  @c regex-syntax simplifies them.
  */
 STRINGZILLA_INLINE sz_status_t sz_regex_add_sequence_(sz_regex_builder_t *builder, sz_regex_node_kind_t kind,
                                                       sz_size_t base, sz_u32_t *index) {
@@ -1204,7 +1204,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_add_sequence_(sz_regex_builder_t *builde
  *  @brief Turns the ranges from @p begin to the end of @c ranges into one normalized class node.
  *
  *  The folds of an uncased class that span several codepoints follow it as alternatives, each a
- *  sequence of single codepoints, so `[sß]` tries @c s before @c ss; a class left with no ranges is
+ *  sequence of single codepoints, so <tt>[sß]</tt> tries @c s before @c ss; a class left with no ranges is
  *  dropped from the alternation. Out of line, as it recurses for those folds and has six callers.
  */
 STRINGZILLA_OUTLINED_ sz_status_t sz_regex_add_class_(sz_regex_builder_t *builder, sz_size_t begin, sz_u32_t *index) {
@@ -1239,9 +1239,9 @@ STRINGZILLA_OUTLINED_ sz_status_t sz_regex_add_class_(sz_regex_builder_t *builde
 }
 
 /**
- *  @brief Wraps @p child into a repetition, simplified as `regex-syntax` does.
+ *  @brief Wraps @p child into a repetition, simplified as @c regex-syntax does.
  *
- *  A child that only matches empty repeats at most once, `{0}` is the empty node, and `{1}` is the
+ *  A child that only matches empty repeats at most once, <tt>{0}</tt> is the empty node, and <tt>{1}</tt> is the
  *  child itself, which then carries @p repeats.
  */
 STRINGZILLA_INLINE sz_status_t sz_regex_add_repeat_(sz_regex_builder_t *builder, sz_u32_t child, sz_u32_t minimum,
@@ -1311,7 +1311,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_add_perl_(sz_regex_builder_t *builder, s
  *  @brief Reads a character escape, the part after the backslash shared inside and outside classes.
  *  @param[out] rune The codepoint it names, when it names one.
  *  @return @c sz_success_k for a codepoint, @c sz_status_unknown_k for anything else, or
- *      @c sz_invalid_syntax_k for a malformed `\x`.
+ *      @c sz_invalid_syntax_k for a malformed <tt>\\x</tt>.
  */
 STRINGZILLA_INLINE sz_status_t sz_regex_parse_character_escape_(sz_regex_parser_t *parser, sz_u32_t *rune) {
     sz_u8_t const letter = parser->text[parser->position];
@@ -1361,7 +1361,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_parse_character_escape_(sz_regex_parser_
     return sz_success_k;
 }
 
-/** Appends the ranges of a POSIX class at `[:`, which `[[:alpha:]]` and `[[:^alpha:]]` spell. */
+/** Appends the ranges of a POSIX class at <tt>[:</tt>, which <tt>[[:alpha:]]</tt> and <tt>[[:^alpha:]]</tt> spell. */
 STRINGZILLA_INLINE sz_status_t sz_regex_parse_posix_(sz_regex_builder_t *builder, sz_regex_parser_t *parser) {
     static char const *const names[14] = {"alnum", "alpha", "ascii", "blank", "cntrl", "digit", "graph",
                                           "lower", "print", "punct", "space", "upper", "word",  "xdigit"};
@@ -1431,7 +1431,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_parse_class_rune_(sz_regex_parser_t *par
     }
 }
 
-/** Parses a bracketed class from its `[` into one class node. */
+/** Parses a bracketed class from its <tt>[</tt> into one class node. */
 STRINGZILLA_INLINE sz_status_t sz_regex_parse_bracket_(sz_regex_builder_t *builder, sz_regex_parser_t *parser,
                                                        sz_u32_t *index) {
     sz_size_t const begin = builder->ranges_count;
@@ -1502,7 +1502,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_parse_count_(sz_regex_parser_t *parser, 
 STRINGZILLA_OUTLINED_ sz_status_t sz_regex_parse_alternation_(sz_regex_builder_t *builder, sz_regex_parser_t *parser,
                                                               sz_u32_t *flags, sz_u32_t depth, sz_u32_t *index);
 
-/** Parses a lookaround from the `=`, `!` or `<` after its `(?` into a look node testing the
+/** Parses a lookaround from the <tt>=</tt>, <tt>!</tt> or <tt>&lt;</tt> after its <tt>(?</tt> into a look node testing the
  *  lookaround's bit, refusing a capturing group in its body, out of which no walk reads groups. */
 STRINGZILLA_OUTLINED_ sz_status_t sz_regex_parse_lookaround_(sz_regex_builder_t *builder, sz_regex_parser_t *parser,
                                                              sz_u32_t flags, sz_u32_t depth, sz_u32_t *index) {
@@ -1539,9 +1539,9 @@ STRINGZILLA_OUTLINED_ sz_status_t sz_regex_parse_lookaround_(sz_regex_builder_t 
 }
 
 /**
- *  @brief Parses a group from its `(`: capturing, non-capturing, named, a flag group,
+ *  @brief Parses a group from its <tt>(</tt>: capturing, non-capturing, named, a flag group,
  *      or a lookaround.
- *  @param[out] index The group's node, or @ref sz_regex_none_k for a flag group, which only
+ *  @param[out] index The group's node, or @c sz_regex_none_k for a flag group, which only
  *      changes @p flags for the rest of the enclosing group.
  *
  *  Capturing groups, named or not, are numbered from one by their opening parenthesis.
@@ -1681,7 +1681,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_parse_escape_(sz_regex_builder_t *builde
 }
 
 /** Parses the quantifiers after an item, refusing a second one,
- *  which RE2 and `regex-syntax` read apart. */
+ *  which RE2 and @c regex-syntax read apart. */
 STRINGZILLA_INLINE sz_status_t sz_regex_parse_quantifier_(sz_regex_builder_t *builder, sz_regex_parser_t *parser,
                                                           sz_u32_t flags, sz_u32_t *index) {
     sz_u8_t const *const text = parser->text;
@@ -1725,7 +1725,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_parse_quantifier_(sz_regex_builder_t *bu
     return sz_regex_add_repeat_(builder, *index, minimum, maximum, greed, repeats, index);
 }
 
-/** Parses items up to the next `|` or `)` into one concatenation. */
+/** Parses items up to the next <tt>|</tt> or <tt>)</tt> into one concatenation. */
 STRINGZILLA_OUTLINED_ sz_status_t sz_regex_parse_concat_(sz_regex_builder_t *builder, sz_regex_parser_t *parser,
                                                          sz_u32_t *flags, sz_u32_t depth, sz_u32_t *index) {
     sz_size_t const base = builder->pending_count;
@@ -1881,7 +1881,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_nfa_patch_(sz_regex_builder_t *builder, 
 }
 
 /** Splits one codepoint range into UTF-8 byte-range sequences,
- *  as `regex-syntax`'s @c Utf8Sequences does. */
+ *  as @c regex-syntax's @c Utf8Sequences does. */
 STRINGZILLA_INLINE sz_size_t sz_regex_utf8_sequences_(sz_u32_t first, sz_u32_t last, sz_u8_t lows[][4],
                                                       sz_u8_t highs[][4], sz_u8_t *lengths) {
     sz_u32_t stack_first[16], stack_last[16];
@@ -2028,10 +2028,10 @@ STRINGZILLA_OUTLINED_ sz_status_t sz_regex_compile_copies_(sz_regex_builder_t *b
 }
 
 /**
- *  @brief Compiles a repetition the way `regex-automata`'s Thompson compiler does, which fixes how
+ *  @brief Compiles a repetition the way @c regex-automata's Thompson compiler does, which fixes how
  *      leftmost-first priority treats empty iterations.
  *
- *  An unbounded repetition of a child that can match empty compiles as `(x+)?` rather than a loop
+ *  An unbounded repetition of a child that can match empty compiles as <tt>(x+)?</tt> rather than a loop
  *  around @c x, and a bounded one as a chain of optional copies sharing one exit.
  */
 STRINGZILLA_OUTLINED_ sz_status_t sz_regex_compile_repeat_(sz_regex_builder_t *builder, sz_regex_nfa_t *nfa,
@@ -2444,7 +2444,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_dfa_intern_(sz_regex_builder_t *builder,
 
 /**
  *  @brief Forms the key of the state @p index moves to on @p unit, a byte or the end of input,
- *      into `builder->key`, porting `regex-automata`'s @c determinize::next.
+ *      into @c builder->key, porting @c regex-automata's @c determinize::next.
  *
  *  Assertions that look ahead are settled first, by re-running the closure from every state once
  *  @p unit or the lookarounds of @p looks, which hold at the boundary before @p unit, prove more of
@@ -3754,7 +3754,7 @@ typedef struct sz_regex_walk_t {
     sz_cptr_t (*find_prefixes)(sz_cptr_t, sz_size_t, sz_regex_prefixes_t const *);
 
     /** The tier's fill of the lookaround table from the bytes beside each position, as
-     *  @ref sz_regex_fill_looks_serial_ does. */
+     *  @c sz_regex_fill_looks_serial_ does. */
     void (*fill_looks)(sz_cptr_t, sz_size_t, sz_u32_t const *, sz_u32_t, sz_u32_t *);
 
     /** The PikeVM that end walks run without forward rows and groups are read with, empty unless
@@ -3808,7 +3808,7 @@ STRINGZILLA_INLINE sz_size_t sz_regex_boundary_(sz_cptr_t haystack, sz_size_t le
 }
 
 /**
- *  @brief Whether so few bytes of `[begin, end)` leave the start pass's idle states that skipping
+ *  @brief Whether so few bytes of <tt>[begin, end)</tt> leave the start pass's idle states that skipping
  *      between them beats walking in lockstep, judged by 64 evenly spaced samples, as in
  *      @c substrings.
  *
@@ -3986,7 +3986,7 @@ STRINGZILLA_INLINE sz_size_t sz_regex_unit_before_(sz_regex_engine_t const *engi
                                                    sz_size_t *unit_class) {
     sz_u8_t const last = (sz_u8_t)haystack[end - 1];
     sz_size_t back = 2, low = 0, high = engine->positions_ranges_count;
-    sz_rune_t rune;
+    sz_rune_t rune = 0;
     if (last < 0x80) {
         *unit_class = engine->positions_ascii[last];
         return end - 1;
@@ -4284,8 +4284,8 @@ STRINGZILLA_INLINE sz_u64_t const *sz_regex_prime_positions_folded_(sz_regex_eng
 }
 
 /**
- *  @brief Marks every position in `[low, edge]` that some match starts at, walking right to left
- *      from the start-finding state at @p edge; the bit of position @c p is `p - base`, ORed in.
+ *  @brief Marks every position in <tt>[low, edge]</tt> that some match starts at, walking right to left
+ *      from the start-finding state at @p edge; the bit of position @c p is <tt>p - base</tt>, ORed in.
  *  @param[out] final The state after the byte before @p low, or after the haystack's first byte
  *      where @p low is zero.
  *  @return What it cost in bytes of a lockstep pass, which steps one byte about three times as fast
@@ -4326,9 +4326,9 @@ STRINGZILLA_INLINE sz_size_t sz_regex_mark_serial_(sz_regex_engine_t const *engi
 }
 
 /**
- *  @brief Marks every unit boundary in `[low, edge]` that some match starts at, stepping
+ *  @brief Marks every unit boundary in <tt>[low, edge]</tt> that some match starts at, stepping
  *      position sets right to left from @p entry at @p edge; the bit of position @c p is
- *      `p - base`, ORed in.
+ *      <tt>p - base</tt>, ORed in.
  *  @return What it cost in bytes of a lockstep pass, which steps one unit in about the time of one
  *      byte and covers four bytes in the time of one byte-set search.
  *
@@ -4607,7 +4607,7 @@ STRINGZILLA_INLINE void sz_regex_mark_chains_positions_serial_(
  *      rather than walk its windows in lockstep.
  *
  *  Before any batch skipped, the samples of @ref sz_regex_live_sparse_ decide. A rare live byte
- *  can still hold a walk off its idle states for long, like the opening quote of `"[^"]*"`, so
+ *  can still hold a walk off its idle states for long, like the opening quote of <tt>"[^"]*"</tt>, so
  *  once batches skipped, skipping goes on only while it costs less than a lockstep pass would
  *  have cost over the bytes it spanned.
  */
@@ -4802,7 +4802,7 @@ STRINGZILLA_INLINE void sz_regex_mark_batch_serial_(sz_regex_engine_t const *eng
     }
 }
 
-/** The first marked position in `[from, last]`, or @c STRINGZILLA_SIZE_MAX. */
+/** The first marked position in <tt>[from, last]</tt>, or @c STRINGZILLA_SIZE_MAX. */
 STRINGZILLA_INLINE sz_size_t sz_regex_next_start_(sz_u64_t const *starts, sz_size_t base, sz_size_t from,
                                                   sz_size_t last) {
     sz_size_t const end = last - base;
@@ -4831,7 +4831,7 @@ STRINGZILLA_INLINE sz_regex_checkpoint_t const *sz_regex_checkpoint_meet_(sz_reg
     return STRINGZILLA_NULL;
 }
 
-/** Tells every checkpoint a walk left in `[first, bound)` the match the walk ended with,
+/** Tells every checkpoint a walk left in <tt>[first, bound)</tt> the match the walk ended with,
  *  valid only past it. */
 STRINGZILLA_INLINE void sz_regex_checkpoints_settle_(sz_regex_walk_t *walk, sz_size_t first, sz_size_t bound,
                                                      sz_size_t end, sz_u32_t pattern) {
@@ -4851,9 +4851,9 @@ STRINGZILLA_INLINE void sz_regex_checkpoints_settle_(sz_regex_walk_t *walk, sz_s
  *  At every checkpoint it crosses, a walk leaves its state; a later walk holding the same state
  *  there walks the same bytes on, so it stops and takes that walk's match if it ends past the
  *  checkpoint, or its own before it. That bounds the bytes walked when many starts share a long
- *  look-ahead, like every @c a of a line before `a[^\n]*z|a` gives up on the @c z. At a checkpoint
+ *  look-ahead, like every @c a of a line before <tt>a[^\\n]*z|a</tt> gives up on the @c z. At a checkpoint
  *  the walk also searches ahead for the next byte that moves its state, where the state stays put
- *  on the byte at hand, as inside `"[^"]*"`. Steps read @p looks for their blocks, which callers
+ *  on the byte at hand, as inside <tt>"[^"]*"</tt>. Steps read @p looks for their blocks, which callers
  *  pass as a literal null for a vocabulary without lookarounds.
  */
 STRINGZILLA_INLINE sz_bool_t sz_regex_walk_end_serial_(sz_regex_engine_t const *engine, sz_u8_t const *bytes,
@@ -4987,7 +4987,7 @@ STRINGZILLA_INLINE sz_u32_t sz_regex_looks_between_(sz_u32_t before, sz_u32_t af
  *      or @p close into the path's slots.
  *
  *  A state the position holds already ends its path, which keeps the first path's priority and
- *  slots, as `regex-automata`'s PikeVM does.
+ *  slots, as @c regex-automata's PikeVM does.
  */
 STRINGZILLA_INLINE void sz_regex_pike_close_(sz_regex_engine_t const *engine, sz_regex_pike_t *pike, sz_u32_t state,
                                              sz_size_t const *slots, sz_u32_t have, sz_size_t open, sz_size_t close) {
@@ -5043,8 +5043,9 @@ STRINGZILLA_INLINE void sz_regex_pike_close_(sz_regex_engine_t const *engine, sz
  *  @brief Runs the PikeVM at one position: closes the threads the last step entered, keeps the
  *      first match among them and cuts every thread after it, then steps the rest over @p after.
  *  @param[in] looks The lookarounds holding at the position, as look bits.
- *  @param[in] open,close What a capture state writes here; they differ only inside the folds
- *      of one codepoint.
+ *  @param[in] open What an opening capture state writes here; it differs from @p close only
+ *      inside the folds of one codepoint.
+ *  @param[in] close What a closing capture state writes here.
  *  @return Whether any thread entered the next position.
  */
 STRINGZILLA_INLINE sz_bool_t sz_regex_pike_step_(sz_regex_engine_t const *engine, sz_regex_pike_t *pike,
@@ -5171,7 +5172,7 @@ enum { sz_regex_body_chains_k = 4 };
  *  @return The state after the last byte.
  *
  *  Step @c i reads the byte at @c i and marks position @c i when walking @p behind, and reads the
- *  byte before position `length - i` and marks that position otherwise. Each chain but the first
+ *  byte before position <tt>length - i</tt> and marks that position otherwise. Each chain but the first
  *  guesses the state it enters its stretch with by walking from the start over the bytes just
  *  before it. Once all are done, each in turn checks its guess against the state the chain before
  *  it ended on, and where the two differ walks both on until they meet, flipping each position
@@ -5347,7 +5348,7 @@ STRINGZILLA_OUTLINED_ void sz_regex_looks_serial_(sz_regex_engine_t const *engin
 }
 
 /**
- *  @brief Finds the leftmost-first match starting at or past @p from, as `regex-automata` does.
+ *  @brief Finds the leftmost-first match starting at or past @p from, as @c regex-automata does.
  *  @param[out] offset Folded bytes into its first unit the match starts at, zero unless uncased.
  *
  *  Windows are marked a batch at a time, from the window the cursor first reaches. An empty
@@ -5429,7 +5430,7 @@ STRINGZILLA_INLINE sz_bool_t sz_regex_next_(sz_regex_engine_t const *engine, sz_
 /**
  *  @brief Counts and optionally writes every match of one haystack,
  *      in the order @c find_iter yields.
- *  @param[inout] matches_count Matches of earlier haystacks, advanced by this one's; only those
+ *  @param[in,out] matches_count Matches of earlier haystacks, advanced by this one's; only those
  *      below @p matches_capacity are written.
  *  @return This haystack's matches.
  */
@@ -5553,8 +5554,8 @@ STRINGZILLA_INLINE sz_size_t sz_regex_groups_most_(sz_regex_engine_t const *engi
  *  @brief Appends one match's replacement to @p target at @p written.
  *  @return The bytes the replacement takes, whether or not they fit below @p capacity.
  *
- *  The replacement appends its bytes as written, `$$` as one dollar, and `$N`, `${N}` or `${name}`
- *  as the text of that group of the match's pattern, `$0` the whole match; a group that took no
+ *  The replacement appends its bytes as written, <tt>$$</tt> as one dollar, and <tt>$N</tt>, <tt>${N}</tt> or <tt>${name}</tt>
+ *  as the text of that group of the match's pattern, <tt>$0</tt> the whole match; a group that took no
  *  part or does not exist is empty, and a dollar starting no reference stands for itself.
  *
  *  Groups come from a PikeVM over the match's own span, run once per match and only for a reference

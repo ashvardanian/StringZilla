@@ -28,8 +28,8 @@ extern "C" {
 /**
  *  @brief Detects bytes at most @p range_length − 1 above @p range_start, compared unsigned.
  *
- *  AVX2 has no unsigned byte compares, so `(x − start) ≤ limit` is realized as
- *  `min(x − start, limit) = x − start`: the wrap-around subtraction maps the range onto [0, limit],
+ *  AVX2 has no unsigned byte compares, so <tt>(x − start) ≤ limit</tt> is realized as
+ *  <tt>min(x − start, limit) = x − start</tt>: the wrap-around subtraction maps the range onto [0, limit],
  *  and the @c VPMINUB and @c VPCMPEQB pair realizes the unsigned ≤ in two single-uop instructions,
  *  cheaper and clearer than the sign-flip pair of @c VPXOR and @c VPCMPGTB.
  */
@@ -64,7 +64,7 @@ STRINGZILLA_INLINE __m256i sz_next_bytes_haswell_(__m256i source_u8x32) {
     return _mm256_alignr_epi8(carry_u8x32, source_u8x32, 1);
 }
 
-/** First @p n bits set; BZHI keeps n = 32 defined, unlike the `(1 << n) − 1` idiom. */
+/** First @p n bits set; BZHI keeps n = 32 defined, unlike the <tt>(1 << n) − 1</tt> idiom. */
 STRINGZILLA_INLINE sz_u32_t sz_mask_until_haswell_(sz_size_t n) {
     return (sz_u32_t)_bzhi_u32(0xFFFFFFFFu, (unsigned)n);
 }
@@ -112,7 +112,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_caseless_chunk_haswell_( //
  *  odd-parity runs, so two or three range compares per lead replace the table. C6 (Latin Ext-B
  *  'ƀ'-'ƿ') is too fragmented for ranges - 16 scattered +1 pairs and 20 irregulars - so its two
  *  64-entry membership bitsets are decomposed into 16-entry @c VPSHUFB nibble lookups:
- *  `bitmap[low_nibble] & (1 << high_quadrant)` tests membership in five ops, versus ~12 compares
+ *  <tt>bitmap[low_nibble] & (1 << high_quadrant)</tt> tests membership in five ops, versus ~12 compares
  *  for the explicit ranges. Irregular codepoints (those that expand, shrink, or fold across lead
  *  bytes) and foreign E1 sub-families (Georgian, Greek Extended) truncate the chunk before the
  *  character's lead and route one rune to the serial fallback.
@@ -596,7 +596,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_guarded_chunk_haswell_( //
  *  Both −0x10 classes also bump their lead by one block (D4 → D5, D5 → D6), through a masked +1,
  *  while the +0x30 class leaves its lead unchanged. The Armenian classification lives at the second
  *  byte, so the lead +1 flag propagates one lane back via @c next_bytes, mirroring the
- *  case-insensitive Armenian finder's `..._armenian_fold_ymm_`. The Ech-Yiwn ligature 'և' (D6 87)
+ *  case-insensitive Armenian finder's <tt>..._armenian_fold_ymm_</tt>. The Ech-Yiwn ligature 'և' (D6 87)
  *  is the only D4-D6 codepoint whose fold changes byte length, so its lead truncates the chunk and
  *  routes one rune to the serial fallback. Non-Armenian complex leads (Cyrillic Extension D2-D3,
  *  IPA/Ext-B C7-CD, 4-byte F0+) and foreign-family leads truncate before their lead, so a mixed

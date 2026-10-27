@@ -87,7 +87,7 @@ assert("abc".equals("abc"))                       // byte-level equality
 assert("STRASSE".utf8UncasedOrder("straße") == .equal)
 ```
 
-## Unicode Case Folding and Normalization
+## Case Folding and Normalization
 
 `utf8UncasedFind(substring:)` performs a case-insensitive search using full Unicode folding and returns a byte-accurate `Range<Index>?`.
 The matched length can differ from the needle length, since folding can change byte counts.
@@ -127,7 +127,7 @@ let bad = "e\u{0301}".utf8NormalizationViolation(.nfc) // Index of the violation
 assert(bad != nil)
 ```
 
-## Splitting and Segmentation
+## Unicode Segmentation
 
 These methods return byte-accurate `[Range<Index>]` arrays you can subscript back into the source string.
 

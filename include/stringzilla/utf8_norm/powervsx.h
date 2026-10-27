@@ -7,7 +7,7 @@
  *  This backend overrides exactly one point of the shared engine: the scan primitive
  *  @c sz_utf8_norm_classify_powervsx_, which locates the first non-inert byte for a form. The two
  *  public entry points, @c sz_utf8_norm_powervsx and @c sz_utf8_find_denormalized_powervsx, reuse
- *  the force-inlined engines from `serial.h`, passing this scanner as the constant function address
+ *  the force-inlined engines from <tt>serial.h</tt>, passing this scanner as the constant function address
  *  that devirtualizes the call.
  *
  *  The scanner mirrors the NEON and Skylake scanners over a 16-byte window: an all-ASCII gate

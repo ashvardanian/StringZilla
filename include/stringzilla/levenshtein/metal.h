@@ -9,7 +9,7 @@
  *  @sa include/stringzilla/levenshtein/simt.cuh, the CUDA sibling
  *
  *  The verbs keep the CUDA tier's shape, with an @c id<MTLCommandQueue> as the stream. Every block
- *  the kernels read, the engine's, the candidates' tape and the distances, must come from @ref
+ *  the kernels read, the engine's, the candidates' tape and the distances, must come from @c
  *  sz_allocator_init_unified_metal on that stream's device, and a round's candidates must be a
  *  tape, as @ref sz_strings_to_tape_best writes one with that allocator, since the kernels read the
  *  tape itself. Accessors and memory outside the registry draw @c sz_device_memory_mismatch_k.
@@ -47,7 +47,7 @@ static char const sz_levenshtein_source_metal_[] = {
 /** Threads a threadgroup runs at most, so a group schedules as finely as the CUDA tier's blocks. */
 enum { sz_levenshtein_threads_per_group_max_metal_k = 256 };
 
-/** Entry points by word count and words per lane, over bytes and runes, as `metal.metal` names. */
+/** Entry points by word count and words per lane, over bytes and runes, as <tt>metal.metal</tt> names. */
 static char const *const sz_levenshtein_threaded_names_metal_[2][sz_levenshtein_gpu_warp_words_min_k - 1] = {
     {"sz_levenshtein_distances_w1_metal_kernel_", "sz_levenshtein_distances_w2_metal_kernel_",
      "sz_levenshtein_distances_w3_metal_kernel_", "sz_levenshtein_distances_w4_metal_kernel_",

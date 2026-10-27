@@ -163,7 +163,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_find_skylake_(sz_cptr_t haystack, sz_size_t hays
     return STRINGZILLA_NULL_CHAR;
 }
 
-/** Bit @c i set where @p bytes match at `text + i + offsets[k]` for every @c k, for the first
+/** Bit @c i set where @p bytes match at <tt>text + i + offsets[k]</tt> for every @c k, for the first
  *  @p starts of the 64 starts from @p text: three loads, masked only for fewer than 64 starts. */
 STRINGZILLA_INLINE sz_u64_t sz_find_candidates_skylake_(sz_u8_t const *text, sz_size_t starts,
                                                         sz_size_t const offsets[3], sz_u8_t const bytes[3]) {

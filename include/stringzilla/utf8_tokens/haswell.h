@@ -25,7 +25,7 @@ extern "C" {
 #pragma GCC target("avx2,bmi,bmi2,popcnt")
 #endif
 
-/** Unsigned byte greater-than-or-equal comparison for AVX2 via the `max(a, b) == a` identity. */
+/** Unsigned byte greater-than-or-equal comparison for AVX2 via the <tt>max(a, b) == a</tt> identity. */
 STRINGZILLA_INLINE __m256i sz_mm256_cmpge_epu8_haswell_(__m256i a_u8x32, __m256i b_u8x32) {
     return _mm256_cmpeq_epi8(_mm256_max_epu8(a_u8x32, b_u8x32), a_u8x32);
 }
@@ -238,13 +238,13 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_whitespaces_haswell_( //
 
 #pragma region Membership
 
-/** Per-half unsigned `value >= bound` mask, as AVX2 has no unsigned compare:
- *  `max_epu8(value, bound) == value`. */
+/** Per-half unsigned <tt>value >= bound</tt> mask, as AVX2 has no unsigned compare:
+ *  <tt>max_epu8(value, bound) == value</tt>. */
 STRINGZILLA_INLINE __m256i sz_delimiter_cmpge_epu8_haswell_(__m256i value_u8x32, __m256i bound_u8x32) {
     return _mm256_cmpeq_epi8(_mm256_max_epu8(value_u8x32, bound_u8x32), value_u8x32);
 }
 
-/** Per-half "third forward neighbour" `next3[i] = window[i + 3]` for the 4-byte astral codepoint
+/** Per-half "third forward neighbour" <tt>next3[i] = window[i + 3]</tt> for the 4-byte astral codepoint
  *  reconstruction, wrapping modulo 64 to mirror the substrate neighbour helper that only emits
  *  next1 and next2. */
 STRINGZILLA_INLINE void sz_delimiter_forward_neighbour3_haswell_( //
@@ -255,8 +255,8 @@ STRINGZILLA_INLINE void sz_delimiter_forward_neighbour3_haswell_( //
     *next3_hi_u8x32 = _mm256_alignr_epi8(high_successor_u8x32, window_hi_u8x32, 3);
 }
 
-/** Per-lane single-bit test `(bitmap_byte >> (low & 7)) & 1` for one 32-lane half as a 0xFF/0x00
- *  byte mask; the bit `1 << (low & 7)` is a @c vpshufb over the resident power-of-two table. */
+/** Per-lane single-bit test <tt>(bitmap_byte >> (low & 7)) & 1</tt> for one 32-lane half as a 0xFF/0x00
+ *  byte mask; the bit <tt>1 << (low & 7)</tt> is a @c vpshufb over the resident power-of-two table. */
 STRINGZILLA_INLINE __m256i sz_delimiter_test_bit_haswell_(__m256i bitmap_byte_u8x32, __m256i low_u8x32) {
     __m256i const bit_table_u8x32 = _mm256_setr_epi8(              //
         1, 2, 4, 8, 16, 32, 64, (char)128, 0, 0, 0, 0, 0, 0, 0, 0, //
@@ -267,10 +267,10 @@ STRINGZILLA_INLINE __m256i sz_delimiter_test_bit_haswell_(__m256i bitmap_byte_u8
     return _mm256_cmpeq_epi8(isolated_u8x32, bit_mask_u8x32);
 }
 
-/** Reads the bitmap byte `columns[(low >> 3) * 64 + block_id]` for one 32-lane half in-register: 32
+/** Reads the bitmap byte <tt>columns[(low >> 3) * 64 + block_id]</tt> for one 32-lane half in-register: 32
  *  candidate column reads, each a 64-entry @c cascade_stage over @p block_id_u8x32, blended by
- *  which column `(low >> 3)` selects. The transposed `..._columns_` layout, where column @c c holds
- *  `bitmaps[id * 32 + c]`, makes each column lut256-addressable for `block_id < 64` without needing
+ *  which column <tt>(low >> 3)</tt> selects. The transposed <tt>..._columns_</tt> layout, where column @c c holds
+ *  <tt>bitmaps[id * 32 + c]</tt>, makes each column lut256-addressable for <tt>block_id < 64</tt> without needing
  *  a page network. */
 STRINGZILLA_INLINE __m256i sz_delimiter_bitmap_byte_haswell_(sz_u8_t const *columns, __m256i block_id_u8x32,
                                                              __m256i low_u8x32) {

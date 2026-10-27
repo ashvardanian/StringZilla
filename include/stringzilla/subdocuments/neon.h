@@ -54,7 +54,7 @@ STRINGZILLA_INLINE void sz_subdocuments_masks_neon_(uint8x16_t first_u8x16, uint
 }
 
 /**
- *  @brief Classifies a block from a deinterleaved load: lane @c l of vector @c k is byte `4l + k`.
+ *  @brief Classifies a block from a deinterleaved load: lane @c l of vector @c k is byte <tt>4l + k</tt>.
  *
  *  Two rounds of masked shifts between vectors gather each class's bit of the four vectors into one
  *  nibble per lane, and neighbouring lanes' nibbles are then whole bytes of that class's mask.

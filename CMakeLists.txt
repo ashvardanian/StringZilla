@@ -28,7 +28,7 @@
 #
 # Python, Node, and Swift build their artifacts through this file, while Rust's `build.rs` and Go's cgo link
 # `stringzilla_static`; Java and C# load `stringzilla_shared`.
-cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.28)
 
 # Every binding reads its version from `VERSION`, which the release bumps.
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" stringzilla_version_line_ LIMIT_COUNT 1)
@@ -42,10 +42,8 @@ project(
     HOMEPAGE_URL "https://github.com/ashvardanian/StringZilla"
 )
 
-set(CMAKE_C_STANDARD 99)
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
+# Standards are floors each target declares, so a parent project's units and the fetched dependencies build at the
+# standard they pick for themselves.
 set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -133,15 +131,12 @@ endif ()
 # One compile probe per capability under `probes/`, defining `STRINGZILLA_TARGET_<CAPABILITY>` as the toolchain
 # compiles it through `stringzilla::cpu_capabilities_compiled`, and as 0 through
 # `stringzilla_cpu_capabilities_disabled_`.
-include(cmake/sz_isa_probe.cmake)
-
-# Determine if StringZilla is built as a sub-project (using `add_subdirectory`) or if it is the main project
-set(STRINGZILLA_IS_MAIN_PROJECT ${PROJECT_IS_TOP_LEVEL})
+include(cmake/stringzilla_probes.cmake)
 
 # Enable the in-repo Git hooks. Git will not auto-run hooks shipped inside a clone (that would let any cloned repo
 # execute code), so point `core.hooksPath` at `.githooks` here - configuring the build arms the `pre-commit` checks.
 # Skipped when built as a subproject or without `.git` (tarball / export builds).
-if (STRINGZILLA_IS_MAIN_PROJECT AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
+if (PROJECT_IS_TOP_LEVEL AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
     execute_process(
         COMMAND git config core.hooksPath .githooks
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -158,17 +153,25 @@ endif ()
 option(STRINGZILLA_INSTALL "Install CMake targets" OFF)
 option(STRINGZILLA_BUILD_TEST "Compile a native unit test in C++" OFF)
 option(STRINGZILLA_BUILD_BENCH "Compile a native benchmark in C++" OFF)
-option(STRINGZILLA_BUILD_SHARED "Compile a dynamic library" ${STRINGZILLA_IS_MAIN_PROJECT})
+option(STRINGZILLA_BUILD_SHARED "Compile a dynamic library" ${PROJECT_IS_TOP_LEVEL})
 option(STRINGZILLA_BUILD_PYTHON "Compile the CPython extension over the static library" OFF)
 option(STRINGZILLA_BUILD_NODE "Compile the Node addon over the static library; cmake-js switches it on" OFF)
 option(STRINGZILLA_BUILD_SWIFT "Package the static library for SwiftPM, as an XCFramework or an artifact bundle" OFF)
 option(STRINGZILLA_BUILD_CUDA "Add CUDA to the libraries and to the tests and benchmarks built" OFF)
 option(STRINGZILLA_BUILD_ROCM "Add ROCm for AMD GPUs to the libraries and to the tests and benchmarks built" OFF)
 option(STRINGZILLA_BUILD_METAL "Add Metal for Apple GPUs to the libraries and to the tests and benchmarks built" OFF)
-option(STRINGZILLA_BUILD_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer in Debug builds" ON)
+option(STRINGZILLA_WERROR "Treat compiler warnings as errors" OFF)
+set(STRINGZILLA_BUILD_SANITIZERS
+    "off"
+    CACHE STRING "Sanitizers for StringZilla's tests, benchmarks and archives: off, address with undefined, or thread"
+)
+set_property(CACHE STRINGZILLA_BUILD_SANITIZERS PROPERTY STRINGS off address thread)
+if (NOT STRINGZILLA_BUILD_SANITIZERS MATCHES "^(off|address|thread)$")
+    message(FATAL_ERROR "STRINGZILLA_BUILD_SANITIZERS is off, address or thread, not '${STRINGZILLA_BUILD_SANITIZERS}'")
+endif ()
 
 # Clang source-based coverage for the header-only library. Recipe (single-arch, native backends only): cmake -B
-# build_cov -DSTRINGZILLA_BUILD_COVERAGE=1 -DSTRINGZILLA_BUILD_SANITIZERS=0 -DCMAKE_CXX_COMPILER=clang++ cmake --build
+# build_cov -DSTRINGZILLA_BUILD_COVERAGE=1 -DCMAKE_CXX_COMPILER=clang++ cmake --build
 # build_cov --target stringzilla_test -j LLVM_PROFILE_FILE=/tmp/sz.profraw ./build_cov/stringzilla_test
 # llvm-profdata merge -sparse /tmp/sz.profraw -o /tmp/sz.profdata llvm-cov report ./build_cov/stringzilla_test
 # -instr-profile=/tmp/sz.profdata include/stringzilla/ `-march=native` compiles out the non-native backends, so a
@@ -211,7 +214,7 @@ if (STRINGZILLA_BUILD_CUDA)
     set(CMAKE_CUDA_ARCHITECTURES ${STRINGZILLA_CUDA_ARCHITECTURES})
     set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
     find_package(CUDAToolkit REQUIRED)
-    include(cmake/sz_cuda_probes.cmake)
+    include(cmake/stringzilla_cuda_probes.cmake)
     stringzilla_probe_cuda_native_arch()
     # "native", "all" and "all-major" stand for the lists CMake resolved them to, which the capability rows read.
     set(stringzilla_cuda_resolved_architectures_)
@@ -301,7 +304,7 @@ set(stringzilla_include_install_dir_ "${CMAKE_INSTALL_INCLUDEDIR}")
 
 # CTest machinery only for top-level builds: a parent project decides its own testing story, and
 # `add_test` calls below are inert without `enable_testing()`.
-if (STRINGZILLA_IS_MAIN_PROJECT)
+if (PROJECT_IS_TOP_LEVEL)
     include(CTest)
     enable_testing()
 endif ()
@@ -313,7 +316,7 @@ if (MSVC)
     string(REGEX REPLACE "/RTC[^ ]*" "" CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
 endif ()
 
-include(cmake/sz_compiler_flags.cmake)
+include(cmake/stringzilla_compiler_flags.cmake)
 
 # {fmt} formats the suites' assertion messages and reports. `FIND_PACKAGE_ARGS` lets a system copy satisfy it without
 # touching the network, but only from the pinned version up, since older copies lack `fmt::println`.
@@ -414,7 +417,7 @@ function (stringzilla_add_library target_ public_name_ library_type_)
 
     # The library, unlike the headers, may use C11: `c/stringzilla.c` caches detection in a <stdatomic.h> atomic, which
     # MSVC gates behind a flag.
-    set_target_properties(${target_} PROPERTIES C_STANDARD 11)
+    target_compile_features(${target_} PRIVATE c_std_11)
     target_compile_options(${target_} PRIVATE $<$<COMPILE_LANG_AND_ID:C,MSVC>:/experimental:c11atomics>)
 
     # The dispatch units share the private `c/dispatch.h`.
@@ -454,7 +457,7 @@ endfunction ()
 # cross-compiled test runs are `-static` executables, which cannot take a `.so` at all - and as a shared library. A
 # parent project builds the archive only if it links it.
 stringzilla_add_library(stringzilla_static static STATIC ${stringzilla_shim_sources_})
-if (NOT STRINGZILLA_IS_MAIN_PROJECT)
+if (NOT PROJECT_IS_TOP_LEVEL)
     set_target_properties(stringzilla_static PROPERTIES EXCLUDE_FROM_ALL ON)
 endif ()
 if (STRINGZILLA_BUILD_SHARED)
@@ -532,11 +535,11 @@ if (STRINGZILLA_BUILD_CUDA)
     # One unit per tier, compiled only for the codes running it, so no cubin carries another tier's kernels.
     stringzilla_select_gpu_codes(
         stringzilla_hopper_unit_codes_ "${stringzilla_cuda_resolved_architectures_}"
-        "${sz_target_hopper_architectures}"
+        "${stringzilla_target_hopper_architectures}"
     )
     stringzilla_select_gpu_codes(
         stringzilla_blackwell_unit_codes_ "${stringzilla_cuda_resolved_architectures_}"
-        "${sz_target_blackwell_architectures}"
+        "${stringzilla_target_blackwell_architectures}"
     )
     stringzilla_add_gpu_unit(
         c/target/cuda.cu "${stringzilla_cuda_resolved_architectures_}" "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart
@@ -599,7 +602,8 @@ if (STRINGZILLA_BUILD_PYTHON)
         python/stringzilla/utf8_norm.c
         c/parallel.c
     )
-    set_target_properties(stringzilla_python PROPERTIES OUTPUT_NAME stringzilla C_STANDARD 11)
+    set_target_properties(stringzilla_python PROPERTIES OUTPUT_NAME stringzilla)
+    target_compile_features(stringzilla_python PRIVATE c_std_11)
     # Strict C11 hides `mmap` from glibc and musl headers included ahead of <Python.h>.
     target_compile_definitions(stringzilla_python PRIVATE $<$<PLATFORM_ID:Linux>:_GNU_SOURCE>)
     # The object types fill CPython's slots and pass through its `PyObject *` parameters uncast, which GCC 14 and Clang
@@ -617,10 +621,15 @@ if (STRINGZILLA_BUILD_PYTHON)
         DESTINATION .
         COMPONENT stringzilla_python
     )
+    install(
+        FILES python/stringzilla.pyi
+        DESTINATION .
+        COMPONENT stringzilla_python
+    )
 endif ()
 
 # The `stringzilla.node` addon, which cmake-js builds from `package.json`. It stays off
-# `stringzilla_set_compiler_flags`, whose output directories would move the Windows addon and whose `-Werror` and
+# `stringzilla_set_compiler_flags`, whose output directories would move the Windows addon and whose warnings and
 # sanitizers belong to the tests.
 if (STRINGZILLA_BUILD_NODE)
     if (NOT CMAKE_JS_INC)
@@ -634,8 +643,8 @@ if (STRINGZILLA_BUILD_NODE)
         PROPERTIES PREFIX ""
                    SUFFIX ".node"
                    OUTPUT_NAME stringzilla
-                   C_STANDARD 11
     )
+    target_compile_features(stringzilla_node PRIVATE c_std_11)
     target_include_directories(stringzilla_node PRIVATE ${CMAKE_JS_INC})
     # The BigInt conversions need Node-API 6.
     target_compile_definitions(stringzilla_node PRIVATE NAPI_VERSION=8)
@@ -702,7 +711,7 @@ if (STRINGZILLA_BUILD_SWIFT)
             "${CMAKE_COMMAND}" -D "STRINGZILLA_SWIFT_ARCHIVE=$<TARGET_FILE:stringzilla_static>" -D
             "STRINGZILLA_SWIFT_HEADERS=${PROJECT_SOURCE_DIR}/include" -D
             "STRINGZILLA_SWIFT_DIRECTORY=${STRINGZILLA_SWIFT_DIRECTORY}" ${stringzilla_swift_target_} -P
-            "${PROJECT_SOURCE_DIR}/cmake/sz_swift_artifact.cmake"
+            "${PROJECT_SOURCE_DIR}/cmake/stringzilla_swift_artifact.cmake"
         DEPENDS stringzilla_static
         VERBATIM
     )

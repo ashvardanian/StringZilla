@@ -91,7 +91,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_seek_haswell_(sz_cptr_t text, sz_size_t len
 #pragma region Shared SIMD leaf substrate
 
 /** The decoded 64-byte window for the AVX2 backend. The 64 bytes live as two @c __m256i halves
- *  (`*_lo` = lanes [0, 32), `*_hi` = lanes [32, 64)); the per-lane byte-domain codepoint halves
+ *  (<tt>*_lo</tt> = lanes [0, 32), <tt>*_hi</tt> = lanes [32, 64)); the per-lane byte-domain codepoint halves
  *  @c high and @c low share that shape. Masks are @c sz_u64_t (one @c vpmovmskb per half,
  *  OR-combined) rather than the Ice Lake @c __mmask64. Field names and semantics match
  *  @ref sz_utf8_rune_window_t so the portable rule algebra is unchanged. */
@@ -103,31 +103,31 @@ typedef struct sz_utf8_rune_window_haswell_t {
     /** Raw input bytes for lanes [32, 64). */
     __m256i window_high_u8x32;
 
-    /** Per-lane `codepoint >> 8` for lanes [0, 32). */
+    /** Per-lane <tt>codepoint >> 8</tt> for lanes [0, 32). */
     __m256i high_byte_low_u8x32;
 
-    /** Per-lane `codepoint >> 8` for lanes [32, 64). */
+    /** Per-lane <tt>codepoint >> 8</tt> for lanes [32, 64). */
     __m256i high_byte_high_u8x32;
 
-    /** Per-lane `codepoint & 0xFF` for lanes [0, 32). */
+    /** Per-lane <tt>codepoint & 0xFF</tt> for lanes [0, 32). */
     __m256i low_byte_low_u8x32;
 
-    /** Per-lane `codepoint & 0xFF` for lanes [32, 64). */
+    /** Per-lane <tt>codepoint & 0xFF</tt> for lanes [32, 64). */
     __m256i low_byte_high_u8x32;
 
-    /** Bit @c i is set when lane @c i is a continuation byte `10xxxxxx`. */
+    /** Bit @c i is set when lane @c i is a continuation byte @c 10xxxxxx. */
     sz_u64_t continuation;
 
     /** Bit @c i is set when lane @c i begins a codepoint (loaded, non-continuation). */
     sz_u64_t codepoint_starts;
 
-    /** Bit @c i is set when lane @c i is a 2-byte lead `110xxxxx`. */
+    /** Bit @c i is set when lane @c i is a 2-byte lead @c 110xxxxx. */
     sz_u64_t two_byte_starts;
 
-    /** Bit @c i is set when lane @c i is a 3-byte lead `1110xxxx`. */
+    /** Bit @c i is set when lane @c i is a 3-byte lead @c 1110xxxx. */
     sz_u64_t three_byte_starts;
 
-    /** Bit @c i is set when lane @c i is a 4-byte lead `11110xxx`. */
+    /** Bit @c i is set when lane @c i is a 4-byte lead @c 11110xxx. */
     sz_u64_t four_byte_starts;
 
     /** Number of bytes actually loaded (at most 64). */
@@ -149,7 +149,7 @@ STRINGZILLA_INLINE sz_u64_t sz_utf8_mask_combine_haswell_(__m256i low_half_u8x32
 
 /** Masked 64-byte load into two halves; bytes [loaded, 64) read as zero (the AVX2 stand-in for
  *  @c _mm512_maskz_loadu_epi8). A small stack staging union covers the partial tail so we never
- *  read past `text + loaded`. */
+ *  read past <tt>text + loaded</tt>. */
 STRINGZILLA_INLINE void sz_utf8_load_window_haswell_( //
     sz_u8_t const *text, sz_size_t loaded, __m256i *out_low_u8x32, __m256i *out_high_u8x32) {
     if (loaded >= 64) {
@@ -165,9 +165,9 @@ STRINGZILLA_INLINE void sz_utf8_load_window_haswell_( //
     *out_high_u8x32 = staging_vec.ymms[1];
 }
 
-/** Forward neighbours `next1[i] = window[i+1]`, `next2[i] = window[i+2]` over all 64 lanes, with
+/** Forward neighbours <tt>next1[i] = window[i+1]</tt>, <tt>next2[i] = window[i+2]</tt> over all 64 lanes, with
  *  the lanes past the window wrapping modulo 64 to match Ice Lake's @c _mm512_permutexvar_epi8 (so
- *  `next1[63]==window[0]`, `next2[62]==window[0]`, `next2[63]==window[1]`). AVX2 has no 32-byte
+ *  <tt>next1[63]==window[0]</tt>, <tt>next2[62]==window[0]</tt>, <tt>next2[63]==window[1]</tt>). AVX2 has no 32-byte
  *  byte permute, so each 128-bit lane is fed its following bytes via @c _mm256_permute2x128_si256
  *  (to rotate in the successor 128-bit block, the window head wrapping in after @c window_hi) then
  *  @c _mm256_alignr_epi8 to shift across the lane boundary. */
@@ -304,8 +304,8 @@ STRINGZILLA_INLINE sz_utf8_rune_window_haswell_t sz_utf8_rune_decode_window_hasw
 
 /**
  *  @brief One nibble-cascade stage with a sub-256 selector:
- *      `result[lane] = table[selector[lane]*16 + within[lane]]`. Each of @p tile_count 16-byte rows
- *      is one selector value; @p within_u8x32 is the addressing nibble (caller-masked to `[0,16)`).
+ *      <tt>result[lane] = table[selector[lane]*16 + within[lane]]</tt>. Each of @p tile_count 16-byte rows
+ *      is one selector value; @p within_u8x32 is the addressing nibble (caller-masked to <tt>[0,16)</tt>).
  *
  *  The AVX2 stand-in for VBMI @c vpermi2b: there is no 32-byte byte permute, so each resident row
  *  is broadcast and shuffled by @p within_u8x32, then blended in for the lanes whose
@@ -329,7 +329,7 @@ STRINGZILLA_INLINE __m256i sz_utf8_rune_cascade_stage_haswell_( //
     return result_u8x32;
 }
 
-/** 256-entry byte LUT at @p group_base addressed by a per-lane byte index in `[0,256)`, each lane
+/** 256-entry byte LUT at @p group_base addressed by a per-lane byte index in <tt>[0,256)</tt>, each lane
  *  reading the entry its index names. Two-stage @c vpshufb over 16 resident rows — the low nibble
  *  shuffles within a row, the high nibble selects the row. The AVX2 twin of the substrate
  *  @c lut256 leaf. */
@@ -340,7 +340,7 @@ STRINGZILLA_INLINE __m256i sz_utf8_rune_lut256_haswell_(sz_u8_t const *group_bas
     return sz_utf8_rune_cascade_stage_haswell_(group_base, 16, index_selector_high_u8x32, index_within_low_u8x32);
 }
 
-/** 64-entry byte LUT addressed by a per-lane index in `[0,64)`: a four-row cascade over the 64-byte
+/** 64-entry byte LUT addressed by a per-lane index in <tt>[0,64)</tt>: a four-row cascade over the 64-byte
  *  table. The bounded twin of @ref sz_utf8_rune_lut256_haswell_ for callers whose table is only
  *  four rows wide - e.g. a 128-entry property table read as two 64-byte halves - so the loads never
  *  run past the array, and only a quarter of the shuffle/blend work is issued. @p group_base must
@@ -352,7 +352,7 @@ STRINGZILLA_INLINE __m256i sz_utf8_rune_lut64_haswell_(sz_u8_t const *group_base
     return sz_utf8_rune_cascade_stage_haswell_(group_base, 4, index_selector_high_u8x32, index_within_low_u8x32);
 }
 
-/** 16-entry byte LUT addressed by a per-lane index in `[0,16)`: one broadcast row and one
+/** 16-entry byte LUT addressed by a per-lane index in <tt>[0,16)</tt>: one broadcast row and one
  *  @c vpshufb, with no cascade at all, since a single row covers the whole index range. The bounded
  *  twin of @ref sz_utf8_rune_lut256_haswell_ for nibble-wide tables. @p group_base must point to at
  *  least 16 valid bytes, and @p index_u8x32 must have bit 7 clear on every lane or @c vpshufb
@@ -375,8 +375,8 @@ STRINGZILLA_INLINE __m256i sz_utf8_rune_pack4_u32_to_u8_haswell_( //
     return _mm256_permutevar8x32_epi32(interleaved_u8x32, _mm256_setr_epi32(0, 4, 1, 5, 2, 6, 3, 7));
 }
 
-/** Class byte per lane from a page-compressed flat table: `page_lut[high]` selects a 256-byte
- *  page, then `flat[page * 256 + low]` is fetched with four @c vpgatherdd. Unlike the nibble
+/** Class byte per lane from a page-compressed flat table: <tt>page_lut[high]</tt> selects a 256-byte
+ *  page, then <tt>flat[page * 256 + low]</tt> is fetched with four @c vpgatherdd. Unlike the nibble
  *  cascade this scales with the window, not the table: the cascade scanned every 16-byte tile of
  *  every stage on the shuffle port, while the gather issues on the load ports and leaves the
  *  shuffle port to the decode. @p flat must extend four bytes past its last index, since the dword
@@ -471,17 +471,17 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_forward_haswell_( //
 
 #pragma region Total vectorized decode
 
-/** Low @p count bits set within a 32-bit lane mask (0 for `count==0`, all-ones for
- *  `count>=32`). The 32-bit twin of @ref sz_u64_mask_until_serial_, used to bound a sub-window
+/** Low @p count bits set within a 32-bit lane mask (0 for <tt>count==0</tt>, all-ones for
+ *  <tt>count>=32</tt>). The 32-bit twin of @ref sz_u64_mask_until_serial_, used to bound a sub-window
  *  of an AVX2 32-byte window. */
 STRINGZILLA_INLINE sz_u32_t sz_u32_mask_until_serial_(sz_size_t count) {
     return count >= 32 ? 0xFFFFFFFFu : (((sz_u32_t)1 << count) - 1u);
 }
 
 /** Gather one byte per 32-bit lane from a 32-byte window addressed by the 8 per-dword byte
- *  @p offsets_u32x8 (each in `[0, 32)`), entirely in-register (NO @c vpgatherdd). The window's two
+ *  @p offsets_u32x8 (each in <tt>[0, 32)</tt>), entirely in-register (NO @c vpgatherdd). The window's two
  *  16-byte halves are each broadcast into both 128-bit lanes (into @p window_dup_lo_u8x32 and
- *  @p window_dup_hi_u8x32); a @c vpshufb per half routes `window[offset & 15]` into the low byte of
+ *  @p window_dup_hi_u8x32); a @c vpshufb per half routes <tt>window[offset & 15]</tt> into the low byte of
  *  every dword, and the high offset bit blends the two halves. Lanes pointing past lane 31 read the
  *  wrapped low half, but the caller only consults lanes whose offset is a real emitted start. */
 STRINGZILLA_INLINE __m256i sz_utf8_rune_gather8_window_haswell_( //
@@ -500,8 +500,8 @@ STRINGZILLA_INLINE __m256i sz_utf8_rune_gather8_window_haswell_( //
  *  shared with the NEON / LASX / PowerVSX backends. Replaces a scalar @c ctz walk with a 2 KB
  *  shuffle-LUT keyed by each 8-bit sub-mask: for every 16-lane half the mask splits into a low and
  *  a high byte, each @c vpshufb over the LUT row of its set-bit positions, the high half offset by
- *  +8, the two stitched at `popcount(low8)` via a gap-shift @c vpshufb (no scalar per-lane index
- *  walk). The half offset `h*16` is added in vector; one loop over the two halves. */
+ *  +8, the two stitched at <tt>popcount(low8)</tt> via a gap-shift @c vpshufb (no scalar per-lane index
+ *  walk). The half offset <tt>h*16</tt> is added in vector; one loop over the two halves. */
 STRINGZILLA_INLINE sz_size_t sz_utf8_leftpack_offsets_haswell_(sz_u32_t mask, sz_u8_t *out) {
     __m128i const lane_iota_u8x16 = _mm_setr_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
     __m128i const constant_eight_u8x16 = _mm_set1_epi8(8);
@@ -657,7 +657,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_haswell_(                       
  *  width-blend → blend U+FFFD" path - the AVX2 twin of @ref sz_utf8_decode_once_icelake_,
  *  bit-exact with the serial reference (one U+FFFD per maximal ill-formed subpart, Unicode 17.0
  *  §3.9 / W3C). Pure-ASCII windows take a @c vpmovzxbd widen lane. The step declines
- *  (`*runes_count == 0`, cursor unchanged) only when the first lead's declared sequence crosses
+ *  (<tt>*runes_count == 0</tt>, cursor unchanged) only when the first lead's declared sequence crosses
  *  the window edge (a boundary truncation), which the public entry finalizes without a serial
  *  re-decode. The decode is total: no decline-to-serial. */
 STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_once_haswell_( //

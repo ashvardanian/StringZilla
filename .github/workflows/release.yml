@@ -629,3 +629,61 @@ jobs:
             echo "One or more macOS dependencies failed.";
             exit 1;
           fi
+
+  build_docs:
+    name: Build Docs
+    needs: publish_pypi_stringzilla
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+      - name: Set Up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install Doxygen
+        run: |
+          curl -sSfL https://www.doxygen.nl/files/doxygen-1.18.0.linux.bin.tar.gz | tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/doxygen-1.18.0/bin" >> "$GITHUB_PATH"
+      - name: Install Sphinx
+        run: pip install -r docs/requirements.txt
+      - name: Install the Released StringZilla
+        run: pip install "stringzilla==$(cat VERSION)"
+      - name: Build Docs
+        run: cd docs && doxygen conf.dox && sphinx-build -M html . ../build/docs -W
+      - name: Compress Docs
+        run: tar -czvf docs.tar.gz build/docs/html/
+      - name: Upload Docs to Release
+        uses: xresloader/upload-to-github-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          file: docs.tar.gz
+          update_latest_release: true
+
+  deploy_docs_pages:
+    name: Deploy GitHub Pages
+    needs: build_docs
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Download Release Assets
+        uses: robinraju/release-downloader@v1.13
+        with:
+          latest: true
+          fileName: docs.tar.gz
+      - name: Unpack Docs
+        run: tar -xf ./docs.tar.gz
+      - name: Set Up GitHub Pages
+        uses: actions/configure-pages@v6
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: ./build/docs/html
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

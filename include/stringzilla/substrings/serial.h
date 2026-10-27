@@ -12,7 +12,7 @@
  *  would need, and makes the edge count follow the state count instead of being bounded separately.
  *
  *  The walk is one data-dependent load per byte, so a single chain leaves the load ports idle for
- *  that whole latency. Byte-exact walks therefore step @ref sz_substrings_chains_serial_k disjoint
+ *  that whole latency. Byte-exact walks therefore step @c sz_substrings_chains_serial_k disjoint
  *  slices at once, each primed by the bytes before it; a walk reporting in haystack order does so
  *  in rounds of windows whose matches it buffers and flushes in window order. A SIMD tier replaces
  *  the stages in @ref sz_substrings_walks_t and inherits the verb drivers.
@@ -324,7 +324,9 @@ typedef sz_substrings_walk_t (*sz_substrings_reporter_t)(void *context, sz_size_
 
 /**
  *  @brief Whether @p challenger outranks @p incumbent among matches sharing one start position.
+ *  @param[in] challenger The match asking to take the start.
  *  @param[in] incumbent A zero @c source_match_bytes means no match has claimed that start yet.
+ *  @param[in] policy The overlap policy that ranks the two.
  *
  *  The only place either leftmost policy is consulted, and it runs once per discovered match rather
  *  than once per byte. Lengths compared here are source bytes, since a needle that folds shorter
@@ -598,8 +600,10 @@ typedef struct sz_substrings_resolved_match_t {
 /**
  *  @brief Resolves a match's source start, and whether it repeats an earlier rune end's span,
  *      in one pass.
+ *  @param[in] haystack The source text the walk started on.
  *  @param[in] source_end End of the codepoint the match ends in; every rune end of it shares this.
  *  @param[in] trailing Folded bytes of that codepoint sitting past the match's end.
+ *  @param[in] folded_match_bytes Folded bytes the match spans.
  *  @param[in] shift Folded bytes back to the previous rune end of the same codepoint, zero
  *      at the first.
  *
@@ -660,9 +664,12 @@ STRINGZILLA_CONSTEXPR sz_substrings_resolved_match_t sz_substrings_resolve_match
 
 /**
  *  @brief Resolves the source span of one output at the rune end @p step stands on.
+ *  @param[in] haystack The source text the walk started on.
+ *  @param[in] step The walk's step, standing on the rune the output ends at.
  *  @param[in] folded Folded bytes consumed so far, the ending offset the output's length is
  *      taken back from.
  *  @param[in] last_break_folded_end Folded end of the last codepoint whose fold broke a boundary.
+ *  @param[in] folded_match_bytes Folded bytes the output spans.
  *
  *  A match starting at or after the last break lies where folded and source offsets still agree, so
  *  its start is one subtraction; anything earlier pays the backward walk.
@@ -695,10 +702,10 @@ STRINGZILLA_CONSTEXPR sz_substrings_resolved_match_t sz_substrings_folded_span(s
  */
 typedef struct sz_substrings_trie_node_t {
 
-    /** Lowest-numbered child, or @ref sz_substrings_no_state_k. */
+    /** Lowest-numbered child, or @c sz_substrings_no_state_k. */
     sz_u32_t first_child;
 
-    /** Next child of this node's own parent, or @ref sz_substrings_no_state_k. */
+    /** Next child of this node's own parent, or @c sz_substrings_no_state_k. */
     sz_u32_t next_sibling;
 
     /** Needle ending exactly here, heading a list threaded through @c needle_next. */
@@ -713,7 +720,7 @@ typedef struct sz_substrings_trie_node_t {
     /** The failure state, always strictly shallower, so depth order finishes it first. */
     sz_u32_t failure;
 
-    /** Published double-array slot, or @ref sz_substrings_no_state_k before
+    /** Published double-array slot, or @c sz_substrings_no_state_k before
      *  packing places it. */
     sz_u32_t published;
 
@@ -765,7 +772,7 @@ typedef struct sz_substrings_builder_t {
     /** Double-array arena: owner of each slot. */
     sz_u32_t *check;
 
-    /** Which trie state each published slot names, or @ref sz_substrings_no_state_k. */
+    /** Which trie state each published slot names, or @c sz_substrings_no_state_k. */
     sz_u32_t *state_of_slot;
 
     /** One bit per slot; the only record of what the packing search has claimed. */
@@ -1789,7 +1796,7 @@ STRINGZILLA_INLINE sz_size_t sz_substrings_count_bytes_serial_(sz_substrings_eng
  *  @brief Counts every match in @p haystack, byte for byte, without enumerating a
  *      single output run.
  *
- *  The counts ride the transitions, so no output is ever read. @ref sz_substrings_chains_serial_k
+ *  The counts ride the transitions, so no output is ever read. @c sz_substrings_chains_serial_k
  *  disjoint slices step at once, each primed by the bytes before it: a state is the longest suffix
  *  read so far that spells a needle prefix, so once the longest match is behind it a chain cannot
  *  remember anything earlier, and the byte it first reports on is one of them. A haystack whose
@@ -1956,7 +1963,7 @@ STRINGZILLA_OUTLINED_ void sz_substrings_find_bytes_serial_(sz_substrings_engine
  *  @brief Reports every match in @p haystack, byte for byte, in whichever order @p order asks for.
  *
  *  A transition is one data-dependent load, so a single chain leaves the load ports idle for
- *  that whole latency. An unordered consumer gets @ref sz_substrings_chains_serial_k disjoint
+ *  that whole latency. An unordered consumer gets @c sz_substrings_chains_serial_k disjoint
  *  slices stepped at once, each primed by the bytes before it; an ordered one gets them in
  *  rounds of windows it can buffer. Either way a haystack too short to amortize the priming
  *  walks on one chain.
@@ -2733,7 +2740,7 @@ STRINGZILLA_INLINE void sz_substrings_bm25_count_(sz_substrings_engine_t const *
  *  @brief Sorts the touched needles ascending with a byte-wise LSD radix sort into the
  *      list's own tail.
  *  @return Whichever half holds the sorted order.
- *  @pre `touched_count * 2 <= needles_count`, so the tail is at least as long as the head.
+ *  @pre <tt>touched_count * 2 <= needles_count</tt>, so the tail is at least as long as the head.
  */
 STRINGZILLA_INLINE sz_u32_t *sz_substrings_sort_needles_(sz_u32_t *keys, sz_size_t count, sz_size_t needles_count) {
     sz_u32_t *spare = keys + count;

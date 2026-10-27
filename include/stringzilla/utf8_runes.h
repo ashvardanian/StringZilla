@@ -36,13 +36,15 @@ extern "C" {
  *  @param[out] count Number of UTF-8 characters in the string.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_utf8_count_best(sz_cptr_t text, sz_size_t length, sz_size_t *count,
                                                sz_capability_t capabilities, sz_stream_t stream);
 
 /**
- *  @brief Checks that every one of `strings[order[i]]`, or of the first @p count strings, is
+ *  @brief Checks that every one of <tt>strings[order[i]]</tt>, or of the first @p count strings, is
  *      well-formed UTF-8 and, unless @p runes is null, counts each one's runes.
  *
  *  Well-formed is RFC 3629: no overlong forms, surrogates, codepoints past U+10FFFF, stray
@@ -58,8 +60,10 @@ STRINGZILLA_API sz_status_t sz_utf8_count_best(sz_cptr_t text, sz_size_t length,
  *  @param[out] malformed_index The first ill-formed string, or @p count when all are well-formed.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, @c sz_invalid_utf8_k when a string is ill-formed, or
- *      @c sz_missing_kernel_k when no capability in @p capabilities has it.
+ *
+ *  @par Statuses:
+ *  - @c sz_invalid_utf8_k A string is ill-formed.
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_utf8_count_strings_best(sz_strings_view_t const *strings, sz_size_t const *order,
                                                        sz_size_t count, sz_size_t *runes, sz_size_t *malformed_index,
@@ -88,11 +92,13 @@ STRINGZILLA_API sz_status_t sz_utf8_count_strings_best(sz_strings_view_t const *
  *
  *  @param[in] text String to be scanned.
  *  @param[in] length Number of bytes in the string.
- *  @param[in] n Number of UTF-8 characters to skip, 0-indexed, so `n = 0` yields @p text.
+ *  @param[in] n Number of UTF-8 characters to skip, 0-indexed, so <tt>n = 0</tt> yields @p text.
  *  @param[out] position The Nth character, or NULL if the string has fewer than @p n characters.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_utf8_seek_best(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
                                               sz_capability_t capabilities, sz_stream_t stream);
@@ -120,13 +126,13 @@ STRINGZILLA_API sz_status_t sz_utf8_seek_best(sz_cptr_t text, sz_size_t length, 
  *
  *  - @b Fill-or-drain: emits runes until @p runes_capacity is reached or @p text is exhausted,
  *    looping internally - one call fills the buffer however many byte-widths the text mixes.
- *  - @b Total @b and @b safe: never reads past `text + length`; substitutes one @b U+FFFD per
+ *  - @b Total @b and @b safe: never reads past <tt>text + length</tt>; substitutes one @b U+FFFD per
  *    maximal ill-formed subpart (overlong, surrogate, out-of-range, or a stray byte) and resyncs.
  *  - @b Valid @b scalar @b values: every emitted rune is a Unicode scalar value (incl. U+FFFD),
  *    so callers may convert without re-validation.
  *
  *  End of text is end of input: a well-formed but truncated final sequence decodes to one U+FFFD
- *  over its maximal subpart and is consumed, so `"a\xE2\x82"` yields `{'a', U+FFFD}` over all 3
+ *  over its maximal subpart and is consumed, so <tt>"a\xE2\x82"</tt> yields <tt>{'a', U+FFFD}</tt> over all 3
  *  bytes. Only a full @p runes buffer stops early, so @p bytes_consumed falls short of @p length
  *  only when @p runes_count reaches @p runes_capacity, and then at a rune boundary. Callers
  *  decoding a stream in chunks split it at a rune boundary.
@@ -139,7 +145,9 @@ STRINGZILLA_API sz_status_t sz_utf8_seek_best(sz_cptr_t text, sz_size_t length, 
  *  @param[out] bytes_consumed Bytes of @p text decoded, the offset the next call resumes at.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_utf8_decode_best(       //
     sz_cptr_t text, sz_size_t length,                  //
@@ -149,9 +157,14 @@ STRINGZILLA_API sz_status_t sz_utf8_decode_best(       //
 
 /**
  *  @brief Finds the UTF-8 runes kernel of @p kind, from the best of @p capabilities.
+ *  @param[in] kind The verb whose kernel to find.
+ *  @param[in] capabilities The mask to pick the best capability from.
  *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
  *  @param[out] capability The capability the kernel belongs to, or zero.
- *  @return @c sz_success_k, @c sz_missing_kernel_k, or @c sz_missing_library_k when header-only.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k
+ *  - @c sz_missing_library_k Header-only.
  */
 STRINGZILLA_API sz_status_t sz_utf8_runes_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
                                                       sz_kernel_punned_t *kernel, sz_capability_t *capability);

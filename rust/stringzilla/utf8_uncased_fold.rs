@@ -2,6 +2,7 @@
 //!
 //! File: rust/stringzilla/utf8_uncased_fold.rs
 //! Author: Ash Vardanian
+//! Date: August 7, 2026
 
 use core::ffi::c_void;
 

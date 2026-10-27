@@ -4,9 +4,9 @@
  *  @date June 14, 2026
  *  @brief RISC-V Vector Crypto (Zvk) backend for hash: hardware AES & SHA-256.
  *
- *  This backend replaces the two emulated primitives of the base RVV 1.0 path in `hash/rvv.h`: the
+ *  This backend replaces the two emulated primitives of the base RVV 1.0 path in <tt>hash/rvv.h</tt>: the
  *  tower-field vector-permute AES round, @c sz_emulate_aesenc_rvv_, is swapped for a single
- *  @c Zvkned `vaesem.vv` instruction, and the serial SHA-256 block for the @c Zvknhb @c vsha2cl,
+ *  @c Zvkned <tt>vaesem.vv</tt> instruction, and the serial SHA-256 block for the @c Zvknhb @c vsha2cl,
  *  @c vsha2ch and @c vsha2ms instructions. Both produce byte- and bit-identical results to the
  *  serial reference, so digests are interchangeable.
  *
@@ -38,10 +38,10 @@ extern "C" {
 
 /**
  *  @brief Bit-exact @c Zvkned implementation of a single @c _mm_aesenc_si128 round.
- *  @return Result of `MixColumns(SubBytes(ShiftRows(state))) ^ round_key`, identical to
+ *  @return Result of <tt>MixColumns(SubBytes(ShiftRows(state))) ^ round_key</tt>, identical to
  *      @c sz_emulate_aesenc_si128_serial_ and to @c sz_emulate_aesenc_rvv_.
  *
- *  RISC-V's `vaesem.vv vd, vs2` computes `vd = MixColumns(SubBytes(ShiftRows(vd))) ^ vs2`, which is
+ *  RISC-V's <tt>vaesem.vv vd, vs2</tt> computes <tt>vd = MixColumns(SubBytes(ShiftRows(vd))) ^ vs2</tt>, which is
  *  exactly the AES-NI @c AESENC operation: the state in @c vd, the round key in @c vs2. A single
  *  128-bit AES block is one element group, EGW = 128, so the operation runs with a vector length of
  *  four 32-bit lanes.
@@ -128,15 +128,15 @@ STRINGZILLA_INLINE sz_u64_t sz_hash_state_finalize_rvvcrypto_(sz_hash_state_alig
     return mixed_in_register_vec.u64s[0];
 }
 
-/** Vector-copy a single AES block (`sizeof(sz_u128_vec_t)` bytes) from @p source into
- *  `target_vec->u8s`, replacing a scalar byte loop. @p source must have a full block
+/** Vector-copy a single AES block (<tt>sizeof(sz_u128_vec_t)</tt> bytes) from @p source into
+ *  @c target_vec->u8s, replacing a scalar byte loop. @p source must have a full block
  *  of readable bytes. */
 STRINGZILLA_INLINE void sz_hash_load_block_rvvcrypto_(sz_u128_vec_t *target_vec, sz_cptr_t source) {
     sz_size_t vector_length = __riscv_vsetvl_e8m1(sizeof(target_vec->u8s));
     __riscv_vse8_v_u8m1(target_vec->u8s, __riscv_vle8_v_u8m1((sz_u8_t const *)source, vector_length), vector_length);
 }
 
-/** Vector-copy a single AES block (`sizeof(sz_u128_vec_t)` bytes) from @p source_vec to
+/** Vector-copy a single AES block (<tt>sizeof(sz_u128_vec_t)</tt> bytes) from @p source_vec to
  *  @p target, the store counterpart of @c sz_hash_load_block_rvvcrypto_. @p target must have a
  *  full block of writable bytes. */
 STRINGZILLA_INLINE void sz_hash_store_block_rvvcrypto_(sz_ptr_t target, sz_u128_vec_t source_vec) {
@@ -466,19 +466,19 @@ STRINGZILLA_API sz_status_t sz_fill_random_rvvcrypto(sz_ptr_t target, sz_size_t 
 
 /**
  *  @brief Process a single 512-bit, 64-byte block of data using SHA-256 via @c Zvknhb.
- *  @param[inout] hash Pointer to 8x 32-bit hash values {a,b,c,d,e,f,g,h}, modified in place.
+ *  @param[in,out] hash Pointer to 8x 32-bit hash values {a,b,c,d,e,f,g,h}, modified in place.
  *  @param[in] block Pointer to a 64-byte message block.
  *
  *  The @c Zvknh state is held in two 128-bit element groups, each four 32-bit lanes. Per the RISC-V
- *  Vector Crypto spec, `vsha2c[hl].vv` reads `vs2 = {a,b,e,f}` and `vd = {c,d,g,h}`, where
- *  `{x@y@z@w}` packs @c w into lane 0 and @c x into lane 3, little-endian, and writes the next
- *  `{a,b,e,f}` back to @c vd. Each instruction performs two compression rounds: @c cl consumes the
- *  low two W+K words of the group, @c ch the high two. `vsha2ms.vv` expands four message-schedule
+ *  Vector Crypto spec, <tt>vsha2c[hl].vv</tt> reads <tt>vs2 = {a,b,e,f}</tt> and <tt>vd = {c,d,g,h}</tt>, where
+ *  <tt>{x\@y\@z\@w}</tt> packs @c w into lane 0 and @c x into lane 3, little-endian, and writes the next
+ *  <tt>{a,b,e,f}</tt> back to @c vd. Each instruction performs two compression rounds: @c cl consumes the
+ *  low two W+K words of the group, @c ch the high two. <tt>vsha2ms.vv</tt> expands four message-schedule
  *  words per call.
  *
  *  The intrinsic argument order matches @c sha256_block_data_order_zvkb_zvknha_or_zvknhb of
- *  OpenSSL: `cdgh = vsha2cl(cdgh, abef, k_plus_w)` then `abef = vsha2ch(abef, cdgh, k_plus_w)` per
- *  quad-round, and `wN = vsha2ms(wN, vmerge(w_older, w_newer, mask_lane0), w_newest)` to roll the
+ *  OpenSSL: <tt>cdgh = vsha2cl(cdgh, abef, k_plus_w)</tt> then <tt>abef = vsha2ch(abef, cdgh, k_plus_w)</tt> per
+ *  quad-round, and <tt>wN = vsha2ms(wN, vmerge(w_older, w_newer, mask_lane0), w_newest)</tt> to roll the
  *  schedule forward. SHA-256 words are big-endian; we load them with a scalar byte-swap so this
  *  path needs only the @c Zvknhb extension, not the @c vrev8 of @c Zvbb or @c Zvkb.
  */
@@ -722,8 +722,8 @@ STRINGZILLA_INLINE void sz_sha256_multistate_stage_rvvcrypto_(sz_u8_t *stage_lan
 
 /**
  *  @brief Compresses one staged block per lane into the batched state, one lane per element group.
- *  @param[inout] abef_u32m2 Every lane's {f,e,b,a} group, as in the single-lane block process.
- *  @param[inout] cdgh_u32m2 Every lane's {h,g,d,c} group.
+ *  @param[in,out] abef_u32m2 Every lane's {f,e,b,a} group, as in the single-lane block process.
+ *  @param[in,out] cdgh_u32m2 Every lane's {h,g,d,c} group.
  *  @param[in] stage Blocks staged by @c sz_sha256_multistate_stage_rvvcrypto_, 64 words a quarter.
  *  @param[in] broadcast_round_constants Table from the broadcast-round-constants helper.
  *  @param[in] active_b16 Lanes whose hash takes the result; the rest keep their state bit-for-bit.
@@ -786,8 +786,8 @@ STRINGZILLA_OUTLINED_ void sz_sha256_multistate_compress_rvvcrypto_(vuint32m2_t 
 }
 
 /**
- *  @brief Offsets of every lane's `{f,e,b,a}` words, relative to the first lane's @c hash, one
- *      lane per element group; the `{h,g,d,c}` words sit two words further.
+ *  @brief Offsets of every lane's <tt>{f,e,b,a}</tt> words, relative to the first lane's @c hash, one
+ *      lane per element group; the <tt>{h,g,d,c}</tt> words sit two words further.
  *  @param[in] vector_length Four 32-bit elements per lane.
  */
 STRINGZILLA_INLINE vuint32m2_t sz_sha256_multistate_abef_offsets_rvvcrypto_(sz_size_t vector_length) {

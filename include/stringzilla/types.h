@@ -105,9 +105,9 @@
     (defined(__BYTE_ORDER) && (__BYTE_ORDER == __BIG_ENDIAN)) || defined(__BIG_ENDIAN__) || defined(_BIG_ENDIAN) ||  \
     defined(__ARMEB__) || defined(__THUMBEB__) || defined(__AARCH64EB__) || defined(_MIBSEB) || defined(__MIBSEB) || \
     defined(__MIBSEB__) || defined(__s390x__) || defined(__s390__)
-#define STRINGZILLA_ARCH_BIG_ENDIAN_ (1) //< It's a big-endian target architecture
+#define STRINGZILLA_ARCH_BIG_ENDIAN_ (1) // It's a big-endian target architecture
 #else
-#define STRINGZILLA_ARCH_BIG_ENDIAN_ (0) //< It's a little-endian target architecture
+#define STRINGZILLA_ARCH_BIG_ENDIAN_ (0) // It's a little-endian target architecture
 #endif
 #endif
 
@@ -200,7 +200,7 @@
  *      from C++20 onwards.
  *
  *  That qualifier is what lets a caller fold the helper at compile time, and what lets a CUDA
- *  kernel call it at all - `--expt-relaxed-constexpr` reaches a host @c constexpr function from
+ *  kernel call it at all - @c --expt-relaxed-constexpr reaches a host @c constexpr function from
  *  device code, so this layer never has to name an execution space of its own.
  *
  *  A helper reaching an intrinsic can never be constant-evaluated, and a @c constexpr function with
@@ -254,7 +254,7 @@
 /**
  *  @brief Disables stack protection for performance-critical functions.
  *
- *  GCC's `-fstack-protector-strong` inserts stack canary checks for functions with local arrays
+ *  GCC's @c -fstack-protector-strong inserts stack canary checks for functions with local arrays
  *  or buffers. For hash functions that use fixed-size state structures, this is unnecessary
  *  overhead (~10 cycles per call). This macro opts out of stack protection for such functions.
  */
@@ -292,7 +292,7 @@
  *  this barrier, rather than paying for @c volatile on every byte - @c volatile also forbids
  *  vectorization, so a scrub written that way cannot use more than one byte per store.
  *
- *  @sa sz_do_not_optimize in `types.hpp`, its C++ read-side companion for a value, not a buffer.
+ *  @sa sz_do_not_optimize in <tt>types.hpp</tt>, its C++ read-side companion for a value, not a buffer.
  */
 #if defined(__GNUC__) || defined(__clang__)
 #define sz_keep_alive_(pointer) __asm__ __volatile__("" : : "r"(pointer) : "memory")
@@ -305,7 +305,7 @@
 
 /**
  *  @brief C99 static array parameter annotation for minimum array size. In C, expands to
- *      `static n` enabling compiler bounds checking. In C++, expands to nothing as this syntax
+ *      <tt>static n</tt> enabling compiler bounds checking. In C++, expands to nothing as this syntax
  *      is not supported.
  *
  *  It annotates declarations like these:
@@ -349,8 +349,8 @@
 #define STRINGZILLA_U64_MAX_PRIME (18446744073709551557ull)
 
 /** Opt into glibc's "misc" extensions, @c _DEFAULT_SOURCE implying @c __USE_MISC, before the first
- *  LibC header is pulled in. A strict @c -std=cNN otherwise hides declarations like `syscall()`,
- *  which the RISC-V @c riscv_hwprobe capability probe in `capabilities.h` relies on. As the first
+ *  LibC header is pulled in. A strict @c -std=cNN otherwise hides declarations like <tt>syscall()</tt>,
+ *  which the RISC-V @c riscv_hwprobe capability probe in <tt>capabilities.h</tt> relies on. As the first
  *  StringZilla header every translation unit includes, this is the one place that covers every
  *  build system, be it CMake, Cargo, or setuptools. */
 #if defined(__linux__) && STRINGZILLA_WITH_LIBC && !defined(_DEFAULT_SOURCE) && !defined(_GNU_SOURCE)
@@ -508,7 +508,7 @@
 /** Compiled as CUDA, host and device passes alike: nvcc, or Clang through its CUDA runtime wrapper.
  *  HIP on NVIDIA goes through nvcc, so it is CUDA here too. Unlike the CPU facts, both GPU facts
  *  hold beside the host's architecture, so they never follow one in an @c #elif chain. The library
- *  also sets it for its host units, which list the kernels of its CUDA units and include no `.cuh`,
+ *  also sets it for its host units, which list the kernels of its CUDA units and include no <tt>.cuh</tt>,
  *  so device code compiles only where the compiler set it. */
 #if !defined(STRINGZILLA_ARCH_CUDA_)
 #if defined(__CUDACC__) && !defined(__HIP__)
@@ -519,7 +519,7 @@
 #endif
 
 /** Compiled as HIP for AMD GPUs, host and device passes alike; Clang predefines @c __HIP__ itself,
- *  unlike @c __HIP_PLATFORM_AMD__, which only `hip_common.h` defines. The library also sets it for
+ *  unlike @c __HIP_PLATFORM_AMD__, which only <tt>hip_common.h</tt> defines. The library also sets it for
  *  its host units, which list the kernels of its one HIP unit. */
 #if !defined(STRINGZILLA_ARCH_ROCM_)
 #if defined(__HIP__)
@@ -946,7 +946,7 @@ typedef enum sz_similarity_gaps_t {
     sz_gaps_affine_k = 3
 } sz_similarity_gaps_t;
 
-/** Unicode normalization form selector, see `utf8_norm.h`. */
+/** Unicode normalization form selector, see <tt>utf8_norm.h</tt>. */
 typedef enum sz_normal_form_t {
 
     /** Canonical decomposition. */
@@ -982,7 +982,7 @@ typedef enum sz_case_sensitivity_t {
     /** Byte-exact matching; needles may be arbitrary bytes, including malformed UTF-8. */
     sz_cased_k = 0,
 
-    /** Full Unicode case folding as `CaseFolding.txt` defines it; needles must be valid UTF-8. */
+    /** Full Unicode case folding as <tt>CaseFolding.txt</tt> defines it; needles must be valid UTF-8. */
     sz_uncased_k = 1,
 } sz_case_sensitivity_t;
 
@@ -1036,8 +1036,19 @@ typedef enum sz_substrings_overlap_policy_t {
     sz_substrings_leftmost_first_k = 2,
 } sz_substrings_overlap_policy_t;
 
-/** Outcome of every StringZilla call that can fail: zero on success, negative when the call failed
- *  and its outputs hold no result. Positive values are reserved for results with a caveat. */
+/**
+ *  @brief Outcome of every StringZilla call that can fail: zero on success, negative when the
+ *      call failed and its outputs hold no result. Positive values are reserved for results
+ *      with a caveat.
+ *
+ *  Statuses fall into four categories, with no interruptions to report. Resources:
+ *  @c sz_bad_alloc_k, @c sz_missing_gpu_k, @c sz_device_code_mismatch_k, @c sz_missing_kernel_k
+ *  and @c sz_missing_library_k. Input: @c sz_invalid_utf8_k, @c sz_contains_duplicates_k,
+ *  @c sz_unexpected_dimensions_k, @c sz_device_memory_mismatch_k, @c sz_authentication_failed_k
+ *  and @c sz_invalid_syntax_k. State: @c sz_overflow_risk_k. Defects: @c sz_status_unknown_k. Any
+ *  verb that allocates, binds a device or touches a file may also return a Resources status. A
+ *  verb's own block lists only what its contract adds.
+ */
 typedef enum sz_status_t {
 
     /** For algorithms that return a status, indicates that the operation was successful. */
@@ -1262,7 +1273,7 @@ typedef void (*sz_free_t)(void *pointer, sz_size_t bytes, void *handle, sz_strea
  *
  *  Every function takes the caller's stream, which on a GPU names the device a block is made on and
  *  the work a release waits behind; host allocators ignore it, and on the CPU it is null. The
- *  optional @c reallocate keeps the first `min(old_bytes, new_bytes)` bytes, resizing the block
+ *  optional @c reallocate keeps the first <tt>min(old_bytes, new_bytes)</tt> bytes, resizing the block
  *  where it lies when it can and moving it otherwise, and leaves the block as it was on failure.
  *  Without it, a block that must change size moves through @c allocate and @c free.
  *
@@ -1278,10 +1289,12 @@ typedef struct sz_allocator_t {
 /**
  *  @brief Initializes a memory allocator to use the system default @c malloc and @c free.
  *  @param[out] allocator Memory allocator to initialize.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k without libc.
- *      Failure preserves the allocator.
- *  @note Unlike the C standard library, `malloc(0)` is guaranteed to return a null pointer.
+ *
+ *  @note Unlike the C standard library, <tt>malloc(0)</tt> is guaranteed to return a null pointer.
  *  @see malloc: https://en.cppreference.com/w/c/memory/malloc
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k Without libc. Failure preserves the allocator.
  */
 STRINGZILLA_INLINE sz_status_t sz_allocator_init_heap(sz_allocator_t *allocator);
 
@@ -1292,11 +1305,14 @@ STRINGZILLA_INLINE sz_status_t sz_allocator_init_heap(sz_allocator_t *allocator)
  *  @param[in] buffer Buffer to use for allocations.
  *  @param[in] bytes Buffer size, including metadata and alignment padding.
  *  @param[in] alignment Nonzero power-of-two alignment guaranteed for every returned block.
- *  @return @c sz_success_k, @c sz_unexpected_dimensions_k for invalid alignment, @c sz_bad_alloc_k
- *      for missing storage, or @c sz_overflow_risk_k for an overflowing address range. Failure
- *      leaves both the allocator and buffer unchanged.
  *
- *  Three aligned @c sz_size_t values store capacity, consumption and alignment inside the buffer.
+ *  Failure leaves both the allocator and buffer unchanged. Three aligned @c sz_size_t values store
+ *  capacity, consumption and alignment inside the buffer.
+ *
+ *  @par Statuses:
+ *  - @c sz_unexpected_dimensions_k Invalid alignment.
+ *  - @c sz_bad_alloc_k Missing storage.
+ *  - @c sz_overflow_risk_k An overflowing address range.
  */
 STRINGZILLA_INLINE sz_status_t sz_allocator_init_arena(sz_allocator_t *allocator, void *buffer, sz_size_t bytes,
                                                        sz_size_t alignment);
@@ -1465,7 +1481,7 @@ typedef union STRINGZILLA_MAY_ALIAS_ sz_u512_vec_t {
 
 #pragma region Lane Compaction Tables
 
-/** Left-pack table for 32-bit permutes: row `[m]` holds the 8 dword indices that gather the
+/** Left-pack table for 32-bit permutes: row <tt>[m]</tt> holds the 8 dword indices that gather the
  *  @c m -selected u64 lanes of 4, each a dword pair, to the front. 512 bytes stay cache-resident;
  *  an 8-wide variant would need 16 KB. */
 sz_align_(64) static sz_u32_t const sz_compact4_dword_indices_[16][8] = {
@@ -1475,7 +1491,7 @@ sz_align_(64) static sz_u32_t const sz_compact4_dword_indices_[16][8] = {
     {4, 5, 6, 7, 0, 0, 0, 0}, {0, 1, 4, 5, 6, 7, 0, 0}, {2, 3, 4, 5, 6, 7, 0, 0}, {0, 1, 2, 3, 4, 5, 6, 7},
 };
 
-/** Byte form of @c sz_compact4_dword_indices_ for @c vqtbl2q_u8: row `[m]` holds the 32 byte
+/** Byte form of @c sz_compact4_dword_indices_ for @c vqtbl2q_u8: row <tt>[m]</tt> holds the 32 byte
  *  indices that gather the @c m -selected u64 lanes of 4 to the front. The first 16 bytes feed
  *  lookup 0, for output lanes 0-1, and the last 16 feed lookup 1, for output lanes 2-3. */
 sz_align_(64) static sz_u8_t const sz_compact4_byte_indices_[16][32] = {
@@ -1506,7 +1522,7 @@ sz_align_(64) static sz_u8_t const sz_popcount4_lut_[16] = {0, 1, 1, 2, 1, 2, 2,
 
 #pragma region String Collections API
 
-/** Signature of the @c sz_strings_view_t accessor, writing the view of every string `indices[i]`.
+/** Signature of the @c sz_strings_view_t accessor, writing the view of every string <tt>indices[i]</tt>.
  *  Kernels call it once per block of up to 64 indices, and it must accept any @c count. */
 typedef void (*sz_strings_get_t)(void const *handle, sz_size_t const *indices, sz_size_t count,
                                  sz_string_view_t *views);
@@ -1514,7 +1530,7 @@ typedef void (*sz_strings_get_t)(void const *handle, sz_size_t const *indices, s
 /** How a collection holds its strings, naming the member of its @c data union to read. */
 typedef enum sz_strings_layout_t {
 
-    /** Apache Arrow @c String, where string i spans `[offsets[i], offsets[i + 1])` of the bytes. */
+    /** Apache Arrow @c String, where string i spans <tt>[offsets[i], offsets[i + 1])</tt> of the bytes. */
     sz_strings_u32_tape_k = 0,
 
     /** Apache Arrow @c LargeString, the same with 64-bit offsets. */
@@ -1661,7 +1677,7 @@ typedef struct sz_strings_rows_t {
 } sz_strings_rows_t;
 
 /**
- *  @brief Describes an array of NUL-terminated strings, like `char const *argv[]`.
+ *  @brief Describes an array of NUL-terminated strings, like <tt>char const *argv[]</tt>.
  *  @param[in] start The array of strings, which must outlive @p strings.
  *  @param[in] count Number of strings in the array.
  *  @param[out] strings The accessor-backed collection to initialize.
@@ -1708,7 +1724,7 @@ STRINGZILLA_INLINE void sz_strings_from_rows(sz_strings_crows_t const *rows, sz_
                                              sz_strings_view_t *strings);
 
 /**
- *  @brief Selects the @p count strings at `start + i * step`, copying no string bytes.
+ *  @brief Selects the @p count strings at <tt>start + i * step</tt>, copying no string bytes.
  *
  *  A step of one over a tape yields a tape over the same bytes and offsets, leaving @p views
  *  untouched. Every other selection fills @p views and points the accessor of @p slice at them.
@@ -1728,7 +1744,7 @@ STRINGZILLA_INLINE void sz_strings_slice(sz_strings_view_t const *strings, sz_si
  *  @param[in] strings The collection to reorder, which must outlive @p permuted.
  *  @param[in] order Indices into @p strings, possibly fewer than all of them.
  *  @param[in] count Number of indices in @p order.
- *  @param[out] views Receives the view of `strings[order[i]]` for each index.
+ *  @param[out] views Receives the view of <tt>strings[order[i]]</tt> for each index.
  *  @param[out] permuted Points its accessor at @p views.
  */
 STRINGZILLA_INLINE void sz_strings_permute(sz_strings_view_t const *strings, sz_size_t const *order, sz_size_t count,
@@ -1739,7 +1755,7 @@ STRINGZILLA_INLINE void sz_strings_permute(sz_strings_view_t const *strings, sz_
  *  @param[in] haystacks The collection the matches were found in, which must outlive @p strings.
  *  @param[in] matches The located matches, in any order.
  *  @param[in] count Number of matches.
- *  @param[out] views Receives the bytes of `matches[i]` inside its haystack for each match.
+ *  @param[out] views Receives the bytes of <tt>matches[i]</tt> inside its haystack for each match.
  *  @param[out] strings Points its accessor at @p views.
  */
 STRINGZILLA_INLINE void sz_strings_from_matches(sz_strings_view_t const *haystacks, sz_match_t const *matches,
@@ -1754,7 +1770,7 @@ STRINGZILLA_INLINE void sz_strings_from_span(sz_strings_span_t const *span, sz_s
 
 /**
  *  @brief Returns both blocks of @p span to the @p allocator they came from, leaving it zeroed.
- *  @param[inout] span The tape to release, whose offsets the host reads to size both blocks.
+ *  @param[in,out] span The tape to release, whose offsets the host reads to size both blocks.
  *  @param[in] allocator The allocator both blocks came from.
  *  @param[in] stream Null on the CPU, or the GPU stream the release waits behind.
  */
@@ -1963,8 +1979,8 @@ STRINGZILLA_CONSTEXPR sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return __bui
 /**
  *  @brief Returns @p pointer unchanged, hiding its origin so table reads stay memory operands.
  *
- *  Left visible, a `static const` table folds into immediates and every constant costs a
- *  @c vpbroadcastd where an AVX-512 `{1toN}` embedded broadcast would have been free. No use
+ *  Left visible, a <tt>static const</tt> table folds into immediates and every constant costs a
+ *  @c vpbroadcastd where an AVX-512 <tt>{1toN}</tt> embedded broadcast would have been free. No use
  *  outside x86, which has no equivalent operand to protect.
  */
 STRINGZILLA_INLINE void const *sz_x86_hide_pointer_origin_(void const *pointer) {
@@ -1996,7 +2012,7 @@ STRINGZILLA_CONSTEXPR int sz_u32_nth_set_bit(sz_u32_t bits, sz_size_t n) {
     return sz_u32_ctz(bits);
 }
 
-/** Branchless `value | (bit if condition)`: OR @p bit into @p value when @p condition holds, with
+/** Branchless <tt>value | (bit if condition)</tt>: OR @p bit into @p value when @p condition holds, with
  *  no branch - a mask-select rather than a CMOV, so there is no flag dependency. For threading a
  *  per-window carry signal into a lane mask. */
 STRINGZILLA_CONSTEXPR sz_u64_t sz_u64_or_if_(sz_u64_t value, sz_u64_t bit, int condition) {
@@ -2066,7 +2082,7 @@ STRINGZILLA_CONSTEXPR sz_i32_t sz_i32_min_of_two(sz_i32_t x, sz_i32_t y) { retur
 /** Branchless maximum function for two signed 32-bit integers. */
 STRINGZILLA_CONSTEXPR sz_i32_t sz_i32_max_of_two(sz_i32_t x, sz_i32_t y) { return x - ((x - y) & (x - y) >> 31); }
 
-/** Low @p count bits set (`[0, count)`), 0 for `count==0`, all-ones for `count>=64`. Portable,
+/** Low @p count bits set (<tt>[0, count)</tt>), 0 for <tt>count==0</tt>, all-ones for <tt>count>=64</tt>. Portable,
  *  branch-light replacement for the BMI2 @c sz_u64_mask_until_ so the shared boundary algebra
  *  compiles on every backend. */
 STRINGZILLA_CONSTEXPR sz_u64_t sz_u64_mask_until_serial_(sz_size_t count) {
@@ -2124,11 +2140,11 @@ STRINGZILLA_CONSTEXPR sz_u64_vec_t sz_u64_each_byte_equal_(sz_u64_vec_t a_vec, s
     return result_vec;
 }
 
-/** Clamps signed offsets to a Python-style `[offset, offset + length)` slice and reports whether
+/** Clamps signed offsets to a Python-style <tt>[offset, offset + length)</tt> slice and reports whether
  *  the requested window was non-degenerate. Mirrors CPython's @c ADJUST_INDICES: negative
  *  indices count from the end, @p end is clamped into the string, and a window with @p start
- *  past @p end, out of range or inverted, is "empty" - exactly when `str.find("")` and
- *  `str.rfind("")` return -1. */
+ *  past @p end, out of range or inverted, is "empty" - exactly when <tt>str.find("")</tt> and
+ *  <tt>str.rfind("")</tt> return -1. */
 STRINGZILLA_CONSTEXPR sz_bool_t sz_ssize_clamp_interval_checked( //
     sz_size_t length, sz_ssize_t start, sz_ssize_t end, sz_size_t *normalized_offset, sz_size_t *normalized_length) {
     sz_ssize_t const signed_length = (sz_ssize_t)length;
@@ -2164,7 +2180,7 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_size_log2i_nonzero(sz_size_t x) {
 }
 
 /** Computes the ceiling of @p x divided by @p divisor - the number of chunks of that size needed to
- *  cover @p x. Assumes a non-zero @p divisor and no overflow on `x + divisor`. */
+ *  cover @p x. Assumes a non-zero @p divisor and no overflow on <tt>x + divisor</tt>. */
 STRINGZILLA_CONSTEXPR sz_size_t sz_size_divide_round_up(sz_size_t x, sz_size_t divisor) {
     return (x + divisor - 1) / divisor;
 }

@@ -13,11 +13,11 @@
  *  codepoint against it.
  *
  *  A tile learns where its output begins from the tiles before it, which publish their folded sizes
- *  in turn through the caller's own length slot, as the @b Chained @b Tiles of `types.cuh` do, so a
+ *  in turn through the caller's own length slot, as the @b Chained @b Tiles of <tt>types.cuh</tt> do, so a
  *  round needs no scratch beyond the slot it reports into.
  *
- *  Written in C, as every `.cuh` in this library is. Only device code lives here; each vendor
- *  launches the kernel from its own host side, in `cuda.cuh` and `rocm.cuh` beside this file.
+ *  Written in C, as every <tt>.cuh</tt> in this library is. Only device code lives here; each vendor
+ *  launches the kernel from its own host side, in <tt>cuda.cuh</tt> and <tt>rocm.cuh</tt> beside this file.
  *
  *  @sa include/stringzilla/utf8_uncased_fold.h
  *  @sa include/stringzilla/utf8_uncased_fold/cuda.cuh

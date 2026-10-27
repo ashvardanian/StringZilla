@@ -5,9 +5,9 @@
  *  @brief The library's cross-family exports: versions, statuses, capability queries, the kernel
  *      finder, and the device queries of the GPU vendors it lacks.
  *
- *  Each family's dispatch points live in its own unit under `c/dispatch/`, each capability's
- *  kernels in its own unit under `c/target/`, and each GPU vendor's kernels and device exports in
- *  `c/target/cuda.cu`, `c/target/rocm.hip` and `c/target/metal.c`.
+ *  Each family's dispatch points live in its own unit under <tt>c/dispatch/</tt>, each capability's
+ *  kernels in its own unit under <tt>c/target/</tt>, and each GPU vendor's kernels and device exports in
+ *  <tt>c/target/cuda.cu</tt>, <tt>c/target/rocm.hip</tt> and <tt>c/target/metal.c</tt>.
  */
 
 /** glibc feature selection must precede the libc headers pulled in by <stdatomic.h>. */

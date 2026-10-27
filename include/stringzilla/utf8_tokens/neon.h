@@ -285,7 +285,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_whitespaces_neon_( //
 
 #pragma region Membership
 
-/** Per-lane single-bit test `(bitmap_byte >> (low & 7)) & 1` for one quarter, returned as 0x00/0xFF
+/** Per-lane single-bit test <tt>(bitmap_byte >> (low & 7)) & 1</tt> for one quarter, returned as 0x00/0xFF
  *  lanes. */
 STRINGZILLA_INLINE uint8x16_t sz_delimiter_test_bit_neon_(uint8x16_t bitmap_byte_u8x16, uint8x16_t low_u8x16) {
     static sz_u8_t const bit_for_low3[16] = {1, 2, 4, 8, 16, 32, 64, 128, 0, 0, 0, 0, 0, 0, 0, 0};
@@ -298,8 +298,8 @@ STRINGZILLA_INLINE uint8x16_t sz_delimiter_test_bit_neon_(uint8x16_t bitmap_byte
  *  @brief BMP (codepoint < 0x10000) delimiter membership for one quarter, as 0x00/0xFF lanes.
  *
  *  The decode window only reconstructs @c high and @c low for 2-/3-byte leads; ASCII lanes (top bit
- *  clear) carry their codepoint in the raw byte itself, so override them with `high = 0` and
- *  `low = byte` before addressing the BMP tables. Lanes below U+0100 read bitmap row 0 directly;
+ *  clear) carry their codepoint in the raw byte itself, so override them with <tt>high = 0</tt> and
+ *  <tt>low = byte</tt> before addressing the BMP tables. Lanes below U+0100 read bitmap row 0 directly;
  *  the rest survive a 256-bit pre-filter over @c high only if their 256-codepoint block holds any
  *  delimiter (row 1 - most of the plane, including all CJK letters - is the unique empty row), and
  *  the survivors resolve one distinct high byte at a time: running text shares one to three highs
@@ -340,12 +340,12 @@ STRINGZILLA_INLINE uint8x16_t sz_delimiter_bmp_membership_neon_(uint8x16_t windo
 /**
  *  @brief Astral (codepoint ≥ 0x10000) delimiter membership for one quarter, as 0x00/0xFF lanes.
  *
- *  Reconstructs the byte-domain components of `offset = cp - 0x10000` directly per lane, with no
- *  32-bit-lane widening. With `cp = b0 << 18 | b1 << 12 | b2 << 6 | b3`, where b0 = lead & 7 and
- *  b1..b3 = continuation & 0x3F, the parts are `super = (cp >> 16) - 1` (no borrow, as it subtracts
- *  exactly 1 << 16), `sub = (cp >> 8) & 0xFF`, and `low8 = cp & 0xFF`. The @c super value (0..15)
+ *  Reconstructs the byte-domain components of <tt>offset = cp - 0x10000</tt> directly per lane, with no
+ *  32-bit-lane widening. With <tt>cp = b0 << 18 | b1 << 12 | b2 << 6 | b3</tt>, where b0 = lead & 7 and
+ *  b1..b3 = continuation & 0x3F, the parts are <tt>super = (cp >> 16) - 1</tt> (no borrow, as it subtracts
+ *  exactly 1 << 16), <tt>sub = (cp >> 8) & 0xFF</tt>, and <tt>low8 = cp & 0xFF</tt>. The @c super value (0..15)
  *  selects an L1 group; group × 256 + sub selects a bitmap row id (group < 2, so the two 256-entry
- *  halves of the L2 table are read and blended by the group bit); the bit `(low8 & 7)` is tested.
+ *  halves of the L2 table are read and blended by the group bit); the bit <tt>(low8 & 7)</tt> is tested.
  */
 STRINGZILLA_INLINE uint8x16_t sz_delimiter_astral_membership_neon_(uint8x16_t window_u8x16, uint8x16_t next1_u8x16,
                                                                    uint8x16_t next2_u8x16, uint8x16_t next3_u8x16) {

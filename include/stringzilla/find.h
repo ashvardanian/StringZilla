@@ -38,10 +38,12 @@ extern "C" {
  *  @param[out] match Address of the first match, or NULL if not found.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
  *  @see x86_64 implementation in glibc: https://github.com/lattera/glibc/blob/master/sysdeps/x86_64/memchr.S
  *  @see AArch64 implementation in glibc: https://github.com/lattera/glibc/blob/master/sysdeps/aarch64/memchr.S
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_find_byte_best(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                               sz_cptr_t *match, sz_capability_t capabilities, sz_stream_t stream);
@@ -55,11 +57,13 @@ STRINGZILLA_API sz_status_t sz_find_byte_best(sz_cptr_t haystack, sz_size_t hays
  *  @param[out] match Address of the last match, or NULL if not found.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
  *  There is no AArch64 reference implementation to link here.
  *
  *  @see x86_64 implementation in glibc: https://github.com/lattera/glibc/blob/master/sysdeps/x86_64/memrchr.S
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_rfind_byte_best(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                                sz_cptr_t *match, sz_capability_t capabilities, sz_stream_t stream);
@@ -75,7 +79,9 @@ STRINGZILLA_API sz_status_t sz_rfind_byte_best(sz_cptr_t haystack, sz_size_t hay
  *  @param[out] match Address of the first match, or NULL if not found.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_find_best(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                          sz_size_t needle_length, sz_cptr_t *match, sz_capability_t capabilities,
@@ -91,7 +97,9 @@ STRINGZILLA_API sz_status_t sz_find_best(sz_cptr_t haystack, sz_size_t haystack_
  *  @param[out] match Address of the last match, or NULL if not found.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_rfind_best(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                           sz_size_t needle_length, sz_cptr_t *match, sz_capability_t capabilities,
@@ -106,9 +114,8 @@ STRINGZILLA_API sz_status_t sz_rfind_best(sz_cptr_t haystack, sz_size_t haystack
  *  @param[out] match Address of the first matching character from @p set, or NULL if not found.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
- *  Equivalent to `strspn(haystack, accepted)` and `strcspn(haystack, rejected)` in LibC. May have
+ *  Equivalent to <tt>strspn(haystack, accepted)</tt> and <tt>strcspn(haystack, rejected)</tt> in LibC. May have
  *  identical implementation and performance to @c sz_rfind_byteset_best. Useful for parsing, when
  *  we want to skip a set of characters, such as:
  *
@@ -116,6 +123,9 @@ STRINGZILLA_API sz_status_t sz_rfind_best(sz_cptr_t haystack, sz_size_t haystack
  *  - 16 digits forming a float number: "0123456789,.eE+-".
  *  - 5 HTML reserved characters: "\"'&<>", of which "<>" can be useful for parsing.
  *  - 2 JSON string special characters useful to locate the end of the string: "\"\\".
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_find_byteset_best(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set,
                                                  sz_cptr_t *match, sz_capability_t capabilities, sz_stream_t stream);
@@ -129,9 +139,8 @@ STRINGZILLA_API sz_status_t sz_find_byteset_best(sz_cptr_t haystack, sz_size_t h
  *  @param[out] match Address of the last matching character from @p set, or NULL if not found.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
- *  Equivalent to `strspn(haystack, accepted)` and `strcspn(haystack, rejected)` in LibC. May have
+ *  Equivalent to <tt>strspn(haystack, accepted)</tt> and <tt>strcspn(haystack, rejected)</tt> in LibC. May have
  *  identical implementation and performance to @c sz_find_byteset_best. Useful for parsing, when we
  *  want to skip a set of characters, such as:
  *
@@ -139,13 +148,16 @@ STRINGZILLA_API sz_status_t sz_find_byteset_best(sz_cptr_t haystack, sz_size_t h
  *  - 16 digits forming a float number: "0123456789,.eE+-".
  *  - 5 HTML reserved characters: "\"'&<>", of which "<>" can be useful for parsing.
  *  - 2 JSON string special characters useful to locate the end of the string: "\"\\".
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_rfind_byteset_best(sz_cptr_t haystack, sz_size_t haystack_length,
                                                   sz_byteset_t const *set, sz_cptr_t *match,
                                                   sz_capability_t capabilities, sz_stream_t stream);
 
 /**
- *  @brief Finds @p needle in every one of `strings[order[i]]`, or of the first @p count strings,
+ *  @brief Finds @p needle in every one of <tt>strings[order[i]]</tt>, or of the first @p count strings,
  *      like a @c LIKE '%needle%' filter over a column.
  *
  *  A tape read in its own order is searched as one run of bytes, 64 starts at a time, so a string
@@ -161,7 +173,9 @@ STRINGZILLA_API sz_status_t sz_rfind_byteset_best(sz_cptr_t haystack, sz_size_t 
  *      @c STRINGZILLA_SIZE_MAX where a string holds none, @p count of them.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_find_strings_best(sz_strings_view_t const *strings, sz_size_t const *order,
                                                  sz_size_t count, sz_cptr_t needle, sz_size_t needle_length,
@@ -477,9 +491,14 @@ STRINGZILLA_API sz_status_t sz_rfind_byteset_powervsx(sz_cptr_t haystack, sz_siz
 
 /**
  *  @brief Finds the search kernel of @p kind, from the best of @p capabilities.
+ *  @param[in] kind The verb whose kernel to find.
+ *  @param[in] capabilities The mask to pick the best capability from.
  *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
  *  @param[out] capability The capability the kernel belongs to, or zero.
- *  @return @c sz_success_k, @c sz_missing_kernel_k, or @c sz_missing_library_k when header-only.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k
+ *  - @c sz_missing_library_k Header-only.
  */
 STRINGZILLA_API sz_status_t sz_find_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
                                                 sz_kernel_punned_t *kernel, sz_capability_t *capability);

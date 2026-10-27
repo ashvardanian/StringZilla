@@ -7,17 +7,17 @@
  *      write it where the tiles before it end.
  *
  *  The tables are the serial tier's own: every vendor's call copies them into the device's copies
- *  below before its kernel reads them, so `tables.h` stays their only definition, and the lookups
+ *  below before its kernel reads them, so <tt>tables.h</tt> stays their only definition, and the lookups
  *  read them as plain global loads. Two calls on different streams write the same bytes into them.
  *
  *  A stretch begins and ends on a safe boundary, a starter whose quick-check is Yes or a malformed
  *  byte, which is where the serial engine splits its dirty regions too, so stretches normalize
  *  independently. Within one, the clean runs are copied and only the dirty ones decompose, reorder
  *  and compose, as in @c sz_utf8_norm_engine_. A tile learns where its output begins through the
- *  @b Chained @b Tiles of `types.cuh`.
+ *  @b Chained @b Tiles of <tt>types.cuh</tt>.
  *
- *  Written in C, as every `.cuh` in this library is. Only device code lives here; each vendor
- *  uploads the tables and launches the kernel from its own host side, in `cuda.cuh` and `rocm.cuh`.
+ *  Written in C, as every <tt>.cuh</tt> in this library is. Only device code lives here; each vendor
+ *  uploads the tables and launches the kernel from its own host side, in <tt>cuda.cuh</tt> and <tt>rocm.cuh</tt>.
  *
  *  @sa include/stringzilla/utf8_norm.h
  *  @sa include/stringzilla/utf8_norm/cuda.cuh

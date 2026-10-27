@@ -59,7 +59,7 @@ try (StringZilla.Hasher hasher = new StringZilla.Hasher(42)) { // streaming
 byte[] sha = StringZilla.Sha256.hashData(data); // cf. MessageDigest "SHA-256"
 ```
 
-## UTF-8 Codepoints and Segmentation
+## Unicode Segmentation
 
 The segmentation primitive is allocation-free: it fills the caller's array with segment lengths and returns the count.
 Segments tile the text, so each starts where the previous one ended.
@@ -87,7 +87,7 @@ for (MemorySegment cluster : StringZilla.graphemes("👍🏽🇺🇸".getBytes(U
 for (MemorySegment word : StringZilla.words("Hello, 世界".getBytes(UTF_8))) use(word);      // Latin run, then CJK run
 ```
 
-## Splitting and Iteration
+## Splitting and Partitioning
 
 Every factory takes an on-heap `byte[]` or any `MemorySegment` (e.g. an off-heap Spark `UTF8String`, a direct `ByteBuffer`, or an mmap'd file).
 The word, grapheme, sentence, line-break, and separator-token iterators are always zero-copy and batch 64 boundaries per native call.
@@ -132,7 +132,7 @@ byte[] ascii = StringZilla.normalize("ﬁ".getBytes(UTF_8), StringZilla.NormalFo
 byte[] key = StringZilla.normalize("Straße".getBytes(UTF_8), StringZilla.NormalForm.NFKC_CASEFOLD); // → "strasse"
 ```
 
-## Sorting and Set Operations
+## Sorting and Sets
 
 ```java
 long[] order = new long[items.size()];
@@ -148,7 +148,7 @@ int matches = StringZilla.intersect(left, right, firstPositions, secondPositions
 
 A failed native call throws `StringZilla.StatusException`, whose `status()` is the C `sz_status_t` code and `statusName()` its enumerator name.
 
-## Zero-Copy and Memory
+## Memory Operations
 
 Every operation accepts an on-heap `byte[]` or any `MemorySegment`.
 Whether the input is read in place or copied once is determined by what the native kernel returns, not by the binding.
@@ -174,7 +174,7 @@ For repeated pointer searches over the same large on-heap buffer, wrap it in a n
 ## Zero-Copy with Apache Lucene
 
 Lucene terms are UTF-8 already (`BytesRef`), so StringZilla reads the backing bytes directly.
-Value operations such as `hash` and `compare` run with no copy; pointer searches copy a heap `BytesRef` once (see [Zero-Copy and Memory](#zero-copy-and-memory)).
+Value operations such as `hash` and `compare` run with no copy; pointer searches copy a heap `BytesRef` once (see [Memory Operations](#memory-operations)).
 This is ideal in custom codecs, comparators, or analysis components.
 
 ```java

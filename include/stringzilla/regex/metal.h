@@ -10,7 +10,7 @@
  *  @sa include/stringzilla/regex/simt.cuh, the CUDA sibling
  *
  *  The verbs keep the serial tier's shape, with an @c id<MTLCommandQueue> as the stream. Every
- *  block the kernels read must come from @ref sz_allocator_init_unified_metal on that stream's
+ *  block the kernels read must come from @c sz_allocator_init_unified_metal on that stream's
  *  device, and haystacks and replacements must be tapes, as @ref sz_strings_to_tape_best writes
  *  them with that allocator. The round block is taken once at init, and a call reads the tape's
  *  offsets on the host to cut its corpus into segments the block holds.
@@ -133,7 +133,7 @@ typedef enum sz_regex_verb_metal_t {
     sz_regex_extracting_metal_k = 3,
 } sz_regex_verb_metal_t;
 
-/** Every kernel of `metal.metal`, built at init so no call compiles one. */
+/** Every kernel of <tt>metal.metal</tt>, built at init so no call compiles one. */
 static char const *const sz_regex_kernels_metal_[] = {
     "sz_regex_clear_metal_kernel_",
     "sz_regex_scan_reduce_metal_kernel_",

@@ -168,7 +168,7 @@ STRINGZILLA_INLINE void sz_strings_split_emit_neon_(sz_u8_t const *source, sz_u6
     }
 }
 
-/** Copies the @p length bytes of @p source to `target + written`: up to 16 in one load and store
+/** Copies the @p length bytes of @p source to <tt>target + written</tt>: up to 16 in one load and store
  *  when 16 bytes stay @p readable and fit before @p end, and exactly otherwise. */
 STRINGZILLA_INLINE void sz_strings_join_piece_neon_(sz_u8_t *target, sz_size_t written, sz_size_t end,
                                                     sz_u8_t const *source, sz_size_t length, sz_size_t readable) {
@@ -362,7 +362,7 @@ STRINGZILLA_INLINE uint8x16_t sz_strings_hex_digits_neon_(uint8x16_t digits_u8x1
     return vorrq_u8(vcltq_u8(decimal_u8x16, vdupq_n_u8(10)), vcltq_u8(letter_u8x16, vdupq_n_u8(6)));
 }
 
-/** The `%` lanes among the 64 bytes at @p source, as bits. */
+/** The <tt>\%</tt> lanes among the 64 bytes at @p source, as bits. */
 STRINGZILLA_INLINE sz_u64_t sz_strings_percents_neon_(sz_u8_t const *source) {
     uint8x16x4_t percents_u8x16x4 = vld1q_u8_x4(source);
     for (int chunk = 0; chunk != 4; ++chunk)
@@ -370,7 +370,7 @@ STRINGZILLA_INLINE sz_u64_t sz_strings_percents_neon_(sz_u8_t const *source) {
     return sz_strings_bits_neon_(percents_u8x16x4);
 }
 
-/** Decodes the 64 bytes at @p source, whose `%` lanes are @p percents and whose first @p skipped
+/** Decodes the 64 bytes at @p source, whose <tt>\%</tt> lanes are @p percents and whose first @p skipped
  *  lanes are digits of an escape of the block before, into @p target, reading up to 130 bytes and
  *  storing up to 128. */
 STRINGZILLA_INLINE void sz_strings_unescape_url_emit_neon_(sz_u8_t const *source, sz_u64_t percents, sz_size_t skipped,
@@ -396,7 +396,7 @@ STRINGZILLA_INLINE void sz_strings_unescape_url_emit_neon_(sz_u8_t const *source
 /**
  *  @brief Unescapes the @p count percent-encoded strings of a tape, read in its own order as one
  *      run of bytes, into fresh blocks.
- *  @return @c sz_invalid_utf8_k with nothing written when a `%` lacks two hexadecimal digits after
+ *  @return @c sz_invalid_utf8_k with nothing written when a <tt>\%</tt> lacks two hexadecimal digits after
  *      it in its string, for the driver to name that string.
  */
 STRINGZILLA_INLINE sz_status_t sz_strings_unescape_url_run_neon_(sz_strings_view_t const *strings, sz_size_t count,

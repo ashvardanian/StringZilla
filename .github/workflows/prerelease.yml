@@ -71,15 +71,16 @@ jobs:
           dry-run: "true"
 
   test_ubuntu_gcc:
-    name: Ubuntu GCC 12 - ${{ matrix.os }}
+    name: Ubuntu GCC 13 - ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-26.04, ubuntu-26.04-arm]
+        # GCC 13 is the floor, the default on Ubuntu 24.04
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
     env:
-      CC: gcc-12
-      CXX: g++-12
+      CC: gcc-13
+      CXX: g++-13
 
     steps:
       - name: Checkout
@@ -98,7 +99,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y build-essential gcc-12 g++-12
+          sudo apt install -y build-essential gcc-13 g++-13
 
       - name: Build C/C++
         run: |
@@ -110,9 +111,9 @@ jobs:
             echo "The original compilation commands:"
             cat build_release/compile_commands.json
             echo "GCC Version:"
-            gcc-12 --version
+            gcc-13 --version
             echo "G++ Version:"
-            g++-12 --version
+            g++-13 --version
             exit 1
           }
       - name: Test C++
@@ -180,16 +181,16 @@ jobs:
         run: cargo package --locked
 
   test_ubuntu_clang:
-    name: Ubuntu Clang 16 - ${{ matrix.os }}
+    name: Ubuntu Clang 18 - ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        # Clang 16 is the floor, and neither Ubuntu 26.04 nor apt.llvm.org packages it for 26.04
-        os: [ubuntu-22.04, ubuntu-22.04-arm]
+        # Clang 18 is the floor, the default on Ubuntu 24.04
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
     env:
-      CC: clang-16
-      CXX: clang++-16
+      CC: clang-18
+      CXX: clang++-18
 
     steps:
       - name: Checkout
@@ -203,14 +204,10 @@ jobs:
           grep -E "model name|flags" /proc/cpuinfo | head -5 || true
 
         # C/C++
-        # Clang 16 isn't available from default repos on Ubuntu 22.04, so we have to install it manually
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y build-essential ninja-build libjemalloc-dev
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 16
+          sudo apt install -y build-essential ninja-build libjemalloc-dev clang-18
 
       - name: Build C/C++
         run: |
@@ -222,9 +219,9 @@ jobs:
             echo "The original compilation commands:"
             cat build_release/compile_commands.json
             echo "Clang Version:"
-            clang-16 --version
+            clang-18 --version
             echo "Clang++ Version:"
-            clang++-16 --version
+            clang++-18 --version
             exit 1
           }
       - name: Test C++
@@ -281,10 +278,10 @@ jobs:
 
   test_ubuntu_debug:
     name: Test Debug build with sanitizers on Ubuntu
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     env:
-      CC: gcc-12
-      CXX: g++-12
+      CC: gcc-13
+      CXX: g++-13
 
     steps:
       - name: Checkout
@@ -293,7 +290,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y build-essential gcc-12 g++-12
+          sudo apt install -y build-essential gcc-13 g++-13
 
         # Debug sanitizes the executables and builds the shared library alongside, all with `STRINGZILLA_DEBUG` asserts live.
       - name: Build C/C++
@@ -312,7 +309,7 @@ jobs:
         # cGo links no sanitizer runtime, so the Go binding takes a Debug archive built without them.
       - name: Build Debug static library for Go binding
         run: |
-          cmake --preset debug -B build_golang -D STRINGZILLA_BUILD_SANITIZERS=OFF
+          cmake --preset debug -B build_golang -D STRINGZILLA_BUILD_SANITIZERS=off
           cmake --build build_golang --target stringzilla_static
       - name: Test Go binding against the Debug static library
         working-directory: golang
@@ -326,7 +323,7 @@ jobs:
       - name: Build Python with asserts
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --group test --group test-oracles . -C cmake.build-type=Debug -C cmake.define.STRINGZILLA_BUILD_SANITIZERS=OFF
+          python -m pip install --group test --group test-oracles . -C cmake.build-type=Debug
       - name: Test Python
         run: python -X faulthandler -m pytest -x
 
@@ -1255,3 +1252,24 @@ jobs:
           # QEMU_CPU drops the SVE kits, whose emulation is flaky; STRINGZILLA_SCALE matches `test_cross_qemu`.
           CIBW_ENVIRONMENT_LINUX: >-
             STRINGZILLA_IN_QEMU=1 STRINGZILLA_SCALE=0.05${{ matrix.arch == 'aarch64' && ' QEMU_CPU=max,sve=off' || '' }}
+
+  build_docs:
+    name: Build Docs
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set Up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install Doxygen
+        run: |
+          curl -sSfL https://www.doxygen.nl/files/doxygen-1.18.0.linux.bin.tar.gz | tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/doxygen-1.18.0/bin" >> "$GITHUB_PATH"
+      - name: Install Sphinx
+        run: pip install -r docs/requirements.txt
+      - name: Install StringZilla from the Checkout
+        run: pip install .
+      - name: Build Docs
+        run: cd docs && doxygen conf.dox && sphinx-build -M html . ../build/docs -W

@@ -53,7 +53,7 @@ ulong streamed = hasher.Digest();
 byte[] sha = Sha256.HashData(data); // cf. System.Security.Cryptography.SHA256
 ```
 
-## UTF-8 Codepoints and Segmentation
+## Unicode Segmentation
 
 The segmentation primitive is allocation-free: it fills the caller's span with segment lengths and returns the count.
 Segments tile the text, so each starts where the previous one ended.
@@ -83,7 +83,7 @@ foreach (var cluster in Sz.EnumerateGraphemes("👍🏽🇺🇸"u8)) Use(cluster
 foreach (var word in Sz.EnumerateWords("Hello, 世界"u8)) Use(word);      // Latin run, then CJK run
 ```
 
-## Splitting and Iteration
+## Splitting and Partitioning
 
 The iterators are lazy and allocation-free: each is a `ref struct` enumerator yielding zero-copy `ReadOnlySpan<byte>` views, so a `foreach` never touches the heap.
 The codepoint and segmentation iterators batch 64 boundaries per native call; the substring and byte-set splits and the match iterators advance one `find` at a time.
@@ -126,7 +126,7 @@ Sz.Normalize("ﬁ"u8, Sz.NormalForm.Nfkc);       // ligature "ﬁ" -> "fi"
 Sz.Normalize("Straße"u8, Sz.NormalForm.NfkcCasefold); // NFKC with case folding -> "strasse", for caseless keys
 ```
 
-## Sorting and Set Operations
+## Sorting and Sets
 
 These take a caller-provided result buffer and return the count; allocating convenience overloads also exist.
 
@@ -162,7 +162,7 @@ The managed package targets `net8.0`, which loads on Unity 6.2+ with the CoreCLR
 On older Unity (Mono/IL2CPP), drop the platform native library into `Assets/Plugins/<platform>/` and call the same API.
 The native binary itself is Unity-compatible; only the managed wrapper's target framework is the gate.
 
-## Capabilities and Runtime Selection
+## Runtime Dispatch
 
 A `Device` is the host CPU or one GPU, by its runtime's own ordinal, and reports capability bitmasks with the serial fallback at bit 0.
 Every call of this binding dispatches to the best kernel among the CPU's enabled capabilities; a GPU device only reports its masks here.

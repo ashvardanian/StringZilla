@@ -1,0 +1,37 @@
+PROJECT_NAME           = StringZilla
+OUTPUT_DIRECTORY       = ../build/
+INPUT                  = ../include/stringzilla
+RECURSIVE              = YES
+FILE_PATTERNS          = *.h *.hpp
+EXTENSION_MAPPING      = cuh=C++
+EXCLUDE_SYMBOLS        = *_ sz_aes256*_serial sz_allocator*_serial sz_bytesum*_serial sz_equal*_serial \
+                         sz_fill*_serial sz_find*_serial sz_hash*_serial sz_intersect*_serial sz_order*_serial \
+                         sz_rfind*_serial sz_sha256*_serial sz_sort*_serial sz_stream*_serial sz_strings*_serial \
+                         sz_utf8*_serial
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+PREDEFINED             = STRINGZILLA_API= STRINGZILLA_INLINE= STRINGZILLA_INLINE_= STRINGZILLA_CONSTEXPR= \
+                         STRINGZILLA_DEVICE= sz_lifetime_bound_= \
+                         STRINGZILLA_MAY_ALIAS_= STRINGZILLA_HEADER_ONLY=0 STRINGZILLA_TARGET_WESTMERE=0 \
+                         STRINGZILLA_TARGET_GOLDMONT=0 STRINGZILLA_TARGET_HASWELL=0 STRINGZILLA_TARGET_SKYLAKE=0 \
+                         STRINGZILLA_TARGET_ICELAKE=0 STRINGZILLA_TARGET_NEON=0 STRINGZILLA_TARGET_NEONAES=0 \
+                         STRINGZILLA_TARGET_NEONSHA=0 STRINGZILLA_TARGET_SVE=0 STRINGZILLA_TARGET_SVE2=0 \
+                         STRINGZILLA_TARGET_SVE2AES=0 STRINGZILLA_TARGET_RVV=0 STRINGZILLA_TARGET_RVVCRYPTO=0 \
+                         STRINGZILLA_TARGET_V128=0 STRINGZILLA_TARGET_V128RELAXED=0 STRINGZILLA_TARGET_LOONGSONASX=0 \
+                         STRINGZILLA_TARGET_POWERVSX=0 STRINGZILLA_TARGET_CUDA=0 STRINGZILLA_TARGET_ROCM=0 \
+                         STRINGZILLA_TARGET_METAL=0 STRINGZILLA_TARGET_HOPPER=0 STRINGZILLA_TARGET_BLACKWELL=0
+JAVADOC_AUTOBRIEF      = YES
+MARKDOWN_ID_STYLE      = GITHUB
+BUILTIN_STL_SUPPORT    = YES
+TYPEDEF_HIDES_STRUCT   = YES
+EXTRACT_ALL            = NO
+EXTRACT_STATIC         = YES
+GENERATE_HTML          = NO
+GENERATE_LATEX         = NO
+GENERATE_XML           = YES
+HAVE_DOT               = NO
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = NO
+WARN_IF_INCOMPLETE_DOC = YES
+WARN_AS_ERROR          = FAIL_ON_WARNINGS

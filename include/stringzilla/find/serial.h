@@ -712,7 +712,7 @@ STRINGZILLA_INLINE sz_u64_t sz_find_word_serial_(sz_u8_t const *text) {
     return STRINGZILLA_ARCH_BIG_ENDIAN_ ? sz_u64_bytes_reverse(word) : word;
 }
 
-/** Bit @c i set where @p bytes match at `text + i + offsets[k]` for every @c k, for the first
+/** Bit @c i set where @p bytes match at <tt>text + i + offsets[k]</tt> for every @c k, for the first
  *  @p starts of the 64 starts from @p text, one start at a time. */
 STRINGZILLA_INLINE sz_u64_t sz_find_candidates_serial_(sz_u8_t const *text, sz_size_t starts,
                                                        sz_size_t const offsets[3], sz_u8_t const bytes[3]) {

@@ -6,13 +6,13 @@
  *      call runs in, the memory both sides address, the launches, the streams and the producers,
  *      and the cross-lane steps its kernels hand the shared walks.
  *
- *  Every call runs on the device of the stream it is given, which @ref sz_device_enter_cuda_ makes
+ *  Every call runs on the device of the stream it is given, which @c sz_device_enter_cuda_ makes
  *  current for its duration, and a null stream runs on the caller's current device.
  *
  *  Only nvcc sees past the guard, and nothing here is shared with ROCm, whose twins live in
- *  `rocm.cuh` under their own names, so a library holding both vendors links one body per name.
- *  Written in C, as every `.cuh` in this library is: the only construct a C compiler would not take
- *  is the `extern "C"` that lets a C dispatch unit link against it.
+ *  <tt>rocm.cuh</tt> under their own names, so a library holding both vendors links one body per name.
+ *  Written in C, as every <tt>.cuh</tt> in this library is: the only construct a C compiler would not take
+ *  is the <tt>extern "C"</tt> that lets a C dispatch unit link against it.
  *
  *  @sa include/stringzilla/rocm.cuh
  *  @sa include/stringzilla/types.cuh
@@ -53,7 +53,7 @@ STRINGZILLA_INLINE sz_status_t sz_device_enter_cuda_(sz_stream_t stream, int *ca
     return cudaSetDevice(device) == cudaSuccess ? sz_success_k : sz_missing_gpu_k;
 }
 
-/** Makes @p caller current again, closing the scope @ref sz_device_enter_cuda_ opened. */
+/** Makes @p caller current again, closing the scope @c sz_device_enter_cuda_ opened. */
 STRINGZILLA_INLINE void sz_device_leave_cuda_(int caller) { sz_unused_(cudaSetDevice(caller)); }
 
 /** Accepts managed memory or the current device's own allocation.
@@ -387,12 +387,12 @@ STRINGZILLA_INLINE sz_status_t sz_stream_init_cuda_(sz_size_t ordinal, sz_stream
 
 #pragma region Device Primitives
 
-/** Lane `lane - delta`'s @p value, a lane's own below @p delta, with @c shfl.sync.up . */
+/** Lane <tt>lane - delta</tt>'s @p value, a lane's own below @p delta, with <tt>shfl.sync.up</tt> . */
 STRINGZILLA_DEVICE sz_u32_t sz_shuffle_up_cuda_(sz_u32_t value, unsigned delta) {
     return __shfl_up_sync(0xFFFFFFFFu, value, delta);
 }
 
-/** Lane `lane + delta`'s @p value, a lane's own past the last, with @c shfl.sync.down . */
+/** Lane <tt>lane + delta</tt>'s @p value, a lane's own past the last, with <tt>shfl.sync.down</tt> . */
 STRINGZILLA_DEVICE int sz_shuffle_down_cuda_(int value, unsigned delta) {
     return __shfl_down_sync(0xFFFFFFFFu, value, delta);
 }
@@ -407,7 +407,7 @@ STRINGZILLA_DEVICE unsigned sz_group_members_cuda_(unsigned width) {
     return width == 32 ? 0xFFFFFFFFu : ((1u << width) - 1u) << ((threadIdx.x & 31u) & ~(width - 1u));
 }
 
-/** Lane `lane - delta`'s @p value within this lane's aligned group of @p width lanes, a lane's own
+/** Lane <tt>lane - delta</tt>'s @p value within this lane's aligned group of @p width lanes, a lane's own
  *  below @p delta, with @c shfl.sync.up ; groups may diverge from one another. */
 STRINGZILLA_DEVICE sz_u32_t sz_group_shuffle_up_cuda_(sz_u32_t value, unsigned delta, unsigned width) {
     return __shfl_up_sync(sz_group_members_cuda_(width), value, delta, (int)width);

@@ -69,11 +69,11 @@ STRINGZILLA_INLINE svuint8_t sz_utf8_sentence_break_astral_class_sve2_(svuint8_t
  *  @brief Per-byte-lane Sentence_Break class for one window chunk, fully in-register: the SVE2 twin
  *      of @ref sz_utf8_sentence_break_classify_quarter_neon_.
  *
- *  Raw lanes, ASCII, continuation bytes, and `>= 0xF8`, keep `low = raw, high = 0` exactly like the
+ *  Raw lanes, ASCII, continuation bytes, and <tt>>= 0xF8</tt>, keep <tt>low = raw, high = 0</tt> exactly like the
  *  serial blind decode; 2- and 3-byte leads rebuild the BMP high and low pair from the peeked
  *  neighbours; 4-byte leads split by their blind plane between the BMP cascade for plane 0 and
  *  overlong encodings, the astral cascade for planes 1..16, and class Other for planes over 16,
- *  such as `F5..F7` leads. The class on non-start lanes is irrelevant, as only start lanes compact.
+ *  such as <tt>F5..F7</tt> leads. The class on non-start lanes is irrelevant, as only start lanes compact.
  */
 STRINGZILLA_INLINE svuint8_t sz_utf8_sentence_break_classify_chunk_sve2_(               //
     svuint8_t bytes_u8x, svuint8_t next1_u8x, svuint8_t next2_u8x, svuint8_t next3_u8x, //
@@ -167,7 +167,7 @@ STRINGZILLA_INLINE sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_s
  *  @ref sz_utf8_sentence_break_decide_block_, whose dense break bits map back to byte positions in
  *  one walk over the codepoint-start lanes.
  *
- *  Each 64-byte window streams as `64 / svcntb()` register chunks with one peeked vector ahead:
+ *  Each 64-byte window streams as <tt>64 / svcntb()</tt> register chunks with one peeked vector ahead:
  *  @c svext supplies the classifier's forward neighbours across chunk edges, and the per-chunk
  *  start-lane classes compact straight into the dense class stream the engine consumes, one
  *  @c svcompact_u32 and a truncating store per 32-bit quarter, so the only memory the window

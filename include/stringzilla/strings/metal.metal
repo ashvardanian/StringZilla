@@ -2,15 +2,15 @@
  *  @file include/stringzilla/strings/metal.metal
  *  @author Ash Vardanian
  *  @date October 4, 2026
- *  @brief The string collection kernels on Apple GPUs, step for step those of `strings/simt.cuh`:
+ *  @brief The string collection kernels on Apple GPUs, step for step those of <tt>strings/simt.cuh</tt>:
  *      measuring every output string, prefix sums of the lengths into offsets, and writing.
  *
  *  Every dispatch binds the strings read as two buffers, their payload and their offsets, then the
  *  order, the scratch, and the payload and offsets written, with the launch record after them. The
- *  scratch holds `count + 1` offsets, the block sums of the scan, and one report per threadgroup of
+ *  scratch holds <tt>count + 1</tt> offsets, the block sums of the scan, and one report per threadgroup of
  *  the measuring dispatch, the first malformed position in it, as Apple7 has no 64-bit atomics.
  *
- *  It compiles behind `utf8_norm/tables.h` and `utf8_norm/metal.metal`, whose
+ *  It compiles behind <tt>utf8_norm/tables.h</tt> and <tt>utf8_norm/metal.metal</tt>, whose
  *  @c sz_utf8_norm_span_metal_ normalizes a string to a thread.
  *
  *  @sa include/stringzilla/strings/metal.h, which embeds and launches this source
@@ -131,7 +131,7 @@ inline ulong sz_strings_encode_rune_metal_(uint rune, thread uchar *bytes) {
     return 4;
 }
 
-/** Writes @p rune as `\uXXXX` in lowercase, a surrogate pair beyond U+FFFF, returning 6 or 12. */
+/** Writes @p rune as <tt>\\uXXXX</tt> in lowercase, a surrogate pair beyond U+FFFF, returning 6 or 12. */
 inline ulong sz_strings_write_utf16_metal_(uint rune, thread uchar *sequence) {
     uint units[2] = {rune, 0};
     ulong units_count = 1;
@@ -372,7 +372,7 @@ inline ulong sz_strings_unescape_hex_metal_(device uchar const *source, ulong le
 }
 
 /** Unescapes the HTML character references of one string into @p target, or measures it, copying
- *  every `&` that starts no reference; it is never malformed. */
+ *  every <tt>&amp;</tt> that starts no reference; it is never malformed. */
 inline ulong sz_strings_unescape_html_metal_(device uchar const *source, ulong length, device uchar *target) {
     // `&`
     sz_strings_byteset_metal_t const set = {{0x0000004000000000ul, 0, 0, 0}};
@@ -421,7 +421,7 @@ inline ulong sz_strings_unescape_html_metal_(device uchar const *source, ulong l
 }
 
 /** Decodes the percent-escapes of one string into @p target, or measures it, returning all ones for
- *  a `%` without two hexadecimal digits. */
+ *  a <tt>\%</tt> without two hexadecimal digits. */
 inline ulong sz_strings_unescape_url_metal_(device uchar const *source, ulong length, device uchar *target) {
     // `%`
     sz_strings_byteset_metal_t const set = {{0x0000002000000000ul, 0, 0, 0}};

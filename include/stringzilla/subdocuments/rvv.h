@@ -40,7 +40,7 @@ STRINGZILLA_INLINE sz_u64_t sz_subdocuments_mask_bits_rvv_(vbool2_t lanes_b2) {
     return __riscv_vmv_x_s_u64m1_u64(__riscv_vreinterpret_v_u8m1_u64m1(__riscv_vreinterpret_v_b2_u8m1(lanes_b2)));
 }
 
-/** Classifies a block at `vl = 64`, so all 64 bits of every mask are defined. */
+/** Classifies a block at <tt>vl = 64</tt>, so all 64 bits of every mask are defined. */
 STRINGZILLA_INLINE sz_subdocuments_block_t sz_subdocuments_classify_rvv_(sz_u8_t const *text,
                                                                          sz_subdocuments_carry_t *carry) {
     sz_size_t const vector_length = __riscv_vsetvl_e8m4(64);

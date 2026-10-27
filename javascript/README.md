@@ -20,7 +20,7 @@ The addon requires Node.js 22 or newer.
 Supported platforms get a prebuilt one from their `@stringzilla/<platform>-<arch>` package, and elsewhere the install compiles it through `cmake-js`, which needs CMake and a C compiler.
 A checkout builds it with `npm run prebuild`, which stages the addon under `prebuilds/` where the loader finds it first.
 
-## Capabilities and Runtime Selection
+## Runtime Dispatch
 
 Every call runs on the CPU and dispatches to the best kernel of its enabled capabilities, a `BigInt` bitmask a `Device` reports:
 
@@ -108,7 +108,7 @@ assert.strictEqual(sz.count(Buffer.from("aaaa"), Buffer.from("aa")), 2n);       
 assert.strictEqual(sz.count(Buffer.from("aaaa"), Buffer.from("aa"), true), 3n); // overlapping
 ```
 
-## Comparing
+## Comparison and Equality
 
 `equal` reports whether two buffers hold identical bytes, returning a JavaScript boolean.
 `compare` orders two buffers lexicographically, returning `-1`, `0`, or `1` as a plain number.
@@ -161,7 +161,7 @@ s.update(Buffer.from("hel")).update(Buffer.from("lo"));
 assert.strictEqual(s.hexdigest(), "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
 ```
 
-## Unicode Case Insensitive Operations
+## Case Folding and Normalization
 
 These functions operate on UTF-8 encoded buffers and apply full Unicode case folding.
 Each accepts an optional trailing `validate` boolean; when `true`, the input is checked for valid UTF-8 and an error is thrown otherwise.

@@ -306,9 +306,9 @@ STRINGZILLA_INLINE svuint64_t sz_ghash_fold_segments_sve2aes_(svuint64_t value_u
  *      a running triple.
  *  @param[in] first_u64x One reflected operand per segment.
  *  @param[in] second_u64x The other reflected operand per segment.
- *  @param[inout] low_u64x Accumulates the product of the two low halves.
- *  @param[inout] middle_u64x Accumulates both cross products.
- *  @param[inout] high_u64x Accumulates the product of the two high halves.
+ *  @param[in,out] low_u64x Accumulates the product of the two low halves.
+ *  @param[in,out] middle_u64x Accumulates both cross products.
+ *  @param[in,out] high_u64x Accumulates the product of the two high halves.
  *
  *  The bottom and top forms of the paired multiply reach the two halves of a segment, and
  *  Karatsuba's identity recovers the cross terms from a third product of the two folded operands,
@@ -559,7 +559,7 @@ STRINGZILLA_INLINE void sz_aes256_gcm_associate_sve2aes_(sz_aes256_gcm_state_t *
 
 /**
  *  @brief Spends what is left of the keystream block the state carries, one byte at a time.
- *  @param[inout] state The state, whose two sixteen-byte rhythms advance together here.
+ *  @param[in,out] state The state, whose two sixteen-byte rhythms advance together here.
  *  @param[in] input The bytes to transform.
  *  @param[out] output Receives the transformed bytes.
  *  @param[in] count Bytes to consume, never more than the keystream block has left.
@@ -616,7 +616,7 @@ STRINGZILLA_INLINE svuint8_t sz_aes256_gcm_spend_sve2aes_(sz_aes256_gcm_state_t 
 
 /**
  *  @brief Transforms a chunk and absorbs its ciphertext, whichever side of the call that is.
- *  @param[inout] state The state.
+ *  @param[in,out] state The state.
  *  @param[in] text The chunk to transform.
  *  @param[in] length Bytes in the chunk.
  *  @param[out] output Receives the transformed bytes.

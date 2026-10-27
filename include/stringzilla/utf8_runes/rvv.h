@@ -43,9 +43,9 @@ STRINGZILLA_INLINE void sz_utf8_decode_ascii_run_rvv_(sz_rune_t *runes_out, sz_u
  *
  *  @c vlseg2e8 deinterleaves the byte stream into a lead lane and a continuation
  *  lane in two registers; the run is validated entirely in-register (every lead
- *  in `[0xC2, 0xDF]` rejecting the `C0/C1` overlongs, every continuation in
- *  `[0x80, 0xBF]`) and a @c vfirst over the fault mask bounds the maximal good
- *  prefix. The kept prefix decodes by `((lead & 0x1F) << 6) | (cont & 0x3F)`,
+ *  in <tt>[0xC2, 0xDF]</tt> rejecting the <tt>C0/C1</tt> overlongs, every continuation in
+ *  <tt>[0x80, 0xBF]</tt>) and a @c vfirst over the fault mask bounds the maximal good
+ *  prefix. The kept prefix decodes by <tt>((lead & 0x1F) << 6) | (cont & 0x3F)</tt>,
  *  widens to @c u32, and stores densely; whatever follows (a non-2-byte lead, a
  *  bad pair, or a half pair at the edge) is handed back to the general window
  *  path. Reads only whole pairs, so it never over-reads the input.
@@ -54,7 +54,7 @@ STRINGZILLA_INLINE void sz_utf8_decode_ascii_run_rvv_(sz_rune_t *runes_out, sz_u
  *  @param[in] length Bytes remaining from @p text.
  *  @param[out] runes Output buffer.
  *  @param[in] capacity Remaining rune capacity.
- *  @param[out] consumed_bytes Set to `2 * runes_emitted` (the byte span of the decoded prefix).
+ *  @param[out] consumed_bytes Set to <tt>2 * runes_emitted</tt> (the byte span of the decoded prefix).
  *  @return Number of runes emitted (0 if the very first pair is not a well-formed 2-byte sequence).
  */
 STRINGZILLA_INLINE sz_size_t sz_utf8_decode_two_byte_run_rvv_( //
@@ -104,14 +104,14 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_decode_two_byte_run_rvv_( //
  *      the RVV analogue of the Arm @c svld3 and @c vld3 decode tiles.
  *
  *  @c vlseg3e8 deinterleaves the byte stream into a lead lane and two continuation lanes in three
- *  registers; each triple is validated entirely in-register (lead in `[0xE0, 0xEF]`, both
- *  continuations in `[0x80, 0xBF]`, and the first-continuation range tightened for the @c E0
+ *  registers; each triple is validated entirely in-register (lead in <tt>[0xE0, 0xEF]</tt>, both
+ *  continuations in <tt>[0x80, 0xBF]</tt>, and the first-continuation range tightened for the @c E0
  *  overlong and @c ED surrogate leads) and a @c vfirst over the fault mask bounds the maximal good
- *  prefix. The kept prefix decodes by `((lead&0x0F)<<12)|((c1&0x3F)<<6)|(c2&0x3F)`, widens to
+ *  prefix. The kept prefix decodes by <tt>((lead&0x0F)<<12)|((c1&0x3F)<<6)|(c2&0x3F)</tt>, widens to
  *  @c u32, and stores densely; whatever follows is handed back to the general window path. Reads
  *  only whole triples, so it never over-reads the input.
  *
- *  @param[out] consumed_bytes Set to `3 * runes_emitted` (the byte span of the decoded prefix).
+ *  @param[out] consumed_bytes Set to <tt>3 * runes_emitted</tt> (the byte span of the decoded prefix).
  *  @return Number of runes emitted (0 if the very first triple is not a
  *      well-formed 3-byte sequence).
  */
@@ -191,7 +191,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_decode_three_byte_run_rvv_( //
  *  per-lane @p consumed_length (the maximal-subpart length, in window order) at the last emitted
  *  lane, so an ill-formed trailing lane never skips bytes that owe their own next U+FFFD.
  *
- *  @param[in] window_bytes_u8m1 The raw window bytes loaded at @c e8m1 (lanes `[0, window)` valid).
+ *  @param[in] window_bytes_u8m1 The raw window bytes loaded at @c e8m1 (lanes <tt>[0, window)</tt> valid).
  *  @param[in] emit_mask_b8 Mask of decodable emitted-start lanes (true leads + promoted
  *      orphan continuations).
  *  @param[in] ill_mask_b8 Mask of emitted lanes that must collapse to one U+FFFD (subset
@@ -293,7 +293,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_rvv_( //
  *  merge U+FFFD" path, the RVV sibling of @ref sz_utf8_decode_once_icelake_. The decode is total:
  *  well-formed leads, ill-formed leads and orphan continuation bytes are all handled in-vector, one
  *  U+FFFD per maximal ill-formed subpart (Unicode 17.0 §3.9 / W3C), bit-exact with the serial
- *  reference. The step declines (`*runes_count == 0`, cursor unchanged) only when the first lead's
+ *  reference. The step declines (<tt>*runes_count == 0</tt>, cursor unchanged) only when the first lead's
  *  declared sequence crosses the window edge (a boundary truncation), which the public entry
  *  finalizes without a serial re-decode. */
 STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_once_rvv_( //
@@ -494,7 +494,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_once_rvv_( //
  *  @c vfirst) and widens it straight into the rune output; non-ASCII regions are decoded a whole
  *  @c e8m1 window at a time via the uniform total classify/gate/compress/gather/width-blend path
  *  (see @ref sz_utf8_decode_once_rvv_) - clean and dirty bytes alike handled in-vector, one U+FFFD
- *  per maximal ill-formed subpart. The step declines (`step_unpacked == 0`) only when the very
+ *  per maximal ill-formed subpart. The step declines (<tt>step_unpacked == 0</tt>) only when the very
  *  first lead declares a sequence crossing the window edge (a boundary truncation), which the
  *  public entry finalizes with a single bounded @c sz_utf8_maximal_subpart_ step - never a
  *  per-codepoint serial re-decode.
@@ -656,19 +656,19 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_seek_rvv_(sz_cptr_t text, sz_size_t length,
  *  @ref sz_utf8_rune_bmp_halves_rvv_. */
 typedef struct sz_utf8_rune_window_rvv_t {
 
-    /** Bit @c i is set when lane @c i is a continuation byte `10xxxxxx`. */
+    /** Bit @c i is set when lane @c i is a continuation byte @c 10xxxxxx. */
     sz_u64_t continuation;
 
     /** Bit @c i is set when lane @c i begins a codepoint (loaded, non-continuation). */
     sz_u64_t codepoint_starts;
 
-    /** Bit @c i is set when lane @c i is a 2-byte lead `110xxxxx`. */
+    /** Bit @c i is set when lane @c i is a 2-byte lead @c 110xxxxx. */
     sz_u64_t two_byte_starts;
 
-    /** Bit @c i is set when lane @c i is a 3-byte lead `1110xxxx`. */
+    /** Bit @c i is set when lane @c i is a 3-byte lead @c 1110xxxx. */
     sz_u64_t three_byte_starts;
 
-    /** Bit @c i is set when lane @c i is a 4-byte lead `11110xxx`. */
+    /** Bit @c i is set when lane @c i is a 4-byte lead @c 11110xxx. */
     sz_u64_t four_byte_starts;
 
     /** Number of bytes actually loaded (at most 64). */
@@ -684,10 +684,10 @@ STRINGZILLA_INLINE vuint8m4_t sz_utf8_rune_load64_rvv_(sz_u8_t const *bytes, sz_
 }
 
 /** Lower a 64-lane @c vbool2_t mask to the engine's @c sz_u64_t, bit @c i ↔ lane @c i, in one
- *  register move: the mask register's low 64 bits reinterpret as a @c u64 element and `vmv.x.s`
- *  reads it — no memory, no `vsm.v` stack staging. This is the one-way bridge out of the vector
+ *  register move: the mask register's low 64 bits reinterpret as a @c u64 element and <tt>vmv.x.s</tt>
+ *  reads it — no memory, no <tt>vsm.v</tt> stack staging. This is the one-way bridge out of the vector
  *  domain at every genuine engine boundary (the window struct fields, the frame's per-class masks).
- *  The producing compare must have run at `vl = 64` so all 64 bits are defined; the mask register's
+ *  The producing compare must have run at <tt>vl = 64</tt> so all 64 bits are defined; the mask register's
  *  tail bits past lane 63 are never read. */
 STRINGZILLA_INLINE sz_u64_t sz_utf8_rune_mask_to_bits_rvv_(vbool2_t lanes_b2) {
     vuint64m1_t const words_u64m1 = __riscv_vreinterpret_v_u8m1_u64m1(__riscv_vreinterpret_v_b2_u8m1(lanes_b2));
@@ -695,17 +695,17 @@ STRINGZILLA_INLINE sz_u64_t sz_utf8_rune_mask_to_bits_rvv_(vbool2_t lanes_b2) {
 }
 
 /** Raise an engine-domain @c sz_u64_t lane mask back into a 64-lane @c vbool2_t in one register
- *  move (`vmv.s.x` into the mask register's low word), the inverse of
+ *  move (<tt>vmv.s.x</tt> into the mask register's low word), the inverse of
  *  @ref sz_utf8_rune_mask_to_bits_rvv_. Reserved for values that genuinely originate in the
  *  portable @c sz_u64_t domain (a partition-resolver output, an engine @c breaks mask, a scalar
  *  @c loaded-clamped mix); a compare that was only just lowered must be recomputed in-register
- *  instead, never round-tripped. Consumers read only lanes `[0, 64)`. */
+ *  instead, never round-tripped. Consumers read only lanes <tt>[0, 64)</tt>. */
 STRINGZILLA_INLINE vbool2_t sz_utf8_rune_bits_to_mask_rvv_(sz_u64_t bits) {
     vuint64m1_t const words_u64m1 = __riscv_vmv_s_x_u64m1(bits, 1);
     return __riscv_vreinterpret_v_u8m1_b2(__riscv_vreinterpret_v_u64m1_u8m1(words_u64m1));
 }
 
-/** Forward neighbour `next[i] = window[(i + distance) & 63]`, wrapping modulo 64 exactly
+/** Forward neighbour <tt>next[i] = window[(i + distance) & 63]</tt>, wrapping modulo 64 exactly
  *  like the NEON @c vextq quarters and the Ice Lake @c vpermb, so every intermediate
  *  partition mask stays bit-identical across backends. Requires the window's lanes past 63
  *  to be zero (see @ref sz_utf8_rune_load64_rvv_), so the @c vslidedown spill lanes OR
@@ -743,7 +743,7 @@ STRINGZILLA_INLINE sz_utf8_rune_window_rvv_t sz_utf8_rune_decode_window_rvv_(vui
 }
 
 /** BMP per-lane @b (high,low) codepoint halves from the raw window and its forward neighbours,
- *  as a register tuple `{high, low}` — 2-/3-byte reconstruction merged on the 3-byte-lead
+ *  as a register tuple <tt>{high, low}</tt> — 2-/3-byte reconstruction merged on the 3-byte-lead
  *  mask, bit-identical to the NEON decode. ASCII and 4-byte lanes carry don't-cares, exactly
  *  like NEON. Recomputed in each consuming leaf instead of threaded, so no 8-register liveness
  *  spans the leaves. */
@@ -771,9 +771,9 @@ STRINGZILLA_INLINE vuint8m4x2_t sz_utf8_rune_bmp_halves_rvv_(vuint8m4_t const ra
 }
 
 /** Class byte per lane from a page-compressed flat table, the RVV twin of
- *  @ref sz_utf8_rune_flat_lookup_sve2_. First `page_lut[high]` by an unmasked @c vluxei8 gather,
+ *  @ref sz_utf8_rune_flat_lookup_sve2_. First <tt>page_lut[high]</tt> by an unmasked @c vluxei8 gather,
  *  the LUT being total over the byte domain, so every lane is in-bounds by construction. Then
- *  `flat[(page << 8) | low]` by a masked @c vluxei16 gather. @p inactive_u8m4 rides through on
+ *  <tt>flat[(page << 8) | low]</tt> by a masked @c vluxei16 gather. @p inactive_u8m4 rides through on
  *  masked-off lanes, which perform no memory access. Index safety never depends on @p active_b2. */
 STRINGZILLA_INLINE vuint8m4_t sz_utf8_rune_flat_lookup_rvv_( //
     sz_u8_t const *page_lut, sz_u8_t const *flat, vuint8m4_t high_u8m4, vuint8m4_t low_u8m4, vbool2_t active_b2,
@@ -787,7 +787,7 @@ STRINGZILLA_INLINE vuint8m4_t sz_utf8_rune_flat_lookup_rvv_( //
 /** RVV forward drain — the vector twin of @ref sz_utf8_rune_drain_forward_neon_, bit-exact with it.
  *  The set boundary lanes compress to dense u16 indices (via @c vid and @c vcompress), widen to u64
  *  absolute positions, and emit as a shifted-difference stream:
- *  `lengths = positions - vslide1up(positions, previous)`, honoring @p capacity and the carried
+ *  <tt>lengths = positions - vslide1up(positions, previous)</tt>, honoring @p capacity and the carried
  *  open-word start @p previous_io. */
 STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_forward_rvv_( //
     sz_u64_t boundary, sz_size_t base, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,

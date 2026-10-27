@@ -17,13 +17,13 @@
  *  ? port-5-only, while gathers issue on the load ports. This bitmap layout predates that result
  *  ? and has not been re-measured against a flat-table shape.
  *
- *  BMP (cp < 0x10000): the high byte `cp >> 8` (0..255) selects a 32-byte bitmap row id via
- *  @c sz_utf8_delimiter_bmp_block_; the bitmap byte `bitmap[id * 32 + ((cp & 0xFF) >> 3)]` of
- *  @c sz_utf8_delimiter_bmp_bitmaps_ tested at bit `(cp & 7)` is the verdict.
+ *  BMP (cp < 0x10000): the high byte <tt>cp >> 8</tt> (0..255) selects a 32-byte bitmap row id via
+ *  @c sz_utf8_delimiter_bmp_block_; the bitmap byte <tt>bitmap[id * 32 + ((cp & 0xFF) >> 3)]</tt> of
+ *  @c sz_utf8_delimiter_bmp_bitmaps_ tested at bit <tt>(cp & 7)</tt> is the verdict.
  *
- *  Astral (cp ≥ 0x10000): the super nibble `(cp - 0x10000) >> 12` (0..15) selects a group via
- *  @c sz_utf8_delimiter_astral_l1_; the sub byte `((cp - 0x10000) >> 8) & 0xFF` selects a 32-byte
- *  bitmap row id via `sz_utf8_delimiter_astral_l2_[group * 256 + sub]`; the bitmap byte of
+ *  Astral (cp ≥ 0x10000): the super nibble <tt>(cp - 0x10000) >> 12</tt> (0..15) selects a group via
+ *  @c sz_utf8_delimiter_astral_l1_; the sub byte <tt>((cp - 0x10000) >> 8) & 0xFF</tt> selects a 32-byte
+ *  bitmap row id via <tt>sz_utf8_delimiter_astral_l2_[group * 256 + sub]</tt>; the bitmap byte of
  *  @c sz_utf8_delimiter_astral_bitmaps_ is tested as for BMP.
  *
  *  @code{.py}
@@ -68,7 +68,7 @@ enum {
     sz_utf8_delimiter_astral_bitmaps_count_k = 54
 };
 
-/** BMP block id per high byte `cp >> 8` (0..255), indexing a 32-byte bitmap row. */
+/** BMP block id per high byte <tt>cp >> 8</tt> (0..255), indexing a 32-byte bitmap row. */
 static sz_align_(64) sz_u8_t const sz_utf8_delimiter_bmp_block_[256] = {
     0, 1, 2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 1,  1,  17, 18, 1,  19, 20, 21, 22, 23, 24, 25,
     1, 1, 26, 27, 28, 29, 29, 30, 29, 29, 31, 29, 29, 29, 32, 33, 34, 35, 36, 37, 38, 39, 29, 1,  1,  1,  1,  1,  1,
@@ -84,8 +84,8 @@ static sz_align_(64) sz_u8_t const sz_utf8_delimiter_bmp_block_[256] = {
 /**
  *  @brief High bytes whose BMP block holds at least one delimiter, as a 256-bit bitmap.
  *
- *  That is, `bmp_block_[high] != 1`, as row 1 is the unique all-zero row; a high byte is suspicious
- *  iff `[high >> 3] & (1 << (high & 7))`. Bit 0 is cleared: vector fronts resolve `high == 0` lanes
+ *  That is, <tt>bmp_block_[high] != 1</tt>, as row 1 is the unique all-zero row; a high byte is suspicious
+ *  iff <tt>[high >> 3] & (1 << (high & 7))</tt>. Bit 0 is cleared: vector fronts resolve <tt>high == 0</tt> lanes
  *  exactly against bitmap row 0 and pre-filter the rest here.
  */
 static sz_align_(64) sz_u8_t const sz_utf8_delimiter_bmp_suspicious_highs_[32] = {
@@ -94,7 +94,7 @@ static sz_align_(64) sz_u8_t const sz_utf8_delimiter_bmp_suspicious_highs_[32] =
 };
 
 /** Unique 256-bit (32-byte) BMP membership bitmaps; member iff
- *  `bitmap[id * 32 + (low >> 3)] & (1 << (low & 7))`. */
+ *  <tt>bitmap[id * 32 + (low >> 3)] & (1 << (low & 7))</tt>. */
 static sz_u8_t const sz_utf8_delimiter_bmp_bitmaps_[1664] = {
     0,   62,  0,   0,   255, 255, 0,   252, 1,   0,   0,   248, 1,   0,   0,   120, 32,  0,   0,   0,   255, 219, 211,
     137, 0,   0,   128, 0,   0,   0,   128, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
@@ -171,14 +171,14 @@ static sz_u8_t const sz_utf8_delimiter_bmp_bitmaps_[1664] = {
     0,   0,   0,   0,   127, 127, 0,   48,
 };
 
-/** Astral super-nibble `(cp - 0x10000) >> 12` (0..15) → L2 group id. Padded to a full 64-byte tile
+/** Astral super-nibble <tt>(cp - 0x10000) >> 12</tt> (0..15) → L2 group id. Padded to a full 64-byte tile
  *  so the Ice Lake @ref sz_utf8_rune_lut_cascade_icelake_ whole-tile @c _mm512_load_si512 stays in
  *  bounds; the tail beyond index 15 is never permute-selected, as the super nibble caps at 15. */
 static sz_align_(64) sz_u8_t const sz_utf8_delimiter_astral_l1_[64] = {
     0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
 };
 
-/** Astral `group * 256 + (((cp - 0x10000) >> 8) & 0xFF)` → 32-byte bitmap row id. */
+/** Astral <tt>group * 256 + (((cp - 0x10000) >> 8) & 0xFF)</tt> → 32-byte bitmap row id. */
 static sz_align_(64) sz_u8_t const sz_utf8_delimiter_astral_l2_[512] = {
     0,  1,  0,  2,  0, 3,  0, 0, 4,  5,  6, 7, 0, 0,  8,  9, 10, 11, 12, 0,  13, 14, 15, 16, 17, 18, 19, 20, 21, 0,  22,
     23, 0,  0,  0,  0, 24, 0, 0, 0,  0,  0, 0, 0, 0,  0,  0, 25, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
@@ -280,8 +280,8 @@ static sz_u8_t const sz_utf8_delimiter_astral_bitmaps_[1728] = {
 };
 
 /** Transposed BMP bitmaps for the lut256-only Haswell and NEON backends: column @c c (0..31) holds
- *  `bitmaps[id * 32 + c]` per row id, padded to 64 ids, and the bitmap byte is the @c block_id
- *  entry of column `low >> 3`. */
+ *  <tt>bitmaps[id * 32 + c]</tt> per row id, padded to 64 ids, and the bitmap byte is the @c block_id
+ *  entry of column <tt>low >> 3</tt>. */
 static sz_align_(64) sz_u8_t const sz_utf8_delimiter_bmp_bitmaps_columns_[2048] = {
     0,   0,   0,   0,   0,   0,   192, 255, 0,   0,   0,   0,   0,   0,   0,   254, 0,   0,   1,   0,   0,   255, 0,
     0,   0,   0,   0,   255, 123, 255, 255, 255, 255, 0,   0,   255, 255, 31,  0,   255, 0,   0,   0,   255, 0,   0,

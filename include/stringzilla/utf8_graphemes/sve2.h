@@ -64,7 +64,7 @@ STRINGZILLA_INLINE svuint8_t sz_grapheme_astral_descriptor_sve2_(svuint8_t plane
     return result_u8x;
 }
 
-/** Predicate of lanes whose BMP codepoint `(high << 8) | low` lies in the inclusive range from
+/** Predicate of lanes whose BMP codepoint <tt>(high << 8) | low</tt> lies in the inclusive range from
  *  @p lo to @p hi, confined to one chunk. */
 STRINGZILLA_INLINE svbool_t sz_grapheme_cp_in_range_sve2_(svuint8_t high_u8x, svuint8_t low_u8x, sz_u16_t lo,
                                                           sz_u16_t hi) {
@@ -110,9 +110,9 @@ STRINGZILLA_INLINE svbool_t sz_grapheme_cjk_other_sve2_(svuint8_t high_u8x, svui
  *  classify feeds the shared portable engine @ref sz_grapheme_window_boundaries_ through the
  *  shared bit-route compaction.
  *
- *  Each window streams as `64 / svcntb()` register chunks with one peeked vector ahead; every byte
+ *  Each window streams as <tt>64 / svcntb()</tt> register chunks with one peeked vector ahead; every byte
  *  lane classifies blindly, matching the family's malformed-input policy, to the packed descriptor
- *  `gcb | incb << 4 | extpict << 6`, whose seven bits lower to window-wide bit-planes through the
+ *  <tt>gcb | incb << 4 | extpict << 6</tt>, whose seven bits lower to window-wide bit-planes through the
  *  predicate bridge. The planes compact to the codepoint-dense domain with one shared bit-route
  *  built from the start lanes - seven gathers instead of eighteen - and the per-class masks
  *  assemble from the dense planes with scalar algebra. Clusters are dense, a boundary every 1-4

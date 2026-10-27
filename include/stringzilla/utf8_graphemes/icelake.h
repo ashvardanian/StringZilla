@@ -13,14 +13,14 @@
  *  without a linear range scan.
  *
  *  Design note: the BMP classifier is a page-compressed flat table read with @c vpgatherdd -
- *  `bmp_page_lut_[cp >> 8]` picks one of 54 distinct 256-byte pages, and one indexed load of
- *  `flat_bmp_[page * 256 + (cp & 0xFF)]` yields the descriptor. The shape is chosen for port
+ *  <tt>bmp_page_lut_[cp >> 8]</tt> picks one of 54 distinct 256-byte pages, and one indexed load of
+ *  <tt>flat_bmp_[page * 256 + (cp & 0xFF)]</tt> yields the descriptor. The shape is chosen for port
  *  pressure rather than instruction count: cross-lane shuffles are port-5-only, so any dependent
  *  shuffle cascade saturates that single port, while the gather issues on the load ports and leaves
  *  the shuffle port to the decode. Gathers pay off on multi-KB tables in general, as the
  *  less_slow.cpp benchmark below measures.
  *
- *  Tables are `sz_align_(64)` and zero-padded in @c tables.h, read straight from @c .rodata: there
+ *  Tables are <tt>sz_align_(64)</tt> and zero-padded in @c tables.h, read straight from <tt>.rodata</tt>: there
  *  is no per-call @c luts struct or @c _init_ load, so calling the kernel on a short input stays
  *  cheap. The astral path is a constant-latency walk with no per-range @c for, dispatch is
  *  value-based, and ill-formed input is forced to U+FFFD in-register.
@@ -127,7 +127,7 @@ STRINGZILLA_INLINE __m512i sz_grapheme_classify_astral16_icelake_(__m512i codepo
  *  @brief Mask of lanes whose BMP codepoint resolves uniformly to GCB=Other via the CJK and Kana
  *      arithmetic ranges, so they need no cold cascade.
  *
- *  The ranges are `[0x3000,0xA66E] | [0xD7FC,0xFB1D]` minus the tight interior exceptions: Extend
+ *  The ranges are <tt>[0x3000,0xA66E] | [0xD7FC,0xFB1D]</tt> minus the tight interior exceptions: Extend
  *  voicing marks 302A-3030 and 3099-309A, 303D, and enclosed 3297 and 3299. Mirrors the word
  *  kernel's @c cjk_combined carve. Six @c vpcmp; called only when a cold lane is present.
  */
@@ -215,7 +215,7 @@ STRINGZILLA_INLINE __m512i sz_grapheme_classify16_icelake_(__m512i codepoints_u3
 
 /** Widens one 16-lane quarter to full 21-bit codepoints and classifies it to packed
  *  descriptors. The astral 4-byte lanes in the quarter take the reconstructed plane/mid/low
- *  codepoint; all others take the BMP `(high << 8) | low`. Returns 16 descriptors in the low
+ *  codepoint; all others take the BMP <tt>(high << 8) | low</tt>. Returns 16 descriptors in the low
  *  byte of each 32-bit lane. */
 STRINGZILLA_INLINE __m512i sz_grapheme_classify_quarter_icelake_( //
     __m128i high_slice_u8x16, __m128i low_slice_u8x16, __m128i plane_slice_u8x16, __m128i mid_slice_u8x16,
@@ -235,7 +235,7 @@ STRINGZILLA_INLINE __m512i sz_grapheme_classify_quarter_icelake_( //
  *  @brief Classifies all 64 lanes of a decoded window into one packed Grapheme_Cluster_Break
  *      descriptor per lane.
  *
- *  The substrate decode already holds `high = codepoint >> 8` and `low = codepoint & 0xFF` for the
+ *  The substrate decode already holds <tt>high = codepoint >> 8</tt> and <tt>low = codepoint & 0xFF</tt> for the
  *  BMP path and the raw bytes for astral reconstruction. Each 16-lane quarter is widened
  *  in-register to a full 21-bit codepoint, the astral lanes reassembling plane/mid/low from the
  *  four UTF-8 bytes, and classified; the four descriptor quarters are written back as one byte per

@@ -2,6 +2,7 @@
 //
 // File: golang/sha256.go
 // Author: Ash Vardanian
+// Date: September 25, 2026
 
 package sz
 

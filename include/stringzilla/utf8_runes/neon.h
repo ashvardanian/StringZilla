@@ -111,7 +111,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_seek_neon_(sz_cptr_t text, sz_size_t length
 #pragma region Shared SIMD leaf substrate
 
 /** The decoded 64-byte window for the NEON backend. The 64 bytes live as four @c uint8x16_t
- *  quarters (`window[0]` = lanes [0, 16), ... `window[3]` = lanes [48, 64)); the per-lane
+ *  quarters (<tt>window[0]</tt> = lanes [0, 16), ... <tt>window[3]</tt> = lanes [48, 64)); the per-lane
  *  byte-domain codepoint halves @c high and @c low share that shape. Masks are @c sz_u64_t (one bit
  *  per byte-lane: the NEON movemask of each quarter placed at bit positions
  *  [0,16)/[16,32)/[32,48)/[48,64)) rather than the Ice Lake @c __mmask64. Field names and semantics
@@ -121,25 +121,25 @@ typedef struct sz_utf8_rune_window_neon_t {
     /** Raw input bytes for lanes [16*q, 16*q+16). */
     uint8x16_t window_u8x16s[4];
 
-    /** Per-lane `codepoint >> 8`. */
+    /** Per-lane <tt>codepoint >> 8</tt>. */
     uint8x16_t high_byte_u8x16s[4];
 
-    /** Per-lane `codepoint & 0xFF`. */
+    /** Per-lane <tt>codepoint & 0xFF</tt>. */
     uint8x16_t low_byte_u8x16s[4];
 
-    /** Bit @c i is set when lane @c i is a continuation byte `10xxxxxx`. */
+    /** Bit @c i is set when lane @c i is a continuation byte @c 10xxxxxx. */
     sz_u64_t continuation;
 
     /** Bit @c i is set when lane @c i begins a codepoint (loaded, non-continuation). */
     sz_u64_t codepoint_starts;
 
-    /** Bit @c i is set when lane @c i is a 2-byte lead `110xxxxx`. */
+    /** Bit @c i is set when lane @c i is a 2-byte lead @c 110xxxxx. */
     sz_u64_t two_byte_starts;
 
-    /** Bit @c i is set when lane @c i is a 3-byte lead `1110xxxx`. */
+    /** Bit @c i is set when lane @c i is a 3-byte lead @c 1110xxxx. */
     sz_u64_t three_byte_starts;
 
-    /** Bit @c i is set when lane @c i is a 4-byte lead `11110xxx`. */
+    /** Bit @c i is set when lane @c i is a 4-byte lead @c 11110xxx. */
     sz_u64_t four_byte_starts;
 
     /** Number of bytes actually loaded (at most 64). */
@@ -164,7 +164,7 @@ STRINGZILLA_INLINE uint8x16_t sz_utf8_srl8_neon_(uint8x16_t value_u8x16, int shi
  *  @brief Reduce one @c uint8x16_t whose lanes are 0x00/0xFF booleans into a 16-bit lane mask (bit
  *      @c i ↔ lane @c i).
  *
- *  The crux of the NEON substrate. `vshrn_n_u16(.., 4)` (the existing
+ *  The crux of the NEON substrate. <tt>vshrn_n_u16(.., 4)</tt> (the existing
  *  @c sz_utf8_vreinterpretq_u8_u4_neon_) yields four bits per byte (only 16 bytes per 64-bit
  *  word), which does not match the @c vpmovmskb one-bit-per-byte layout the shared rule engine
  *  consumes. Instead AND each lane's 0xFF with its bit position {1,2,4,..,128} (repeated per
@@ -195,7 +195,7 @@ STRINGZILLA_INLINE sz_u64_t sz_utf8_mask_combine_neon_( //
 
 /** Masked 64-byte load into four quarters; bytes [loaded, 64) read as zero (the NEON stand-in for
  *  @c _mm512_maskz_loadu_epi8). A zero-initialized vector union stages the partial tail so we never
- *  read past `text + loaded`. Mirrors @ref sz_utf8_load_window_haswell_. */
+ *  read past <tt>text + loaded</tt>. Mirrors @ref sz_utf8_load_window_haswell_. */
 STRINGZILLA_INLINE void sz_utf8_load_window_neon_(sz_u8_t const *text, sz_size_t loaded, uint8x16_t *out_u8x16) {
     if (loaded >= 64) {
         out_u8x16[0] = vld1q_u8(text + 0);
@@ -213,10 +213,10 @@ STRINGZILLA_INLINE void sz_utf8_load_window_neon_(sz_u8_t const *text, sz_size_t
     out_u8x16[3] = window_vec.u8x16s[3];
 }
 
-/** Forward neighbours `next1_u8x16[i] = window_u8x16[i+1]`, `next2_u8x16[i] = window_u8x16[i+2]`,
- *  `next3_u8x16[i] = window_u8x16[i+3]` over all 64 lanes, with the lanes past the window wrapping
+/** Forward neighbours <tt>next1_u8x16[i] = window_u8x16[i+1]</tt>, <tt>next2_u8x16[i] = window_u8x16[i+2]</tt>,
+ *  <tt>next3_u8x16[i] = window_u8x16[i+3]</tt> over all 64 lanes, with the lanes past the window wrapping
  *  modulo 64 to match Ice Lake's @c _mm512_permutexvar_epi8 (so
- *  `next1_u8x16[63]==window_u8x16[0]`, etc.). NEON @c vextq_u8 concatenates two adjacent quarters
+ *  <tt>next1_u8x16[63]==window_u8x16[0]</tt>, etc.). NEON @c vextq_u8 concatenates two adjacent quarters
  *  and extracts the shifted span; the successor of the last quarter wraps to quarter 0 (byte 64
  *  aliases byte 0). The three neighbour distances are provided because the family classifiers need
  *  up to @p next3_u8x16 (4-byte sequences). */
@@ -305,8 +305,8 @@ STRINGZILLA_INLINE sz_utf8_rune_window_neon_t sz_utf8_rune_decode_window_neon_( 
 }
 
 /** One nibble-cascade stage with a sub-256 selector:
- *  `result[lane] = table[selector[lane]*16 + within[lane]]`. Each of @p tile_count 16-byte rows
- *  is one selector value; @p within_u8x16 is the addressing nibble (caller-masked to `[0,16)`).
+ *  <tt>result[lane] = table[selector[lane]*16 + within[lane]]</tt>. Each of @p tile_count 16-byte rows
+ *  is one selector value; @p within_u8x16 is the addressing nibble (caller-masked to <tt>[0,16)</tt>).
  *  The NEON twin of the AVX2 cascade and VBMI @c vpermi2b: each resident row is loaded into a
  *  @c uint8x16_t and shuffled by @p within_u8x16 via @c vqtbl1q_u8, then blended in for the
  *  lanes whose @p selector_u8x16 picks that row. Gather-free — only @c vld1q, @c vqtbl1q,
@@ -332,7 +332,7 @@ STRINGZILLA_INLINE uint8x16_t sz_utf8_rune_cascade_stage_neon_( //
     return vandq_u8(vld1q_u8(gathered_lanes), in_range_u8x16);
 }
 
-/** 256-entry byte LUT at @p group_base addressed by a per-lane byte index in `[0,256)`, each lane
+/** 256-entry byte LUT at @p group_base addressed by a per-lane byte index in <tt>[0,256)</tt>, each lane
  *  reading the entry its index names. Four @c vqtbl4q_u8 reads over the four resident 64-byte
  *  quads; @c vqtbl4q_u8 returns zero for indices ≥ 64, so subtracting 64/128/192 routes each lane
  *  to exactly one quad and the four results OR together. The NEON twin of the substrate @c lut256
@@ -353,7 +353,7 @@ STRINGZILLA_INLINE uint8x16_t sz_utf8_rune_lut256_neon_(sz_u8_t const *group_bas
     return result_u8x16;
 }
 
-/** 64-entry byte LUT addressed by a per-lane index in `[0,64)`: a single @c vqtbl4q_u8 over the
+/** 64-entry byte LUT addressed by a per-lane index in <tt>[0,64)</tt>: a single @c vqtbl4q_u8 over the
  *  64-byte table (zero for indices ≥ 64). The bounded twin of @ref sz_utf8_rune_lut256_neon_ for
  *  callers whose table is only one quad wide - e.g. a 128-entry property table read as two
  *  64-byte halves - so the load never over-reads past the array. @p group_base must point to at
@@ -362,10 +362,10 @@ STRINGZILLA_INLINE uint8x16_t sz_utf8_rune_lut64_neon_(sz_u8_t const *group_base
     return vqtbl4q_u8(vld1q_u8_x4(group_base), index_u8x16);
 }
 
-/** Class byte per lane from a page-compressed flat table: `page_lut[high]` selects one 256-byte
- *  page, then `flat[page * 256 + low]` is read per lane. Armv8 NEON has no gather and @c vqtbl4q
+/** Class byte per lane from a page-compressed flat table: <tt>page_lut[high]</tt> selects one 256-byte
+ *  page, then <tt>flat[page * 256 + low]</tt> is read per lane. Armv8 NEON has no gather and @c vqtbl4q
  *  reaches only 64 bytes, so the page LUT resolves in-register while the leaf read is a bounded
- *  scalar L1 walk over fused 16-bit indices `(page << 8) | low`. Lanes whose page index reaches
+ *  scalar L1 walk over fused 16-bit indices <tt>(page << 8) | low</tt>. Lanes whose page index reaches
  *  @p page_count return zero. SVE2 does the same lookup with a real @c LD1B gather; see
  *  @ref sz_utf8_rune_flat_lookup_sve2_. */
 STRINGZILLA_INLINE uint8x16_t sz_utf8_rune_flat_lookup_neon_( //
@@ -392,7 +392,7 @@ STRINGZILLA_INLINE uint8x16_t sz_utf8_rune_flat_lookup_neon_( //
 
 /** Left-pack the set lane indices (in [0, 64), ascending) of a 64-bit @p mask into
  *  @p out[0..popcount). NEON has no @c vpcompressb or @c pext: pull the lowest set bit's index via
- *  @c ctz, clear it via `mask & (mask-1)`. This matches the AVX2 @c sz_utf8_unpack_indices_haswell_
+ *  @c ctz, clear it via <tt>mask & (mask-1)</tt>. This matches the AVX2 @c sz_utf8_unpack_indices_haswell_
  *  BMI2 path semantically; on AArch64 @c ctz lowers to @c rbit plus @c clz, and the loop trip count
  *  is the boundary popcount (sparse for real text). */
 STRINGZILLA_INLINE void sz_utf8_unpack_indices_neon_(sz_u64_t mask, sz_u8_t *out) {
@@ -420,8 +420,8 @@ STRINGZILLA_INLINE uint8x16_t sz_utf8_expand16_neon_(sz_u32_t submask) {
  *  a 2 KB shuffle-LUT, @ref sz_utf8_leftpack8_, keyed by each 8-bit sub-mask, with no scalar @c ctz
  *  walk: for every 16-lane quarter the mask splits into a low and a high byte, each
  *  @c vqtbl1q_u8-shuffles the LUT row of its set-bit positions, the high half is offset by +8, and
- *  the two halves are stitched at `popcount(low8)` with one @c vqtbl1q_u8 over a gap-shift index
- *  (no scalar per-lane index walk). The quarter offset `q*16` is added in vector and the dense
+ *  the two halves are stitched at <tt>popcount(low8)</tt> with one @c vqtbl1q_u8 over a gap-shift index
+ *  (no scalar per-lane index walk). The quarter offset <tt>q*16</tt> is added in vector and the dense
  *  lanes are stored at the running cursor; one loop over the four quarters. */
 STRINGZILLA_INLINE sz_size_t sz_utf8_leftpack_offsets_neon_(sz_u64_t mask, sz_u8_t *out) {
     static sz_u8_t const iota16_lanes[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
@@ -675,10 +675,10 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_neon_(                          
  *
  *  Requires @p length ≥ 48 so the unpredicated @c vld3q_u8 never over-reads; shorter spans fall to
  *  the general engine (masked load). Emits only well-formed 3-byte runes, so the consumed span is
- *  exactly `clean * 3`.
+ *  exactly <tt>clean * 3</tt>.
  *
  *  @return Number of runes emitted (0 when the tile declines); sets @p consumed_bytes to
- *      `clean * 3` when it emits.
+ *      <tt>clean * 3</tt> when it emits.
  */
 STRINGZILLA_INLINE sz_size_t sz_utf8_rune_tile3_neon_( //
     sz_u8_t const *text, sz_size_t length,             //
@@ -743,7 +743,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_rune_tile3_neon_( //
 /** Decode one <=64-byte window of @p text into dense UTF-32 @p runes by the uniform "classify →
  *  whole-window soundness gate → compress starts → gather → width-blend" path, the NEON twin of
  *  @ref sz_utf8_decode_once_icelake_. Pure ASCII takes a dedicated widen lane. The step declines
- *  (`*runes_count == 0`, cursor unchanged) only when the first lead's declared sequence crosses
+ *  (<tt>*runes_count == 0</tt>, cursor unchanged) only when the first lead's declared sequence crosses
  *  the end of the text, which the public entry finalizes without a serial re-decode. */
 STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_once_neon_( //
     sz_cptr_t text, sz_size_t length,                   //

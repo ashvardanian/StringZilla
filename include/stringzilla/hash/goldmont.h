@@ -27,7 +27,7 @@ extern "C" {
 
 /**
  *  @brief Process a single 512-bit (64-byte) block of data using SHA256 with SHA-NI intrinsics.
- *  @param[inout] hash Pointer to 8x 32-bit hash values, modified in place.
+ *  @param[in,out] hash Pointer to 8x 32-bit hash values, modified in place.
  *  @param[in] block Pointer to 64-byte message block.
  */
 STRINGZILLA_INLINE void sz_sha256_process_block_goldmont_(

@@ -10,21 +10,21 @@
  *  twin of the AVX2 (Haswell) / Ice Lake / NEON kernels: no path scalar-walks codepoints or spills
  *  a vector to call the serial oracle. The BMP classifier deliberately does issue a gather: it
  *  reads the page-compressed flat leaf via @c svld1ub_gather_u32offset_u32 (see
- *  @ref sz_utf8_rune_flat_lookup_sve2_) rather than walking a nibble cascade of @c svtbl_u8 chunks:
+ *  @c sz_utf8_rune_flat_lookup_sve2_) rather than walking a nibble cascade of @c svtbl_u8 chunks:
  *  cross-lane shuffles contend for the single shuffle pipe while gathers issue on the load pipes,
  *  and SVE2, unlike NEON, has a real hardware gather, so it takes the flat path directly.
  *
  *  The engine and decode leaves were validated bit-exact vs @c sz_utf8_wordbreaks_serial
  *  (streaming-cursor: clamped capacity, resumed past the words written) over the regression cases,
- *  a capacity × alignment sweep, and ≥ 2,000,000 random valid/malformed inputs at `svcntb()==64`
+ *  a capacity × alignment sweep, and ≥ 2,000,000 random valid/malformed inputs at <tt>svcntb()==64</tt>
  *  (so one window == one 64-bit lane-mask domain) - but that campaign predates the flat BMP leaf
  *  and must be re-run on Arm hardware to cover it. The flat table is bit-exact with the cascade by
  *  construction (see @c sz_utf8_word_break_flat_bmp_), and the flat leaf's throughput on Arm is
  *  likewise unmeasured to date.
  *
- *  Implementation note: the engine's `<<k` / `>>1` lane algebra is realized with @c svext-based
- *  shift macros (`sz_utf8_word_break_lane_up_sve2_(v, k)` /
- *  `sz_utf8_word_break_lane_dn_sve2_(v, k)`) so the shift amount stays an integer-constant
+ *  Implementation note: the engine's <tt><<k</tt> / <tt>>>1</tt> lane algebra is realized with @c svext-based
+ *  shift macros (<tt>sz_utf8_word_break_lane_up_sve2_(v, k)</tt> /
+ *  <tt>sz_utf8_word_break_lane_dn_sve2_(v, k)</tt>) so the shift amount stays an integer-constant
  *  expression and the whole file compiles as both C99 and C++, matching the sibling kernels.
  */
 #ifndef STRINGZILLA_UTF8_WORDBREAKS_SVE2_H_
@@ -87,7 +87,7 @@ STRINGZILLA_INLINE svuint8_t sz_utf8_word_break_astral_class_sve2_(svuint8_t pla
     return result_u8x;
 }
 
-/** Predicate → 64-bit lane mask bridge: each active lane raises bit `lane & 7` inside its byte,
+/** Predicate → 64-bit lane mask bridge: each active lane raises bit <tt>lane & 7</tt> inside its byte,
  *  the byte groups OR-fold within every 64-bit element (bit sets are disjoint, so shifts never
  *  carry), and the per-element mask bytes recombine through one shifted @c svaddv — no stack
  *  round-trip, no lane loop. */
@@ -107,7 +107,7 @@ STRINGZILLA_INLINE sz_u64_t sz_utf8_pred_to_u64_sve2_(svbool_t p_b8x, sz_size_t 
 }
 
 /** 64-bit lane mask → predicate bridge, the inverse of @ref sz_utf8_pred_to_u64_sve2_: each lane
- *  reads its mask byte via @c svtbl over the broadcast mask and tests bit `lane & 7`, with no
+ *  reads its mask byte via @c svtbl over the broadcast mask and tests bit <tt>lane & 7</tt>, with no
  *  round-trip through the stack. */
 STRINGZILLA_INLINE svbool_t sz_utf8_u64_to_pred_sve2_(sz_u64_t mask, sz_size_t loaded) {
     svbool_t const pg_b8x = svptrue_b8();
@@ -229,7 +229,7 @@ STRINGZILLA_INLINE void sz_utf8_word_classify_window_sve2_(            //
     svst1_u8(loaded_b8x, out, classes_u8x);
 }
 
-/** Full-width SVE2 rule engine; the portable @c sz_u64_t engine's `<<k` / `>>1` lane
+/** Full-width SVE2 rule engine; the portable @c sz_u64_t engine's <tt><<k</tt> / <tt>>>1</tt> lane
  *  algebra is realized on per-lane 0/1 vectors via @c svext-based lane shifts, which scale
  *  beyond a 64-bit movemask. */
 STRINGZILLA_INLINE svuint8_t sz_utf8_word_break_lane_up1_sve2_(svuint8_t a_u8x) { return svinsr_n_u8(a_u8x, 0); }
@@ -240,8 +240,8 @@ STRINGZILLA_INLINE svuint8_t sz_utf8_word_break_lane_dn1_sve2_(svuint8_t a_u8x) 
 /** The @c svext lane-shift amount must be an integer-constant expression, so the variable-k helpers
  *  are function-like macros rather than functions: the literal k at each call site reaches the
  *  intrinsic unchanged. Macros also keep this header a single code path for C99 and C++, as it is
- *  compiled into the C99 library (`c/target/sve2.c`), which cannot parse C++ templates or an
- *  `extern "C++"` island. */
+ *  compiled into the C99 library (<tt>c/target/sve2.c</tt>), which cannot parse C++ templates or an
+ *  <tt>extern "C++"</tt> island. */
 #define sz_utf8_word_break_lane_up_sve2_(v, k) svrev_u8(svext_u8(svrev_u8((v)), svdup_n_u8(0), (k)))
 #define sz_utf8_word_break_lane_dn_sve2_(v, k) svext_u8((v), svdup_n_u8(0), (k))
 
@@ -908,7 +908,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_word_drain_sve2_(svbool_t boundary_b8x, sz_
 }
 
 /** Forward UAX-29 word segmentation (SVE2), mirroring @c sz_utf8_wordbreaks_neon step for step.
- *  Each iteration commits at most `svcntb()` bytes (one byte-vector of engine lanes); the carry
+ *  Each iteration commits at most <tt>svcntb()</tt> bytes (one byte-vector of engine lanes); the carry
  *  mechanism re-decodes the deferred tail, so the windowed result is bit-exact with serial
  *  regardless of the per-iteration ceiling. */
 STRINGZILLA_INLINE sz_size_t sz_utf8_wordbreaks_sve2_( //

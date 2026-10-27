@@ -27,7 +27,7 @@ extern "C" {
 /**
  *  @brief Peels the window's first @p emit_count matches by a branchless, ctz-free SIMD left-pack.
  *
- *  Each ascending 2-lane sub-block gathers its set lanes' `(position + lane, length)` @c u64 pairs
+ *  Each ascending 2-lane sub-block gathers its set lanes' <tt>(position + lane, length)</tt> @c u64 pairs
  *  with one @c vec_perm and full-stores to an 18-wide scratch, absorbing the last sub-block's
  *  2-lane spill since VSX has no masked store; the low @p emit_count entries copy out in ascending
  *  lane order, byte-exact.
@@ -300,7 +300,7 @@ STRINGZILLA_INLINE sz_u8_t sz_utf8_max_reduce_powervsx_(__vector unsigned char v
     return vec_extract(value_u8x16, 0);
 }
 
-/** Per-lane single-bit test `(bitmap_byte >> (low & 7)) & 1`, returned as 0x00/0xFF lanes. */
+/** Per-lane single-bit test <tt>(bitmap_byte >> (low & 7)) & 1</tt>, returned as 0x00/0xFF lanes. */
 STRINGZILLA_INLINE __vector unsigned char sz_delimiter_test_bit_powervsx_(__vector unsigned char bitmap_byte_u8x16,
                                                                           __vector unsigned char low_u8x16) {
     static sz_u8_t const bit_for_low3[16] = {1, 2, 4, 8, 16, 32, 64, 128, 0, 0, 0, 0, 0, 0, 0, 0};
@@ -312,7 +312,7 @@ STRINGZILLA_INLINE __vector unsigned char sz_delimiter_test_bit_powervsx_(__vect
     return vec_nor(is_clear_u8x16, is_clear_u8x16);
 }
 
-/** Looks up `row[index]` per lane in a 32-byte bitmap row with one @c vec_perm. */
+/** Looks up <tt>row[index]</tt> per lane in a 32-byte bitmap row with one @c vec_perm. */
 STRINGZILLA_INLINE __vector unsigned char sz_delimiter_row_lookup_powervsx_(sz_u8_t const *row,
                                                                             __vector unsigned char index_u8x16) {
     return vec_perm(vec_xl(0, row), vec_xl(0, row + 16), index_u8x16);

@@ -118,7 +118,7 @@ STRINGZILLA_INLINE sz_u8_t sz_sentence_break_property_at_(sz_cptr_t text, sz_siz
  *      resolve in O(1) per codepoint.
  *
  *  The scalar twin of the Ice Lake register carry, mirroring @c sz_grapheme_state_serial_t.
- *  The trailing `SATerm Close* Sp*` context and the Extend- and Format-transparent
+ *  The trailing <tt>SATerm Close* Sp*</tt> context and the Extend- and Format-transparent
  *  significant chain are tracked forward here, so the bulk driver decodes each codepoint once
  *  with no backward re-scan.
  */
@@ -133,7 +133,7 @@ typedef struct sz_sentence_state_serial_t {
     /** The significant codepoint before @c previous_significant, for SB7. */
     sz_u8_t before_significant;
 
-    /** Open `SATerm Close* Sp*` context terminator (ATerm / STerm), else Other = none. */
+    /** Open <tt>SATerm Close* Sp*</tt> context terminator (ATerm / STerm), else Other = none. */
     sz_u8_t terminator;
 
     /** A Close followed the terminator (before any Sp). */
@@ -147,7 +147,7 @@ typedef struct sz_sentence_state_serial_t {
 } sz_sentence_state_serial_t;
 
 /** Advances @p state by the @p current codepoint property, updating the significant chain
- *  and the `SATerm Close* Sp*` terminator context; Extend and Format are transparent and
+ *  and the <tt>SATerm Close* Sp*</tt> terminator context; Extend and Format are transparent and
  *  leave both unchanged. */
 STRINGZILLA_CONSTEXPR void sz_sentence_advance_serial_(sz_sentence_state_serial_t *state, sz_u8_t current) {
     if (!sz_sentence_break_is_transparent_(current)) {
@@ -301,7 +301,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_sentences_serial_( //
  *  @brief Cross-window register carry: the portable engine carry, shared verbatim by
  *      every ISA backend.
  *
- *  Holds the open `SATerm Close* Sp*` shadow run-state, the trailing significant and raw classes
+ *  Holds the open <tt>SATerm Close* Sp*</tt> shadow run-state, the trailing significant and raw classes
  *  the bounded-lookback rules SB3, SB4, SB6, and SB7 need at the next block head, plus the SB8
  *  "neutral chain awaiting a Lower verdict" pending state that threads an unbounded right context
  *  across windows without any serial re-walk or oracle call. The Ice Lake and Haswell extractors
@@ -348,7 +348,7 @@ typedef struct sz_utf8_sentence_break_window_t {
      *  the SB8 edge. */
     sz_size_t resolved;
 
-    /** Verdict for an entering `carry->sb8_pending`: 0 still pending, 1 break, 2 no break. */
+    /** Verdict for an entering @c carry->sb8_pending: 0 still pending, 1 break, 2 no break. */
     sz_u8_t sb8_resolution;
 } sz_utf8_sentence_break_window_t;
 
@@ -356,13 +356,13 @@ typedef struct sz_utf8_sentence_break_window_t {
  *  @brief Per-class membership masks of the dense codepoint stream, the ISA-independent dense frame
  *      the rule engine consumes.
  *
- *  Bit i of `by_class[c]` is set when dense lane i, in @c valid, carries Sentence_Break class c,
+ *  Bit i of <tt>by_class[c]</tt> is set when dense lane i, in @c valid, carries Sentence_Break class c,
  *  one of the 15 classes 0..14. Built in one pass over @c dense_classes; a backend may instead fill
- *  it with vector compares, as the engine only reads `by_class[...]`.
+ *  it with vector compares, as the engine only reads <tt>by_class[...]</tt>.
  */
 typedef struct sz_utf8_sentence_break_frame_t {
 
-    /** Lanes whose class is c, restricted to @c valid, in `by_class[c]`. */
+    /** Lanes whose class is c, restricted to @c valid, in <tt>by_class[c]</tt>. */
     sz_u64_t by_class[15];
 } sz_utf8_sentence_break_frame_t;
 
@@ -385,16 +385,16 @@ STRINGZILLA_CONSTEXPR sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_fram
  *  @brief Resolves a block of @p count dense classified codepoints into dense
  *      per-codepoint sentence-break bits.
  *
- *  The lanes `0..count-1` sit in @p dense_classes, with the open shadow and left context arriving
+ *  The lanes <tt>0..count-1</tt> sit in @p dense_classes, with the open shadow and left context arriving
  *  in @p carry. The ISA driver compacts the byte-lane classes to this dense stream and scatters the
  *  result back to byte lanes.
  *
  *  All of SB3-SB998 are pure 64-bit bit algebra over the per-class lane masks: the two-phase
- *  `SATerm Close* Sp*` shadow, @c close_phase then @c shadow; the SB8 in-window lower-ahead, a
+ *  <tt>SATerm Close* Sp*</tt> shadow, @c close_phase then @c shadow; the SB8 in-window lower-ahead, a
  *  @c fill_left of Lower through neutral via the shared substrate; the SB6 and SB7
  *  effective-previous chains across Extend and Format, where the @c flow gate hops only the
  *  remaining ignorable codepoints and no continuation bytes; and the SB3 and SB4 raw-before, a
- *  single `<< 1` on the dense stream. @p carry is updated with the trailing run-state. Bit 0 of
+ *  single <tt><< 1</tt> on the dense stream. @p carry is updated with the trailing run-state. Bit 0 of
  *  @c breaks is the inter-block boundary, only meaningful when @c have_prev is set.
  *
  *  SB8's right context is unbounded; the in-window @c fill_left is exact unless a trailing neutral

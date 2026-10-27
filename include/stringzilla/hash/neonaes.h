@@ -96,7 +96,7 @@ STRINGZILLA_INLINE sz_u64_t sz_hash_state_short_finalize_neon_(sz_hash_state_ali
 /**
  *  @brief Feeds one 16-byte block into the minimal hash state.
  *
- *  @param[inout] state Pointer to the minimal hash state to update.
+ *  @param[in,out] state Pointer to the minimal hash state to update.
  *  @param[in] block_u8x16 16-byte input block as a NEON register.
  */
 STRINGZILLA_INLINE void sz_hash_state_short_update_neon_(sz_hash_state_aligned_for_short_t *state,
@@ -155,7 +155,7 @@ STRINGZILLA_INLINE void sz_hash_state_store_neonaes_(sz_hash_state_t *packed, sz
 
 /**
  *  @brief Absorbs the buffered 64-byte block into the aligned state (four 128-bit lanes), in place.
- *  @param[inout] state Pointer to the aligned hash state whose @c ins lanes are consumed.
+ *  @param[in,out] state Pointer to the aligned hash state whose @c ins lanes are consumed.
  */
 STRINGZILLA_INLINE void sz_hash_state_absorb_neonaes_(sz_hash_state_aligned_t *state) {
     uint8x16_t const order_u8x16 = vld1q_u8(sz_hash_u8x16x4_shuffle_());

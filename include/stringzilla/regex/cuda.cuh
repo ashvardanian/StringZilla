@@ -4,7 +4,7 @@
  *  @date October 13, 2026
  *  @brief CUDA host side of regular expressions: the round block a call runs out of, the
  *      launches that prime, mark, walk, settle and store, and the @c _cuda exports, over the
- *      kernels of `regex/simt.cuh`.
+ *      kernels of <tt>regex/simt.cuh</tt>.
  *
  *  No compute verb allocates. The round block is taken once at init, sized from the device's
  *  resident threads, and a call reads the tape's offsets on the host to cut its corpus into

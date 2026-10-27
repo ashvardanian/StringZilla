@@ -206,7 +206,9 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_btree_prepare_(sz_u32_t *nodes, sz_siz
  *  @brief Lays out the tree over the @p keys_count sorted distinct keys leading @c nodes: flips the
  *      leaves in place, pads the last leaf, and writes the branch levels after the leaves. Zero
  *      keys give one padding leaf.
- *  @param[inout] nodes Caller-owned, @ref sz_overlap_btree_entries entries, the keys at its start.
+ *  @param[in,out] nodes Caller-owned, @ref sz_overlap_btree_entries entries, the keys at its start.
+ *  @param[in] keys_count Number of sorted distinct keys leading @p nodes.
+ *  @param[out] btree The forest view over @p nodes, with its level count.
  *  @return @c sz_success_k always; the level count is an invariant of sixteen keys per node,
  *      asserted, never reported.
  */
@@ -452,10 +454,10 @@ enum { sz_overlap_keys_per_check_k = 64 };
  *  @brief Counts one candidate's matches against one @p query of @p engine at every width, as
  *      @ref sz_overlap_scores counts them.
  *
- *  The pair may miss @p misses_bound of its own longer side, as @ref sz_overlap_misses_bound_
- *  rounds its radius, and its windows go to @p probe in runs of at most the misses it may still
- *  take, so that budget is checked once per run rather than once per window. Windows past either
- *  text are misses before any probe, so a pair whose lengths alone exhaust its budget probes none.
+ *  The pair may miss @p misses_bound of its own longer side, as @c sz_overlap_misses_bound_ rounds
+ *  its radius, and its windows go to @p probe in runs of at most the misses it may still take, so
+ *  that budget is checked once per run rather than once per window. Windows past either text are
+ *  misses before any probe, so a pair whose lengths alone exhaust its budget probes none.
  *
  *  @param[in] window_hashes The candidate's window hashes, width after width, as
  *      @ref sz_overlap_windows counts them.
@@ -510,7 +512,7 @@ typedef struct sz_overlap_round_t {
     /** Candidates the round hashes. */
     sz_size_t count;
 
-    /** The misses the radius allows, as @ref sz_overlap_misses_bound_ rounds it. */
+    /** The misses the radius allows, as @c sz_overlap_misses_bound_ rounds it. */
     sz_u32_t misses_bound;
 
     /** Where the counts go. */
@@ -618,7 +620,10 @@ STRINGZILLA_INLINE sz_f64_t sz_overlap_f64x1_prefix_hash_step_tail_serial(sz_f64
 /**
  *  @brief One position's window hash: H(i, w) = P(i + w) − P(i) · bʷ, a full-width hash
  *      under the modulus.
+ *  @param[in] prefix_hashes_at_start The prefix hash at the window's first position.
+ *  @param[in] prefix_hashes_at_end The prefix hash past the window's last position.
  *  @param[in] window_power @ref sz_overlap_window_power for this window's width.
+ *  @param[out] window_hashes The window's hash.
  */
 STRINGZILLA_CONSTEXPR void sz_overlap_f64x1_window_hash_step_serial(sz_f64_t const *prefix_hashes_at_start,
                                                                     sz_f64_t const *prefix_hashes_at_end,

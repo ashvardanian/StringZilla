@@ -9,12 +9,12 @@
  *  The walk never builds a tree. In JSON it classifies each 64-byte block into masks of structural
  *  bytes, visits only those inside containers a live step can enter, and steps over every other
  *  container by counting its brackets a block at a time. In XML, whose lexing needs no state
- *  across blocks, it searches for the one byte its lexer needs next, `<` in character data, and
+ *  across blocks, it searches for the one byte its lexer needs next, <tt>&lt;</tt> in character data, and
  *  reads only the tags.
  *
  *  A match is the subdocument's exact bytes in its document: in JSON a string with its quotes, a
  *  number or literal without the blank space around it, or an object or array through its closing
- *  bracket; in XML an element from `<` through its end tag, an attribute's value without its
+ *  bracket; in XML an element from <tt>&lt;</tt> through its end tag, an attribute's value without its
  *  quotes, or a text node's character data and CDATA sections. A caller reads it in place or hands
  *  it to another parser.
  *
@@ -27,7 +27,7 @@
  *  - @ref sz_subdocuments_find_kernel → the kernel any of them would run, for a caller to keep.
  *
  *  Each verb runs the kernel of the capability its engine was compiled for. The engine lives in
- *  `subdocuments/serial.h`.
+ *  <tt>subdocuments/serial.h</tt>.
  */
 #ifndef STRINGZILLA_SUBDOCUMENTS_H_
 #define STRINGZILLA_SUBDOCUMENTS_H_
@@ -35,8 +35,8 @@
 #include "stringzilla/types.h"
 #include "stringzilla/capabilities.h" // `sz_capability_t`
 
-/** The array positions one selector picks, RFC 9535's `[begin:end:step]`, an index @c n being
- *  `[n:n+1:1]`, or `[-1::1]` for the last element; negative bounds count from the array's end. */
+/** The array positions one selector picks, RFC 9535's <tt>[begin:end:step]</tt>, an index @c n being
+ *  <tt>[n:n+1:1]</tt>, or <tt>[-1::1]</tt> for the last element; negative bounds count from the array's end. */
 typedef struct sz_subdocuments_slice_t {
 
     /** The first position, or 2⁵³ past the end that a negative step walks from when omitted. */
@@ -60,19 +60,19 @@ extern "C" {
 /**
  *  @brief Compiles @p paths for the best capability of @p capabilities that has an init kernel.
  *
- *  JSON paths follow RFC 9535: the root `$`, child segments `.name` and `.*`, and bracketed unions
- *  of names `'name'` or `"name"`, wildcards `*`, indices @c n, slices `begin:end:step` and filters
- *  `?expression`, the same after a descendant `..`, with blank space where the RFC allows it.
+ *  JSON paths follow RFC 9535: the root <tt>$</tt>, child segments <tt>.name</tt> and <tt>.*</tt>, and bracketed unions
+ *  of names <tt>'name'</tt> or <tt>"name"</tt>, wildcards <tt>*</tt>, indices @c n, slices <tt>begin:end:step</tt> and filters
+ *  <tt>?expression</tt>, the same after a descendant <tt>..</tt>, with blank space where the RFC allows it.
  *  Negative indices and bounds count from the array's end, and a negative step walks backward,
  *  though matches still come in document order. Filters hold comparisons, existence tests of
- *  relative queries, `&&`, `||`, `!` and parentheses, and the functions `length()`, `count()`,
- *  `value()`, `match()` and `search()`, whose I-Regexp patterns compile into one regex engine owned
+ *  relative queries, <tt>&&</tt>, <tt>||</tt>, <tt>!</tt> and parentheses, and the functions <tt>length()</tt>, <tt>count()</tt>,
+ *  <tt>value()</tt>, <tt>match()</tt> and <tt>search()</tt>, whose I-Regexp patterns compile into one regex engine owned
  *  by this one. Each path compiles into one step per segment, numbered path after path, each
- *  filter's queries taking steps of their own. A path may also be a bare filter `?expression`,
- *  which tests the document's root as `$[?expression]` tests an array's elements.
+ *  filter's queries taking steps of their own. A path may also be a bare filter <tt>?expression</tt>,
+ *  which tests the document's root as <tt>$[?expression]</tt> tests an array's elements.
  *
- *  XML paths follow XPath 1.0 along forward axes: absolute paths of `/` and `//` steps, each a name
- *  test, `*`, `@name`, `@*` or `text()` with an optional position `[n]`, which counts the siblings
+ *  XML paths follow XPath 1.0 along forward axes: absolute paths of <tt>/</tt> and <tt>//</tt> steps, each a name
+ *  test, <tt>*</tt>, <tt>\@name</tt>, <tt>\@*</tt> or <tt>text()</tt> with an optional position <tt>[n]</tt>, which counts the siblings
  *  passing the same test. Name tests compare QNames as the document spells them, prefix included,
  *  and namespace declarations are no attributes. No blank space is allowed.
  *
@@ -88,18 +88,19 @@ extern "C" {
  *      @ref sz_subdocuments_engine_free needs none and cannot get the wrong one. Scratch grows to
  *      the widest call seen, so a warm engine allocates nothing.
  *  @param[in] stream Null on the CPU.
- *  @return @c sz_success_k once the paths compiled, or one of the failures below.
  *
- *  The call returns @c sz_invalid_syntax_k for anything outside the grammar, and for what no
- *  walk evaluates: an absolute query inside a filter, a comparison with no literal,
- *  `length()` or `count()` on either side, a pattern other than a string literal or one the
- *  regex family refuses, and in XML a reverse axis or a predicate other than a position. It
- *  returns @c sz_missing_library_k for `match()` or `search()` in a header-only build, whose
- *  regex dispatch links no library; @c sz_missing_kernel_k when no capability of the mask has
- *  an init, for a @p format no kernel reads yet, or on a GPU for non-zero @p options or a bare
- *  filter, which @p malformed_index then names; @c sz_unexpected_dimensions_k for an empty
- *  vocabulary; @c sz_overflow_risk_k past 32-bit step or name offsets; or
- *  @c sz_bad_alloc_k if memory allocation failed.
+ *  What no walk evaluates is an absolute query inside a filter, a comparison with no literal,
+ *  <tt>length()</tt> or <tt>count()</tt> on either side, a pattern other than a string literal or one the regex
+ *  family refuses, and in XML a reverse axis or a predicate other than a position.
+ *
+ *  @par Statuses:
+ *  - @c sz_invalid_syntax_k Anything outside the grammar, and what no walk evaluates, as above.
+ *  - @c sz_missing_library_k <tt>match()</tt> or <tt>search()</tt> in a header-only build, whose regex dispatch
+ *    links no library.
+ *  - @c sz_missing_kernel_k No capability of the mask has an init, a @p format no kernel reads
+ *    yet, or on a GPU non-zero @p options or a bare filter, which @p malformed_index then names.
+ *  - @c sz_unexpected_dimensions_k An empty vocabulary.
+ *  - @c sz_overflow_risk_k Past 32-bit step or name offsets.
  */
 STRINGZILLA_API sz_status_t sz_subdocuments_engine_init(sz_subdocuments_engine_t *engine,
                                                         sz_strings_view_t const *paths, sz_subdocuments_format_t format,
@@ -125,10 +126,11 @@ STRINGZILLA_API void sz_subdocuments_engine_free(sz_subdocuments_engine_t *engin
  *      document matches, with the bits past the last document written as zero.
  *  @param[out] malformed_index The first malformed document, on failure.
  *  @param[in] stream Null on the CPU.
- *  @return @c sz_success_k once every document was marked; @c sz_invalid_syntax_k for a malformed
- *      document, as @ref sz_subdocuments_counts defines it, leaving @p contained unspecified;
- *      @c sz_missing_kernel_k for an empty engine; or @c sz_bad_alloc_k if the walk's depth stack
- *      could not grow to the document's nesting.
+ *
+ *  @par Statuses:
+ *  - @c sz_invalid_syntax_k A malformed document, as @ref sz_subdocuments_counts defines it,
+ *    leaving @p contained unspecified.
+ *  - @c sz_missing_kernel_k An empty engine.
  */
 STRINGZILLA_API sz_status_t sz_subdocuments_contains(sz_subdocuments_engine_t *engine,
                                                      sz_strings_view_t const *documents, sz_u1x8_t *contained,
@@ -142,19 +144,21 @@ STRINGZILLA_API sz_status_t sz_subdocuments_contains(sz_subdocuments_engine_t *e
  *  @param[in] engine Compiled paths; the walk grows the engine's depth stack, so one engine serves
  *      one call at a time.
  *  @param[in] documents One document per string; their bytes are read in place and never copied.
- *  @param[out] counts The per-document counts, document d at `counts[d * stride]`.
+ *  @param[out] counts The per-document counts, document d at <tt>counts[d * stride]</tt>.
  *  @param[in] counts_stride Entries from one document's count to the next, at least one.
  *  @param[out] malformed_index The first malformed document, on failure.
  *  @param[in] stream Null on the CPU.
- *  @return @c sz_success_k once every document was counted; @c sz_unexpected_dimensions_k if
- *      @p counts_stride is zero; @c sz_missing_kernel_k for an empty engine; @c sz_bad_alloc_k if
- *      the depth stack could not grow; or @c sz_invalid_syntax_k for a malformed document.
  *
  *  A document is malformed with unbalanced brackets or tags, an unterminated string, attribute
- *  value, comment or CDATA section, a `/` outside the strings of JSON, broken structure where the
+ *  value, comment or CDATA section, a <tt>/</tt> outside the strings of JSON, broken structure where the
  *  walk reads it, or an XML DOCTYPE with an internal subset, and leaves the counts unspecified. A
  *  container or element no live step can enter is skipped by counting its nesting, so nothing else
  *  it holds is validated.
+ *
+ *  @par Statuses:
+ *  - @c sz_unexpected_dimensions_k @p counts_stride is zero.
+ *  - @c sz_missing_kernel_k An empty engine.
+ *  - @c sz_invalid_syntax_k A malformed document.
  */
 STRINGZILLA_API sz_status_t sz_subdocuments_counts(sz_subdocuments_engine_t *engine, sz_strings_view_t const *documents,
                                                    sz_size_t *counts, sz_size_t counts_stride,
@@ -179,17 +183,39 @@ STRINGZILLA_API sz_status_t sz_subdocuments_counts(sz_subdocuments_engine_t *eng
  *      the total; filled whether or not the matches fit, which is what sizes the next call.
  *  @param[out] malformed_index The first malformed document, on failure.
  *  @param[in] stream Null on the CPU.
- *  @return @c sz_success_k once every match was reported, those past @p matches_capacity only
- *      counted; @c sz_invalid_syntax_k for a malformed document, as @ref sz_subdocuments_counts
- *      defines it, leaving the outputs unspecified; @c sz_missing_kernel_k for an empty engine; or
- *      @c sz_bad_alloc_k if the depth stack could not grow.
+ *
+ *  @par Statuses:
+ *  - @c sz_invalid_syntax_k A malformed document, as @ref sz_subdocuments_counts defines it,
+ *    leaving the outputs unspecified.
+ *  - @c sz_missing_kernel_k An empty engine.
  */
 STRINGZILLA_API sz_status_t sz_subdocuments_find(sz_subdocuments_engine_t *engine, sz_strings_view_t const *documents,
                                                  sz_match_t *matches, sz_size_t matches_capacity,
                                                  sz_size_t *matches_offsets, sz_size_t *malformed_index,
                                                  sz_stream_t stream);
 
-/** @copydoc sz_subdocuments_engine_init */
+/**
+ *  @brief Compiles @p paths for the serial kernels, with the grammar
+ *      @ref sz_subdocuments_engine_init lists.
+ *  @param[out] engine Left untouched unless the call succeeds.
+ *  @param[in] paths The vocabulary, one path per string, read on the host.
+ *  @param[in] format The grammar of the documents every verb of this engine reads.
+ *  @param[in] options How JSON walks read what RFC 8259 leaves open, or
+ *      @c sz_subdocuments_options_none_k for the default.
+ *  @param[out] malformed_index The first path to break the grammar or leave the subset, on failure.
+ *  @param[in] allocator Where both blocks come from, or @c STRINGZILLA_NULL for
+ *      @c sz_allocator_init_unified_serial. Stored by value, so
+ *      @ref sz_subdocuments_engine_free needs none and cannot get the wrong one. Scratch grows to
+ *      the widest call seen, so a warm engine allocates nothing.
+ *  @param[in] stream Null on the CPU.
+ *
+ *  @par Statuses:
+ *  - @c sz_invalid_syntax_k Anything outside the grammar or what no walk evaluates.
+ *  - @c sz_missing_library_k <tt>match()</tt> or <tt>search()</tt> in a header-only build.
+ *  - @c sz_missing_kernel_k A @p format no kernel reads yet.
+ *  - @c sz_unexpected_dimensions_k An empty vocabulary.
+ *  - @c sz_overflow_risk_k Past 32-bit step or name offsets.
+ */
 STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_serial(
     sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths, sz_subdocuments_format_t format,
     sz_subdocuments_options_t options, sz_size_t *malformed_index, sz_allocator_t *allocator, sz_stream_t stream);
@@ -438,9 +464,14 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_metal(sz_subdocuments_engine_t 
 
 /**
  *  @brief Finds the subdocuments kernel of @p kind, from the best of @p capabilities.
+ *  @param[in] kind The verb whose kernel to find.
+ *  @param[in] capabilities The mask to pick the best capability from.
  *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
  *  @param[out] capability The capability the kernel belongs to, or zero.
- *  @return @c sz_success_k, @c sz_missing_kernel_k, or @c sz_missing_library_k when header-only.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k
+ *  - @c sz_missing_library_k Header-only.
  */
 STRINGZILLA_API sz_status_t sz_subdocuments_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
                                                         sz_kernel_punned_t *kernel, sz_capability_t *capability);

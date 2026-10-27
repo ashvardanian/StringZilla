@@ -90,7 +90,7 @@ STRINGZILLA_INLINE __m512i sz_line_break_classify_astral16_icelake_(__m512i code
  *      page-compressed flat leaf.
  *
  *  One @c vpermb over @c bmp_page_lut_ picks the 256-byte page, and one @c vpgatherdd fetches
- *  `flat_bmp_[page * 256 + (cp & 0xFF)]`. The leaf byte is an index into
+ *  <tt>flat_bmp_[page * 256 + (cp & 0xFF)]</tt>. The leaf byte is an index into
  *  @c sz_utf8_line_break_flat_palette_, not the 62-entry cascade palette. Only the low byte of each
  *  u32 lane is the index; the caller truncates with @c vpmovdb.
  */
@@ -99,7 +99,7 @@ STRINGZILLA_INLINE __m512i sz_line_break_bmp_flat_index16_icelake_(__m512i codep
                                              codepoints_u32x16);
 }
 
-/** Flat-palette index for one sixteen-byte group, where `cp = (high << 8) | low`, narrowed back to
+/** Flat-palette index for one sixteen-byte group, where <tt>cp = (high << 8) | low</tt>, narrowed back to
  *  bytes with @c vpmovdb. */
 STRINGZILLA_INLINE __m128i sz_line_break_flat_group_icelake_(__m128i high_u8x16, __m128i low_u8x16) {
     __m512i const high_u32x16 = _mm512_cvtepu8_epi32(high_u8x16);
@@ -109,7 +109,7 @@ STRINGZILLA_INLINE __m128i sz_line_break_flat_group_icelake_(__m128i high_u8x16,
 }
 
 /**
- *  @brief All-64-lane flat-palette index for `cp < 0x10000`, where `cp = (high << 8) | low`.
+ *  @brief All-64-lane flat-palette index for <tt>cp < 0x10000</tt>, where <tt>cp = (high << 8) | low</tt>.
  *
  *  Four sixteen-lane @c vpgatherdd leaves resolve the whole window on the load ports, leaving the
  *  cross-lane shuffle port to the decode. Lanes whose codepoint is ≥ 0x10000 are undefined, as the
@@ -632,7 +632,7 @@ STRINGZILLA_INLINE sz_size_t sz_line_break_complete_limit_(sz_utf8_rune_window_t
  *
  *  Each iteration decodes one 64-byte window at the codepoint-aligned @c position, classifies it
  *  in-register, decides the break-before mask over the complete-codepoint region with a carry-aware
- *  rule engine, drains the trusted band below the trust horizon, and advances by `win.resolved`
+ *  rule engine, drains the trusted band below the trust horizon, and advances by <tt>win.resolved</tt>
  *  with the small register carry threaded forward. No byte is re-read - there is no
  *  @c start_at_or_before_ and no left-context back-walk - because the carry alone supplies lane-0
  *  left context. A full buffer always ends at a confirmed break, a @c line_start, so resume is

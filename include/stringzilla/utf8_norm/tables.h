@@ -4,13 +4,13 @@
  *  @date June 14, 2026
  *  @brief Generated unified Unicode normalization tables for the single-pass @c utf8_norm engine.
  *
- *  Only the @b array @b contents below are generated: the `sz_utf8_norm_*_[]` initializer lists are
+ *  Only the @b array @b contents below are generated: the <tt>sz_utf8_norm_*_[]</tt> initializer lists are
  *  derived from Unicode 17.0.0 and must not be hand-edited; regenerate them instead. The rest of
  *  the file is ordinary hand-written code - include guards, the @c sz_utf8_norm_props_t
  *  declaration, and every comment - and may be edited freely. One record per code-point drives both
  *  APIs; composition is partner-indexed (#3); Hangul is algorithmic and absent here. The recipe
  *  below, Python 3 with the standard library only, derives those array contents from the UCD files
- *  unpacked into `ucd/`; it emits table data, never this file:
+ *  unpacked into <tt>ucd/</tt>; it emits table data, never this file:
  *
  *  @code{.py}
  *  import urllib.request
@@ -34,7 +34,7 @@
  *          elif g[1] == "Full_Composition_Exclusion": excl.add(cp)
  *          elif g[1] == "NFKC_CF": nfkc_cf[cp] = [int(x, 16) for x in g[2].split()]
  *
- *  # Full case folding, statuses C and F, as the `utf8_uncased_fold` kernels apply it:
+ *  # Full case folding, statuses C and F, as the <tt>utf8_uncased_fold</tt> kernels apply it:
  *  fold = {}
  *  for ln in ucd("CaseFolding.txt").splitlines():
  *      g = [x.strip() for x in ln.split("#")[0].split(";")]
@@ -62,9 +62,9 @@
  *  # each starter a slice into a (partner -> composite) table; every code-point < 0x30000 gets a record
  *  # (ccc, qc bits, NFD/NFKD/NFKC_Casefold slices, partner, starter) interned into a shared u16 rune pool (astral
  *  # via the 0xD800 escape), reached by a 3-stage trie. Hangul syllables get no slices, and a code-point outside
- *  # `nfkc_cf` reuses its NFD slice. A separate u8-palette trie holds the scan value (qc_flags << 8 | ccc), paired
+ *  # nfkc_cf reuses its NFD slice. A separate u8-palette trie holds the scan value (qc_flags << 8 | ccc), paired
  *  # with a 64-entry lead LUT and a flat 2-byte table for the SIMD scanner. Bit 4 of the qc bits and of the
- *  # qc_flags marks a code-point that is not `inert`. Past 0x30000 only E0000-E0FFF has properties, U+00AD's.
+ *  # qc_flags marks a code-point that is not inert. Past 0x30000 only E0000-E0FFF has properties, U+00AD's.
  *  @endcode
  *
  *  @see Unicode Character Database 17.0.0: https://www.unicode.org/Public/17.0.0/ucd/
@@ -4983,7 +4983,7 @@ STRINGZILLA_CONSTANT sz_rune_t const sz_utf8_norm_compose_value_[961] = {
     0x1134C, 0x11383, 0x11385, 0x1138E, 0x11391, 0x113C7, 0x113C5, 0x113C8, 0x114BC, 0x114BB, 0x114BE, 0x115BA, 0x115BB,
     0x11938, 0x16121, 0x16123, 0x16125, 0x16122, 0x16126, 0x16128, 0x16127, 0x16124, 0x16D69, 0x16D68, 0x16D6A};
 
-/** Hot-path lead classifier: index = lead_byte & 0x3F, bits = the `sz_utf8_norm_quick_check_*_k`
+/** Hot-path lead classifier: index = lead_byte & 0x3F, bits = the <tt>sz_utf8_norm_quick_check_*_k</tt>
  *  flags possibly present. */
 STRINGZILLA_CONSTANT sz_u8_t const sz_utf8_norm_lead_lut_[64] = {
     0x0,  0x0,  0x1A, 0xC,  0x1E, 0x1E, 0xC,  0x1E, 0xC,  0x0,  0x1A, 0x1A, 0x1F, 0x1F, 0x1F, 0x1E,
@@ -4992,7 +4992,7 @@ STRINGZILLA_CONSTANT sz_u8_t const sz_utf8_norm_lead_lut_[64] = {
     0x1F, 0x0,  0x0,  0x10, 0x0,  0x0,  0x0,  0x0,  0x0,  0x0,  0x0,  0x0,  0x0,  0x0,  0x0,  0x0};
 
 /** Cold-loop flat 2-byte lookup for U+0000-07FF, each value holding
- *  `(quick_check_flags << 8) | canonical_combining_class`. */
+ *  <tt>(quick_check_flags << 8) | canonical_combining_class</tt>. */
 STRINGZILLA_CONSTANT sz_u16_t const sz_utf8_norm_twobyte_[2048] = {
     0x0,    0x0,    0x0,    0x0,    0x0,    0x0,    0x0,    0x0,    0x0,    0x0,    0x0,    0x0,    0x0,    0x0,
     0x0,    0x0,    0x0,    0x0,    0x0,    0x0,    0x0,    0x0,    0x0,    0x0,    0x0,    0x0,    0x0,    0x0,

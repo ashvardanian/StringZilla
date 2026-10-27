@@ -118,7 +118,7 @@ typedef sz_u64_t sz_capability_t;
 #define sz_cap_loongsonasx_k ((sz_capability_t)1 << 16)
 #define sz_cap_powervsx_k ((sz_capability_t)1 << 17)
 
-/** GPU capabilities, as each vendor's `sz_<vendor>_capabilities_*` functions report them for one
+/** GPU capabilities, as each vendor's <tt>sz_&lt;vendor&gt;_capabilities_*</tt> functions report them for one
  *  device, grouped by vendor above bit 47 to leave room for more CPU capabilities and more per
  *  vendor. Each vendor's baseline runs on all its devices, as @c serial runs on every CPU, and each
  *  later tier on every device from its generation on: @c hopper from compute capability 9.0, for
@@ -922,7 +922,7 @@ typedef sz_status_t (*sz_kernel_subdocuments_find_t)(struct sz_subdocuments_engi
 typedef void (*sz_kernel_punned_t)(void);
 
 /** Returns the capabilities whose kernels were compiled into this binary, as decided by the
- *  `STRINGZILLA_TARGET_*` macros. Says nothing about the current CPU - see
+ *  <tt>STRINGZILLA_TARGET_*</tt> macros. Says nothing about the current CPU - see
  *  @c sz_capabilities_detected_cpu_. */
 STRINGZILLA_CONSTEXPR sz_capability_t sz_capabilities_compiled_cpu_(void) {
     return (sz_capability_t)(                                     //
@@ -1302,7 +1302,6 @@ STRINGZILLA_API sz_status_t sz_capabilities_enabled_cpu(sz_capability_t *capabil
 /**
  *  @brief Prepares the calling thread for the kernels of @p capabilities, and only those.
  *  @param[in] capabilities The capabilities to prepare for, like @c sz_capabilities_enabled_cpu.
- *  @return @c sz_success_k.
  *
  *  Call it once on each thread that dispatches. Every current capability needs nothing, so today
  *  it returns right away.
@@ -1327,8 +1326,10 @@ STRINGZILLA_API sz_size_t sz_capabilities_name(sz_capability_t capabilities, cha
  *  @param[out] kernel The kernel, cast back to its @c sz_kernel_find_t or sibling before the call,
  *      or null when none of @p capabilities has it.
  *  @param[out] capability The capability the kernel belongs to, or zero.
- *  @return @c sz_success_k, @c sz_missing_kernel_k when no capability in @p capabilities has it,
- *      or @c sz_missing_library_k in header-only builds.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
+ *  - @c sz_missing_library_k Header-only builds.
  */
 STRINGZILLA_API sz_status_t sz_find_kernel_punned(sz_kernel_kind_t kind, sz_capability_t capabilities,
                                                   sz_kernel_punned_t *kernel, sz_capability_t *capability);
@@ -1374,9 +1375,10 @@ STRINGZILLA_API sz_size_t sz_capabilities_name(sz_capability_t capabilities, cha
  *  @param[in] capabilities One device's capabilities; its group picks the runtime that waits.
  *  @param[in] stream Null on the CPU, which has nothing to wait for. On a GPU, the stream to join,
  *      which also names the device, or null for the default stream of the default device.
- *  @return @c sz_success_k; or on a device @c sz_device_memory_mismatch_k for a @p stream it cannot
- *      use, @c sz_device_code_mismatch_k when the runtime reports a failed launch, and
- *      @c sz_missing_gpu_k for a vendor this build lacks or a device that doesn't answer.
+ *
+ *  @par Statuses:
+ *  - @c sz_device_memory_mismatch_k On a device, a @p stream it cannot use.
+ *  - @c sz_missing_gpu_k A vendor this build lacks.
  */
 STRINGZILLA_API sz_status_t sz_stream_synchronize_best(sz_capability_t capabilities, sz_stream_t stream);
 
@@ -1487,7 +1489,10 @@ STRINGZILLA_CONSTEXPR sz_capability_t sz_capabilities_compiled_metal_(void) {
 
 /**
  *  @brief Counts the CUDA devices the process sees.
- *  @return @c sz_success_k, or @c sz_missing_gpu_k without one.
+ *  @param[out] count The number of devices, zero without one.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_gpu_k Without one.
  */
 STRINGZILLA_API sz_status_t sz_device_count_cuda(sz_size_t *count);
 
@@ -1495,15 +1500,26 @@ STRINGZILLA_API sz_status_t sz_device_count_cuda(sz_size_t *count);
  *  @brief Reports the capabilities CUDA device @p ordinal runs.
  *  @param[in] ordinal The CUDA runtime's device index, like @c cudaSetDevice takes.
  *  @param[out] capabilities The CUDA baseline and what the device runs, zero on failure.
- *  @return @c sz_success_k, @c sz_missing_gpu_k past the last device, or
- *      @c sz_device_code_mismatch_k when the runtime fails to answer.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_gpu_k Past the last device.
  */
 STRINGZILLA_API sz_status_t sz_capabilities_detected_cuda(sz_size_t ordinal, sz_capability_t *capabilities);
 
-/** Reports the CUDA capabilities this binary holds kernels for. */
+/**
+ *  @brief Reports the CUDA capabilities this binary holds kernels for.
+ *  @param[out] capabilities The CUDA capabilities compiled in, zero without any.
+ */
 STRINGZILLA_API sz_status_t sz_capabilities_compiled_cuda(sz_capability_t *capabilities);
 
-/** @copydoc sz_capabilities_detected_cuda, narrowed to what this binary holds kernels for. */
+/**
+ *  @brief Reports the capabilities CUDA device @p ordinal runs that this binary holds kernels for.
+ *  @param[in] ordinal The CUDA runtime's device index, like @c cudaSetDevice takes.
+ *  @param[out] capabilities The CUDA baseline and what the device runs, zero on failure.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_gpu_k Past the last device.
+ */
 STRINGZILLA_API sz_status_t sz_capabilities_enabled_cuda(sz_size_t ordinal, sz_capability_t *capabilities);
 
 /** Creates a stream on CUDA device @p ordinal with @c cudaStreamCreate. */
@@ -1512,16 +1528,39 @@ STRINGZILLA_API sz_status_t sz_stream_init_cuda(sz_size_t ordinal, sz_stream_t *
 /** Destroys a stream of @ref sz_stream_init_cuda with @c cudaStreamDestroy, once its work ends. */
 STRINGZILLA_API sz_status_t sz_stream_free_cuda(sz_stream_t stream);
 
-/** @copydoc sz_device_count_cuda, for ROCm. */
+/**
+ *  @brief Counts the ROCm devices the process sees.
+ *  @param[out] count The number of devices, zero without one.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_gpu_k Without one.
+ */
 STRINGZILLA_API sz_status_t sz_device_count_rocm(sz_size_t *count);
 
-/** @copydoc sz_capabilities_detected_cuda, for ROCm, whose ordinal @c hipSetDevice takes. */
+/**
+ *  @brief Reports the capabilities ROCm device @p ordinal runs.
+ *  @param[in] ordinal The HIP runtime's device index, like @c hipSetDevice takes.
+ *  @param[out] capabilities The ROCm baseline and what the device runs, zero on failure.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_gpu_k Past the last device.
+ */
 STRINGZILLA_API sz_status_t sz_capabilities_detected_rocm(sz_size_t ordinal, sz_capability_t *capabilities);
 
-/** @copydoc sz_capabilities_compiled_cuda, for ROCm. */
+/**
+ *  @brief Reports the ROCm capabilities this binary holds kernels for.
+ *  @param[out] capabilities The ROCm capabilities compiled in, zero without any.
+ */
 STRINGZILLA_API sz_status_t sz_capabilities_compiled_rocm(sz_capability_t *capabilities);
 
-/** @copydoc sz_capabilities_enabled_cuda, for ROCm. */
+/**
+ *  @brief Reports the capabilities ROCm device @p ordinal runs that this binary holds kernels for.
+ *  @param[in] ordinal The HIP runtime's device index, like @c hipSetDevice takes.
+ *  @param[out] capabilities The ROCm baseline and what the device runs, zero on failure.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_gpu_k Past the last device.
+ */
 STRINGZILLA_API sz_status_t sz_capabilities_enabled_rocm(sz_size_t ordinal, sz_capability_t *capabilities);
 
 /** Creates a stream on ROCm device @p ordinal with @c hipStreamCreate. */
@@ -1530,16 +1569,39 @@ STRINGZILLA_API sz_status_t sz_stream_init_rocm(sz_size_t ordinal, sz_stream_t *
 /** Destroys a stream of @ref sz_stream_init_rocm with @c hipStreamDestroy, once its work ends. */
 STRINGZILLA_API sz_status_t sz_stream_free_rocm(sz_stream_t stream);
 
-/** @copydoc sz_device_count_cuda, for Metal. */
+/**
+ *  @brief Counts the Metal devices the system lists.
+ *  @param[out] count The number of devices, zero without one.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_gpu_k Without one.
+ */
 STRINGZILLA_API sz_status_t sz_device_count_metal(sz_size_t *count);
 
-/** @copydoc sz_capabilities_detected_cuda, for Metal, whose devices count in system order. */
+/**
+ *  @brief Reports the capabilities Metal device @p ordinal runs.
+ *  @param[in] ordinal The device's position in the order the system lists them.
+ *  @param[out] capabilities The Metal baseline when the device supports it, zero otherwise.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_gpu_k Past the last device.
+ */
 STRINGZILLA_API sz_status_t sz_capabilities_detected_metal(sz_size_t ordinal, sz_capability_t *capabilities);
 
-/** @copydoc sz_capabilities_compiled_cuda, for Metal. */
+/**
+ *  @brief Reports the Metal capabilities this binary holds kernels for.
+ *  @param[out] capabilities The Metal capabilities compiled in, zero without any.
+ */
 STRINGZILLA_API sz_status_t sz_capabilities_compiled_metal(sz_capability_t *capabilities);
 
-/** @copydoc sz_capabilities_enabled_cuda, for Metal. */
+/**
+ *  @brief Reports the capabilities Metal device @p ordinal runs that this binary holds kernels for.
+ *  @param[in] ordinal The device's position in the order the system lists them.
+ *  @param[out] capabilities The Metal baseline when the device supports it, zero otherwise.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_gpu_k Past the last device.
+ */
 STRINGZILLA_API sz_status_t sz_capabilities_enabled_metal(sz_size_t ordinal, sz_capability_t *capabilities);
 
 /** Opens an @c id<MTLCommandQueue> stream on Metal device @p ordinal with @c newCommandQueue. */

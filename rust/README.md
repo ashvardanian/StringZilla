@@ -52,7 +52,7 @@ use stringzilla::sz::StringZillableUnary;  // hash/segmentation extension method
 
 ### SIMD Dispatch
 
-Every call picks its kernel from the capability mask it passes, `Capabilities::cpu_enabled()` (see [Runtime Dispatch and Capabilities](#runtime-dispatch-and-capabilities)) — the same `_best` dispatch points as the precompiled `stringzilla_shared` C library.
+Every call picks its kernel from the capability mask it passes, `Capabilities::cpu_enabled()` (see [Runtime Dispatch](#runtime-dispatch)) — the same `_best` dispatch points as the precompiled `stringzilla_shared` C library.
 One binary runs optimally on any CPU of the target architecture, at the cost of one pick per operation.
 CMake decides which capabilities to compile in, as for every other binding, by try-compiling `probes/<capability>.c` — tiny programs calling one of the capability's real kernels header-only at the baseline flags, so broken or old toolchains are caught up front.
 Every capability the toolchain can emit is built, and the enabled mask leaves out whatever the CPU lacks.
@@ -603,7 +603,7 @@ sz::sha256_multistate_digest(&states, &mut digests).unwrap();
 assert_eq!(digests[0], sz::Sha256::hash(b"alpha"));
 ```
 
-## Sorting, Sampling, and Shuffling
+## Sorting and Sets
 
 ### Argsort
 
@@ -895,7 +895,7 @@ cpu.scope(|scope| engine.replace(scope, documents, replacements, &mut target, &m
 assert_eq!(&target[offsets[0]..offsets[1]], b"feline and canine");
 ```
 
-## UTF-8 Segmentation
+## Unicode Segmentation
 
 A single emoji such as the flag `🇺🇸` is 8 bytes and 2 codepoints, yet a reader sees one character — one grapheme cluster.
 StringZilla draws every one of these boundaries: `sz_utf8_runes` (`Utf8View`) walks codepoints, while `sz_utf8_graphemes` (`Utf8Graphemes`) walks user-perceived clusters.
@@ -991,7 +991,7 @@ assert_eq!((bytes, count), (5, 5));
 assert_eq!(runes[0], 'H' as u32);
 ```
 
-## Runtime Dispatch and Capabilities
+## Runtime Dispatch
 
 The producers report `Capabilities`, a set of `Capability` bits, for the CPU or for one GPU by its runtime's own ordinal.
 

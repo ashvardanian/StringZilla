@@ -7,8 +7,8 @@
  *
  *  @sa include/stringzilla/metal.h, which embeds this and compiles it ahead of each family's source
  *
- *  The runtime compiler takes one source string and no include path, so `metal.h` embeds this file
- *  once and joins it with a family's `metal.metal` into the one string each library compiles from.
+ *  The runtime compiler takes one source string and no include path, so <tt>metal.h</tt> embeds this file
+ *  once and joins it with a family's <tt>metal.metal</tt> into the one string each library compiles from.
  *
  *  Kernels address memory through the buffers the host binds, one per block a call touches. A
  *  block's contents point inside it by host address, which @ref sz_reach_metal_ turns into the

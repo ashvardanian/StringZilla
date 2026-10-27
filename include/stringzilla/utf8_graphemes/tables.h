@@ -6,7 +6,7 @@
  *
  *  Each codepoint resolves to a packed descriptor byte with Grapheme_Cluster_Break in bits 0-3,
  *  Indic_Conjunct_Break in bits 4-5, and Extended_Pictographic in bit 6, consumed by GB9c and GB11:
- *  `gcb | incb << 4 | extended_pictographic << 6`. Derived by:
+ *  <tt>gcb | incb << 4 | extended_pictographic << 6</tt>. Derived by:
  *
  *  @code{.py}
  *  # GraphemeBreakProperty.txt  → gcb in {Other,CR,LF,Control,Extend,ZWJ,RI,Prepend,SpacingMark,L,V,T,LV,LVT}
@@ -36,8 +36,8 @@
  *  astral_s2 = [value for row in stage2 for value in row]
  *  astral_leaf = [value for row in leaf for value in row]  # descriptor indexed by (offset & 0xF)
  *  # Every table the Ice Lake cascade loads (stage_hi/mid/sub, id_to_desc, ascii_desc, astral_stage1/stage2_low/s2/leaf) is
- *  # stored `sz_align_(64)` and zero-padded to a multiple of 64 bytes, so the classifier reads each 64-byte tile
- *  # straight from `.rodata` with an aligned `_mm512_load_si512` (no per-call table materialization), and the final
+ *  # stored sz_align_(64) and zero-padded to a multiple of 64 bytes, so the classifier reads each 64-byte tile
+ *  # straight from .rodata with an aligned _mm512_load_si512 (no per-call table materialization), and the final
  *  # tile never overruns the array:
  *  pad64 = lambda values: values + [0] * ((-len(values)) % 64)
  *  @endcode
@@ -55,7 +55,7 @@ extern "C" {
  *  @brief Unicode UAX-29 Grapheme_Cluster_Break property values (4-bit encoding, 0-13).
  *
  *  These values correspond to the Grapheme_Cluster_Break property from Unicode UAX-29. Used by
- *  `sz_rune_grapheme_break_property()` for full UAX-29-compliant grapheme cluster detection.
+ *  <tt>sz_rune_grapheme_break_property()</tt> for full UAX-29-compliant grapheme cluster detection.
  */
 enum sz_grapheme_break_t {
 
@@ -648,13 +648,13 @@ sz_align_(64) static const sz_u8_t sz_utf8_grapheme_break_astral_leaf_[2624] = {
 
 /**
  *  @brief SIMD descriptor tables mapping a codepoint to its packed Grapheme_Cluster_Break
- *      descriptor byte, `gcb | incb << 4 | extpict << 6`.
+ *      descriptor byte, <tt>gcb | incb << 4 | extpict << 6</tt>.
  *
  *  Bit-exact with the serial oracle @c sz_rune_grapheme_break_property. @c ascii_desc is a 256-LUT
- *  over the raw byte, the cp < 0x80 fast path. @c bmp_page_lut_ maps `cp >> 8` to a page index and
+ *  over the raw byte, the cp < 0x80 fast path. @c bmp_page_lut_ maps <tt>cp >> 8</tt> to a page index and
  *  doubles as the page LUT of the flat BMP classifier below. The astral 5-nibble @c vpshufb cascade
  *  covers cp - 0x10000: leaf ids exceed 255, so the leaf-id stages are emitted as two byte planes,
- *  low and high, and the final stage is grouped by `leaf >> 4` so every per-lane index stays a
+ *  low and high, and the final stage is grouped by <tt>leaf >> 4</tt> so every per-lane index stays a
  *  byte. Derived by:
  *
  *  @code{.py}
@@ -886,8 +886,8 @@ static const sz_u8_t sz_utf8_grapheme_break_astral_stage4_groups_[2816] = {
 // clang-format off
 
 /**
- *  @brief Flat Grapheme_Cluster_Break classifier table: `bmp_page_lut_[cp >> 8]` selects one of 54
- *      distinct 256-byte pages, then `flat_bmp_[page * 256 + (cp & 0xFF)]` is the descriptor.
+ *  @brief Flat Grapheme_Cluster_Break classifier table: <tt>bmp_page_lut_[cp >> 8]</tt> selects one of 54
+ *      distinct 256-byte pages, then <tt>flat_bmp_[page * 256 + (cp & 0xFF)]</tt> is the descriptor.
  *
  *  One indexed lookup per codepoint, read by @c vpgatherdd on x86 and @c svld1_gather on SVE2. The
  *  page LUT is @c bmp_page_lut_ itself, reused rather than duplicated. Bit-exact with

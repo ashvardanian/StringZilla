@@ -1,6 +1,6 @@
 {
   "version": 6,
-  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "cmakeMinimumRequired": { "major": 3, "minor": 28, "patch": 0 },
   "configurePresets": [
     {
       "name": "base",
@@ -11,7 +11,8 @@
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "STRINGZILLA_BUILD_TEST": "ON",
-        "STRINGZILLA_BUILD_BENCH": "ON"
+        "STRINGZILLA_BUILD_BENCH": "ON",
+        "STRINGZILLA_WERROR": "ON"
       }
     },
     {
@@ -45,7 +46,17 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "STRINGZILLA_BUILD_CUDA": "OFF",
-        "STRINGZILLA_BUILD_SANITIZERS": "ON"
+        "STRINGZILLA_BUILD_SANITIZERS": "address"
+      }
+    },
+    {
+      "name": "check",
+      "inherits": ["base", "clang"],
+      "displayName": "Clang with warnings as errors, no CUDA",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "STRINGZILLA_BUILD_CUDA": "OFF",
+        "STRINGZILLA_WERROR": "ON"
       }
     },
     {
@@ -147,6 +158,7 @@
   ],
   "buildPresets": [
     { "name": "debug", "configurePreset": "debug" },
+    { "name": "check", "configurePreset": "check" },
     { "name": "release", "configurePreset": "release" },
     { "name": "release_shared", "configurePreset": "release_shared" },
     { "name": "swift", "configurePreset": "swift", "configuration": "Release" },

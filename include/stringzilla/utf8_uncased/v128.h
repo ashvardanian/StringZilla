@@ -39,19 +39,19 @@ extern "C" {
 
 #pragma region Helpers
 
-/** Slide-up carrying a real predecessor across windows: `result[0] = carry` and
- *  `result[i] = vector[i - 1]`. */
+/** Slide-up carrying a real predecessor across windows: <tt>result[0] = carry</tt> and
+ *  <tt>result[i] = vector[i - 1]</tt>. */
 STRINGZILLA_INLINE v128_t sz_utf8_uncased_slide1up_v128_(v128_t vector_u8x16, sz_u8_t carry) {
     return wasm_i8x16_shuffle(vector_u8x16, wasm_i8x16_splat((sz_i8_t)carry), 16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
                               12, 13, 14);
 }
 
-/** 0/1 byte (not 0xFF): 1 where `bytes == value`. */
+/** 0/1 byte (not 0xFF): 1 where <tt>bytes == value</tt>. */
 STRINGZILLA_INLINE v128_t sz_utf8_uncased_eq01_v128_(v128_t bytes_u8x16, sz_u8_t value) {
     return wasm_v128_and(wasm_i8x16_eq(bytes_u8x16, wasm_i8x16_splat((sz_i8_t)value)), wasm_i8x16_splat(1));
 }
 
-/** 0/1 byte: 1 where @p bytes_u8x16 lies in `[start, start + length)`. */
+/** 0/1 byte: 1 where @p bytes_u8x16 lies in <tt>[start, start + length)</tt>. */
 STRINGZILLA_INLINE v128_t sz_utf8_uncased_inrange01_v128_(v128_t bytes_u8x16, sz_u8_t start, sz_u8_t length) {
     return wasm_v128_and(sz_utf8_in_range_v128_(bytes_u8x16, start, length), wasm_i8x16_splat(1));
 }
@@ -88,20 +88,20 @@ STRINGZILLA_INLINE v128_t sz_utf8_uncased_latin_delta_v128_(v128_t source_u8x16,
     return wasm_v128_and(delta_u8x16, is_continuation_u8x16);
 }
 
-/** A 16-byte fold window: the chunk at `src + pos` plus its cross-boundary neighbours. */
+/** A 16-byte fold window: the chunk at <tt>src + pos</tt> plus its cross-boundary neighbours. */
 typedef struct {
 
-    /** The 16 bytes at `src + pos`. */
+    /** The 16 bytes at <tt>src + pos</tt>. */
     v128_t source_u8x16;
 
-    /** @c source_u8x16 slid up one lane, carrying the real predecessor byte, zero at `pos == 0`. */
+    /** @c source_u8x16 slid up one lane, carrying the real predecessor byte, zero at <tt>pos == 0</tt>. */
     v128_t previous_u8x16;
 
     /** @c source_u8x16 slid down one lane, carrying the real successor byte. */
     v128_t next_u8x16;
 } sz_utf8_uncased_window_v128_t;
 
-/** Loads the fold window at `src + pos`, reading one byte on each side for cross-window folds. */
+/** Loads the fold window at <tt>src + pos</tt>, reading one byte on each side for cross-window folds. */
 STRINGZILLA_INLINE sz_utf8_uncased_window_v128_t sz_utf8_uncased_load_window_v128_(sz_u8_t const *src, sz_size_t pos) {
     sz_utf8_uncased_window_v128_t window;
     window.source_u8x16 = wasm_v128_load(src + pos);
@@ -311,7 +311,7 @@ STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_vietnamese_strip_v128_(sz_u8_t c
 
 #pragma region Per script alarm strips
 
-/** Fold the first lead-danger from a window's 0/1 second-byte danger vector into `*best` (min). */
+/** Fold the first lead-danger from a window's 0/1 second-byte danger vector into <tt>*best</tt> (min). */
 STRINGZILLA_INLINE void sz_utf8_uncased_alarm_window_(v128_t danger_second_u8x16, sz_size_t pos, sz_size_t window,
                                                       long *best) {
     sz_u32_t bits = (sz_u32_t)wasm_i8x16_bitmask(wasm_i8x16_ne(danger_second_u8x16, wasm_i8x16_splat(0)));

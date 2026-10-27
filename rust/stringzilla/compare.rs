@@ -2,6 +2,7 @@
 //!
 //! File: rust/stringzilla/compare.rs
 //! Author: Ash Vardanian
+//! Date: August 7, 2026
 
 use core::cmp::Ordering;
 use core::ffi::c_void;

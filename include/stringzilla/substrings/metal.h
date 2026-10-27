@@ -10,9 +10,9 @@
  *  @sa include/stringzilla/substrings/simt.cuh, the CUDA sibling
  *
  *  The verbs keep the CUDA tier's shape, with an @c id<MTLCommandQueue> as the stream. Every block
- *  the kernels read must come from @ref sz_allocator_init_unified_metal on that stream's device,
- *  and haystacks and replacements must be tapes, as @ref sz_strings_to_tape_best writes them with
- *  that allocator, since the kernels read the tapes themselves. A round's dispatches run in order
+ *  the kernels read must come from @c sz_allocator_init_unified_metal on that stream's device, and
+ *  haystacks and replacements must be tapes, as @ref sz_strings_to_tape_best writes them with that
+ *  allocator, since the kernels read the tapes themselves. A round's dispatches run in order
  *  inside one command buffer, so each sees what the one before it wrote, and nothing is read back
  *  until the caller synchronizes.
  */
@@ -107,7 +107,7 @@ typedef struct sz_substrings_spill_metal_t {
     sz_u32_t padding;
 } sz_substrings_spill_metal_t;
 
-/** Every kernel of `metal.metal`, built at init so no round compiles one. */
+/** Every kernel of <tt>metal.metal</tt>, built at init so no round compiles one. */
 static char const *const sz_substrings_kernels_metal_[] = {
     "sz_substrings_clear_metal_kernel_",        "sz_substrings_scan_reduce_metal_kernel_",
     "sz_substrings_scan_carry_metal_kernel_",   "sz_substrings_scan_apply_metal_kernel_",

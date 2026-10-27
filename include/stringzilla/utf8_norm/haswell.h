@@ -4,7 +4,7 @@
  *  @date June 15, 2026
  *  @brief Haswell AVX2 backend for the single-pass Unicode normalizer, NFD / NFC / NFKD / NFKC.
  *
- *  This is the AVX2 sibling of the AVX-512 `skylake.h` scanner, mirrored at 32-byte YMM
+ *  This is the AVX2 sibling of the AVX-512 <tt>skylake.h</tt> scanner, mirrored at 32-byte YMM
  *  granularity. It overrides exactly one point of the shared engine: the scan primitive
  *  @c sz_utf8_norm_classify_haswell_, a 32-byte all-ASCII gate via @c _mm256_movemask_epi8 plus a
  *  lead-byte classify over the shared @c sz_utf8_norm_lead_lut_, then the shared cold per-codepoint
@@ -39,7 +39,7 @@ extern "C" {
 
 /**
  *  @brief 64-entry lead lookup without AVX-512 VBMI: four per-128-lane @c vpshufb over the
- *      broadcast LUT quadrants, selected by the high two index bits, then `families & flag` picks
+ *      broadcast LUT quadrants, selected by the high two index bits, then <tt>families & flag</tt> picks
  *      out the requested form.
  *  @return The flagged lanes, nonzero where a lead byte begins a candidate non-inert codepoint.
  */

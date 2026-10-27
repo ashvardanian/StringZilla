@@ -317,7 +317,7 @@ inline uint sz_subdocuments_hex_unit_metal_(device uchar const *digits) {
 }
 
 /**
- *  @brief Decodes the unit of a `"`-quoted string body at @p source [read], a byte or one escape,
+ *  @brief Decodes the unit of a <tt>"</tt>-quoted string body at @p source [read], a byte or one escape,
  *      into @p encoded, as @c sz_subdocuments_unescape_unit_simt_ does.
  *  @return Bytes it encodes to, or zero for a malformed one.
  */
@@ -355,9 +355,9 @@ inline ulong sz_subdocuments_unescape_unit_metal_(device uchar const *source, ul
 }
 
 /**
- *  @brief Unescapes a `"`-quoted string body into @p target,
+ *  @brief Unescapes a <tt>"</tt>-quoted string body into @p target,
  *      writing only its first @p capacity bytes.
- *  @return The unescaped length, or `~0` for a malformed escape.
+ *  @return The unescaped length, or <tt>~0</tt> for a malformed escape.
  */
 inline ulong sz_subdocuments_unescape_metal_(device uchar const *source, ulong length, device uchar *target,
                                              ulong capacity) {
@@ -516,7 +516,7 @@ inline void sz_subdocuments_report_metal_(thread sz_subdocuments_engine_metal_t 
         }
 }
 
-/** Settles the lengths of the matches `[begin, end)` that fit, all starting at one byte. */
+/** Settles the lengths of the matches <tt>[begin, end)</tt> that fit, all starting at one byte. */
 inline void sz_subdocuments_close_metal_(device sz_match_metal_t *matches, ulong matches_capacity, ulong begin,
                                          ulong end, ulong end_offset) {
     for (end = min(end, matches_capacity); begin < end; ++begin)
@@ -683,7 +683,7 @@ inline bool sz_subdocuments_compare_metal_(thread sz_subdocuments_value_metal_t 
     return order == 1 || order == 0;
 }
 
-/** RFC 9535's `length()`: a string's codepoints, a container's elements or members, or Nothing. */
+/** RFC 9535's <tt>length()</tt>: a string's codepoints, a container's elements or members, or Nothing. */
 inline sz_subdocuments_value_metal_t sz_subdocuments_length_metal_(thread sz_subdocuments_value_metal_t const &value) {
     device uchar const *const bytes = value.bytes;
     sz_subdocuments_value_metal_t result = {sz_subdocuments_kind_number_metal_k, false, 0, 0, nullptr};
@@ -750,7 +750,7 @@ inline bool sz_subdocuments_regex_test_metal_(thread sz_subdocuments_engine_meta
 }
 
 /** Runs filter @p filter for the node in slot @p node over the slots
- *  `[node, end)` of its subtree. */
+ *  <tt>[node, end)</tt> of its subtree. */
 inline bool sz_subdocuments_filter_holds_metal_(thread sz_subdocuments_engine_metal_t const &engine,
                                                 device uchar const *text, device ulong const *stack, ulong frame_words,
                                                 ulong node, ulong end, sz_subdocuments_filter_metal_t filter,
@@ -813,7 +813,7 @@ inline bool sz_subdocuments_filter_holds_metal_(thread sz_subdocuments_engine_me
     return values[0].number != 0;
 }
 
-/** Settles the slots `[begin, end)` of a closed pending run, each filter's replay of a node's
+/** Settles the slots <tt>[begin, end)</tt> of a closed pending run, each filter's replay of a node's
  *  subtree one level up, as @c sz_subdocuments_replay_simt_ does. */
 inline void sz_subdocuments_replay_metal_(thread sz_subdocuments_engine_metal_t const &engine, device uchar const *text,
                                           device ulong *stack, ulong frame_words, ulong begin, ulong end, ulong spare,
@@ -1045,7 +1045,7 @@ inline ulong sz_subdocuments_markup_find_metal_(device uchar const *text, ulong 
     return from;
 }
 
-/** The `>` ending a comment, CDATA section or processing instruction whose body starts at
+/** The <tt>&gt;</tt> ending a comment, CDATA section or processing instruction whose body starts at
  *  @p from, or @p length. */
 inline ulong sz_subdocuments_markup_end_metal_(device uchar const *text, ulong length, ulong from, uchar terminator,
                                                ulong terminator_length) {
@@ -1613,7 +1613,7 @@ inline void sz_subdocuments_chunk_cursor_metal_(thread sz_subdocuments_view_meta
     cursor.scalar = (before >> 5 & 1) & (in_string ^ 1), cursor.slashes = 0;
 }
 
-/** Whether the last byte of the chunk `[start, end)` belongs to a scalar outside strings, as
+/** Whether the last byte of the chunk <tt>[start, end)</tt> belongs to a scalar outside strings, as
  *  @c sz_subdocuments_scalar_end_simt_ decides it. */
 inline ulong sz_subdocuments_scalar_end_metal_(device uchar const *text, ulong start, ulong end, ulong escape) {
     uchar const byte = text[end - 1];
@@ -1730,7 +1730,7 @@ inline uint sz_subdocuments_token_expect_metal_(thread sz_subdocuments_view_meta
 }
 
 /** Whether the walk accepts token @p token inside container @p current of the document of
- *  @p length bytes at @p text whose tokens are `[begin, end)`, as
+ *  @p length bytes at @p text whose tokens are <tt>[begin, end)</tt>, as
  *  @c sz_subdocuments_token_valid_simt_ decides it. */
 inline bool sz_subdocuments_token_valid_metal_(thread sz_subdocuments_engine_metal_t const &engine,
                                                thread sz_subdocuments_view_metal_t const &view,
@@ -1893,7 +1893,7 @@ kernel void sz_subdocuments_large_apply_metal_kernel_(device uchar *scratch [[bu
 }
 
 /** Counts each chunk's tokens and opening brackets, the depth it ends at, and how far its
- *  depth dips and rises, marking its document malformed for a `/` outside strings. */
+ *  depth dips and rises, marking its document malformed for a <tt>/</tt> outside strings. */
 kernel void sz_subdocuments_large_count_metal_kernel_(device uchar *scratch [[buffer(1)]],
                                                       device uchar const *documents [[buffer(2)]],
                                                       device uchar const *documents_offsets [[buffer(3)]],

@@ -5,13 +5,13 @@
  *  @brief NEON (Arm) backend for sorting string collections.
  *
  *  Mirrors the SVE backend's out-of-place 3-way QuickSort partition, but NEON has no @c svcompact,
- *  so the per-block compaction uses a small `static const` left-pack table fed to @c vqtbl2q_u8
+ *  so the per-block compaction uses a small <tt>static const</tt> left-pack table fed to @c vqtbl2q_u8
  *  (four u64 values, 32 bytes, exactly one @c uint8x16x2_t, so one table lookup gathers any subset
  *  of 4 lanes to the front; a second moves the order indices). At 16 × 32 = 512 bytes, the 4-wide
  *  table is small enough to keep @c const and warm in cache, versus the 16 KB an 8-wide table would
  *  need. Compaction preserves lane order, so the partition is @b stable - matching the
  *  stable-by-default contract - and the recursion/stability/reverse/top-K/uncased machinery is
- *  reused verbatim from `sort/serial.h`.
+ *  reused verbatim from <tt>sort/serial.h</tt>.
  *
  *  @sa include/stringzilla/sort.h
  */

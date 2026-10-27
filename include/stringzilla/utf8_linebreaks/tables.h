@@ -17,7 +17,7 @@ extern "C" {
  *  @brief Unicode UAX-14 Line_Break property values (6-bit encoding, 0-48).
  *
  *  These values correspond to the Line_Break property from Unicode UAX-14.
- *  Used by `sz_rune_line_break_property()` for full UAX-14-compliant line break detection.
+ *  Used by <tt>sz_rune_line_break_property()</tt> for full UAX-14-compliant line break detection.
  *  The two-letter names match the canonical UAX-14 property abbreviations.
  */
 enum sz_line_break_t {
@@ -175,7 +175,7 @@ enum sz_line_break_t {
 /**
  *  @brief UAX-14 Line_Break property tables.
  *
- *  The trie and range layers resolve a codepoint to a 6-bit palette index; `palette[index]` is a
+ *  The trie and range layers resolve a codepoint to a 6-bit palette index; <tt>palette[index]</tt> is a
  *  16-bit descriptor whose bits 0-5 are the resolved Line_Break class and whose bits 6-13 carry the
  *  side flags the rule engine needs: Pi, Pf, East-Asian F/W/H, Extended_Pictographic & Cn,
  *  Regional_Indicator, ZWJ, combining mark, and Dotted_Circle.
@@ -952,9 +952,9 @@ sz_align_(64) static const sz_u8_t sz_utf8_line_break_palette_dotted_[256] = {
 /**
  *  @brief SIMD palette-index tables mapping a codepoint to the 6-bit palette index to unpack.
  *
- *  @c bmp_page_lut_ maps `cp >> 8` to a page index and doubles as the page LUT of the flat BMP
- *  classifier below; `sz_utf8_line_break_palette_*` unpacks the resulting index. Astral codepoints,
- *  cp ≥ 0x10000 addressed by `cp - 0x10000`, resolve via a 5-nibble in-register @c vpshufb cascade
+ *  @c bmp_page_lut_ maps <tt>cp >> 8</tt> to a page index and doubles as the page LUT of the flat BMP
+ *  classifier below; <tt>sz_utf8_line_break_palette_*</tt> unpacks the resulting index. Astral codepoints,
+ *  cp ≥ 0x10000 addressed by <tt>cp - 0x10000</tt>, resolve via a 5-nibble in-register @c vpshufb cascade
  *  over stage1, stage2 in low and high planes, stage3 in low and high planes, and stage4,
  *  exhaustively bit-exact with the serial oracle. Derived by:
  *
@@ -1254,12 +1254,12 @@ static const sz_u8_t sz_utf8_line_break_astral_stage4_groups_[4096] = {
 /**
  *  @brief Flat Line_Break classifier table, one indexed lookup per BMP codepoint.
  *
- *  `bmp_page_lut_[cp >> 8]` selects one of 67 distinct 256-byte pages, then
- *  `flat_bmp_[page * 256 + (cp & 0xFF)]` is the descriptor, read by @c vpgatherdd on x86,
+ *  <tt>bmp_page_lut_[cp >> 8]</tt> selects one of 67 distinct 256-byte pages, then
+ *  <tt>flat_bmp_[page * 256 + (cp & 0xFF)]</tt> is the descriptor, read by @c vpgatherdd on x86,
  *  @c svld1_gather on SVE2, and a bounded scalar leaf walk on NEON, which has no gather. The page
  *  LUT is @c bmp_page_lut_ itself, reused rather than duplicated. The leaf holds a 56-entry palette
  *  index rather than the wide descriptor, so it stays one byte per codepoint;
- *  `flat_palette_[index]` is the real value. Bit-exact with @c sz_rune_line_break_property across
+ *  <tt>flat_palette_[index]</tt> is the real value. Bit-exact with @c sz_rune_line_break_property across
  *  the BMP by construction, and derived by:
  *
  *  @code{.py}

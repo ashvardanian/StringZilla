@@ -96,6 +96,7 @@ Modern IDEs, like VS Code, can be configured to automatically format the code on
   Write `char const*` instead of `const char*`.
 - For color-coded comments start the line with `!` for warnings or `?` for questions.
 - Sort the includes: standard libraries, third-party libraries, and only then internal project headers.
+- List in a `@par Statuses:` block only the statuses a function's contract adds, while resource failures, cancellation, deferral and defects are covered once by the categories in the `sz_status_t` docblock.
 
 Every all-caps name starts with the full project name, `STRINGZILLA_`.
 A trailing `_` marks a name as internal: it may change in any release, and nothing outside this repository may define or test it.
@@ -176,16 +177,11 @@ For Python code:
 ## C++ and C
 
 The primary C implementation and the C++ wrapper are built with CMake.
-Assuming the extensive use of new SIMD intrinsics and recent C++ language features, using a recent compiler is recommended.
-We prefer GCC 12 or newer, which is available from default Ubuntu repositories with Ubuntu 22.04 LTS onwards.
-If this is your first experience with CMake, use the following commands to get started on Ubuntu:
+StringZilla builds with GCC 13, Clang 18, Apple Clang 16, MSVC 19.40 or newer.
+On Ubuntu 24.04 the default packages are enough:
 
 ```bash
-sudo apt-get update
-sudo apt-get install build-essential
-sudo apt-get install cmake              # Consider pulling a newer version from PyPI
-sudo apt-get install g++-12 gcc-12      # You may already have a newer version on Ubuntu 24
-sudo apt install libstdc++6-12-dbg      # STL debugging symbols for GCC 12
+sudo apt-get install cmake g++ gcc
 ```
 
 On Linux, after that, if you want to compile the minimal set of tests, use the presets CI uses:
@@ -208,7 +204,7 @@ The libraries compile every capability the toolchain builds and dispatch by runt
 `-D STRINGZILLA_TARGET_<CAPABILITY>=0` drops a capability, and `=1` keeps one only where its probe compiles.
 Units calling capability kernels link `stringzilla::cpu_capabilities_compiled`, the build-tree twin of `sz_capabilities_compiled_cpu()`: every CPU capability the toolchain compiles.
 `stringzilla::header` carries no verdict, so a header-only consumer enables what its own flags name, and the runtime mask picks the compiled capabilities the CPU runs.
-Each capability's flags for a unit compiled whole for it are cached as `sz_target_<capability>_flags`.
+Each capability's flags for a unit compiled whole for it are cached as `stringzilla_target_<capability>_flags`.
 
 The baseline is each architecture's floor: `-march=x86-64`, `-march=armv8-a`, `-march=rv64gc`, `-mcpu=power8`, and `-march=loongarch64`.
 WebAssembly is the exception, as an engine validates a module whole, so its one capability, `STRINGZILLA_TARGET_ARCH`, reaches every unit.
@@ -252,7 +248,7 @@ cmake --build build_release --config Release --parallel
 Using modern syntax, this is how you build and run the test suite:
 
 ```bash
-cmake -D STRINGZILLA_BUILD_TEST=1 -D STRINGZILLA_BUILD_SANITIZERS=0 -D CMAKE_BUILD_TYPE=Debug -B build_debug
+cmake -D STRINGZILLA_BUILD_TEST=1 -D CMAKE_BUILD_TYPE=Debug -B build_debug
 cmake --build build_debug --config Debug --parallel   # Which will produce the following targets:
 build_debug/stringzilla_test            # Dispatch points, C++ wrappers, and every kernel of the static library
 build_debug/stringzilla_shared_test     # Dispatch points alone, through the shared library
@@ -497,10 +493,10 @@ On x86_64, you may want to compare GCC, Clang, and ICX.
 
 ```bash
 cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCH=1 -D STRINGZILLA_BUILD_SHARED=1 \
-    -D CMAKE_CXX_COMPILER=g++-12 -D CMAKE_C_COMPILER=gcc-12 \
+    -D CMAKE_CXX_COMPILER=g++ -D CMAKE_C_COMPILER=gcc \
     -B build_release/gcc && cmake --build build_release/gcc --config Release --parallel
 cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCH=1 -D STRINGZILLA_BUILD_SHARED=1 \
-    -D CMAKE_CXX_COMPILER=clang++-14 -D CMAKE_C_COMPILER=clang-14 \
+    -D CMAKE_CXX_COMPILER=clang++-18 -D CMAKE_C_COMPILER=clang-18 \
     -B build_release/clang && cmake --build build_release/clang --config Release --parallel
 ```
 
@@ -582,25 +578,6 @@ cmake3 -D STRINGZILLA_BUILD_TEST=1 -D CMAKE_BUILD_TYPE=Debug \
 cmake3 --build build_debug --config Debug --target stringzilla_test
 build_debug/stringzilla_test
 ```
-
-The CentOS-based __Amazon Linux 2__ is still used in older AWS Lambda functions.
-Sadly, the newest GCC version it supports is 10, and it can't handle AVX-512 instructions.
-
-```bash
-sudo docker run -it --rm -v "$(pwd)":/workspace/StringZilla amazonlinux:2 bash
-cd /workspace/StringZilla
-yum install -y make cmake3 gcc10 gcc10-c++
-cmake3 -D STRINGZILLA_BUILD_TEST=1 -D CMAKE_BUILD_TYPE=Debug \
-    -D CMAKE_CXX_COMPILER=g++ -D CMAKE_C_COMPILER=gcc -D STRINGZILLA_TARGET_ARCH="ivybridge" \
-    -B build_debug
-cmake3 --build build_debug --config Debug --target stringzilla_test
-build_debug/stringzilla_test
-```
-
-> [!CAUTION]
-> 
-> Even with GCC 10 the tests compilation will fail, as the STL implementation of the `insert` function doesn't conform to standard.
-> The `s.insert(s.begin() + 1, {'a', 'b', 'c'}) == (s.begin() + 1)` expression is illformed, as the `std::string::insert` return `void`.
 
 ---
 
@@ -725,7 +702,7 @@ The ISA probes pick the SIMD capabilities exactly as they do for the C library.
 CMake options pass through `-C`:
 
 ```bash
-uv pip install . -C cmake.build-type=Debug -C cmake.define.STRINGZILLA_BUILD_SANITIZERS=OFF # debug asserts on
+uv pip install . -C cmake.build-type=Debug                                               # debug asserts on
 uv pip install . -C cmake.define.STRINGZILLA_BUILD_CUDA=ON                               # CUDA backends too
 STRINGZILLA_TARGET_ARCH=native uv pip install .                                           # tuned for this machine
 ```
@@ -937,7 +914,7 @@ go test
 ```
 
 An archive elsewhere, like a Debug one, links through `CGO_LDFLAGS="-L<its directory>"`.
-cGo links no sanitizer runtime, so build that one with `-D STRINGZILLA_BUILD_SANITIZERS=OFF`.
+cGo links no sanitizer runtime, so build that one with `-D STRINGZILLA_BUILD_SANITIZERS=off`.
 
 To benchmark:
 

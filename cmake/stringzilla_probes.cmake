@@ -1,9 +1,9 @@
-# cmake/sz_isa_probe.cmake — which CPU capabilities of the target architecture the toolchain compiles, and which GPU
-# capabilities the listed codes run
+# cmake/stringzilla_probes.cmake — which CPU capabilities of the target architecture the toolchain compiles, and which
+# GPU capabilities the listed codes run
 #
 # One `stringzilla_add_cpu_capability` row per capability. Each probes `probes/<capability>.c` into the cached
-# `sz_target_<capability>_compiles`, caches the flags enabling the capability across a unit as
-# `sz_target_<capability>_flags`, and defines its `STRINGZILLA_TARGET_<CAPABILITY>` macro on the targets below.
+# `stringzilla_target_<capability>_compiles`, caches the flags enabling the capability across a unit as
+# `stringzilla_target_<capability>_flags`, and defines its `STRINGZILLA_TARGET_<CAPABILITY>` macro on the targets below.
 # `-D STRINGZILLA_TARGET_<CAPABILITY>=0` leaves a capability out.
 #
 # A compiled capability is not one the unit's own flags enable, nor one the CPU runs. `stringzilla_header` carries no
@@ -31,20 +31,23 @@ function (stringzilla_add_cpu_capability capability_name_ capability_macro_)
     else ()
         set(unit_flags_ ${arg_GCC_FLAGS})
     endif ()
-    set(sz_target_${capability_name_}_flags
+    set(stringzilla_target_${capability_name_}_flags
         "${unit_flags_}"
         CACHE INTERNAL "Flags enabling ${capability_macro_} across a unit"
     )
-    if (NOT DEFINED sz_target_${capability_name_}_compiles)
+    if (NOT DEFINED stringzilla_target_${capability_name_}_compiles)
         set(CMAKE_TRY_COMPILE_CONFIGURATION "Release")
         try_compile(
-            sz_target_${capability_name_}_compiles ${CMAKE_BINARY_DIR}/sz_probes
+            stringzilla_target_${capability_name_}_compiles ${CMAKE_BINARY_DIR}/stringzilla_probes
             ${PROJECT_SOURCE_DIR}/probes/${capability_name_}.c
             CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${PROJECT_SOURCE_DIR}/include" C_STANDARD 99
         )
     endif ()
-    message(STATUS "Performing ISA probe ${capability_macro_} - compiles: ${sz_target_${capability_name_}_compiles}")
-    set(capability_enabled_ ${sz_target_${capability_name_}_compiles})
+    message(
+        STATUS
+            "Performing ISA probe ${capability_macro_} - compiles: ${stringzilla_target_${capability_name_}_compiles}"
+    )
+    set(capability_enabled_ ${stringzilla_target_${capability_name_}_compiles})
     if (DEFINED ${capability_macro_} AND NOT ${capability_macro_})
         set(capability_enabled_ FALSE)
     endif ()
@@ -123,11 +126,11 @@ endif ()
 add_library(stringzilla_cuda_capabilities_compiled_ INTERFACE)
 
 # One CUDA capability, named `capability_name_` in its cache variable: caches the `CUDA_ARCHITECTURES` running it as
-# `sz_target_<capability>_architectures`, the twin of a CPU capability's `sz_target_<capability>_flags`, and defines
+# `stringzilla_target_<capability>_architectures`, the twin of a CPU capability's `stringzilla_target_<capability>_flags`, and defines
 # `capability_macro_` from the codes in `stringzilla_cuda_resolved_architectures_`.
 function (stringzilla_add_gpu_capability capability_name_ capability_macro_)
     cmake_parse_arguments(PARSE_ARGV 2 arg "" "" "CUDA_ARCHITECTURES")
-    set(sz_target_${capability_name_}_architectures
+    set(stringzilla_target_${capability_name_}_architectures
         "${arg_CUDA_ARCHITECTURES}"
         CACHE INTERNAL "Architectures running ${capability_macro_}"
     )

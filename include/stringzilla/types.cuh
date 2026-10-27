@@ -5,12 +5,12 @@
  *  @brief Core device code the CUDA and ROCm kernels share: the lanes, the block scan, the tile
  *      queues, the chained tiles and the tape a kernel reads strings from.
  *
- *  Every family with a SIMT backend writes its walks once, in its `simt.cuh`, and both nvcc and
+ *  Every family with a SIMT backend writes its walks once, in its <tt>simt.cuh</tt>, and both nvcc and
  *  hipcc compile them. What those walks share lives here for the same reason the host tape
- *  readers live in `types.h` rather than in a family. The host side of every vendor is its own:
- *  `cuda.cuh` and `rocm.cuh` each drive their runtime, and nothing here calls one.
+ *  readers live in <tt>types.h</tt> rather than in a family. The host side of every vendor is its own:
+ *  <tt>cuda.cuh</tt> and <tt>rocm.cuh</tt> each drive their runtime, and nothing here calls one.
  *
- *  Written in C, as every `.cuh` in this library is. A walk takes its cross-lane and tile-queue
+ *  Written in C, as every <tt>.cuh</tt> in this library is. A walk takes its cross-lane and tile-queue
  *  steps as function parameters, which each vendor's or tier's kernel binds to its own helpers, so
  *  nothing here spells one vendor's or one generation's instructions.
  *

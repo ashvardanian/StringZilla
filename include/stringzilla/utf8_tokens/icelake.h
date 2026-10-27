@@ -227,7 +227,7 @@ STRINGZILLA_API sz_status_t sz_utf8_whitespaces_icelake(                        
 
 #pragma region Membership
 
-/** Per-lane single-bit test `(bitmap_byte >> (low & 7)) & 1` over all 64 lanes of
+/** Per-lane single-bit test <tt>(bitmap_byte >> (low & 7)) & 1</tt> over all 64 lanes of
  *  @p bitmap_byte_u8x64 and @p low_u8x64, as a mask. */
 STRINGZILLA_INLINE __mmask64 sz_delimiter_test_bit_icelake_(__m512i bitmap_byte_u8x64, __m512i low_u8x64) {
     __m512i const bit_table_u8x64 = _mm512_broadcast_i32x4(_mm_setr_epi8( //
@@ -255,8 +255,8 @@ STRINGZILLA_INLINE __m512i sz_delimiter_pack_chunks_epi8_icelake_(__m512i chunk0
  *
  *  The @c high byte (cp >> 8, in [0,256)) selects a 32-byte bitmap row id through the aligned
  *  256-entry @c bmp_block table with @c vpermb, as @ref sz_utf8_rune_permute256_icelake_ does; the
- *  bitmap byte at `row_id * 32 + (low >> 3)` is read through the substrate page network, and the
- *  bit `(low & 7)` is tested. ASCII lanes (high == 0) fall through naturally, as block 0 encodes
+ *  bitmap byte at <tt>row_id * 32 + (low >> 3)</tt> is read through the substrate page network, and the
+ *  bit <tt>(low & 7)</tt> is tested. ASCII lanes (high == 0) fall through naturally, as block 0 encodes
  *  the ASCII delimiter set.
  */
 STRINGZILLA_INLINE __mmask64 sz_delimiter_bmp_membership_icelake_(__m512i window_u8x64, __m512i high_in_u8x64,
@@ -302,8 +302,8 @@ STRINGZILLA_INLINE __mmask64 sz_delimiter_bmp_membership_icelake_(__m512i window
  *  @brief Astral delimiter membership (codepoint ≥ 0x10000) for four-byte lanes, in-register.
  *
  *  Reconstructs the full 21-bit codepoint per lane from the raw lead/continuation bytes, then walks
- *  the small astral network: `super = offset >> 16` picks an L1 group, `(offset >> 8) & 0xFF` plus
- *  group × 256 names the bitmap row, and the bit `(offset & 7)` is tested. The walk covers all 64
+ *  the small astral network: <tt>super = offset >> 16</tt> picks an L1 group, <tt>(offset >> 8) & 0xFF</tt> plus
+ *  group × 256 names the bitmap row, and the bit <tt>(offset & 7)</tt> is tested. The walk covers all 64
  *  lanes, and the caller blends the result onto the four-byte lanes.
  */
 STRINGZILLA_INLINE __mmask64 sz_delimiter_astral_membership_icelake_(__m512i window_u8x64, __m512i next1_u8x64,

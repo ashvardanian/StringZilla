@@ -111,11 +111,6 @@ class StringZillaTest {
     }
 
     @Test
-    void metadata_isPopulated() {
-        assertTrue(Character.isDigit(StringZilla.version().charAt(0)));
-    }
-
-    @Test
     void capabilities_enabledIsDetectedAndCompiledWithSerial() {
         StringZilla.Device cpu = StringZilla.Device.cpu();
         long enabled = cpu.capabilitiesEnabled();

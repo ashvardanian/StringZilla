@@ -203,7 +203,7 @@ STRINGZILLA_INLINE sz_u64_t sz_find_bits_neon_(uint8x16x4_t masks_u8x16x4) {
     return vgetq_lane_u64(vreinterpretq_u64_u8(vpaddq_u8(quarters_u8x16, quarters_u8x16)), 0);
 }
 
-/** Bit @c i set where @p bytes match at `text + i + offsets[k]` for every @c k, for the 64 starts
+/** Bit @c i set where @p bytes match at <tt>text + i + offsets[k]</tt> for every @c k, for the 64 starts
  *  from @p text, gathering the bits only when one narrowing finds a match at all. */
 STRINGZILLA_INLINE sz_u64_t sz_find_candidates_neon_(sz_u8_t const *text, sz_size_t const offsets[3],
                                                      sz_u8_t const bytes[3]) {

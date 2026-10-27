@@ -18,11 +18,11 @@
  *  and Stream-Safe Text caps them at 30; the buffer falls back to a flush if a pathological run
  *  exceeds @b sz_utf8_norm_seg_cap_k.
  *
- *  The engine reads the unified `utf8_norm/tables.h` record set and exposes two public entry
+ *  The engine reads the unified <tt>utf8_norm/tables.h</tt> record set and exposes two public entry
  *  points, a normalizer and a violation finder, that share a single scan primitive,
  *  @c sz_utf8_norm_classify_serial_: the one point a NEON or other ISA backend overrides. The
  *  composition step is partner-indexed, so the compose key is a dense small-range search instead of
- *  a 42-bit `(starter<<21)|combiner` probe.
+ *  a 42-bit <tt>(starter<<21)|combiner</tt> probe.
  *
  *  @sa include/stringzilla/utf8_norm.h
  */
@@ -38,7 +38,7 @@
 extern "C" {
 #endif
 
-/** Geometry of the 3-stage props trie in `tables.h`. The stage widths are the only free parameters;
+/** Geometry of the 3-stage props trie in <tt>tables.h</tt>. The stage widths are the only free parameters;
  *  the block sizes and index masks below are derived from them, so retuning the trie means editing
  *  one number per stage instead of keeping three hand-computed values in sync. */
 enum {
@@ -122,7 +122,7 @@ STRINGZILLA_INLINE sz_utf8_norm_props_t sz_utf8_norm_lookup_(sz_rune_t codepoint
 }
 
 /**
- *  @brief Cold-verify value `(quick_check_flags << 8) | canonical_combining_class`
+ *  @brief Cold-verify value <tt>(quick_check_flags << 8) | canonical_combining_class</tt>
  *      for @p codepoint.
  *
  *  Read via the compact scan trie. A dedicated palette trie, a u8 stage3 plus a small u16
@@ -404,7 +404,7 @@ STRINGZILLA_INLINE void sz_utf8_norm_run_(sz_cptr_t source, sz_size_t source_len
  *  A boundary is safe to split before iff @p codepoint is a starter, with a canonical combining
  *  class of 0, and its Quick_Check for the form is Yes. The Quick_Check=Yes condition is essential:
  *  a starter that is QC=Maybe, such as a Hangul vowel or trailing jamo that composes backward, must
- *  not be a split point, or `가` + `ᆨ` would be separated mid-composition.
+ *  not be a split point, or <tt>가</tt> + <tt>ᆨ</tt> would be separated mid-composition.
  */
 STRINGZILLA_INLINE sz_bool_t sz_utf8_norm_is_safe_boundary_(sz_rune_t codepoint, sz_normal_form_t form) {
     sz_bool_t hangul = (codepoint >= sz_utf8_norm_hangul_s_base_k &&
@@ -430,7 +430,7 @@ STRINGZILLA_INLINE sz_bool_t sz_utf8_norm_is_safe_boundary_(sz_rune_t codepoint,
  *  whose quick-check is not Yes, whose canonical combining class is nonzero, or that has a relevant
  *  decomposition for the D-forms - or @b STRINGZILLA_NULL_CHAR if the whole span is inert. This is
  *  the scalar reference; the NEON backend replaces just this with a @c vqtbl4q lead-classify plus a
- *  64-byte gate. It reads the unified props trie and depends on no `utf8_*` segmentation module.
+ *  64-byte gate. It reads the unified props trie and depends on no <tt>utf8_*</tt> segmentation module.
  */
 STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_norm_classify_serial_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     sz_u8_t const *ptr = (sz_u8_t const *)text;
@@ -470,7 +470,7 @@ STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_norm_classify_serial_(sz_cptr_t text, sz
     return STRINGZILLA_NULL_CHAR;
 }
 
-/** Map a normalization form to its hot-path `sz_utf8_norm_quick_check_k*` flag bit. */
+/** Map a normalization form to its hot-path <tt>sz_utf8_norm_quick_check_k*</tt> flag bit. */
 STRINGZILLA_CONSTEXPR sz_u8_t sz_utf8_norm_form_flag_(sz_normal_form_t form) {
     switch (form) {
     case sz_normal_form_nfc_k: return sz_utf8_norm_quick_check_nfc_k;
@@ -486,8 +486,8 @@ STRINGZILLA_CONSTEXPR sz_u8_t sz_utf8_norm_form_flag_(sz_normal_form_t form) {
  *
  *  Walks from the byte @p position_io points at up to @p block_end and returns the first byte that
  *  begins a non-inert codepoint for @p form_flag, meaning a canonical-ordering violation or a
- *  quick-check No or Maybe, else @b STRINGZILLA_NULL_CHAR. Updates `*position_io` to where it
- *  stopped and carries `*previous_canonical_combining_class_io` across SIMD-block boundaries.
+ *  quick-check No or Maybe, else @b STRINGZILLA_NULL_CHAR. Updates <tt>*position_io</tt> to where it
+ *  stopped and carries <tt>*previous_canonical_combining_class_io</tt> across SIMD-block boundaries.
  *
  *  ASCII resets the combining class; 2-byte runes use the flat @c sz_utf8_norm_twobyte_ table, one
  *  load with no general parse; 3- and 4-byte runes parse and read @c sz_utf8_norm_value_. This is
@@ -547,7 +547,7 @@ STRINGZILLA_CONSTEXPR sz_cptr_t sz_utf8_norm_verify_block_(sz_u8_t const **posit
  *      point both engines force-inline.
  *
  *  @c sz_utf8_norm_classify_serial_ is the scalar reference; @c sz_utf8_norm_classify_neon_ in
- *  `neon.h` is the vectorized override. Passing a constant function address into the
+ *  <tt>neon.h</tt> is the vectorized override. Passing a constant function address into the
  *  always-inline @c STRINGZILLA_CONSTEXPR engines below devirtualizes the call at -O2 and -O3,
  *  so each backend pays no indirection - the same force-inlined function-pointer idiom the
  *  case-folding family uses.

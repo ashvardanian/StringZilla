@@ -159,7 +159,7 @@ h.Write([]byte("hello"))
 fmt.Println(h.Hexdigest())
 ```
 
-## UTF-8 Operations
+## Case Folding and Normalization
 
 The binding exposes codepoint counting, Unicode normalization, and full case folding over UTF-8 bytes.
 Counts are scalar values, not bytes; normalization covers all four forms (`NFC`, `NFD`, `NFKC`, `NFKD`).

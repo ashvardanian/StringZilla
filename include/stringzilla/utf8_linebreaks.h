@@ -36,10 +36,12 @@ extern "C" {
  *  @param[out] count Number of segments written, at most @p capacity.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
  *  @note No zero-length segments are emitted; @p length == 0 yields no segments.
  *  @note Line segmentation is forward-only.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_utf8_linebreaks_best(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
                                                     sz_size_t capacity, sz_size_t *count, sz_capability_t capabilities,
@@ -47,9 +49,14 @@ STRINGZILLA_API sz_status_t sz_utf8_linebreaks_best(sz_cptr_t text, sz_size_t le
 
 /**
  *  @brief Finds the UTF-8 line break kernel of @p kind, from the best of @p capabilities.
+ *  @param[in] kind The verb whose kernel to find.
+ *  @param[in] capabilities The mask to pick the best capability from.
  *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
  *  @param[out] capability The capability the kernel belongs to, or zero.
- *  @return @c sz_success_k, @c sz_missing_kernel_k, or @c sz_missing_library_k when header-only.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k
+ *  - @c sz_missing_library_k Header-only.
  */
 STRINGZILLA_API sz_status_t sz_utf8_linebreaks_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
                                                            sz_kernel_punned_t *kernel, sz_capability_t *capability);

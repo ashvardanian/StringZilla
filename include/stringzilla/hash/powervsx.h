@@ -94,7 +94,7 @@ STRINGZILLA_INLINE __vector unsigned char sz_aes_byte_reverse_mask_powervsx_(voi
 
 /**
  *  @brief Bit-exact VSX equivalent of @c sz_emulate_aesenc_si128_serial_ using hardware AES.
- *  @return `MixColumns(SubBytes(ShiftRows(state))) ^ round_key`, identical to the serial reference.
+ *  @return <tt>MixColumns(SubBytes(ShiftRows(state))) ^ round_key</tt>, identical to the serial reference.
  */
 STRINGZILLA_INLINE sz_u128_vec_t sz_aesenc_powervsx_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
     __vector unsigned char const rev_u8x16 = sz_aes_byte_reverse_mask_powervsx_();

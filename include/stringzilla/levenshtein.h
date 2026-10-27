@@ -57,13 +57,13 @@ extern "C" {
  *      @ref sz_allocator_init_unified_best of @p capabilities.
  *  @param[in] stream Null on the CPU. On a GPU, the stream to queue on, also naming the device:
  *      a @c cudaStream_t, a @c hipStream_t, or an @c id<MTLCommandQueue>; null for the default.
- *  @return @c sz_success_k; @c sz_missing_kernel_k when no capability of the mask has an init;
- *      @c sz_bad_alloc_k when a block could not be allocated; or on a device
- *      @c sz_unexpected_dimensions_k for an unrepresentable query length,
- *      @c sz_device_memory_mismatch_k for memory or a
- *      @p stream the device cannot use, @c sz_missing_gpu_k when the device doesn't answer, or
- *      @c sz_device_code_mismatch_k when a launch fails.
+ *
  *  @note May join @p stream; no scoring verb ever does.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability of the mask has an init.
+ *  - @c sz_unexpected_dimensions_k On a device, an unrepresentable query length.
+ *  - @c sz_device_memory_mismatch_k On a device, memory or a @p stream the device cannot use.
  */
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init(sz_levenshtein_engine_t *engine,
                                                        sz_strings_view_t const *queries, sz_levenshtein_symbol_t symbol,
@@ -95,17 +95,19 @@ STRINGZILLA_API void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine,
  *  @param[in] bound The largest distance reported exactly; a candidate past it reports
  *      @p bound + 1 on every backend. @c STRINGZILLA_SIZE_MAX keeps every distance exact.
  *  @param[out] distances The @b [count, candidates] distances, query @c q at
- *      `distances[q * stride + c]`, device-reachable on a device.
+ *      <tt>distances[q * stride + c]</tt>, device-reachable on a device.
  *  @param[in] distances_stride Entries from one query's row to the next, at least the count.
  *  @param[in] stream Null on the CPU. On a GPU, the stream to queue on, which also names the device
  *      the round runs on; null for the default.
- *  @return @c sz_success_k, on a device once enqueued; @c sz_unexpected_dimensions_k when
- *      @p distances_stride is under the candidate count; @c sz_bad_alloc_k when round workspace
- *      could not be allocated; @c sz_missing_kernel_k for an empty engine; or on a device
- *      @c sz_device_memory_mismatch_k for an engine, an output, an accessor, a tape or a stream
- *      the device of @p stream cannot use, and @c sz_device_code_mismatch_k for a refused launch.
+ *
  *  @note Grows the engine's host scratch when a round needs more than the last one did; never
  *      joins, so the caller joins @p stream before reading @p distances.
+ *
+ *  @par Statuses:
+ *  - @c sz_unexpected_dimensions_k @p distances_stride is under the candidate count.
+ *  - @c sz_missing_kernel_k An empty engine.
+ *  - @c sz_device_memory_mismatch_k On a device, an engine, an output, an accessor, a tape or a
+ *    stream the device of @p stream cannot use.
  */
 STRINGZILLA_API sz_status_t sz_levenshtein_distances(sz_levenshtein_engine_t *engine,
                                                      sz_strings_view_t const *candidates,
@@ -113,7 +115,19 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances(sz_levenshtein_engine_t *en
                                                      sz_size_t bound, sz_size_t *distances, sz_size_t distances_stride,
                                                      sz_stream_t stream);
 
-/** @copydoc sz_levenshtein_engine_init */
+/**
+ *  @brief Prepares @p queries into one block from @p allocator, for the serial kernels.
+ *  @param[out] engine Untouched unless the call succeeds; @ref sz_levenshtein_engine_free frees it.
+ *  @param[in] queries The patterns every candidate is scored against, in any layout over
+ *      host-readable texts, whose symbols and classes size the block.
+ *  @param[in] symbol Whether a distance counts bytes or UTF-8 runes.
+ *  @param[in] allocator Source of the engine's blocks, or @c STRINGZILLA_NULL for
+ *      @c sz_allocator_init_unified_serial.
+ *  @param[in] stream Null on the CPU.
+ *
+ *  @par Statuses:
+ *  - @c sz_unexpected_dimensions_k An unrepresentable query length.
+ */
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_serial(sz_levenshtein_engine_t *engine,
                                                               sz_strings_view_t const *queries,
                                                               sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
@@ -239,9 +253,14 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_metal(sz_levenshtein_engine
 
 /**
  *  @brief Finds the Levenshtein kernel of @p kind, from the best of @p capabilities.
+ *  @param[in] kind The verb whose kernel to find.
+ *  @param[in] capabilities The mask to pick the best capability from.
  *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
  *  @param[out] capability The capability the kernel belongs to, or zero.
- *  @return @c sz_success_k, @c sz_missing_kernel_k, or @c sz_missing_library_k when header-only.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k
+ *  - @c sz_missing_library_k Header-only.
  */
 STRINGZILLA_API sz_status_t sz_levenshtein_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
                                                        sz_kernel_punned_t *kernel, sz_capability_t *capability);

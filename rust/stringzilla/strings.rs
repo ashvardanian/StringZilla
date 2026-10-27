@@ -4,6 +4,7 @@
 //!
 //! File: rust/stringzilla/strings.rs
 //! Author: Ash Vardanian
+//! Date: October 13, 2026
 
 use alloc::alloc::Global;
 use alloc::vec::Vec;

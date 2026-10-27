@@ -29,7 +29,7 @@ NumPy is not required, since every engine writes into any writable buffer the ca
 It is the convenient way to produce one, though, so most of the examples below reach for it.
 
 Building from source goes through CMake, which scikit-build-core drives, so it needs a C compiler and pulls CMake and Ninja from PyPI when the system has none recent enough.
-The build probes the compiler for every SIMD kit it can emit and compiles them all, and every call picks among them by its capability mask, as [Runtime Dispatch and Capabilities](#runtime-dispatch-and-capabilities) describes.
+The build probes the compiler for every SIMD kit it can emit and compiles them all, and every call picks among them by its capability mask, as [Runtime Dispatch](#runtime-dispatch) describes.
 Build parallelism follows `CMAKE_BUILD_PARALLEL_LEVEL`, which should be lowered in memory-constrained containers.
 `STRINGZILLA_TARGET_ARCH=native` in the environment tunes the build for the machine it runs on, and `-C cmake.define.STRINGZILLA_BUILD_CUDA=ON` adds the CUDA backends of the batch engines, as `STRINGZILLA_BUILD_ROCM=ON` does the ROCm ones.
 
@@ -393,7 +393,7 @@ tags = sz.hmac_sha256(b"secret", texts)   # one 32-byte tag per message
 assert tags[0] == sz.hmac_sha256(b"secret", "alpha")
 ```
 
-## Sorting, Intersecting, and Sampling
+## Sorting and Sets
 
 These operate on a `Strings` collection and return new collections or tuples of numbers, leaving the original unchanged.
 
@@ -705,7 +705,7 @@ A plain NumPy array is host memory and is refused; a NumPy array over a `cudaMal
 `SubstringsEngine.report` is written by the device too, so it obeys the same rule.
 A host engine ignores `stream`, imposes no such requirement, and has always finished writing by the time it answers.
 
-## UTF-8 Segmentation
+## Unicode Segmentation
 
 `String`, along with the matching module-level functions, exposes lazy iterators over Unicode boundaries.
 Each yields `String` views into the original buffer, so segmentation stays allocation-free, except `utf8_codepoints`, which yields `int` code points.
@@ -789,7 +789,7 @@ assert sz.utf8_find_denormalized("café", "NFC") is None   # already NFC
 assert sz.utf8_norm("Straße­", "NFKC_Casefold") == b"strasse"   # folded, soft hyphen dropped
 ```
 
-## Runtime Dispatch and Capabilities
+## Runtime Dispatch
 
 StringZilla detects the running CPU's SIMD features and routes every kernel to the fastest capability both the CPU and this build have, without recompilation.
 Capabilities are `sz.Capability` flags, one member per CPU capability, like `sz.Capability.HASWELL` or `sz.Capability.NEON`; GPU bits sit above every member, so a GPU mask prints as a number.

@@ -5,8 +5,8 @@
  *  @brief The uncased search preparation, search, order and cased-finder capability lists, dispatch
  *      points and finder.
  *
- *  Isolated from the folding unit, `utf8_uncased_fold.c`, because the AVX-512 per-script find
- *  kernels in `utf8_uncased/icelake.h` are by far the heaviest single compilation in the core;
+ *  Isolated from the folding unit, <tt>utf8_uncased_fold.c</tt>, because the AVX-512 per-script find
+ *  kernels in <tt>utf8_uncased/icelake.h</tt> are by far the heaviest single compilation in the core;
  *  their own translation unit lets the rest of the UTF-8 case domain build in parallel.
  */
 #include <stringzilla/utf8_uncased.h>

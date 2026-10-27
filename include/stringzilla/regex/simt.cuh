@@ -7,7 +7,7 @@
  *      crosses a chunk's edge.
  *
  *  A haystack owns one slot per byte and one more ahead of them: a haystack with first slot @c V
- *  marks a match starting at byte @c p in slot `V + p`, which is also the slot of byte `p - 1`. The
+ *  marks a match starting at byte @c p in slot <tt>V + p</tt>, which is also the slot of byte <tt>p - 1</tt>. The
  *  corpus spans the tape's bytes plus its count in slots, chunks cut that span evenly, so one long
  *  haystack and a million short ones fill the device alike, and a slot finds its haystack by binary
  *  search over the tape offsets. A round covers one segment of slots at a time, which bounds the
@@ -19,7 +19,7 @@
  *  collapse within a few bytes; the end walks that reach the edge; and the leftmost-first chain,
  *  whose first candidate in every chunk is found from the chunk before it. A link that outlives one
  *  thread's share of bytes is walked on by a whole warp, each lane a piece, which takes its
- *  cross-lane steps as parameters each vendor's kernel binds, as `levenshtein/simt.cuh` does.
+ *  cross-lane steps as parameters each vendor's kernel binds, as <tt>levenshtein/simt.cuh</tt> does.
  *
  *  A DFA, cased or folded, settles a chunk's edge as a choice among a few states. The position
  *  automaton that replaces an exploding start-finding DFA, and the lookaround passes that fill the
@@ -40,7 +40,7 @@
  *  exact rather than fast, and refuses the call rather than read past the window; its lists and the
  *  sets live in the round block, one share per thread of a launch sized to them.
  *
- *  Each vendor's host side, in `regex/cuda.cuh` and `regex/rocm.cuh`, sizes and launches these.
+ *  Each vendor's host side, in <tt>regex/cuda.cuh</tt> and <tt>regex/rocm.cuh</tt>, sizes and launches these.
  *
  *  @sa include/stringzilla/regex.h
  *  @sa include/stringzilla/regex/metal.metal, the Metal sibling these mirror kernel for kernel
@@ -182,8 +182,8 @@ typedef struct sz_regex_affine_simt_t {
     sz_u64_t rows[sz_regex_undecided_simt_k];
 } sz_regex_affine_simt_t;
 
-/** Where lookarounds hold, one entry of look bits per slot of the window `[begin, end)`, from a
- *  ring of two segments' halves indexed by `slot & mask`; null without any. A walk that cannot
+/** Where lookarounds hold, one entry of look bits per slot of the window <tt>[begin, end)</tt>, from a
+ *  ring of two segments' halves indexed by <tt>slot & mask</tt>; null without any. A walk that cannot
  *  pause past the window raises @c refused instead, which fails the call. */
 typedef struct sz_regex_looks_simt_t {
     sz_u32_t *table, *refused;
@@ -693,7 +693,7 @@ STRINGZILLA_DEVICE sz_size_t sz_regex_boundary_simt_(sz_u8_t const *text, sz_siz
     return (sz_size_t)rune_length > back ? position - back + (sz_size_t)rune_length : position;
 }
 
-/** Walks @p state right to left over the folds of the @p haystack units ending in `(stop, at]`. */
+/** Walks @p state right to left over the folds of the @p haystack units ending in <tt>(stop, at]</tt>. */
 STRINGZILLA_DEVICE sz_u32_t sz_regex_walk_folded_back_simt_(sz_regex_table_simt_t const *table, sz_u32_t state,
                                                             sz_regex_haystack_simt_t const *haystack, sz_size_t at,
                                                             sz_size_t stop) {
@@ -890,7 +890,7 @@ STRINGZILLA_DEVICE void sz_regex_positions_step_simt_(sz_regex_engine_t const *e
 
 /**
  *  @brief Steps the position set at @p state right to left over the units of @p haystack ending in
- *      `(stop, from]`, marking in @p bits every start it finds in slots `[low, high)`.
+ *      <tt>(stop, from]</tt>, marking in @p bits every start it finds in slots <tt>[low, high)</tt>.
  *
  *  It steps them as @c sz_regex_mark_positions_serial_ does, or over folded runes when @p folded,
  *  as @c sz_regex_mark_positions_folded_ does.
@@ -1145,7 +1145,7 @@ STRINGZILLA_DEVICE sz_bool_t sz_regex_walk_pike_simt_(sz_regex_engine_t const *e
  *  @brief The match a search takes at candidate @p start of @p haystack without links: each rune
  *      its unit folds to tried in turn, as @c sz_regex_search_serial_ tries them, by @p pike when
  *      there is one, else by the folded DFA of @p table.
- *  @param[inout] offset The folded bytes into the unit the first try starts at, then those the
+ *  @param[in,out] offset The folded bytes into the unit the first try starts at, then those the
  *      match starts at.
  */
 STRINGZILLA_DEVICE sz_bool_t sz_regex_match_at_simt_(sz_regex_engine_t const *engine,
@@ -1176,7 +1176,7 @@ STRINGZILLA_DEVICE sz_bool_t sz_regex_match_at_simt_(sz_regex_engine_t const *en
 }
 
 /** Fills the matched slots of @p pike with the groups of the match of @p pattern over
- *  `[start, end)` of @p haystack, starting inside the folds of its first unit wherever the
+ *  <tt>[start, end)</tt> of @p haystack, starting inside the folds of its first unit wherever the
  *  search started it. */
 STRINGZILLA_DEVICE void sz_regex_groups_simt_(sz_regex_engine_t const *engine, sz_regex_table_simt_t const *table,
                                               sz_regex_pike_simt_t *pike, sz_regex_haystack_simt_t const *haystack,
@@ -1472,7 +1472,7 @@ STRINGZILLA_DEVICE sz_u32_t sz_regex_looks_step_simt_(sz_regex_engine_t const *e
 
 /**
  *  @brief Walks one level's lookbehind pass over the unit boundaries of @p haystack in
- *      `[from, to)`, and its end when @p to passes it, as @c sz_regex_looks_serial_ walks it.
+ *      <tt>[from, to)</tt>, and its end when @p to passes it, as @c sz_regex_looks_serial_ walks it.
  *
  *  It starts from the set at @p state arriving at @p from, recording where its members hold
  *  when @p recording.
@@ -1520,7 +1520,7 @@ STRINGZILLA_DEVICE sz_u64_t *sz_regex_behind_walk_simt_(sz_regex_engine_t const 
 
 /**
  *  @brief Walks one level's lookahead pass right to left over the unit boundaries of @p haystack in
- *      `[to, from)`, as @c sz_regex_looks_serial_ walks it.
+ *      <tt>[to, from)</tt>, as @c sz_regex_looks_serial_ walks it.
  *
  *  It starts from the set at @p state past @p from, or from the haystack's end when @p from passes
  *  it, and records where its members hold when @p recording.
@@ -1707,7 +1707,7 @@ STRINGZILLA_DEVICE sz_size_t sz_regex_flow_align_simt_(sz_regex_engine_t const *
                                                 : position;
 }
 
-/** Where @p haystack 's piece of the chunk of slots `[low, high)` hands sets across: @p begin,
+/** Where @p haystack 's piece of the chunk of slots <tt>[low, high)</tt> hands sets across: @p begin,
  *  zero where the haystack starts in the chunk, and @p end, past the haystack's length where it
  *  ends in the chunk. */
 STRINGZILLA_DEVICE void sz_regex_flow_piece_simt_(sz_regex_engine_t const *engine, sz_regex_round_simt_t const *round,
@@ -1809,7 +1809,7 @@ STRINGZILLA_DEVICE sz_u64_t sz_regex_apply_simt_(sz_u64_t const *rows, sz_u64_t 
     return united;
 }
 
-/** The haystack whose set the chunk of slots `[low, high)` hands downstream, and whether it hands
+/** The haystack whose set the chunk of slots <tt>[low, high)</tt> hands downstream, and whether it hands
  *  one: walks right to left hand on the haystack that started before the chunk, lookbehind passes
  *  the one running past it. */
 STRINGZILLA_DEVICE sz_bool_t sz_regex_flow_handing_simt_(sz_strings_view_t haystacks,
@@ -3626,8 +3626,8 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
  *      thread's share of the walks: every byte no kept match covers, every kept match's
  *      replacement, and where each haystack starting in the chunk begins.
  *
- *  Byte @c b of haystack @c h, in slot @c s, lands at `s - h - 1` plus the drift of the kept
- *  matches before it, and a match starting in slot @c s at `s - h` plus the same.
+ *  Byte @c b of haystack @c h, in slot @c s, lands at <tt>s - h - 1</tt> plus the drift of the kept
+ *  matches before it, and a match starting in slot @c s at <tt>s - h</tt> plus the same.
  */
 static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
     sz_regex_rewrite_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {

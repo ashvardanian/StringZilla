@@ -19,7 +19,7 @@ extern "C" {
  *  @brief Scalar newline scan emitting every delimiter into parallel offset/length arrays.
  *
  *  A @c "\r\n" CRLF is one match of length 2, and its trailing LF is never emitted alone. @p base
- *  is added to every emitted offset and to `*bytes_consumed`, the resume offset, which is always a
+ *  is added to every emitted offset and to <tt>*bytes_consumed</tt>, the resume offset, which is always a
  *  true delimiter boundary.
  */
 STRINGZILLA_INLINE sz_size_t sz_utf8_newlines_serial_(  //
@@ -128,7 +128,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_delimiter_complete_span_(sz_u64_t two_byte_
 
 /** Emits already-decided delimiter starts from a vector tile's lane mask and returns how many it
  *  appended, as the portable ctz-drain twin of @ref sz_utf8_rune_drain_forward_serial_. Bit @c i of
- *  @p hits marks a verified match at `base + i`, its length read from the lead's high nibble. */
+ *  @p hits marks a verified match at <tt>base + i</tt>, its length read from the lead's high nibble. */
 STRINGZILLA_INLINE sz_size_t sz_utf8_delimiter_emit_matches_( //
     sz_u8_t const *text, sz_size_t base, sz_u64_t hits, sz_size_t *match_offsets, sz_size_t *match_lengths,
     sz_size_t capacity) {
@@ -151,7 +151,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_delimiter_emit_matches_( //
  *  UTF-8 sequence never over-reads past @p text + @p length. A byte that does not begin a
  *  well-formed codepoint (lone continuation, overlong, surrogate, truncated tail) is skipped one
  *  byte at a time and is never reported as a delimiter. @p base is added to every emitted offset
- *  and to `*bytes_consumed`, the resume offset, which is always a true codepoint boundary.
+ *  and to <tt>*bytes_consumed</tt>, the resume offset, which is always a true codepoint boundary.
  */
 STRINGZILLA_CONSTEXPR sz_size_t sz_utf8_delimiters_serial_( //
     sz_cptr_t text, sz_size_t length, sz_size_t base,       //

@@ -12,7 +12,7 @@
  *  the structural bytes one each, matching each with its container by depth, so the checks, the key
  *  lookups and the live sets of a batch settle side by side. XML searches byte by byte for the one
  *  byte its lexer needs next. The replay runs the filters of a node one level up in its spare
- *  frames rather than recursing, and `match()` and `search()` walk the forward DFA of the regex
+ *  frames rather than recursing, and <tt>match()</tt> and <tt>search()</tt> walk the forward DFA of the regex
  *  engine the paths embed over the tested string in the same thread.
  *
  *  A thread's stack holds a fixed number of frames. A document needing more is measured instead and
@@ -37,7 +37,7 @@
  *  tentative live sets for the steps an array's length settles is exactly where it validates, and
  *  matched in document order.
  *
- *  Each vendor's host side, in `subdocuments/cuda.cuh` and `subdocuments/rocm.cuh`,
+ *  Each vendor's host side, in <tt>subdocuments/cuda.cuh</tt> and <tt>subdocuments/rocm.cuh</tt>,
  *  sizes and launches these.
  *
  *  @sa include/stringzilla/subdocuments.h
@@ -189,7 +189,7 @@ typedef struct sz_subdocuments_large_simt_t {
 } sz_subdocuments_large_simt_t;
 
 /** Where a chunk lies: the listed document holding it, as its slot in the list and its index in
- *  the batch, that document's length, and its chunks `[first, next)`; a chunk past every listed
+ *  the batch, that document's length, and its chunks <tt>[first, next)</tt>; a chunk past every listed
  *  one has slot @c listed. */
 typedef struct sz_subdocuments_place_simt_t {
     sz_size_t slot, document, length, first, next;
@@ -615,7 +615,7 @@ STRINGZILLA_DEVICE sz_u32_t sz_subdocuments_hex_unit_simt_(sz_u8_t const *digits
 }
 
 /**
- *  @brief Decodes the unit of a `"`-quoted string body at @p source [*read], a byte or one escape,
+ *  @brief Decodes the unit of a <tt>"</tt>-quoted string body at @p source [*read], a byte or one escape,
  *      into @p encoded as @c sz_subdocuments_unescape_ does, moving @p read past it.
  *  @return Bytes it encodes to, or zero for a raw control byte, an unknown
  *      escape or an unpaired surrogate.
@@ -655,7 +655,7 @@ STRINGZILLA_DEVICE sz_size_t sz_subdocuments_unescape_unit_simt_(sz_u8_t const *
 }
 
 /**
- *  @brief Unescapes a `"`-quoted string body, writing only the first @p capacity bytes.
+ *  @brief Unescapes a <tt>"</tt>-quoted string body, writing only the first @p capacity bytes.
  *  @return The unescaped length, or @c STRINGZILLA_SIZE_MAX for a malformed escape.
  */
 STRINGZILLA_DEVICE sz_size_t sz_subdocuments_unescape_simt_(sz_u8_t const *source, sz_size_t length, sz_u8_t *target,
@@ -773,7 +773,7 @@ STRINGZILLA_DEVICE sz_bool_t sz_subdocuments_slice_selects_simt_(sz_subdocuments
  *
  *  Both settle as @c sz_subdocuments_member_live_ and @c sz_subdocuments_element_live_ settle them.
  *
- *  @param[inout] carry The top advancing bit of the word before, zero for the first word.
+ *  @param[in,out] carry The top advancing bit of the word before, zero for the first word.
  *  @param[in] length The array's element count, or zero while it is open, when the steps
  *      it settles select tentatively.
  */
@@ -878,7 +878,7 @@ STRINGZILLA_DEVICE void sz_subdocuments_report_simt_(sz_subdocuments_engine_t co
         }
 }
 
-/** Settles the lengths of the matches `[begin, end)` that fit, all starting at one byte. */
+/** Settles the lengths of the matches <tt>[begin, end)</tt> that fit, all starting at one byte. */
 STRINGZILLA_DEVICE void sz_subdocuments_close_simt_(sz_match_t *matches, sz_size_t matches_capacity, sz_size_t begin,
                                                     sz_size_t end, sz_size_t end_offset) {
     for (end = sz_min_of_two(end, matches_capacity); begin < end; ++begin)
@@ -985,7 +985,7 @@ STRINGZILLA_DEVICE sz_bool_t sz_subdocuments_compare_simt_(sz_subdocuments_value
     return (sz_bool_t)(greater || equal);
 }
 
-/** RFC 9535's `length()`, as @c sz_subdocuments_length_ counts it. */
+/** RFC 9535's <tt>length()</tt>, as @c sz_subdocuments_length_ counts it. */
 STRINGZILLA_DEVICE sz_subdocuments_value_t sz_subdocuments_length_simt_(sz_subdocuments_value_t const *value) {
     sz_u8_t const *const bytes = (sz_u8_t const *)value->bytes;
     sz_subdocuments_value_t result;
@@ -1030,7 +1030,7 @@ STRINGZILLA_DEVICE sz_subdocuments_value_t sz_subdocuments_length_simt_(sz_subdo
  *      decides it, streaming the pattern's tag and the unescaped string through the forward DFA of
  *      @p regex in place.
  *
- *  Every tagged pattern is anchored by `\A`, so the one walk from the start answers, and the first
+ *  Every tagged pattern is anchored by <tt>\\A</tt>, so the one walk from the start answers, and the first
  *  accepting state settles it, acceptance trailing the match's end by one byte.
  */
 STRINGZILLA_DEVICE sz_bool_t sz_subdocuments_regex_test_simt_(sz_regex_engine_t const *regex,
@@ -1061,7 +1061,7 @@ STRINGZILLA_DEVICE sz_bool_t sz_subdocuments_regex_test_simt_(sz_regex_engine_t 
     return (sz_bool_t)(rows[state + regex->classes_count] >= accepts);
 }
 
-/** Runs filter @p filter for the node in slot @p node over the slots `[node, end)` of its subtree,
+/** Runs filter @p filter for the node in slot @p node over the slots <tt>[node, end)</tt> of its subtree,
  *  as @c sz_subdocuments_filter_holds_ does. */
 STRINGZILLA_DEVICE sz_bool_t sz_subdocuments_filter_holds_simt_(sz_subdocuments_engine_t const *engine,
                                                                 sz_u8_t const *text, sz_u64_t const *stack,
@@ -1131,10 +1131,10 @@ typedef struct sz_subdocuments_level_simt_t {
 } sz_subdocuments_level_simt_t;
 
 /**
- *  @brief Settles the slots `[begin, end)` of a closed pending run as @c sz_subdocuments_replay_
+ *  @brief Settles the slots <tt>[begin, end)</tt> of a closed pending run as @c sz_subdocuments_replay_
  *      does, each filter's replay of a node's subtree running one level up rather than recursing.
  *  @param[in] spare The first free slot past every kept one; level @c l keeps its place
- *      in the header of slot `spare + l` and its filter results in that slot's live set.
+ *      in the header of slot <tt>spare + l</tt> and its filter results in that slot's live set.
  *      Only level zero reports.
  */
 STRINGZILLA_DEVICE void sz_subdocuments_replay_simt_(sz_subdocuments_engine_t const *engine, sz_u8_t const *text,
@@ -1218,10 +1218,10 @@ STRINGZILLA_DEVICE void sz_subdocuments_replay_simt_(sz_subdocuments_engine_t co
  *  container entered keeps the next slot in order, as the walk keeps them for the replay, and each
  *  container's slot is found by following the parents up from the innermost one.
  *
- *  @param[inout] from The first byte not walked yet, left in place when nothing was committed.
- *  @param[inout] current The innermost open container's slot, never @c sz_subdocuments_no_slot_k ;
+ *  @param[in,out] from The first byte not walked yet, left in place when nothing was committed.
+ *  @param[in,out] current The innermost open container's slot, never @c sz_subdocuments_no_slot_k ;
  *      @c sz_subdocuments_no_slot_k once the root closes.
- *  @param[inout] top Inside a pending run, the first slot past the kept ones; read otherwise.
+ *  @param[in,out] top Inside a pending run, the first slot past the kept ones; read otherwise.
  *  @param[in] run The pending run's container, or @c sz_subdocuments_no_slot_k .
  *  @return The first failure among the committed bytes, else @c sz_success_k.
  */
@@ -1736,7 +1736,7 @@ STRINGZILLA_DEVICE sz_size_t sz_subdocuments_markup_find_simt_(sz_u8_t const *te
     return length;
 }
 
-/** The `>` ending a comment, CDATA section or processing instruction whose body starts at @p from,
+/** The <tt>&gt;</tt> ending a comment, CDATA section or processing instruction whose body starts at @p from,
  *  as @c sz_subdocuments_markup_end_ finds it, or @p length. */
 STRINGZILLA_DEVICE sz_size_t sz_subdocuments_markup_end_simt_(sz_u8_t const *text, sz_size_t length, sz_size_t from,
                                                               sz_u8_t terminator, sz_size_t terminator_length) {
@@ -2319,7 +2319,7 @@ STRINGZILLA_DEVICE void sz_subdocuments_chunk_cursor_simt_(sz_subdocuments_large
     cursor->scalar = (before >> 5 & 1) & (in_string ^ 1), cursor->slashes = 0;
 }
 
-/** Whether the last byte of the chunk `[start, end)` belongs to a scalar outside strings, its
+/** Whether the last byte of the chunk <tt>[start, end)</tt> belongs to a scalar outside strings, its
  *  first byte escaped when @p escape is set: every byte but blank space, brackets, separators
  *  and unescaped quotes does. */
 STRINGZILLA_DEVICE sz_u64_t sz_subdocuments_scalar_end_simt_(sz_u8_t const *text, sz_size_t start, sz_size_t end,
@@ -2440,7 +2440,7 @@ STRINGZILLA_DEVICE sz_subdocuments_expect_t sz_subdocuments_token_expect_simt_(
 }
 
 /** Whether the walk accepts token @p token inside container @p current of the document of
- *  @p length bytes at @p text whose tokens are `[begin, end)`, as @c sz_subdocuments_walk_
+ *  @p length bytes at @p text whose tokens are <tt>[begin, end)</tt>, as @c sz_subdocuments_walk_
  *  checks every structural byte of a container it enters: a key in the wrong place fails here,
  *  as its colon would there. */
 STRINGZILLA_DEVICE sz_bool_t sz_subdocuments_token_valid_simt_(sz_subdocuments_engine_t const *engine,
@@ -2578,7 +2578,7 @@ static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_
 }
 
 /** Counts each chunk's tokens and opening brackets, the depth it ends at, and how far its
- *  depth dips and rises, marking its document malformed for a `/` outside strings. */
+ *  depth dips and rises, marking its document malformed for a <tt>/</tt> outside strings. */
 static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
     sz_subdocuments_large_count_simt_kernel_(sz_strings_view_t documents, sz_subdocuments_large_simt_t large) {
     for (sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; chunk <= large.chunks;

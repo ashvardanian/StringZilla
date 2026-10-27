@@ -2,6 +2,7 @@
 //!
 //! File: rust/stringzilla/cipher.rs
 //! Author: Ash Vardanian
+//! Date: August 7, 2026
 
 use core::ffi::c_void;
 use core::fmt;

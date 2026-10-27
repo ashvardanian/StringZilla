@@ -6,12 +6,12 @@
  *      the automaton's hot head staged in shared memory, and the leftmost cover resolved after the
  *      walk rather than inside it.
  *
- *  The transition is the serial tier's, reached from the device through `--expt-relaxed-constexpr`,
- *  so both sides answer the same matches rather than similar ones.
+ *  The transition is the serial tier's, reached from the device through
+ *  @c --expt-relaxed-constexpr, so both sides answer the same matches rather than similar ones.
  *
  *  Parallelism comes from @b chunks rather than from haystacks: a corpus of one long document and a
  *  corpus of a million short ones then fill the device the same way. A chunk reports every match
- *  @b ending inside it, priming itself from the `max_source_match_bytes - 1` bytes before its own
+ *  @b ending inside it, priming itself from the <tt>max_source_match_bytes - 1</tt> bytes before its own
  *  start - clamped to its haystack, never earlier - so every match is found exactly once and no
  *  chunk reads a neighbour's text. The walk that counts a chunk's matches also keeps them, the
  *  first few in the chunk's own slots and the rest in a pool the round shares, so once the counts
@@ -25,7 +25,7 @@
  *
  *  When a round outruns its match budget the gather, the cover, the compaction and the boundaries
  *  kernel each retire at their first instruction, so an output is left untouched rather than
- *  truncated. Each vendor's host side, in `substrings/cuda.cuh` and `substrings/rocm.cuh`, sizes
+ *  truncated. Each vendor's host side, in <tt>substrings/cuda.cuh</tt> and <tt>substrings/rocm.cuh</tt>, sizes
  *  and launches them.
  *
  *  @sa include/stringzilla/substrings.h

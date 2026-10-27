@@ -9,7 +9,7 @@
  *
  *  Each 64-byte window lives as four @c v128_t quarters (the codepoint substrate twin of NEON's
  *  four @c uint8x16_t quarters); every per-codepoint BMP Word_Break property resolves through the
- *  shared page-compressed flat table via @ref sz_utf8_rune_flat_lookup_v128_ (the page LUT and leaf
+ *  shared page-compressed flat table via @c sz_utf8_rune_flat_lookup_v128_ (the page LUT and leaf
  *  read by bounded scalar L1 walks, since @c wasm_i8x16_swizzle reaches only 16 B), and the
  *  Supplementary Plane through a @c wasm_i8x16_swizzle nibble cascade, bit-identical to
  *  @c sz_rune_word_break_property over the whole code space.
@@ -60,7 +60,7 @@ STRINGZILLA_INLINE v128_t sz_utf8_word_break_byte_mask_from_bits_v128_(sz_u64_t 
 }
 
 /** Word_Break class byte for sixteen ASCII codepoints (cp < 0x80) via the existing 128-entry
- *  property table, read by a bounded scalar L1 walk over `raw & 0x7F` (v128's @c wasm_i8x16_swizzle
+ *  property table, read by a bounded scalar L1 walk over <tt>raw & 0x7F</tt> (v128's @c wasm_i8x16_swizzle
  *  reaches only 16 B, so NEON's in-register @c vqtbl4q_u8 read does not port). The window byte
  *  equals the codepoint on ASCII lanes. Addresses one quarter. */
 STRINGZILLA_INLINE v128_t sz_utf8_word_break_ascii_class_v128_(v128_t bytes_u8x16) {
@@ -71,7 +71,7 @@ STRINGZILLA_INLINE v128_t sz_utf8_word_break_ascii_class_v128_(v128_t bytes_u8x1
 }
 
 /** Word_Break class byte for sixteen BMP codepoints (per-lane high = cp>>8, low = cp&0xFF) from the
- *  flat page-compressed table via @ref sz_utf8_rune_flat_lookup_v128_, the v128 twin of
+ *  flat page-compressed table via @c sz_utf8_rune_flat_lookup_v128_, the v128 twin of
  *  @ref sz_utf8_word_break_bmp_class_neon_. Bit-exact with @c sz_rune_word_break_property over the
  *  whole BMP. Addresses one quarter. */
 STRINGZILLA_INLINE v128_t sz_utf8_word_break_bmp_class_v128_(v128_t high_bytes_u8x16, v128_t low_bytes_u8x16) {
@@ -217,7 +217,7 @@ STRINGZILLA_INLINE sz_u64_t sz_utf8_word_break_byte_ge_v128_(v128_t const *quart
                                       wasm_u8x16_ge(quarters_u8x16[3], bound_broadcast_u8x16));
 }
 
-/** Per-quarter "(high,low) 16-bit value in `[lo, hi]`" membership for one range, the v128 unsigned
+/** Per-quarter "(high,low) 16-bit value in <tt>[lo, hi]</tt>" membership for one range, the v128 unsigned
  *  16-bit window-compare building block of @ref sz_utf8_word_break_range16_mask_v128_.
  *  @c wasm_u8x16_ge and @c wasm_u8x16_lt are native, so no @c max_epu8 emulation is needed. */
 STRINGZILLA_INLINE v128_t sz_utf8_word_break_range16_one_v128_(v128_t high_u8x16, v128_t low_u8x16, sz_u16_t lo,
@@ -239,7 +239,7 @@ STRINGZILLA_INLINE v128_t sz_utf8_word_break_range16_one_v128_(v128_t high_u8x16
     return wasm_v128_and(not_below_u8x16, not_above_u8x16);
 }
 
-/** A 64-bit "(high,low) 16-bit value in any sorted `[lo, hi]` range" lane mask over the four window
+/** A 64-bit "(high,low) 16-bit value in any sorted <tt>[lo, hi]</tt> range" lane mask over the four window
  *  quarters, the v128 twin of @ref sz_utf8_word_break_range16_mask_neon_ (WSegSpace /
  *  Extended_Pictographic). */
 STRINGZILLA_INLINE sz_u64_t sz_utf8_word_break_range16_mask_v128_( //
@@ -404,7 +404,7 @@ STRINGZILLA_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_v
 
 #pragma region Forward driver
 
-/** Forward UAX-29 word segmentation over `[0, length)` (WebAssembly SIMD128): the overlap-free
+/** Forward UAX-29 word segmentation over <tt>[0, length)</tt> (WebAssembly SIMD128): the overlap-free
  *  advancing driver, mirroring @ref sz_utf8_wordbreaks_neon over the v128
  *  window/classify/partition/decide/drain leaves. Bit-exact with @c sz_utf8_wordbreaks_serial,
  *  @c sz_utf8_wordbreaks_neon, and @c sz_utf8_wordbreaks_rvv. */

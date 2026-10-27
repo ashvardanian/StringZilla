@@ -52,7 +52,7 @@ STRINGZILLA_INLINE void sz_hash_state_short_init_aligned_westmere_(sz_hash_state
 
 /**
  *  @brief Absorbs one 128-bit block into the minimal hash state using AES-NI and SSSE3 intrinsics.
- *  @param[inout] state_ptr Pointer to the aligned minimal hash state.
+ *  @param[in,out] state_ptr Pointer to the aligned minimal hash state.
  *  @param[in] block_u8x16 128-bit data block to absorb.
  *  @param[in] order_u8x16 Shuffle permutation for the additive accumulator lane (loaded
  *      from @c sz_hash_u8x16x4_shuffle_).
@@ -137,7 +137,7 @@ STRINGZILLA_INLINE void sz_hash_state_store_westmere_(sz_hash_state_t *packed, s
 
 /**
  *  @brief Absorbs the buffered 64-byte block into the aligned state (four 128-bit lanes), in place.
- *  @param[inout] state Pointer to the aligned hash state whose @c ins lanes are consumed.
+ *  @param[in,out] state Pointer to the aligned hash state whose @c ins lanes are consumed.
  */
 STRINGZILLA_INLINE void sz_hash_state_absorb_westmere_(sz_hash_state_aligned_t *state) {
     __m128i const order_u8x16 = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());

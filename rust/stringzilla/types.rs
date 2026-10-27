@@ -18,6 +18,7 @@
 //!
 //! File: rust/stringzilla/types.rs
 //! Author: Ash Vardanian
+//! Date: August 7, 2026
 
 use core::alloc::{AllocError, Allocator, Layout};
 use core::ffi::{c_void, CStr};
@@ -44,8 +45,11 @@ pub(crate) type sz_ordering_t = i32;
 /// A simple semantic version structure.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct SemVer {
+    /// The major version.
     pub major: i32,
+    /// The minor version.
     pub minor: i32,
+    /// The patch version.
     pub patch: i32,
 }
 
@@ -174,6 +178,7 @@ pub enum NormalForm {
     NfkcCasefold = 4,
 }
 
+/// A set of byte values, held as a 256-bit mask.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct Byteset {
@@ -335,6 +340,7 @@ impl<Source: AsRef<[u8]>> From<Source> for Byteset {
 }
 
 impl SemVer {
+    /// Builds a version from its three components.
     pub const fn new(major: i32, minor: i32, patch: i32) -> Self {
         Self { major, minor, patch }
     }
@@ -354,29 +360,52 @@ pub fn version() -> SemVer {
 #[repr(u64)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Capability {
-    Serial = 1 << 0,       // Always: fallback
-    Westmere = 1 << 1,     // Intel SSE4.2 + AES-NI
-    Goldmont = 1 << 2,     // Intel SHA-NI
-    Haswell = 1 << 3,      // Intel AVX2
-    Skylake = 1 << 4,      // Intel AVX-512
-    IceLake = 1 << 5,      // Intel AVX-512 VBMI2 + VAES
-    Neon = 1 << 6,         // Arm NEON
-    NeonAes = 1 << 7,      // Arm NEON + AES
-    NeonSha = 1 << 8,      // Arm NEON + SHA-256
-    Sve = 1 << 9,          // Arm SVE
-    Sve2 = 1 << 10,        // Arm SVE2
-    Sve2Aes = 1 << 11,     // Arm SVE2 + AES
-    Rvv = 1 << 12,         // RISC-V Vector
-    RvvCrypto = 1 << 13,   // RISC-V Vector Crypto
-    V128 = 1 << 14,        // WASM SIMD128
-    V128Relaxed = 1 << 15, // WASM Relaxed SIMD
-    LoongsonAsx = 1 << 16, // LoongArch LASX 256-bit SIMD
-    PowerVsx = 1 << 17,    // Power VSX 128-bit SIMD
-    Cuda = 1 << 48,        // NVIDIA: every CUDA device
-    Hopper = 1 << 51,      // NVIDIA: clusters, from compute capability 9.0
-    Blackwell = 1 << 52,   // NVIDIA: cluster launch control, from compute capability 10.0
-    Rocm = 1 << 56,        // AMD: every ROCm device
-    Metal = 1 << 60,       // Apple: every Metal device
+    /// Always: fallback.
+    Serial = 1 << 0,
+    /// Intel SSE4.2 + AES-NI.
+    Westmere = 1 << 1,
+    /// Intel SHA-NI.
+    Goldmont = 1 << 2,
+    /// Intel AVX2.
+    Haswell = 1 << 3,
+    /// Intel AVX-512.
+    Skylake = 1 << 4,
+    /// Intel AVX-512 VBMI2 + VAES.
+    IceLake = 1 << 5,
+    /// Arm NEON.
+    Neon = 1 << 6,
+    /// Arm NEON + AES.
+    NeonAes = 1 << 7,
+    /// Arm NEON + SHA-256.
+    NeonSha = 1 << 8,
+    /// Arm SVE.
+    Sve = 1 << 9,
+    /// Arm SVE2.
+    Sve2 = 1 << 10,
+    /// Arm SVE2 + AES.
+    Sve2Aes = 1 << 11,
+    /// RISC-V Vector.
+    Rvv = 1 << 12,
+    /// RISC-V Vector Crypto.
+    RvvCrypto = 1 << 13,
+    /// WASM SIMD128.
+    V128 = 1 << 14,
+    /// WASM Relaxed SIMD.
+    V128Relaxed = 1 << 15,
+    /// LoongArch LASX 256-bit SIMD.
+    LoongsonAsx = 1 << 16,
+    /// Power VSX 128-bit SIMD.
+    PowerVsx = 1 << 17,
+    /// NVIDIA: every CUDA device.
+    Cuda = 1 << 48,
+    /// NVIDIA: clusters, from compute capability 9.0.
+    Hopper = 1 << 51,
+    /// NVIDIA: cluster launch control, from compute capability 10.0.
+    Blackwell = 1 << 52,
+    /// AMD: every ROCm device.
+    Rocm = 1 << 56,
+    /// Apple: every Metal device.
+    Metal = 1 << 60,
 }
 
 /// Every [`Capability`], in bit order.

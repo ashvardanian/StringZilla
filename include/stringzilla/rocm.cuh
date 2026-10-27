@@ -6,11 +6,11 @@
  *      call runs in, the memory both sides address, the launches, the streams and the producers,
  *      and the cross-lane steps its kernels hand the shared walks.
  *
- *  Every call runs on the device of the stream it is given, which @ref sz_device_enter_rocm_ makes
+ *  Every call runs on the device of the stream it is given, which @c sz_device_enter_rocm_ makes
  *  current for its duration, and a null stream runs on the caller's current device.
  *
  *  Only hipcc sees past the guard, and nothing here is shared with CUDA, whose twins live in
- *  `cuda.cuh` under their own names. AMD has no clusters and no block stealing, so neither appears
+ *  <tt>cuda.cuh</tt> under their own names. AMD has no clusters and no block stealing, so neither appears
  *  here, and a family's ROCm host code launches every grid flat.
  *
  *  @sa include/stringzilla/cuda.cuh
@@ -48,7 +48,7 @@ STRINGZILLA_INLINE sz_status_t sz_device_enter_rocm_(sz_stream_t stream, int *ca
     return hipSetDevice(device) == hipSuccess ? sz_success_k : sz_missing_gpu_k;
 }
 
-/** Makes @p caller current again, closing the scope @ref sz_device_enter_rocm_ opened. */
+/** Makes @p caller current again, closing the scope @c sz_device_enter_rocm_ opened. */
 STRINGZILLA_INLINE void sz_device_leave_rocm_(int caller) { sz_unused_(hipSetDevice(caller)); }
 
 /** Accepts managed memory or the current device's own allocation.
@@ -327,10 +327,10 @@ STRINGZILLA_INLINE sz_status_t sz_stream_init_rocm_(sz_size_t ordinal, sz_stream
  *  walks side by side. */
 #pragma region Device Primitives
 
-/** Lane `lane - delta`'s @p value among this thread's 32 lanes, a lane's own below @p delta. */
+/** Lane <tt>lane - delta</tt>'s @p value among this thread's 32 lanes, a lane's own below @p delta. */
 STRINGZILLA_DEVICE sz_u32_t sz_shuffle_up_rocm_(sz_u32_t value, unsigned delta) { return __shfl_up(value, delta, 32); }
 
-/** Lane `lane + delta`'s @p value among this thread's 32 lanes, a lane's own past the last. */
+/** Lane <tt>lane + delta</tt>'s @p value among this thread's 32 lanes, a lane's own past the last. */
 STRINGZILLA_DEVICE int sz_shuffle_down_rocm_(int value, unsigned delta) { return __shfl_down(value, delta, 32); }
 
 /** Lane @p lane 's @p value among this thread's 32 lanes. */
@@ -338,7 +338,7 @@ STRINGZILLA_DEVICE sz_u32_t sz_shuffle_index_rocm_(sz_u32_t value, unsigned lane
     return __shfl(value, (int)lane, 32);
 }
 
-/** Lane `lane - delta`'s @p value within this lane's aligned group of @p width lanes, a lane's own
+/** Lane <tt>lane - delta</tt>'s @p value within this lane's aligned group of @p width lanes, a lane's own
  *  below @p delta. */
 STRINGZILLA_DEVICE sz_u32_t sz_group_shuffle_up_rocm_(sz_u32_t value, unsigned delta, unsigned width) {
     return __shfl_up(value, delta, (int)width);

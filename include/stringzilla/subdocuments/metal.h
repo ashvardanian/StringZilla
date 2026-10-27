@@ -9,7 +9,7 @@
  *  @sa include/stringzilla/subdocuments/cuda.cuh, the CUDA sibling
  *
  *  The verbs keep the serial tier's shape, with an @c id<MTLCommandQueue> as the stream. Every
- *  block the kernels read must come from @ref sz_allocator_init_unified_metal on that stream's
+ *  block the kernels read must come from @c sz_allocator_init_unified_metal on that stream's
  *  device, and documents must be tapes. Both verbs wait for their counting walks, as a malformed
  *  document fails the call and the documents needing more frames than the first walk's stacks hold
  *  are counted again; a find then scans the counts on the host, every Metal block being shared, and

@@ -4,6 +4,7 @@
 //!
 //! File: rust/stringzilla/find.rs
 //! Author: Ash Vardanian
+//! Date: August 7, 2026
 
 use core::ffi::c_void;
 use core::marker::PhantomData;
@@ -360,6 +361,7 @@ pub struct FindMatches<'a, Overlap: Overlaps = NonOverlapping> {
 }
 
 impl<'a> FindMatches<'a, NonOverlapping> {
+    /// Iterates the non-overlapping matches of `matcher` in `haystack`, front to back.
     pub fn new(haystack: &'a [u8], matcher: Matcher<'a>) -> Self {
         Self {
             matcher,
@@ -417,6 +419,7 @@ pub struct RFindMatches<'a, Overlap: Overlaps = NonOverlapping> {
 }
 
 impl<'a> RFindMatches<'a, NonOverlapping> {
+    /// Iterates the non-overlapping matches of `matcher` in `haystack`, back to front.
     pub fn new(haystack: &'a [u8], matcher: Matcher<'a>) -> Self {
         Self {
             matcher,
@@ -477,6 +480,7 @@ pub struct FindSplits<'a, Empty: EmptySegments = KeepEmpty> {
 }
 
 impl<'a> FindSplits<'a, KeepEmpty> {
+    /// Splits `haystack` at every match of `matcher`, front to back, keeping empty pieces.
     pub fn new(haystack: &'a [u8], matcher: Matcher<'a>) -> Self {
         Self {
             matcher,
@@ -541,6 +545,7 @@ pub struct RFindSplits<'a, Empty: EmptySegments = KeepEmpty> {
 }
 
 impl<'a> RFindSplits<'a, KeepEmpty> {
+    /// Splits `haystack` at every match of `matcher`, back to front, keeping empty pieces.
     pub fn new(haystack: &'a [u8], matcher: Matcher<'a>) -> Self {
         Self {
             matcher,

@@ -9,7 +9,7 @@
  *  comes before the first write into a block the tape holds, so a failed call leaves the tape as it
  *  was. Tiers differ only in the @ref sz_strings_walks_t they hand to the drivers: a byte-set
  *  search that skips the bytes needing no escaping, and a lookup-table kernel. Normalization takes
- *  the tier's own normalizer from `utf8_norm/` instead.
+ *  the tier's own normalizer from <tt>utf8_norm/</tt> instead.
  *
  *  @sa include/stringzilla/strings.h
  */
@@ -314,7 +314,7 @@ STRINGZILLA_INLINE sz_bool_t sz_strings_hex_parse_(sz_cptr_t digits, sz_size_t c
     return sz_true_k;
 }
 
-/** Writes @p rune as `\uXXXX` in lowercase, a surrogate pair beyond U+FFFF, returning 6 or 12. */
+/** Writes @p rune as <tt>\\uXXXX</tt> in lowercase, a surrogate pair beyond U+FFFF, returning 6 or 12. */
 STRINGZILLA_INLINE sz_size_t sz_strings_write_utf16_(sz_rune_t rune, char *sequence) {
     static char const digits[] = "0123456789abcdef";
     sz_u32_t units[2] = {rune, 0};
@@ -357,7 +357,7 @@ STRINGZILLA_INLINE sz_u64_t sz_strings_escape_sequence_(sz_escape_kind_t kind, s
 }
 
 /** Escapes one string for JSON into @p target, or measures it for a null @p target; @p ascii also
- *  writes DEL and every non-ASCII codepoint as `\uXXXX`, and every ill-formed byte as U+FFFD. */
+ *  writes DEL and every non-ASCII codepoint as <tt>\\uXXXX</tt>, and every ill-formed byte as U+FFFD. */
 STRINGZILLA_INLINE sz_size_t sz_strings_escape_json_(sz_cptr_t source, sz_size_t length, sz_ptr_t target,
                                                      sz_bool_t ascii, sz_strings_walks_t const *walks) {
     // `"`, `\` and the C0 controls, and for ASCII output DEL and every byte from 0x80 on
@@ -589,7 +589,7 @@ STRINGZILLA_INLINE sz_size_t sz_strings_unescape_hex_(sz_cptr_t source, sz_size_
 }
 
 /** Unescapes the HTML character references of one string into @p target, or measures it, copying
- *  every `&` that starts no reference; it is never malformed. */
+ *  every <tt>&amp;</tt> that starts no reference; it is never malformed. */
 STRINGZILLA_INLINE sz_size_t sz_strings_unescape_html_(sz_cptr_t source, sz_size_t length, sz_ptr_t target,
                                                        sz_strings_walks_t const *walks) {
     // `&`
@@ -639,7 +639,7 @@ STRINGZILLA_INLINE sz_size_t sz_strings_unescape_html_(sz_cptr_t source, sz_size
 }
 
 /** Decodes the percent-escapes of one string into @p target, or measures it, returning
- *  @c STRINGZILLA_SIZE_MAX for a `%` without two hexadecimal digits. */
+ *  @c STRINGZILLA_SIZE_MAX for a <tt>\%</tt> without two hexadecimal digits. */
 STRINGZILLA_INLINE sz_size_t sz_strings_unescape_url_(sz_cptr_t source, sz_size_t length, sz_ptr_t target,
                                                       sz_strings_walks_t const *walks) {
     // `%`

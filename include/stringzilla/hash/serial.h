@@ -137,7 +137,7 @@ STRINGZILLA_INLINE sz_u64_t sz_bytesum_serial_(sz_cptr_t text, sz_size_t length)
 /**
  *  @brief Emulates the behaviour of @c _mm_aesenc_si128 for a single round, as a fallback when the
  *      hardware-accelerated version is not available.
- *  @return Result of `MixColumns(SubBytes(ShiftRows(state))) ^ round_key`.
+ *  @return Result of <tt>MixColumns(SubBytes(ShiftRows(state))) ^ round_key</tt>.
  *  @see Jean-Philippe Aumasson's reference implementation, which this is based on: https://github.com/veorq/aesenc-noNI
  */
 STRINGZILLA_INLINE sz_u128_vec_t sz_emulate_aesenc_si128_serial_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
@@ -259,7 +259,7 @@ STRINGZILLA_CONSTEXPR sz_u128_vec_t sz_emulate_shuffle_epi8_serial_(sz_u128_vec_
  *          return "".join(result)
  *  @endcode
  *
- *  For `pi(16)` the result is `3.243F6A8885A308D3` and you can find the digits after the dot in
+ *  For <tt>pi(16)</tt> the result is <tt>3.243F6A8885A308D3</tt> and you can find the digits after the dot in
  *  the first element of output array.
  *
  *  @see Bailey-Borwein-Plouffe (BBP) formula explanation by Mosè Giordano: https://giordano.github.io/blog/2017-11-21-hexadecimal-pi/
@@ -353,7 +353,7 @@ STRINGZILLA_INLINE void sz_hash_state_short_init_serial_(sz_hash_state_aligned_f
 
 /**
  *  @brief Absorbs one 128-bit block into the minimal hash state.
- *  @param[inout] state Pointer to the minimal hash state.
+ *  @param[in,out] state Pointer to the minimal hash state.
  *  @param[in] block_vec 128-bit data block to absorb.
  */
 STRINGZILLA_INLINE void sz_hash_state_short_update_serial_(sz_hash_state_aligned_for_short_t *state,
@@ -389,7 +389,7 @@ STRINGZILLA_INLINE sz_u64_t sz_hash_state_short_finalize_serial_(sz_hash_state_a
 /**
  *  @brief Right-shifts the 128-bit vector by @p shift_bytes bytes in software. Used to zero out
  *      trailing overlap bytes when the last block is shorter than 16 bytes.
- *  @param[inout] vec Pointer to the 128-bit vector to shift in place.
+ *  @param[in,out] vec Pointer to the 128-bit vector to shift in place.
  *  @param[in] shift_bytes Number of bytes to shift right (0–15); shifting by 0 is a no-op.
  */
 STRINGZILLA_CONSTEXPR void sz_hash_shift_in_register_serial_(sz_u128_vec_t *vec, int shift_bytes) {
@@ -470,7 +470,7 @@ STRINGZILLA_INLINE void sz_hash_state_store_serial_(sz_hash_state_t *packed, sz_
 
 /**
  *  @brief Absorbs the buffered 64-byte block into the aligned state (four 128-bit lanes), in place.
- *  @param[inout] state Pointer to the aligned hash state whose @c ins lanes are consumed.
+ *  @param[in,out] state Pointer to the aligned hash state whose @c ins lanes are consumed.
  */
 STRINGZILLA_INLINE void sz_hash_state_absorb_serial_(sz_hash_state_aligned_t *state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
@@ -728,7 +728,7 @@ STRINGZILLA_INLINE sz_u64_t sz_hash_state_digest_serial_(sz_hash_state_t const *
  *      @b text-lanes, once.
  *  @param[in] text Input string.
  *  @param[in] length Number of bytes, must be <= 64.
- *  @param[out] text_lanes_vec Output: each `u128s[i]` holds up to 16 contiguous input bytes,
+ *  @param[out] text_lanes_vec Output: each <tt>u128s[i]</tt> holds up to 16 contiguous input bytes,
  *      low-justified and zero-padded. Shared by every backend's multi-seed replay routine.
  *  @return The number of populated text-lanes (1..4).
  *
@@ -738,7 +738,7 @@ STRINGZILLA_INLINE sz_u64_t sz_hash_state_digest_serial_(sz_hash_state_t const *
  *  and the branch-heavy tail handling that dominate the cost of hashing short, variable-length
  *  strings, on top of any per-backend AES parallelism across seeds.
  *
- *  @note The text-lane contents are bit-identical to the `length <= 64` ladder of @c sz_hash_best
+ *  @note The text-lane contents are bit-identical to the <tt>length <= 64</tt> ladder of @c sz_hash_best
  *      on every backend (both the serial in-register shift and the masked-load variants), so
  *      replaying them yields exactly the @c sz_hash_best digest under each seed.
  *  @sa sz_hash_multiseed_best, sz_hash_multiseed_replay_serial_
@@ -816,7 +816,7 @@ STRINGZILLA_INLINE sz_u32_t sz_sha256_sigma1_lower_(sz_u32_t x) {
 
 /**
  *  @brief Process a single 512-bit (64-byte) block of data using SHA256.
- *  @param[inout] hash Pointer to 8x 32-bit hash values, modified in place.
+ *  @param[in,out] hash Pointer to 8x 32-bit hash values, modified in place.
  *  @param[in] block Pointer to 64-byte message block.
  */
 STRINGZILLA_INLINE void sz_sha256_process_block_serial_(

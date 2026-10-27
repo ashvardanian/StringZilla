@@ -46,7 +46,7 @@ extern "C" {
 typedef __mmask64 (*sz_utf8_norm_lead_classify_avx512_t_)(__m512i, __mmask64, sz_u8_t);
 
 /** 64-entry lead lookup without AVX-512 VBMI: four per-128-lane @c vpshufb over the
- *  broadcast LUT quadrants, selected by the high two index bits, then `families & flag`
+ *  broadcast LUT quadrants, selected by the high two index bits, then <tt>families & flag</tt>
  *  picks out the requested form. */
 STRINGZILLA_OUTLINED_ __mmask64 sz_utf8_norm_lead_classify_shuffle_skylake_(__m512i bytes_u8x64, __mmask64 is_lead_m64,
                                                                             sz_u8_t form_flag) {

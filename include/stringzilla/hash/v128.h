@@ -57,7 +57,7 @@ STRINGZILLA_INLINE sz_u64_t sz_bytesum_v128_(sz_cptr_t text, sz_size_t length) {
     return sum;
 }
 
-/** Evaluate a GF(2)-linear byte map `x -> low_table[x&0xF] ^ high_table[x>>4]` across
+/** Evaluate a GF(2)-linear byte map <tt>x -> low_table[x&0xF] ^ high_table[x>>4]</tt> across
  *  all 16 lanes. */
 STRINGZILLA_INLINE v128_t sz_aes_linear_v128_(v128_t low_table_u8x16, v128_t high_table_u8x16, v128_t x_u8x16) {
     v128_t low_nibbles_u8x16 = wasm_v128_and(x_u8x16, wasm_i8x16_splat((sz_i8_t)0x0F));
@@ -93,7 +93,7 @@ STRINGZILLA_INLINE v128_t sz_aes_gf4_mul_v128_(v128_t a_u8x16, v128_t b_u8x16) {
 /**
  *  @brief Bit-exact @c _mm_aesenc_si128 for one round, identical
  *      to @c sz_emulate_aesenc_si128_serial_.
- *  @return `MixColumns(SubBytes(ShiftRows(state))) ^ round_key`, computed with the
+ *  @return <tt>MixColumns(SubBytes(ShiftRows(state))) ^ round_key</tt>, computed with the
  *      vpaes tower field.
  */
 STRINGZILLA_INLINE sz_u128_vec_t sz_emulate_aesenc_v128_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
@@ -391,7 +391,7 @@ STRINGZILLA_INLINE sz_u64_t sz_hash_state_digest_v128_(sz_hash_state_t const *pa
 
 /**
  *  @brief Replays prepared text-lanes through the SIMD128 minimal AES state for a single seed.
- *  @return 64-bit hash, bit-identical to `sz_hash_v128(text, length, seed)` (hence to serial).
+ *  @return 64-bit hash, bit-identical to <tt>sz_hash_v128(text, length, seed)</tt> (hence to serial).
  *  @sa sz_hash_multiseed_replay_serial_, sz_hash_multiseed_prepare_serial_
  */
 STRINGZILLA_INLINE sz_u64_t sz_hash_multiseed_replay_v128_(sz_u512_vec_t const *text_lanes_vec,
@@ -429,9 +429,9 @@ STRINGZILLA_INLINE v128_t sz_sha256_sigma1_lower_v128_(v128_t x_u32x4) {
  *  @brief Process one 64-byte block with a SIMD message schedule, bit-exact with
  *      the serial reference.
  *
- *  The 64-round compression is sequential in `a..h`, so it stays scalar; the gain is the message
- *  schedule, computed four words per @c i32x4 (the Gueron-Krasnov layout). `W[i]` needs
- *  `sigma1(W[i-2])`, so within a group of four the upper two lanes depend on the lower two just
+ *  The 64-round compression is sequential in <tt>a..h</tt>, so it stays scalar; the gain is the message
+ *  schedule, computed four words per @c i32x4 (the Gueron-Krasnov layout). <tt>W[i]</tt> needs
+ *  <tt>sigma1(W[i-2])</tt>, so within a group of four the upper two lanes depend on the lower two just
  *  computed — handled with a two-phase @c sigma1 and a final lane blend. The input words are loaded
  *  big-endian via one shuffle.
  */
@@ -564,7 +564,7 @@ STRINGZILLA_API sz_status_t sz_fill_random_v128(sz_ptr_t target, sz_size_t lengt
  *  @brief Hashes one @c text under many @c seeds, sharing a single normalization pass
  *      for short inputs.
  *
- *  The branchy load + de-interleave of a `<= 64` byte input depends only on @b (text,length), so it
+ *  The branchy load + de-interleave of a <tt><= 64</tt> byte input depends only on @b (text,length), so it
  *  is done exactly once, by @c sz_hash_multiseed_prepare_serial_, and replayed through the cheap
  *  SIMD128 AES rounds per seed — amortizing the input-load/tail cost that dominates short-string
  *  hashing. On a 128-bit register each seed's minimal state is a full vector, so seeds are not

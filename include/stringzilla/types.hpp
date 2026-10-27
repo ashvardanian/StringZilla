@@ -7,7 +7,7 @@
  *  The goal for this header is to provide an absolutely-minimal set of types and
  *  forward-declarations for CPU and GPU backends of higher-level complex templated algorithms
  *  implemented outside of the C layer. It includes the following primitive type aliases for
- *  the `types.h` header:
+ *  the <tt>types.h</tt> header:
  *
  *  - @c u8_t, @c u16_t, @c u32_t, @c u64_t, @c i8_t, @c i16_t, @c i32_t, @c i64_t - sized integers.
  *  - @c ssize_t, @c ptr_t, @c cptr_t - address-related types.
@@ -16,10 +16,10 @@
  *  The header also provides @c strings_view_t, a borrowed column of strings in any layout of
  *  @c sz_strings_view_t, and these higher-level types:
  *
- *  - `std::span<value_type>` - a view to a contiguous memory block of @c value_type elements.
- *  - `dummy_alloc<value_type>` - a dummy memory allocator shaped like @c std::allocator.
- *  - `vector<value_type, allocator_type>` - owning storage with fallible allocation.
- *  - `strings<allocator_type>` - an owned column of strings, an @c sz_strings_span_t tape.
+ *  - @c std::span<value_type> - a view to a contiguous memory block of @c value_type elements.
+ *  - @c dummy_alloc<value_type> - a dummy memory allocator shaped like @c std::allocator.
+ *  - <tt>vector&lt;value_type, allocator_type&gt;</tt> - owning storage with fallible allocation.
+ *  - @c strings<allocator_type> - an owned column of strings, an @c sz_strings_span_t tape.
  */
 #ifndef STRINGZILLA_TYPES_HPP_
 #define STRINGZILLA_TYPES_HPP_
@@ -29,7 +29,7 @@
 #include "stringzilla/strings.h"
 
 /** When set to 1, the library will include the C++ STL headers and implement automatic conversion
- *  from and to @c std::string_view and `std::basic_string<any_allocator>`. */
+ *  from and to @c std::string_view and @c std::basic_string<any_allocator>. */
 #if !defined(STRINGZILLA_WITH_STL)
 #define STRINGZILLA_WITH_STL (1) // true or false
 #endif
@@ -90,7 +90,7 @@ namespace stringzilla {
  *  returning it from a @c STRINGZILLA_NOIPA_ public entry point so the value survives a
  *  same-TU caller's interprocedural rewrite.
  *
- *  @sa sz_keep_alive_ in `types.h`, the C-callable sibling that pins stores to a buffer rather than
+ *  @sa sz_keep_alive_ in <tt>types.h</tt>, the C-callable sibling that pins stores to a buffer rather than
  *      a value, for the C headers, which cannot instantiate a template.
  */
 template <typename value_type_>
@@ -150,6 +150,13 @@ using u512_vec_t = sz_u512_vec_t;
  *
  *  Every enumerator takes its value from @c sz_status_t in @c types.h, so the C++ mirror and the
  *  ABI cannot drift, and the crossing is a cast rather than a table.
+ *
+ *  Statuses fall into four categories, with no interruptions to report. Resources: @c bad_alloc_k,
+ *  @c missing_gpu_k, @c device_code_mismatch_k, @c missing_kernel_k and @c missing_library_k.
+ *  Input: @c invalid_utf8_k, @c contains_duplicates_k, @c unexpected_dimensions_k,
+ *  @c device_memory_mismatch_k and @c authentication_failed_k. State: @c overflow_risk_k. Defects:
+ *  @c unknown_k. Any verb that allocates, binds a device or touches a file may also return a
+ *  Resources status. A verb's own block lists only what its contract adds.
  */
 enum class [[nodiscard]] status_t : int {
 
@@ -228,7 +235,7 @@ struct [[nodiscard]] expected<value_type_ &> {
 
 #pragma region Devices
 
-/** Which runtime a device belongs to, as the `sz_<kind>_*` C functions name it. */
+/** Which runtime a device belongs to, as the <tt>sz_&lt;kind&gt;_*</tt> C functions name it. */
 enum class device_kind_t : int { cpu_k, cuda_k, rocm_k, metal_k };
 
 /** One device StringZilla runs kernels on: the host CPU, or a GPU by its runtime's own ordinal. */
@@ -609,7 +616,7 @@ struct strings_view_t {
     /** Wraps a C view, like one over records or NUL-padded rows. */
     explicit strings_view_t(sz_strings_view_t raw) noexcept : raw(raw) {}
 
-    /** An Apache Arrow @c String column: string i is `[offsets[i], offsets[i + 1])` of @p data. */
+    /** An Apache Arrow @c String column: string i is <tt>[offsets[i], offsets[i + 1])</tt> of @p data. */
     strings_view_t(char const *data, sz_u32_t const *offsets, std::size_t count) noexcept : raw {} {
         raw.layout = sz_strings_u32_tape_k, raw.count = count;
         raw.data.u32_tape.data = data, raw.data.u32_tape.offsets = offsets;
@@ -636,17 +643,26 @@ struct strings_view_t {
 
     /**
      *  @brief Finds @p needle in every string, like a @c LIKE '%needle%' filter over a column.
+     *  @param[in] needle The bytes to look for.
      *  @param[out] positions The offset of each string's first match, or @c STRINGZILLA_SIZE_MAX.
-     *  @return @c success_k, or @c unexpected_dimensions_k when @p positions is too short.
+     *  @param[in] capabilities Capabilities to pick from.
+     *  @param[in] stream Null on the CPU, or the stream of the device @p capabilities describes.
+     *
      *  @sa sz_find_strings_best
+     *
+     *  @par Statuses:
+     *  - @c unexpected_dimensions_k @p positions is too short.
      */
     status_t find(string_view_t needle, std::span<std::size_t> positions,
                   sz_capability_t capabilities = default_capabilities(), sz_stream_t stream = nullptr) const noexcept;
 
     /**
      *  @brief Hashes every string under one @p seed, each as @c string_view_t::hash would.
-     *  @return @c success_k, or @c unexpected_dimensions_k when @p hashes is too short.
+     *
      *  @sa sz_hash_strings_best
+     *
+     *  @par Statuses:
+     *  - @c unexpected_dimensions_k @p hashes is too short.
      */
     status_t hashes(std::span<u64_t> hashes, u64_t seed = 0, sz_capability_t capabilities = default_capabilities(),
                     sz_stream_t stream = nullptr) const noexcept;
@@ -655,9 +671,14 @@ struct strings_view_t {
      *  @brief Validates every string as UTF-8 and, unless @p runes is empty, counts its runes.
      *  @param[out] runes Empty, or each string's runes, unspecified from the first ill-formed one.
      *  @param[out] malformed_index The first ill-formed string, or @c size() if none is ill-formed.
-     *  @return @c success_k, @c invalid_utf8_k when a string is ill-formed, or
-     *      @c unexpected_dimensions_k when @p runes is too short.
+     *  @param[in] capabilities Capabilities to pick from.
+     *  @param[in] stream Null on the CPU, or the stream of the device @p capabilities describes.
+     *
      *  @sa sz_utf8_count_strings_best
+     *
+     *  @par Statuses:
+     *  - @c invalid_utf8_k A string is ill-formed.
+     *  - @c unexpected_dimensions_k @p runes is too short.
      */
     status_t utf8_count(std::span<std::size_t> runes, std::size_t &malformed_index,
                         sz_capability_t capabilities = default_capabilities(),
@@ -714,7 +735,11 @@ struct strings_view_t {
 
     /**
      *  @brief Unescapes every string from @p kind, checking all of them before writing any.
+     *  @param[in] kind The text format the strings are in.
      *  @param[out] malformed_index The first malformed string, set on @c invalid_utf8_k.
+     *  @param[in] allocator Source of the result's blocks.
+     *  @param[in] capabilities Capabilities to pick from.
+     *  @param[in] stream Null on the CPU, or the stream of the device @p capabilities describes.
      *  @sa sz_strings_unescape_best
      */
     template <typename allocator_type_ = heap_alloc<char>>
@@ -757,7 +782,7 @@ struct strings_view_t {
     }
 
     /**
-     *  @brief Joins every string with @p between into one, like Python's `str.join`.
+     *  @brief Joins every string with @p between into one, like Python's <tt>str.join</tt>.
      *  @sa sz_strings_join_best
      */
     template <typename allocator_type_ = std::allocator<char>>
@@ -767,10 +792,13 @@ struct strings_view_t {
 
     /**
      *  @brief Writes row r of @p columns as
-     *      `frames[0] + columns[0][r] + frames[1] + … + frames[n]`, with @p between between rows,
+     *      <tt>frames[0] + columns[0][r] + frames[1] + … + frames[n]</tt>, with @p between between rows,
      *      like CSV lines or JSON arrays.
-     *  @return @c unexpected_dimensions_k for uneven columns or when @p frames is not one longer.
+     *
      *  @sa sz_strings_join_best
+     *
+     *  @par Statuses:
+     *  - @c unexpected_dimensions_k Uneven columns or @p frames is not one longer.
      */
     template <typename allocator_type_ = std::allocator<char>>
     static expected<string<allocator_type_>> join(std::span<sz_strings_view_t const> columns,
@@ -823,7 +851,7 @@ struct strings {
     strings_view_t view() const noexcept;
 
     /**
-     *  @brief Splits @p text at the bytes of @p delimiters into its parts, like `bytes.split`.
+     *  @brief Splits @p text at the bytes of @p delimiters into its parts, like <tt>bytes.split</tt>.
      *  @sa sz_strings_split_best
      */
     static expected<strings> split(string_view_t text, byteset_t const &delimiters, sz_split_kind_t kind,
@@ -832,7 +860,7 @@ struct strings {
                                    sz_stream_t stream = nullptr) noexcept;
 
     /**
-     *  @brief Splits @p text into lines without their breaks, like `str.splitlines`.
+     *  @brief Splits @p text into lines without their breaks, like <tt>str.splitlines</tt>.
      *  @sa sz_strings_split_lines_best
      */
     static expected<strings> split_lines(string_view_t text, allocator_type_ allocator = {},
@@ -916,7 +944,7 @@ struct gpu_specs_t {
     /**
      *  @brief Looks up hardware specs for a given compute capability (major, minor), used to
      *      populate the @c cuda_cores property.
-     *  @param[in] sm The compute capability code obtained from `pack_sm_code(major, minor)`.
+     *  @param[in] sm The compute capability code obtained from <tt>pack_sm_code(major, minor)</tt>.
      */
     inline static std::size_t cores_per_multiprocessor(std::size_t sm) noexcept {
         typedef struct {
@@ -976,7 +1004,7 @@ struct gpu_specs_t {
 /**
  *  @brief Divides @p x by @p divisor and rounds up to the nearest integer.
  *
- *  @note This is equivalent to `ceil(x / divisor)`, but avoids floating-point arithmetic.
+ *  @note This is equivalent to <tt>ceil(x / divisor)</tt>, but avoids floating-point arithmetic.
  */
 template <typename scalar_type_>
 constexpr scalar_type_ divide_round_up(scalar_type_ x, scalar_type_ divisor) {
@@ -1037,7 +1065,7 @@ constexpr scalar_type_ integer_square_root(scalar_type_ x) noexcept {
     return (scalar_type_)(guess > wide / guess ? guess - 1 : guess);
 }
 
-/** Equivalent to `(condition ? value : 0)`, but avoids branching. */
+/** Equivalent to <tt>(condition &#63; value : 0)</tt>, but avoids branching. */
 template <typename value_type_>
 constexpr value_type_ non_zero_if(value_type_ value, value_type_ condition) noexcept {
     static_assert(std::is_unsigned<value_type_>::value, "Value type must be unsigned integer");
@@ -1045,7 +1073,7 @@ constexpr value_type_ non_zero_if(value_type_ value, value_type_ condition) noex
     return value * condition;
 }
 
-/** Analog to @c std::swap from `<utility>`, but also generates device code, unlike STL. */
+/** Analog to @c std::swap from <tt>&lt;utility&gt;</tt>, but also generates device code, unlike STL. */
 template <typename value_type_>
 constexpr void trivial_swap(value_type_ &x, value_type_ &y) noexcept {
     static_assert(std::is_trivially_copyable<value_type_>::value, "Value type must be trivially copyable");
@@ -1128,7 +1156,7 @@ class vector {
      *      which growing requires.
      *
      *  Growth moves live elements on the host, so an allocator over memory the host cannot touch
-     *  opts out with `static constexpr bool host_accessible_k = false` and gets a build error here
+     *  opts out with <tt>static constexpr bool host_accessible_k = false</tt> and gets a build error here
      *  instead of a segmentation fault, as @ref device_alloc does. Allocators that say nothing -
      *  are assumed reachable.
      */
@@ -1252,7 +1280,7 @@ class vector {
      *
      *  On growth it allocates fresh storage and discards the old contents, with no element move, so
      *  it is safe even when the storage lives in @b device memory the host cannot dereference, like
-     *  a task array backed by @ref device_alloc. Requires a trivially-destructible type.
+     *  a task array backed by @c device_alloc. Requires a trivially-destructible type.
      */
     status_t resize_uninitialized(size_type new_size) noexcept {
         static_assert(std::is_trivially_destructible<value_type>::value,

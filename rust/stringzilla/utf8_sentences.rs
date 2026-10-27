@@ -2,6 +2,7 @@
 //!
 //! File: rust/stringzilla/utf8_sentences.rs
 //! Author: Ash Vardanian
+//! Date: August 7, 2026
 
 use super::*;
 

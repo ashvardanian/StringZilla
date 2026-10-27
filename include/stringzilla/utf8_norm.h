@@ -10,7 +10,7 @@
  *  - @c sz_utf8_find_denormalized_best - find the first byte breaking a normalization form, if any
  *
  *  Normalization is built from three UAX #15 primitives - decomposition, canonical ordering, and
- *  composition - sharing one ISA-agnostic table set (`utf8_norm/tables.h`, generated from the UCD
+ *  composition - sharing one ISA-agnostic table set (<tt>utf8_norm/tables.h</tt>, generated from the UCD
  *  by the recipe embedded in that header). It is intentionally locale-independent. NFKC_Casefold is
  *  the UAX #44 toNFKC_Casefold: every codepoint maps to its NFKC_CF image, empty for the default
  *  ignorables, and the result recomposes to NFC.
@@ -33,7 +33,7 @@ extern "C" {
  *  @section utf8_norm_buffer_sizing Buffer Sizing
  *
  *  Decomposition forms (NFD, NFKD) can expand the input; the target must hold up to
- *  `source_length * 18` bytes for the worst single-codepoint compatibility decomposition. The
+ *  <tt>source_length * 18</tt> bytes for the worst single-codepoint compatibility decomposition. The
  *  composing forms (NFC, NFKC) never exceed the decomposed length, so the same bound is safe.
  *  NFKC_Casefold grows a byte into 11 at most, for U+FDFA, within the same bound.
  *
@@ -46,7 +46,7 @@ extern "C" {
  *  source, target and length slot must be memory that device reaches, and the length lands once
  *  @p stream is joined. Calls allocate no output or scratch and join nothing. CUDA and ROCm copy
  *  the shared normalization tables to the device ahead of the kernel; Metal embeds them in its
- *  compiled library and requires buffers from @ref sz_allocator_init_unified_metal.
+ *  compiled library and requires buffers from @c sz_allocator_init_unified_metal.
  *
  *  @param[in] source UTF-8 string to normalize.
  *  @param[in] source_length Number of bytes in @p source.
@@ -56,10 +56,12 @@ extern "C" {
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU. On a GPU, the stream to queue on, which also names the
  *      device; null for the default.
- *  @return @c sz_success_k, @c sz_missing_kernel_k when no capability in @p capabilities has it,
- *      and on a GPU @c sz_device_memory_mismatch_k for a buffer or a @p stream the device cannot
- *      use or @c sz_unexpected_dimensions_k for a text whose expanded length cannot be counted.
  *  @warning No bounds checking is performed on @p target.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
+ *  - @c sz_device_memory_mismatch_k On a GPU, a buffer or a @p stream the device cannot use.
+ *  - @c sz_unexpected_dimensions_k On a GPU, a text whose expanded length cannot be counted.
  */
 STRINGZILLA_API sz_status_t sz_utf8_norm_best(                        //
     sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form, //
@@ -79,7 +81,9 @@ STRINGZILLA_API sz_status_t sz_utf8_norm_best(                        //
  *      the first byte of the first codepoint breaking it: a non-Yes QC or out of canonical order.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_utf8_find_denormalized_best(                             //
     sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form, sz_cptr_t *match, //
@@ -87,9 +91,14 @@ STRINGZILLA_API sz_status_t sz_utf8_find_denormalized_best(                     
 
 /**
  *  @brief Finds the UTF-8 normalization kernel of @p kind, from the best of @p capabilities.
+ *  @param[in] kind The verb whose kernel to find.
+ *  @param[in] capabilities The mask to pick the best capability from.
  *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
  *  @param[out] capability The capability the kernel belongs to, or zero.
- *  @return @c sz_success_k, @c sz_missing_kernel_k, or @c sz_missing_library_k when header-only.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k
+ *  - @c sz_missing_library_k Header-only.
  */
 STRINGZILLA_API sz_status_t sz_utf8_norm_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
                                                      sz_kernel_punned_t *kernel, sz_capability_t *capability);

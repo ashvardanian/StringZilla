@@ -8,7 +8,7 @@
  *
  *  Ports the validated AVX2 architecture to 32-byte NEON chunks held as @c uint8x16x2_t, two
  *  16-byte registers mirroring a 32-byte YMM. The needle classification, match verification, and
- *  danger-zone scanning stay ISA-independent in `serial.h`; per-script fold and alarm helpers
+ *  danger-zone scanning stay ISA-independent in <tt>serial.h</tt>; per-script fold and alarm helpers
  *  become @c uint8x16x2_t functions; and the shared force-inlined @c scripted_ driver walks the
  *  haystack in 32-byte steps. AVX2's two compare domains map directly: byte-mask vectors for folds,
  *  which feed masked adds, and a 32-bit movemask integer for alarms and probe filters, where scalar
@@ -65,7 +65,7 @@ STRINGZILLA_INLINE sz_u32_t sz_utf8_uncased_movemask_u8x16x2_neon_(uint8x16_t lo
 }
 
 /** Detects bytes in the unsigned range from @p range_start up to, but excluding, @p range_start +
- *  @p range_length. NEON has unsigned byte compares, so `(x − start) < length` is one wrap-around
+ *  @p range_length. NEON has unsigned byte compares, so <tt>(x − start) < length</tt> is one wrap-around
  *  subtraction plus one @c VCLT: bytes below the start wrap above the length and drop out. */
 STRINGZILLA_INLINE uint8x16_t sz_utf8_uncased_in_byte_range_u8x16_neon_(uint8x16_t values_u8x16, sz_u8_t range_start,
                                                                         sz_u8_t range_length) {
@@ -77,7 +77,7 @@ STRINGZILLA_INLINE uint8x16_t sz_utf8_uncased_in_byte_range_u8x16_neon_(uint8x16
  *
  *  Lane 0 of the low register receives zero; lane 0 of the high register receives the low
  *  register's lane 15 - the carry across the internal 16-byte boundary. Vector-domain equivalent of
- *  Ice Lake's `k-mask << 1` and of AVX2's @c VPERM2I128 followed by @c VPALIGNR.
+ *  Ice Lake's <tt>k-mask << 1</tt> and of AVX2's @c VPERM2I128 followed by @c VPALIGNR.
  *
  *  The zero fill at lane 0 is correct because a real match starts on a character boundary where the
  *  lead byte's fold never needs its predecessor; the candidate-window re-fold uses the same
@@ -93,7 +93,7 @@ STRINGZILLA_INLINE uint8x16x2_t sz_utf8_uncased_previous_bytes_u8x16x2_neon_(uin
 
 /** Shifts the 32 chunk bytes left by one lane, so lane @c i holds byte i + 1. Lane 15 of the high
  *  register receives zero; lane 15 of the low register receives the high register's lane 0.
- *  Vector-domain equivalent of Ice Lake's `k-mask >> 1`. */
+ *  Vector-domain equivalent of Ice Lake's <tt>k-mask >> 1</tt>. */
 STRINGZILLA_INLINE uint8x16x2_t sz_utf8_uncased_next_bytes_u8x16x2_neon_(uint8x16x2_t source_u8x16x2) {
     uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
     uint8x16x2_t result_u8x16x2;
@@ -102,7 +102,7 @@ STRINGZILLA_INLINE uint8x16x2_t sz_utf8_uncased_next_bytes_u8x16x2_neon_(uint8x1
     return result_u8x16x2;
 }
 
-/** First N bits set, defined for `n == 32` (where `(1u << n) − 1` is undefined). */
+/** First N bits set, defined for <tt>n == 32</tt> (where <tt>(1u << n) − 1</tt> is undefined). */
 STRINGZILLA_INLINE sz_u32_t sz_utf8_uncased_mask_until_neon_(sz_size_t n) {
     return n >= 32 ? 0xFFFFFFFFu : ((sz_u32_t)1 << n) - 1;
 }

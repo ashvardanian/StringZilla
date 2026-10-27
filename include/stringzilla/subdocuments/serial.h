@@ -37,19 +37,19 @@ typedef enum sz_subdocuments_operation_t {
     sz_subdocuments_operation_exists_k = 1,
 
     /** Pushes the value of the one node the query ending at step @c operand selects, or Nothing for
-     *  none or several: a singular query, or `value()`. */
+     *  none or several: a singular query, or <tt>value()</tt>. */
     sz_subdocuments_operation_value_k = 2,
 
-    /** Pushes how many nodes the query ending at step @c operand selects: `count()`. */
+    /** Pushes how many nodes the query ending at step @c operand selects: <tt>count()</tt>. */
     sz_subdocuments_operation_count_k = 3,
 
-    /** Replaces a value with its `length()`. */
+    /** Replaces a value with its <tt>length()</tt>. */
     sz_subdocuments_operation_length_k = 4,
 
-    /** Replaces a value with whether pattern @c operand matches all of it: `match()`. */
+    /** Replaces a value with whether pattern @c operand matches all of it: <tt>match()</tt>. */
     sz_subdocuments_operation_match_k = 5,
 
-    /** Replaces a value with whether pattern @c operand matches some of it: `search()`. */
+    /** Replaces a value with whether pattern @c operand matches some of it: <tt>search()</tt>. */
     sz_subdocuments_operation_search_k = 6,
 
     /** Replaces two values with their comparison by @c operand, a
@@ -101,7 +101,7 @@ typedef struct sz_subdocuments_instruction_t {
     /** A number literal's value. */
     sz_f64_t number;
 
-    /** Where a string literal or a `match()` or `search()` pattern starts in @c strings_data. */
+    /** Where a string literal or a <tt>match()</tt> or <tt>search()</tt> pattern starts in @c strings_data. */
     sz_u32_t string_offset;
 
     /** Its unescaped bytes. */
@@ -149,24 +149,24 @@ typedef struct sz_subdocuments_engine_t {
     sz_u64_t const *wildcard_steps;
 
     /** Steps a descendant segment keeps live at every depth below: each one
-     *  precedes a `..` selector. */
+     *  precedes a <tt>..</tt> selector. */
     sz_u64_t const *descendant_steps;
 
     /** Steps with a slice the array's length settles: negative indices or bounds, or a step
      *  under -1. An array such a step may enter opens a pending run, settled when it closes. */
     sz_u64_t const *relative_steps;
 
-    /** XPath steps selecting attributes, `@name` and `@*`, which select no element. */
+    /** XPath steps selecting attributes, <tt>\@name</tt> and <tt>\@*</tt>, which select no element. */
     sz_u64_t const *attribute_steps;
 
-    /** XPath steps selecting text nodes, `text()`. */
+    /** XPath steps selecting text nodes, <tt>text()</tt>. */
     sz_u64_t const *text_steps;
 
     /** Steps with a filter selector, whose selection of a node waits for that node's close. */
     sz_u64_t const *filter_steps;
 
     /** Per filter, the root steps of its queries, @c words_count words each: the
-     *  steps `@` stands for. */
+     *  steps <tt>\@</tt> stands for. */
     sz_u64_t const *filters_roots;
 
     /** Every filter, in the order compiled. */
@@ -214,7 +214,7 @@ typedef struct sz_subdocuments_engine_t {
     /** Filters the paths hold. */
     sz_u32_t filters_count;
 
-    /** Patterns of `match()` and `search()`, each compiled behind a tag naming it, so
+    /** Patterns of <tt>match()</tt> and <tt>search()</tt>, each compiled behind a tag naming it, so
      *  that one engine answers for each alone: a tested string carries the tag of its
      *  pattern. Empty without any. */
     sz_regex_engine_t regex;
@@ -416,7 +416,7 @@ typedef struct sz_subdocuments_builder_t {
     /** Filter instructions so far. */
     sz_size_t instructions_count;
 
-    /** Patterns of `match()` and `search()` so far. */
+    /** Patterns of <tt>match()</tt> and <tt>search()</tt> so far. */
     sz_size_t patterns_count;
 
     /** Bytes of @c strings_data so far, bounded by the escaped ones while counting. */
@@ -608,7 +608,7 @@ STRINGZILLA_INLINE sz_size_t sz_subdocuments_skip_literal_(sz_cptr_t path, sz_si
 
 /**
  *  @brief Reads an RFC 9535 integer at @p path [*position]: an optional minus, no leading zeros, no
- *      `-0`, and a magnitude of at most 2⁵³ - 1.
+ *      @c -0, and a magnitude of at most 2⁵³ - 1.
  *  @return Whether one was there, leaving @p position where it was otherwise.
  */
 STRINGZILLA_INLINE sz_bool_t sz_subdocuments_parse_integer_(sz_cptr_t path, sz_size_t length, sz_size_t *position,
@@ -774,21 +774,21 @@ typedef enum sz_subdocuments_primary_t {
     /** A literal, already emitted: a comparable. */
     sz_subdocuments_primary_literal_k = 0,
 
-    /** A query, not emitted yet: an existence test, the argument of `count()` or `value()`, or a
+    /** A query, not emitted yet: an existence test, the argument of <tt>count()</tt> or <tt>value()</tt>, or a
      *  comparable if singular. */
     sz_subdocuments_primary_query_k = 1,
 
     /** A singular query, not emitted yet. */
     sz_subdocuments_primary_singular_k = 2,
 
-    /** A call of `length()` or `count()`, already emitted: a comparable that is
+    /** A call of <tt>length()</tt> or <tt>count()</tt>, already emitted: a comparable that is
      *  a number or Nothing. */
     sz_subdocuments_primary_number_k = 3,
 
-    /** A call of `value()`, already emitted: a comparable. */
+    /** A call of <tt>value()</tt>, already emitted: a comparable. */
     sz_subdocuments_primary_value_k = 4,
 
-    /** A call of `match()` or `search()`, already emitted: a test. */
+    /** A call of <tt>match()</tt> or <tt>search()</tt>, already emitted: a test. */
     sz_subdocuments_primary_logical_k = 5,
 } sz_subdocuments_primary_t;
 
@@ -810,7 +810,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_emit_query_(sz_subdocuments_parse
 
 /**
  *  @brief Parses one primary of a filter expression: a relative query, a literal, or a call of
- *      `length()`, `count()`, `value()`, `match()` or `search()`, checking each argument's type.
+ *      <tt>length()</tt>, <tt>count()</tt>, <tt>value()</tt>, <tt>match()</tt> or <tt>search()</tt>, checking each argument's type.
  *
  *  A query's own steps are numbered on the first pass, its root joining the filter's roots; on the
  *  second pass its segments compile the filters nested in it.
@@ -979,7 +979,7 @@ STRINGZILLA_OUTLINED_ sz_status_t sz_subdocuments_parse_primary_(sz_subdocuments
 }
 
 /** Parses a basic expression: a parenthesized one, a comparison, or a test, either of the last two
- *  negated by `!` only when it is a test. */
+ *  negated by <tt>!</tt> only when it is a test. */
 STRINGZILLA_INLINE sz_status_t sz_subdocuments_parse_basic_(sz_subdocuments_parser_t *parser) {
     sz_cptr_t const path = parser->path;
     sz_size_t const length = parser->length;
@@ -1073,7 +1073,7 @@ STRINGZILLA_OUTLINED_ sz_status_t sz_subdocuments_parse_or_(sz_subdocuments_pars
 }
 
 /**
- *  @brief Compiles the filter selector whose expression starts at `parser->position`, for @p step.
+ *  @brief Compiles the filter selector whose expression starts at @c parser->position, for @p step.
  *
  *  The first pass emits the program and numbers the steps of its queries, which follow every step
  *  numbered so far; the second compiles the filters nested in those queries, so every program and
@@ -1101,7 +1101,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_parse_filter_(sz_subdocuments_par
     return status;
 }
 
-/** The end of a filter selector's expression starting at @p position: the first `,` or `]` outside
+/** The end of a filter selector's expression starting at @p position: the first <tt>,</tt> or <tt>]</tt> outside
  *  parentheses, brackets and string literals, or @p length. */
 STRINGZILLA_INLINE sz_size_t sz_subdocuments_skip_filter_(sz_cptr_t path, sz_size_t length, sz_size_t position) {
     sz_size_t depth = 0;
@@ -1118,11 +1118,11 @@ STRINGZILLA_INLINE sz_size_t sz_subdocuments_skip_filter_(sz_cptr_t path, sz_siz
 }
 
 /**
- *  @brief Parses the segments after a path's `$` or a filter query's `@`, from `parser->position`
+ *  @brief Parses the segments after a path's <tt>$</tt> or a filter query's <tt>\@</tt>, from @c parser->position
  *      up to blank space no segment follows.
  *
  *  Numbering, it adds one step per segment and skips filter bodies; @p filtering, it adds nothing
- *  and compiles each filter selector for its segment's step, `root + segment`. Two passes keep
+ *  and compiles each filter selector for its segment's step, <tt>root + segment</tt>. Two passes keep
  *  every path's own steps contiguous, whatever its filters hold.
  *
  *  @param[out] segments_count Segments read.
@@ -1263,8 +1263,8 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_parse_path_(sz_cptr_t path, sz_si
     return sz_subdocuments_parse_segments_(&parser, root, sz_true_k, &segments_count, &singular);
 }
 
-/** Bytes an XML name may hold, as XPath name tests spell them: letters, digits, underscores, `-`,
- *  `.`, the `:` of a QName prefix, and every non-ASCII byte. */
+/** Bytes an XML name may hold, as XPath name tests spell them: letters, digits, underscores, <tt>-</tt>,
+ *  <tt>.</tt>, the <tt>:</tt> of a QName prefix, and every non-ASCII byte. */
 STRINGZILLA_CONSTEXPR sz_bool_t sz_subdocuments_is_xml_name_(sz_u8_t byte) {
     sz_u8_t const lowered = (sz_u8_t)(byte | 0x20);
     return (lowered >= 'a' && lowered <= 'z') || (byte >= '0' && byte <= ':') || byte == '_' || byte == '-' ||
@@ -1275,10 +1275,10 @@ STRINGZILLA_CONSTEXPR sz_bool_t sz_subdocuments_is_xml_name_(sz_u8_t byte) {
 
 /**
  *  @brief Parses one XPath 1.0 location path along forward axes into @p builder 's steps: an
- *      absolute path of `/` and `//` steps, each a name test, `*`, `@name`, `@*` or `text()`, with
- *      an optional position `[n]`, and no blank space.
+ *      absolute path of <tt>/</tt> and <tt>//</tt> steps, each a name test, <tt>*</tt>, <tt>\@name</tt>, <tt>\@*</tt> or <tt>text()</tt>, with
+ *      an optional position <tt>[n]</tt>, and no blank space.
  *  @return @c sz_invalid_syntax_k for anything else: relative paths, reverse axes, other
- *      predicates, and a bare `/`, whose document node is no element, attribute or text to report.
+ *      predicates, and a bare <tt>/</tt>, whose document node is no element, attribute or text to report.
  */
 STRINGZILLA_INLINE sz_status_t sz_subdocuments_parse_xpath_(sz_cptr_t path, sz_size_t length, sz_size_t path_index,
                                                             sz_subdocuments_builder_t *builder) {
@@ -1336,9 +1336,9 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_parse_xpath_(sz_cptr_t path, sz_s
  *  @brief Writes I-Regexp @p pattern in the regex family's syntax behind the tag of pattern
  *      @p index, a @p whole one matching all of a tested string and a partial one any part of it.
  *
- *  I-Regexp's `.` excludes line feeds and carriage returns; its `^` and `$` are plain characters.
+ *  I-Regexp's <tt>.</tt> excludes line feeds and carriage returns; its <tt>^</tt> and <tt>$</tt> are plain characters.
  *
- *  @return Bytes written, at most `7 * length + 48`.
+ *  @return Bytes written, at most <tt>7 * length + 48</tt>.
  */
 STRINGZILLA_INLINE sz_size_t sz_subdocuments_translate_pattern_(sz_cptr_t pattern, sz_size_t length, sz_size_t index,
                                                                 sz_bool_t whole, sz_ptr_t target) {
@@ -1372,7 +1372,7 @@ STRINGZILLA_INLINE sz_size_t sz_subdocuments_translate_pattern_(sz_cptr_t patter
 }
 
 /**
- *  @brief Compiles the pattern of every `match()` and `search()` of @p instructions into @p regex,
+ *  @brief Compiles the pattern of every <tt>match()</tt> and <tt>search()</tt> of @p instructions into @p regex,
  *      each behind its tag, for the capabilities in @p capabilities.
  *  @param[out] malformed_pattern The refused pattern, when @c sz_invalid_syntax_k is returned.
  */
@@ -1606,10 +1606,10 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_engine_compile_(
 /** The masks a tier's classifier makes for one 64-byte block, bit @c i standing for byte @c i. */
 typedef struct sz_subdocuments_block_t {
 
-    /** `{` and `[` outside strings. */
+    /** <tt>{</tt> and <tt>[</tt> outside strings. */
     sz_u64_t opens;
 
-    /** `}` and `]` outside strings. */
+    /** <tt>}</tt> and <tt>]</tt> outside strings. */
     sz_u64_t closes;
 
     /** Every byte the walk stops at: brackets, colons and commas outside strings, unescaped quotes,
@@ -1638,14 +1638,14 @@ typedef struct sz_subdocuments_carry_t {
     /** One when the block ended inside a scalar, so the next block's first byte starts none. */
     sz_u64_t scalar;
 
-    /** Nonzero once any block held a `/` outside strings, which no JSON document does. */
+    /** Nonzero once any block held a <tt>/</tt> outside strings, which no JSON document does. */
     sz_u64_t slashes;
 } sz_subdocuments_carry_t;
 
 /** Class bits by low nibble, for the SIMD tiers' classifiers, which AND it with the entry of the
- *  high nibble: `{[` 0x01, `}]` 0x02, `:` 0x04, `,` 0x08, `"` 0x10, `\` 0x20, space 0x40, and tab,
+ *  high nibble: <tt>{[</tt> 0x01, <tt>}]</tt> 0x02, <tt>:</tt> 0x04, <tt>,</tt> 0x08, <tt>"</tt> 0x10, <tt>\\</tt> 0x20, space 0x40, and tab,
  *  line feed and carriage return 0x80. Every class is a product of nibble sets, so no other byte
- *  gets a bit, while `/` alone gets both the comma's and the space's, which the settle tests. */
+ *  gets a bit, while <tt>/</tt> alone gets both the comma's and the space's, which the settle tests. */
 static sz_u8_t const sz_subdocuments_low_nibble_classes_k[16] = {0x40, 0,    0x10, 0,    0,    0,    0, 0,
                                                                  0,    0x80, 0x84, 0x01, 0x28, 0x82, 0, 0x48};
 
@@ -1688,7 +1688,7 @@ STRINGZILLA_INLINE sz_u64_t sz_subdocuments_in_string_(sz_u64_t *quotes, sz_u64_
 }
 
 /** Turns a block's raw byte masks into the walk's: drops escaped quotes, clears everything inside
- *  strings with @p prefix_xor, and marks the first byte of every scalar. A `/` arrives in both
+ *  strings with @p prefix_xor, and marks the first byte of every scalar. A <tt>/</tt> arrives in both
  *  @p separators and @p blanks, the one byte that does, and the carry records those outside
  *  strings, which fail the document however the walk reads them. */
 STRINGZILLA_INLINE sz_subdocuments_block_t sz_subdocuments_block_settle_with_(sz_u64_t quotes, sz_u64_t backslashes,
@@ -2033,7 +2033,7 @@ typedef struct sz_subdocuments_frame_t {
     /** One past the last match it reported, whose lengths settle when it closes. */
     sz_size_t matches_end;
 
-    /** The byte that closes it, `}` or `]`, or zero for a node that holds
+    /** The byte that closes it, <tt>}</tt> or <tt>]</tt>, or zero for a node that holds
      *  nothing the walk entered. */
     sz_size_t closer;
 
@@ -2206,7 +2206,7 @@ STRINGZILLA_INLINE void sz_subdocuments_report_(sz_subdocuments_engine_t const *
         }
 }
 
-/** Settles the lengths of the matches `[begin, end)` that fit, all starting at one byte. */
+/** Settles the lengths of the matches <tt>[begin, end)</tt> that fit, all starting at one byte. */
 STRINGZILLA_INLINE void sz_subdocuments_close_matches_(sz_match_t *matches, sz_size_t matches_capacity, sz_size_t begin,
                                                        sz_size_t end, sz_size_t end_offset) {
     for (end = sz_min_of_two(end, matches_capacity); begin < end; ++begin)
@@ -2344,7 +2344,7 @@ STRINGZILLA_INLINE sz_bool_t sz_subdocuments_compare_(sz_subdocuments_value_t co
     }
 }
 
-/** RFC 9535's `length()`: a string's codepoints, a container's elements or members, or Nothing. */
+/** RFC 9535's <tt>length()</tt>: a string's codepoints, a container's elements or members, or Nothing. */
 STRINGZILLA_INLINE sz_subdocuments_value_t sz_subdocuments_length_(sz_subdocuments_value_t const *value) {
     sz_subdocuments_value_t result;
     sz_size_t count = 0, index;
@@ -2386,7 +2386,7 @@ STRINGZILLA_INLINE sz_subdocuments_value_t sz_subdocuments_length_(sz_subdocumen
 }
 
 /** Whether pattern @p pattern of @p engine 's regex matches the string @p value, as compiled:
- *  all of it for `match()`, some of it for `search()`; any other value matches nothing. The
+ *  all of it for <tt>match()</tt>, some of it for <tt>search()</tt>; any other value matches nothing. The
  *  string is copied behind the pattern's tag into @p buffer, which the walk sizes past its
  *  document and the longest tag. */
 STRINGZILLA_INLINE sz_status_t sz_subdocuments_regex_test_(sz_subdocuments_engine_t *engine,
@@ -2417,7 +2417,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_regex_test_(sz_subdocuments_engin
     return status;
 }
 
-/** Runs filter @p filter for the node in slot @p node, over the slots `[node, end)` its subtree
+/** Runs filter @p filter for the node in slot @p node, over the slots <tt>[node, end)</tt> its subtree
  *  holds, whose live sets a replay from the filter's query roots left: a query selects the nodes
  *  where its final step is live. */
 STRINGZILLA_INLINE sz_status_t sz_subdocuments_filter_holds_(sz_subdocuments_engine_t *engine, sz_u8_t const *text,
@@ -2429,6 +2429,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_filter_holds_(sz_subdocuments_eng
     sz_subdocuments_value_t values[sz_subdocuments_filter_depth_k];
     sz_size_t depth = 0, index;
     sz_status_t status = sz_success_k;
+    values[0].number = 0; // An empty program holds for nothing.
     for (index = filter->instructions_begin; index != filter->instructions_end && status == sz_success_k; ++index) {
         sz_subdocuments_instruction_t const *const instruction = &engine->instructions[index];
         sz_subdocuments_value_t *const top = &values[depth];
@@ -2490,7 +2491,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_filter_holds_(sz_subdocuments_eng
 }
 
 /**
- *  @brief Settles slots `[begin, end)` of a closed pending run, each from its parent's live set.
+ *  @brief Settles slots <tt>[begin, end)</tt> of a closed pending run, each from its parent's live set.
  *
  *  Before a node's own live set, every filter of a step advancing into it runs: a replay of the
  *  node's subtree from the filter's query roots, which overwrites the live sets there before this
@@ -2499,13 +2500,13 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_filter_holds_(sz_subdocuments_eng
  *
  *  @param[in] spare A free slot past every kept one, holding this level's filter results; deeper
  *      levels take the next ones.
- *  @param[inout] emitted Matches so far, or null for a filter's replay.
+ *  @param[in,out] emitted Matches so far, or null for a filter's replay.
  */
-STRINGZILLA_INLINE sz_status_t sz_subdocuments_replay_(sz_subdocuments_engine_t *engine, sz_u8_t const *text,
-                                                       sz_u64_t *stack, sz_size_t begin, sz_size_t end, sz_size_t spare,
-                                                       sz_ptr_t buffer, sz_size_t capacity, sz_size_t document_index,
-                                                       sz_match_t *matches, sz_size_t matches_capacity,
-                                                       sz_size_t *emitted) {
+STRINGZILLA_OUTLINED_ sz_status_t sz_subdocuments_replay_(sz_subdocuments_engine_t *engine, sz_u8_t const *text,
+                                                          sz_u64_t *stack, sz_size_t begin, sz_size_t end,
+                                                          sz_size_t spare, sz_ptr_t buffer, sz_size_t capacity,
+                                                          sz_size_t document_index, sz_match_t *matches,
+                                                          sz_size_t matches_capacity, sz_size_t *emitted) {
     sz_size_t const header_words = sz_subdocuments_frame_header_words_(), words_count = engine->words_count;
     sz_size_t const frame_words = header_words + words_count + sz_subdocuments_names_words_(engine);
     sz_u64_t *const results = stack + spare * frame_words;
@@ -2608,7 +2609,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_replay_run_(sz_subdocuments_engin
  *  @param[in] names_lengths The lengths of the names, as @ref sz_subdocuments_names_lengths_ sets
  *      them for the batch.
  *  @param[in] stop_after The matches count at which the walk returns, leaving the rest unread.
- *  @param[inout] matches_count Matches reported before this document, then after it; only those
+ *  @param[in,out] matches_count Matches reported before this document, then after it; only those
  *      below @p matches_capacity are written.
  *  @return @c sz_success_k, @c sz_invalid_syntax_k for a malformed document, or @c sz_bad_alloc_k
  *      when the depth stack cannot grow.
@@ -2846,7 +2847,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walk_(sz_subdocuments_engine_t *e
 #pragma region Markup
 
 /** Signature of a tier's byte search, which the XML lexer runs to the next byte its state needs:
- *  `<` in character data, the closing quote of an attribute value, `>` in comments and the like. */
+ *  <tt>&lt;</tt> in character data, the closing quote of an attribute value, <tt>&gt;</tt> in comments and the like. */
 typedef sz_cptr_t (*sz_subdocuments_find_byte_t)(sz_cptr_t, sz_size_t, sz_cptr_t);
 
 /** The first @p byte at or after @p from, or @p length. */
@@ -2857,7 +2858,7 @@ STRINGZILLA_INLINE sz_size_t sz_subdocuments_markup_find_(sz_u8_t const *text, s
     return found ? (sz_size_t)(found - (sz_cptr_t)text) : length;
 }
 
-/** The `>` ending a comment, CDATA section or processing instruction whose body starts at
+/** The <tt>&gt;</tt> ending a comment, CDATA section or processing instruction whose body starts at
  *  @p from: the first preceded by @p terminator_length copies of @p terminator inside the
  *  body, or @p length. */
 STRINGZILLA_INLINE sz_size_t sz_subdocuments_markup_end_(sz_u8_t const *text, sz_size_t length,
@@ -2892,13 +2893,13 @@ STRINGZILLA_INLINE sz_size_t sz_subdocuments_markup_skip_name_(sz_u8_t const *te
 /** What an XPath step meets: an element, an attribute or a text node. */
 typedef enum sz_subdocuments_node_t {
 
-    /** An element, which name tests and `*` select. */
+    /** An element, which name tests and <tt>*</tt> select. */
     sz_subdocuments_node_element_k = 0,
 
-    /** An attribute, which `@name` and `@*` select. */
+    /** An attribute, which <tt>\@name</tt> and <tt>\@*</tt> select. */
     sz_subdocuments_node_attribute_k = 1,
 
-    /** A text node, which `text()` selects. */
+    /** A text node, which <tt>text()</tt> selects. */
     sz_subdocuments_node_text_k = 2,
 } sz_subdocuments_node_t;
 
@@ -2906,7 +2907,7 @@ typedef enum sz_subdocuments_node_t {
  *  @brief The live set of an XML node from its parent element's: the steps advancing into it whose
  *      test it passes, kept by their positions among the siblings passing the same test, plus for
  *      an element the steps a descendant segment carries.
- *  @param[inout] counters The parent's count of children passing each positional step's test, by
+ *  @param[in,out] counters The parent's count of children passing each positional step's test, by
  *      its slice index, as a step holds at most one position.
  */
 STRINGZILLA_INLINE void sz_subdocuments_node_live_(sz_subdocuments_engine_t const *engine, sz_u64_t const *parent_live,
@@ -2955,8 +2956,8 @@ STRINGZILLA_INLINE sz_size_t sz_subdocuments_markup_name_(sz_subdocuments_engine
  *  Slot 0 is the document node, whose child is the root element; every open element a live step can
  *  advance from takes a slot, its live set and its positional counters following the header. XML
  *  lexing needs no state across blocks, so instead of classifying every byte, the lexer runs the
- *  tier's byte search to the one byte its state needs, `<` in character data, the closing quote in
- *  an attribute value, and `>` in comments, CDATA sections and processing instructions, and reads
+ *  tier's byte search to the one byte its state needs, <tt>&lt;</tt> in character data, the closing quote in
+ *  an attribute value, and <tt>&gt;</tt> in comments, CDATA sections and processing instructions, and reads
  *  names byte by byte. An element no live step advances from is lexed to its end tag without a
  *  slot, so what it holds is not validated beyond its nesting.
  *
@@ -3175,7 +3176,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walk_markup_(sz_subdocuments_engi
 #pragma region Batches
 
 /** Bytes of the key buffer for a document of @p length bytes: @p key_bytes, or past the document
- *  and the longest pattern tag when `match()` or `search()` may copy one of its strings there. */
+ *  and the longest pattern tag when <tt>match()</tt> or <tt>search()</tt> may copy one of its strings there. */
 STRINGZILLA_INLINE sz_size_t sz_subdocuments_buffer_bytes_(sz_subdocuments_engine_t const *engine, sz_size_t key_bytes,
                                                            sz_size_t length) {
     if (!engine->patterns_count) return key_bytes;

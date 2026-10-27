@@ -109,21 +109,21 @@ STRINGZILLA_INLINE sz_u64_t sz_bytesum_haswell_(sz_cptr_t text, sz_size_t length
  *  issues on all three vector ports on this class of core, so the round mix stays throughput-bound
  *  rather than shift-bound. */
 
-/** Evaluates `(state_e & state_f) ^ (~state_e & state_g)` across 8 lanes. */
+/** Evaluates <tt>(state_e & state_f) ^ (~state_e & state_g)</tt> across 8 lanes. */
 STRINGZILLA_INLINE __m256i sz_sha256_choice_haswell_(__m256i state_e_u32x8, __m256i state_f_u32x8,
                                                      __m256i state_g_u32x8) {
     return _mm256_xor_si256(state_g_u32x8,
                             _mm256_and_si256(state_e_u32x8, _mm256_xor_si256(state_f_u32x8, state_g_u32x8)));
 }
 
-/** Evaluates `(state_a & state_b) ^ (state_a & state_c) ^ (state_b & state_c)` across 8 lanes. */
+/** Evaluates <tt>(state_a & state_b) ^ (state_a & state_c) ^ (state_b & state_c)</tt> across 8 lanes. */
 STRINGZILLA_INLINE __m256i sz_sha256_majority_haswell_(__m256i state_a_u32x8, __m256i state_b_u32x8,
                                                        __m256i state_c_u32x8) {
     return _mm256_xor_si256(_mm256_and_si256(_mm256_xor_si256(state_a_u32x8, state_b_u32x8), state_c_u32x8),
                             _mm256_and_si256(state_a_u32x8, state_b_u32x8));
 }
 
-/** Evaluates `ror(state_a, 2) ^ ror(state_a, 13) ^ ror(state_a, 22)` across 8 lanes. */
+/** Evaluates <tt>ror(state_a, 2) ^ ror(state_a, 13) ^ ror(state_a, 22)</tt> across 8 lanes. */
 STRINGZILLA_INLINE __m256i sz_sha256_big_sigma0_haswell_(__m256i state_a_u32x8) {
     __m256i const rotated_by_2_u32x8 = _mm256_or_si256(_mm256_srli_epi32(state_a_u32x8, 2),
                                                        _mm256_slli_epi32(state_a_u32x8, 30));
@@ -134,7 +134,7 @@ STRINGZILLA_INLINE __m256i sz_sha256_big_sigma0_haswell_(__m256i state_a_u32x8) 
     return _mm256_xor_si256(_mm256_xor_si256(rotated_by_2_u32x8, rotated_by_13_u32x8), rotated_by_22_u32x8);
 }
 
-/** Evaluates `ror(state_e, 6) ^ ror(state_e, 11) ^ ror(state_e, 25)` across 8 lanes. */
+/** Evaluates <tt>ror(state_e, 6) ^ ror(state_e, 11) ^ ror(state_e, 25)</tt> across 8 lanes. */
 STRINGZILLA_INLINE __m256i sz_sha256_big_sigma1_haswell_(__m256i state_e_u32x8) {
     __m256i const rotated_by_6_u32x8 = _mm256_or_si256(_mm256_srli_epi32(state_e_u32x8, 6),
                                                        _mm256_slli_epi32(state_e_u32x8, 26));
@@ -145,7 +145,7 @@ STRINGZILLA_INLINE __m256i sz_sha256_big_sigma1_haswell_(__m256i state_e_u32x8) 
     return _mm256_xor_si256(_mm256_xor_si256(rotated_by_6_u32x8, rotated_by_11_u32x8), rotated_by_25_u32x8);
 }
 
-/** Evaluates `ror(word, 7) ^ ror(word, 18) ^ (word >> 3)` across 8 lanes. */
+/** Evaluates <tt>ror(word, 7) ^ ror(word, 18) ^ (word >> 3)</tt> across 8 lanes. */
 STRINGZILLA_INLINE __m256i sz_sha256_small_sigma0_haswell_(__m256i message_word_u32x8) {
     __m256i const rotated_by_7_u32x8 = _mm256_or_si256(_mm256_srli_epi32(message_word_u32x8, 7),
                                                        _mm256_slli_epi32(message_word_u32x8, 25));
@@ -155,7 +155,7 @@ STRINGZILLA_INLINE __m256i sz_sha256_small_sigma0_haswell_(__m256i message_word_
                             _mm256_srli_epi32(message_word_u32x8, 3));
 }
 
-/** Evaluates `ror(word, 17) ^ ror(word, 19) ^ (word >> 10)` across 8 lanes. */
+/** Evaluates <tt>ror(word, 17) ^ ror(word, 19) ^ (word >> 10)</tt> across 8 lanes. */
 STRINGZILLA_INLINE __m256i sz_sha256_small_sigma1_haswell_(__m256i message_word_u32x8) {
     __m256i const rotated_by_17_u32x8 = _mm256_or_si256(_mm256_srli_epi32(message_word_u32x8, 17),
                                                         _mm256_slli_epi32(message_word_u32x8, 15));
@@ -168,7 +168,7 @@ STRINGZILLA_INLINE __m256i sz_sha256_small_sigma1_haswell_(__m256i message_word_
 /**
  *  @brief Transposes eight 32-byte halves into word-major big-endian order.
  *  @param[in] lanes_u32x8 The eight per-lane halves, byte-swapped on entry.
- *  @param[out] words_u32x8 Receives eight registers, where `words_u32x8[index]` holds that word
+ *  @param[out] words_u32x8 Receives eight registers, where <tt>words_u32x8[index]</tt> holds that word
  *      from all 8 lanes.
  *
  *  Two interleave stages gather 32-bit and then 64-bit neighbours inside each 128-bit half, and a
@@ -244,13 +244,13 @@ STRINGZILLA_INLINE void sz_sha256_round_haswell_(                               
 /**
  *  @brief Transposes and compresses one 64-byte block for each of 8 lanes into
  *      word-major hash registers.
- *  @param[inout] hashes Eight registers of word-major hash state, updated in place.
+ *  @param[in,out] hashes_u32x8 Eight registers of word-major hash state, updated in place.
  *  @param[in] lane_blocks Pointers to 8 message blocks, one per lane.
  *  @param[in] active_u32x8 All-ones per lane whose block counts; the rest keep
  *      their hash bit-for-bit.
  *
  *  Masking rides on the closing accumulation rather than on a saved copy and a blend. Compression
- *  ends in `hash += working`, so clearing the addend for a lane is all it needs to sit out, which
+ *  ends in <tt>hash += working</tt>, so clearing the addend for a lane is all it needs to sit out, which
  *  costs one @c vpand per word and one live mask register at a point where the state and the
  *  message window are already competing for sixteen. AVX2 has no write mask, hence the gated addend
  *  rather than a masked add. The rounds still run for an inactive lane and produce a value nobody
@@ -396,18 +396,18 @@ STRINGZILLA_INLINE void sz_sha256_compress_haswell_(__m256i hashes_u32x8[8], sz_
 /**
  *  @brief Compresses each lane's own run of whole blocks, plus an optional buffered block
  *      ahead of them.
- *  @param[inout] states The lane states, whose hash words are gathered on entry and
+ *  @param[in,out] states The lane states, whose hash words are gathered on entry and
  *      scattered on exit.
  *  @param[in] active_lanes_count Lanes owning a state, 1 to 8; the rest borrow lane zero
  *      and are discarded.
  *  @param[in] buffered_bitmask Lanes whose @c block the caller has just filled to 64
  *      bytes, compressed first.
- *  @param[inout] cursors Per-lane read positions, advanced past every block consumed.
+ *  @param[in,out] cursors Per-lane read positions, advanced past every block consumed.
  *  @param[in] blocks_per_lane Whole 64-byte blocks each lane owns; the loop runs as far
  *      as the largest.
  *
  *  Lanes retire independently. @p blocks_per_lane rides in a register as a countdown, and two masks
- *  come off it each turn: `counts > 0` says whose accumulation lands, `counts > 1` says whose
+ *  come off it each turn: <tt>counts > 0</tt> says whose accumulation lands, <tt>counts > 1</tt> says whose
  *  cursor steps. Splitting the two is what parks a retiring lane on its @b last full block instead
  *  of on a short tail, so every read stays in bounds with no per-block pointer select. A lane
  *  owning no blocks at all reads its own @c block buffer, which is always 64 valid bytes.

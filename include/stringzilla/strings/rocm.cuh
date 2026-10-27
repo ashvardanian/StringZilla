@@ -2,7 +2,7 @@
  *  @file include/stringzilla/strings/rocm.cuh
  *  @author Ash Vardanian
  *  @date October 4, 2026
- *  @brief ROCm host side of the string collection kernels in `strings/simt.cuh`: the residency
+ *  @brief ROCm host side of the string collection kernels in <tt>strings/simt.cuh</tt>: the residency
  *      checks, the scratch, the one readback a verb waits for, and the @c _rocm exports.
  *
  *  Every verb reads tapes and writes tapes the device reaches. It measures, reads the payload size
@@ -95,7 +95,7 @@ STRINGZILLA_INLINE sz_status_t sz_strings_measured_rocm_(sz_u64_t *scratch, sz_s
     return status;
 }
 
-/** Reads offsets `[0]` and `[count]` of the tape @p strings views back, synchronizing @p stream. */
+/** Reads offsets <tt>[0]</tt> and <tt>[count]</tt> of the tape @p strings views back, synchronizing @p stream. */
 STRINGZILLA_INLINE sz_status_t sz_strings_bounds_rocm_(sz_strings_view_t const *strings, sz_size_t count,
                                                        sz_size_t *first, sz_size_t *end, sz_stream_t stream) {
     sz_bool_t const wide = (sz_bool_t)(strings->layout == sz_strings_u64_tape_k);

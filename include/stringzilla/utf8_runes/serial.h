@@ -15,12 +15,12 @@ extern "C" {
 #endif
 #pragma region Rune Codec
 
-/** The unsigned value of the byte at @p offset. A `char const *` cannot be reinterpreted as
- *  `sz_u8_t const *` inside a constant expression, and that qualifier is what carries these helpers
+/** The unsigned value of the byte at @p offset. A <tt>char const *</tt> cannot be reinterpreted as
+ *  <tt>sz_u8_t const *</tt> inside a constant expression, and that qualifier is what carries these helpers
  *  into device code, so the sign is taken off one byte at a time instead. */
 STRINGZILLA_CONSTEXPR sz_u8_t sz_utf8_byte_at_(sz_cptr_t utf8, sz_size_t offset) { return (sz_u8_t)utf8[offset]; }
 
-/** Whether @p byte is a UTF-8 continuation byte (`0x80..0xBF`). The single low-level predicate
+/** Whether @p byte is a UTF-8 continuation byte (<tt>0x80..0xBF</tt>). The single low-level predicate
  *  every decode path shares, so @c sz_rune_decode and @c sz_utf8_maximal_subpart_ can never
  *  disagree on validity. */
 STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_is_continuation_(sz_u8_t byte) { return (sz_bool_t)((byte & 0xC0) == 0x80); }
@@ -140,7 +140,7 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_utf8_maximal_subpart_(sz_cptr_t utf8, sz_cptr
  *      validation; returns the byte length and stores the codepoint in @p rune.
  *  @warning Assumes valid, complete UTF-8 (a truncated trailing sequence over-reads). Use
  *      @c sz_rune_decode for the bounds-checked + validating variant, or
- *      `sz_utf8_find_malformed()` first.
+ *      <tt>sz_utf8_find_malformed()</tt> first.
  */
 STRINGZILLA_CONSTEXPR sz_rune_length_t sz_rune_decode_unchecked(sz_cptr_t utf8, sz_rune_t *rune) {
     sz_u8_t lead = sz_utf8_byte_at_(utf8, 0);
@@ -190,7 +190,7 @@ STRINGZILLA_CONSTEXPR sz_rune_length_t sz_rune_encode(sz_rune_t rune, sz_u8_t *u
     return sz_rune_invalid_k;
 }
 
-/** Locate the first ill-formed byte in `[text, text+length)`; @c STRINGZILLA_NULL_CHAR if
+/** Locate the first ill-formed byte in <tt>[text, text+length)</tt>; @c STRINGZILLA_NULL_CHAR if
  *  entirely well-formed UTF-8. */
 STRINGZILLA_CONSTEXPR sz_cptr_t sz_utf8_find_malformed(sz_cptr_t text, sz_size_t length) {
     sz_cptr_t const end = text + length;
@@ -268,7 +268,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_serial_( //
     return text_cursor;
 }
 
-/** Decode the UTF-8 codepoint at `*position`, advancing it. Ill-formed bytes (lone continuation,
+/** Decode the UTF-8 codepoint at <tt>*position</tt>, advancing it. Ill-formed bytes (lone continuation,
  *  overlong, surrogate, out-of-range, truncated) decode to U+FFFD consuming one byte — the
  *  segmentation-side substitution the SIMD @c sz_utf8_rune_decode_window_ classifiers mirror
  *  byte-for-byte. (The rune-unpack path uses the ICU maximal-subpart resync instead; segmentation
@@ -337,7 +337,7 @@ STRINGZILLA_CONSTEXPR sz_u64_t sz_u64_smear_right_(sz_u64_t bits, sz_u64_t reach
  *  Reaches the full 64-lane span without a per-lane loop, so runs of arbitrary length resolve in
  *  six iterations (sentence SB8 / line SP-runs).
  *
- *  @note A bit at lane @c i ends up set when `seed[i]` or there is a contiguous @p gate run from
+ *  @note A bit at lane @c i ends up set when <tt>seed[i]</tt> or there is a contiguous @p gate run from
  *      some seeded lane up to and including @c i. The gate is contracted alongside the flood so
  *      each doubling step still only crosses lanes that are themselves gated.
  */

@@ -85,13 +85,13 @@ STRINGZILLA_INLINE __m256i sz_grapheme_astral_descriptor_haswell_(__m256i plane_
     return result_u8x32;
 }
 
-/** Per-half unsigned `value >= bound` mask, as AVX2 lacks an unsigned byte compare:
- *  `max_epu8(value, bound) == value`. */
+/** Per-half unsigned <tt>value >= bound</tt> mask, as AVX2 lacks an unsigned byte compare:
+ *  <tt>max_epu8(value, bound) == value</tt>. */
 STRINGZILLA_INLINE __m256i sz_grapheme_cmpge_epu8_haswell_(__m256i value_u8x32, __m256i bound_u8x32) {
     return _mm256_cmpeq_epi8(_mm256_max_epu8(value_u8x32, bound_u8x32), value_u8x32);
 }
 
-/** 64-bit unsigned `low ≤ cp ≤ high` mask over reconstructed BMP codepoints carried in
+/** 64-bit unsigned <tt>low ≤ cp ≤ high</tt> mask over reconstructed BMP codepoints carried in
  *  @p high_byte and @p low_byte halves. With cp = (high << 8) | low, the inclusive 16-bit range
  *  test passes a high byte strictly between the bounds unconditionally, and on the boundary high
  *  bytes checks the low byte against its bound. Two halves, branchless. */
@@ -129,7 +129,7 @@ STRINGZILLA_INLINE sz_u64_t sz_grapheme_cp_in_range_haswell_(__m256i high_lo_u8x
 
 /** Lanes whose BMP codepoint resolves uniformly to GCB=Other via the CJK and Kana arithmetic
  *  ranges, the AVX2 twin of @c sz_grapheme_cjk_other_icelake_:
- *  `[0x3000,0xA66E] | [0xD7FC,0xFB1D]` minus the interior Extend and enclosed exceptions. Such
+ *  <tt>[0x3000,0xA66E] | [0xD7FC,0xFB1D]</tt> minus the interior Extend and enclosed exceptions. Such
  *  lanes need no cold cascade, as their descriptor is 0. */
 STRINGZILLA_INLINE sz_u64_t sz_grapheme_cjk_other_haswell_(__m256i high_lo_u8x32, __m256i low_lo_u8x32,
                                                            __m256i high_hi_u8x32, __m256i low_hi_u8x32) {
@@ -150,8 +150,8 @@ STRINGZILLA_INLINE sz_u64_t sz_grapheme_cjk_other_haswell_(__m256i high_lo_u8x32
     return (run_a | run_b) & ~(exc_a | exc_b | exc_c | exc_d | exc_e);
 }
 
-/** Computes `next3[i] = window[i+3]` over all 64 lanes with mod-64 wrap, the AVX2 twin
- *  of the Ice Lake `_mm512_permutexvar_epi8(lane_identity+3)`, the idiom of the
+/** Computes <tt>next3[i] = window[i+3]</tt> over all 64 lanes with mod-64 wrap, the AVX2 twin
+ *  of the Ice Lake <tt>_mm512_permutexvar_epi8(lane_identity+3)</tt>, the idiom of the
  *  substrate forward neighbours. */
 STRINGZILLA_INLINE void sz_grapheme_next3_haswell_(__m256i window_lo_u8x32, __m256i window_hi_u8x32,
                                                    __m256i *next3_lo_u8x32, __m256i *next3_hi_u8x32) {
@@ -414,7 +414,7 @@ STRINGZILLA_INLINE sz_grapheme_classified_haswell_t sz_grapheme_classify_window_
  *  portable engine. Each per-class membership mask is built in the byte-lane domain, from
  *  @c vpcmpeqb halves into @c mask_combine, then compacted to the codepoint-dense domain by a
  *  single @c _pext_u64 over the start lanes, the analogue without @c vpcompressb of the Ice Lake
- *  per-class `& valid` after the dense compress. No scalar loop and no rule control flow. */
+ *  per-class <tt>& valid</tt> after the dense compress. No scalar loop and no rule control flow. */
 STRINGZILLA_INLINE sz_grapheme_window_masks_t sz_grapheme_build_masks_haswell_(
     sz_grapheme_classified_haswell_t classified, sz_u64_t valid) {
     sz_u64_t const starts = classified.start_lanes;

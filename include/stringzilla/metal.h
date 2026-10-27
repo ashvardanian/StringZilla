@@ -3,16 +3,16 @@
  *  @author Ash Vardanian
  *  @date September 24, 2026
  *  @brief Core types on an Apple GPU: the library's state per device, the unified memory both sides
- *      address, and the calls every Metal family encodes, the twin of `types.cuh`.
+ *      address, and the calls every Metal family encodes, the twin of <tt>types.cuh</tt>.
  *
  *  A stream is an @c id<MTLCommandQueue>, which names its device; a null stream means the system
- *  default device's own queue. The library keeps one @ref sz_metal_context_t per device for the
+ *  default device's own queue. The library keeps one @c sz_metal_context_t per device for the
  *  process, as a CUDA primary context lives: that default queue, the compiled pipelines, the
  *  command buffers committed to each stream, and a registry of every shared buffer the unified
  *  allocator handed out, sorted by host address.
  *
  *  A shared buffer's host address is never its GPU address, so a kernel gets every block it reads
- *  as a buffer of its own, at the offset @ref sz_metal_resolve_ finds in the registry. A block
+ *  as a buffer of its own, at the offset @c sz_metal_resolve_ finds in the registry. A block
  *  points inside itself by host address, which the kernel turns into its own against the host
  *  address the block was bound at. No block points into another, which is why kernels read tapes.
  *
@@ -693,15 +693,20 @@ STRINGZILLA_INLINE sz_status_t sz_metal_tape_call_(sz_metal_call_t *call, sz_str
 
 #pragma region Public API
 
-/** Initializes @p allocator to hand back shared buffers on the device of each call's stream, which
- *  both the host and device address. Encoded work retains buffers until completion. The allocator
- *  is stateless, so its handle is null. @return @c sz_success_k. */
+/**
+ *  @brief Initializes @p allocator to hand back shared buffers on the device of each call's
+ *      stream, which both the host and device address.
+ *
+ *  Encoded work retains buffers until completion. The allocator is stateless, so its
+ *  handle is null.
+ */
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_metal(sz_allocator_t *allocator);
 
 /**
  *  @brief Waits for every call committed to @p stream before the synchronization begins.
- *  @return The first failure: @c sz_device_code_mismatch_k when a command buffer finished in error,
- *      or @c sz_missing_gpu_k without a device.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_gpu_k Without a device.
  */
 STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(sz_stream_t stream);
 

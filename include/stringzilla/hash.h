@@ -15,7 +15,7 @@
  *  Why the hell do we need a yet another hashing library?! Turns out, most existing libraries have
  *  noticeable constraints. Try finding a library that:
  *
- *  - Outputs 64-bit or 128-bit hashes and passes the @b SMHasher `--extra` tests.
+ *  - Outputs 64-bit or 128-bit hashes and passes the @b SMHasher @c --extra tests.
  *  - Is fast for both short @b (velocity) and long strings @b (throughput).
  *  - Supports incremental @b (streaming) hashing, when the data arrives in chunks.
  *  - Supports custom @b seeds for hashes and have it affecting every bit of the output.
@@ -32,7 +32,7 @@
  *    computing packet checksums in network traffic or implementing persistent data structures.
  *  - "xxHash" is implemented in C, has an extremely wide set of third-party language bindings, and
  *    provides 32-, 64-, and 128-bit hashes. It is fast, but its dynamic dispatch is limited to x86
- *    with `xxh_x86dispatch.c`.
+ *    with <tt>xxh_x86dispatch.c</tt>.
  *
  *  StringZilla uses a scheme more similar to "aHash" and "GxHash", utilizing the AES extensions,
  *  that provide a remarkable level of "mixing per cycle" and are broadly available on modern CPUs.
@@ -103,7 +103,6 @@ extern "C" {
  *  @param[out] checksum The 64-bit unsigned sum.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
  *  Summing the bytes of "hi", 104 + 105:
  *
@@ -121,6 +120,9 @@ extern "C" {
  *  @sa sz_bytesum_serial, sz_bytesum_haswell, sz_bytesum_skylake, sz_bytesum_icelake,
  *      sz_bytesum_neon, sz_bytesum_sve, sz_bytesum_sve2, sz_bytesum_v128, sz_bytesum_v128relaxed,
  *      sz_bytesum_rvv, sz_bytesum_loongsonasx, sz_bytesum_powervsx
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_bytesum_best(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum,
                                             sz_capability_t capabilities, sz_stream_t stream);
@@ -134,10 +136,9 @@ STRINGZILLA_API sz_status_t sz_bytesum_best(sz_cptr_t text, sz_size_t length, sz
  *  @param[out] hash The 64-bit hash value.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
  *  It's not cryptographically secure, but it's fast and provides a good distribution. It passes the
- *  SMHasher suite by Austin Appleby with no collisions, even with the `--extra` flag. HASH.md
+ *  SMHasher suite by Austin Appleby with no collisions, even with the @c --extra flag. HASH.md
  *  explains the algorithm in detail.
  *
  *  Telling two different strings apart:
@@ -159,12 +160,15 @@ STRINGZILLA_API sz_status_t sz_bytesum_best(sz_cptr_t text, sz_size_t length, sz
  *      sz_hash_sve2aes, sz_hash_rvv, sz_hash_rvvcrypto, sz_hash_v128, sz_hash_v128relaxed,
  *      sz_hash_loongsonasx, sz_hash_powervsx
  *  @sa sz_hash_state_init_best, sz_hash_state_update_best, sz_hash_state_digest_best
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_hash_best(sz_cptr_t text, sz_size_t length, sz_u64_t seed, sz_u64_t *hash,
                                          sz_capability_t capabilities, sz_stream_t stream);
 
 /**
- *  @brief Hashes every one of `strings[order[i]]`, or of the first @p count strings, under one
+ *  @brief Hashes every one of <tt>strings[order[i]]</tt>, or of the first @p count strings, under one
  *      @p seed, each exactly as @c sz_hash_best would, for group-by keys, joins and sharding.
  *
  *  A tape read in its own order loads each window of consecutive keys once and hashes the keys of
@@ -178,7 +182,9 @@ STRINGZILLA_API sz_status_t sz_hash_best(sz_cptr_t text, sz_size_t length, sz_u6
  *  @param[out] hashes The @p count hashes, one per string.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_hash_strings_best(sz_strings_view_t const *strings, sz_size_t const *order,
                                                  sz_size_t count, sz_u64_t seed, sz_u64_t *hashes,
@@ -194,7 +200,6 @@ STRINGZILLA_API sz_status_t sz_hash_strings_best(sz_strings_view_t const *string
  *  @param[out] hashes Caller-allocated output buffer of @p seeds_count 64-bit hashes.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
  *  Equivalent to hashing with @c sz_hash_best under each of @p seeds, but normalizes the input into
  *  AES blocks @b once and replays the cheap per-seed rounds over that prepared form.
@@ -223,6 +228,9 @@ STRINGZILLA_API sz_status_t sz_hash_strings_best(sz_strings_view_t const *string
  *  @sa sz_hash_multiseed_serial, sz_hash_multiseed_westmere, sz_hash_multiseed_icelake,
  *      sz_hash_multiseed_neonaes, sz_hash_multiseed_rvvcrypto, sz_hash_multiseed_v128,
  *      sz_hash_multiseed_v128relaxed, sz_hash_multiseed_powervsx
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_hash_multiseed_best( //
     sz_cptr_t text, sz_size_t length,               //
@@ -248,7 +256,6 @@ STRINGZILLA_API sz_status_t sz_hash_multiseed_best( //
  *  @param[in] nonce "Number used once" to ensure uniqueness of produced blocks.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
  *  Filling two buffers under the same nonce:
  *
@@ -271,6 +278,9 @@ STRINGZILLA_API sz_status_t sz_hash_multiseed_best( //
  *      sz_fill_random_icelake, sz_fill_random_neonaes, sz_fill_random_sve2aes, sz_fill_random_rvv,
  *      sz_fill_random_rvvcrypto, sz_fill_random_v128, sz_fill_random_v128relaxed,
  *      sz_fill_random_loongsonasx, sz_fill_random_powervsx
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_fill_random_best(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
                                                 sz_capability_t capabilities, sz_stream_t stream);
@@ -282,9 +292,11 @@ STRINGZILLA_API sz_status_t sz_fill_random_best(sz_ptr_t target, sz_size_t lengt
  *  @param[in] seed The 64-bit unsigned seed for the hash.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
  *  Every backend shares the state layout, so each call of a stream may pass other @p capabilities.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_hash_state_init_best(sz_hash_state_t *state, sz_u64_t seed, sz_capability_t capabilities,
                                                     sz_stream_t stream);
@@ -292,12 +304,14 @@ STRINGZILLA_API sz_status_t sz_hash_state_init_best(sz_hash_state_t *state, sz_u
 /**
  *  @brief Updates the state with new data.
  *
- *  @param[inout] state The state to stream.
+ *  @param[in,out] state The state to stream.
  *  @param[in] text The new data to include in the hash.
  *  @param[in] length The number of bytes in the new data.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_hash_state_update_best(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length,
                                                       sz_capability_t capabilities, sz_stream_t stream);
@@ -309,7 +323,9 @@ STRINGZILLA_API sz_status_t sz_hash_state_update_best(sz_hash_state_t *state, sz
  *  @param[out] hash The 64-bit hash value, as @c sz_hash_best gives for the same bytes and seed.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_hash_state_digest_best(sz_hash_state_t const *state, sz_u64_t *hash,
                                                       sz_capability_t capabilities, sz_stream_t stream);
@@ -320,9 +336,11 @@ STRINGZILLA_API sz_status_t sz_hash_state_digest_best(sz_hash_state_t const *sta
  *  @param[out] state The state to initialize.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
  *  Every backend shares the state layout, so each call of a stream may pass other @p capabilities.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_sha256_state_init_best(sz_sha256_state_t *state, sz_capability_t capabilities,
                                                       sz_stream_t stream);
@@ -330,12 +348,14 @@ STRINGZILLA_API sz_status_t sz_sha256_state_init_best(sz_sha256_state_t *state, 
 /**
  *  @brief Updates the SHA256 state with new data.
  *
- *  @param[inout] state The state to update.
+ *  @param[in,out] state The state to update.
  *  @param[in] text The new data to hash.
  *  @param[in] length The number of bytes in the new data.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_sha256_state_update_best(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length,
                                                         sz_capability_t capabilities, sz_stream_t stream);
@@ -347,7 +367,9 @@ STRINGZILLA_API sz_status_t sz_sha256_state_update_best(sz_sha256_state_t *state
  *  @param[out] digest Output buffer for the 32-byte (256-bit) digest.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_sha256_state_digest_best(sz_sha256_state_t const *state,
                                                         sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)],
@@ -356,13 +378,12 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_best(sz_sha256_state_t const 
 /**
  *  @brief Advances many independent SHA256 states, one message per lane.
  *
- *  @param[inout] states Array of at least `texts->count` states, each initialized with
+ *  @param[in,out] states Array of at least @c texts->count states, each initialized with
  *      @c sz_sha256_state_init_best.
  *  @param[in] texts Strings supplying the next chunk of each lane's message, with @c count lanes;
  *      on a GPU, a tape the device addresses, like @c sz_strings_to_tape_best writes.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
  *  Hashing one message is a serial dependency chain, so a wider instruction set cannot accelerate
  *  it. Independent messages compress in parallel lanes, which is what this does: sixteen at a time
@@ -399,6 +420,9 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_best(sz_sha256_state_t const 
  *  Lanes are grouped by vector width and a group advances in lockstep, so it costs as much as its
  *  longest member. Inputs sorted by length put similar lengths in the same group, and
  *  @c sz_sort_order_best gives that ordering.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_sha256_multistate_update_best(sz_sha256_state_t *states, sz_strings_view_t const *texts,
                                                              sz_capability_t capabilities, sz_stream_t stream);
@@ -408,15 +432,17 @@ STRINGZILLA_API sz_status_t sz_sha256_multistate_update_best(sz_sha256_state_t *
  *
  *  @param[in] states Array of @p states_count states.
  *  @param[in] states_count Number of states to finalize, which is the lane count.
- *  @param[out] digests Output buffer of `states_count * STRINGZILLA_SHA256_DIGEST_LENGTH` bytes,
+ *  @param[out] digests Output buffer of <tt>states_count * STRINGZILLA_SHA256_DIGEST_LENGTH</tt> bytes,
  *      one big-endian digest per lane, in lane order.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
  *  Leaves every state unmodified, so a streaming caller can take an interim digest and append more.
  *
  *  @sa sz_sha256_state_digest_best, sz_sha256_multistate_update_best
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k No capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_best(sz_sha256_state_t const *states, sz_size_t states_count,
                                                              sz_u8_t *digests, sz_capability_t capabilities,
@@ -979,9 +1005,14 @@ STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_rocm(sz_sha256_state_t c
 
 /**
  *  @brief Finds the hashing kernel of @p kind, from the best of @p capabilities.
+ *  @param[in] kind The verb whose kernel to find.
+ *  @param[in] capabilities The mask to pick the best capability from.
  *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
  *  @param[out] capability The capability the kernel belongs to, or zero.
- *  @return @c sz_success_k, @c sz_missing_kernel_k, or @c sz_missing_library_k when header-only.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_kernel_k
+ *  - @c sz_missing_library_k Header-only.
  */
 STRINGZILLA_API sz_status_t sz_hash_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
                                                 sz_kernel_punned_t *kernel, sz_capability_t *capability);

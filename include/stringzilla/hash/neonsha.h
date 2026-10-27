@@ -27,7 +27,7 @@ extern "C" {
 
 /**
  *  @brief Process a single 512-bit (64-byte) block of data using SHA256.
- *  @param[inout] hash Pointer to 8x 32-bit hash values, modified in place.
+ *  @param[in,out] hash Pointer to 8x 32-bit hash values, modified in place.
  *  @param[in] block Pointer to 64-byte message block.
  */
 STRINGZILLA_INLINE void sz_sha256_process_block_neon_(
@@ -345,7 +345,7 @@ STRINGZILLA_INLINE uint32x4_t sz_sha256_extend_neonsha_(uint32x4_t oldest_words_
 
 /**
  *  @brief Compresses one 64-byte block in each of four independent lanes.
- *  @param[inout] hashes_u32x4 Lane k keeps @c abcd at index 2k and @c efgh at 2k + 1.
+ *  @param[in,out] hashes_u32x4 Lane k keeps @c abcd at index 2k and @c efgh at 2k + 1.
  *  @param[in] lane_blocks One 64-byte block per lane.
  *  @param[in] active_bitmask Lanes whose result lands; the rest keep their hash bit-for-bit.
  *
@@ -459,10 +459,10 @@ STRINGZILLA_INLINE void sz_sha256_compress_x4_neonsha_(uint32x4_t hashes_u32x4[8
 /**
  *  @brief Compresses each of up to four lanes' own run of whole blocks, plus an optional buffered
  *      block ahead of them.
- *  @param[inout] states The lane states, whose hash words are loaded on entry and stored on exit.
+ *  @param[in,out] states The lane states, whose hash words are loaded on entry and stored on exit.
  *  @param[in] active_lanes_count Lanes owning a state, 1 to 4; others borrow lane zero.
  *  @param[in] buffered_bitmask Lanes whose @c block the caller filled to 64 bytes, first.
- *  @param[inout] cursors Per-lane read positions, advanced past every block consumed.
+ *  @param[in,out] cursors Per-lane read positions, advanced past every block consumed.
  *  @param[in] blocks_per_lane Whole 64-byte blocks each lane owns; the loop runs to the largest.
  *
  *  A retiring lane parks on its last full block instead of stepping onto its short tail, so every
