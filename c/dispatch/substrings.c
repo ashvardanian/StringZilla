@@ -75,6 +75,49 @@ static sz_capability_kernels_t const *sz_substrings_engine_init_capabilities(voi
     return lists;
 }
 
+static sz_capability_kernels_t const *sz_substrings_contains_capabilities(void) {
+    static sz_kernel_punned_t const cpu[] = {
+        STRINGZILLA_NULL,
+        (sz_kernel_punned_t)&sz_substrings_contains_serial,
+#if STRINGZILLA_TARGET_HASWELL
+        (sz_kernel_punned_t)&sz_substrings_contains_haswell,
+#endif
+#if STRINGZILLA_TARGET_ICELAKE
+        (sz_kernel_punned_t)&sz_substrings_contains_icelake,
+#endif
+#if STRINGZILLA_TARGET_NEON
+        (sz_kernel_punned_t)&sz_substrings_contains_neon,
+#endif
+#if STRINGZILLA_TARGET_SVE2
+        (sz_kernel_punned_t)&sz_substrings_contains_sve2,
+#endif
+#if STRINGZILLA_TARGET_RVV
+        (sz_kernel_punned_t)&sz_substrings_contains_rvv,
+#endif
+#if STRINGZILLA_TARGET_V128
+        (sz_kernel_punned_t)&sz_substrings_contains_v128,
+#endif
+#if STRINGZILLA_TARGET_LOONGSONASX
+        (sz_kernel_punned_t)&sz_substrings_contains_loongsonasx,
+#endif
+#if STRINGZILLA_TARGET_POWERVSX
+        (sz_kernel_punned_t)&sz_substrings_contains_powervsx,
+#endif
+    };
+    static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
+        {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
+             sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
+             sz_cap_sve2_k * STRINGZILLA_TARGET_SVE2 | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV |
+             sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
+             sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
+         cpu},
+        {0, sz_no_kernels_},
+        {0, sz_no_kernels_},
+        {0, sz_no_kernels_},
+    };
+    return lists;
+}
+
 static sz_capability_kernels_t const *sz_substrings_counts_capabilities(void) {
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -348,6 +391,13 @@ STRINGZILLA_API void sz_substrings_engine_free(sz_substrings_engine_t *engine, s
     sz_substrings_engine_free_(engine, stream);
 }
 
+STRINGZILLA_API sz_status_t sz_substrings_contains(sz_substrings_engine_t *engine, sz_strings_view_t const *haystacks,
+                                                   sz_u1x8_t *contained, sz_stream_t stream) {
+    sz_kernel_substrings_contains_t const kernel = (sz_kernel_substrings_contains_t)sz_kernel_pick_(
+        engine->capability, sz_substrings_contains_capabilities());
+    return kernel ? kernel(engine, haystacks, contained, stream) : sz_missing_kernel_k;
+}
+
 STRINGZILLA_API sz_status_t sz_substrings_counts(sz_substrings_engine_t *engine, sz_strings_view_t const *haystacks,
                                                  sz_size_t *counts, sz_size_t counts_stride, sz_stream_t stream) {
     sz_kernel_substrings_counts_t const kernel = (sz_kernel_substrings_counts_t)sz_kernel_pick_(
@@ -390,6 +440,7 @@ STRINGZILLA_API sz_status_t sz_substrings_find_kernel(sz_kernel_kind_t kind, sz_
     sz_capability_kernels_t const *lists = STRINGZILLA_NULL;
     switch (kind) {
     case sz_kernel_substrings_engine_init_k: lists = sz_substrings_engine_init_capabilities(); break;
+    case sz_kernel_substrings_contains_k: lists = sz_substrings_contains_capabilities(); break;
     case sz_kernel_substrings_counts_k: lists = sz_substrings_counts_capabilities(); break;
     case sz_kernel_substrings_find_k: lists = sz_substrings_find_capabilities(); break;
     case sz_kernel_substrings_replace_k: lists = sz_substrings_replace_capabilities(); break;

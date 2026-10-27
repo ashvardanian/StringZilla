@@ -81,12 +81,19 @@ STRINGZILLA_INLINE sz_subdocuments_block_t sz_subdocuments_classify_v128_(sz_u8_
 
 #if STRINGZILLA_TARGET_V128
 
-STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_v128(sz_subdocuments_engine_t *engine,
-                                                             sz_strings_view_t const *paths,
-                                                             sz_subdocuments_format_t format,
-                                                             sz_size_t *malformed_index, sz_allocator_t *allocator,
-                                                             sz_stream_t stream) {
-    return sz_subdocuments_engine_compile_(engine, paths, format, malformed_index, sz_cap_v128_k, allocator, stream);
+STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_v128(
+    sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths, sz_subdocuments_format_t format,
+    sz_subdocuments_options_t options, sz_size_t *malformed_index, sz_allocator_t *allocator, sz_stream_t stream) {
+    return sz_subdocuments_engine_compile_(engine, paths, format, options, malformed_index, sz_cap_v128_k, allocator,
+                                           stream);
+}
+
+STRINGZILLA_API sz_status_t sz_subdocuments_contains_v128(sz_subdocuments_engine_t *engine,
+                                                          sz_strings_view_t const *documents, sz_u1x8_t *contained,
+                                                          sz_size_t *malformed_index, sz_stream_t stream) {
+    sz_unused_(stream);
+    return sz_subdocuments_contains_with_(engine, &sz_subdocuments_classify_v128_, &sz_subdocuments_classify_v128_,
+                                          &sz_find_byte_v128_, documents, contained, malformed_index);
 }
 
 STRINGZILLA_API sz_status_t sz_subdocuments_counts_v128(sz_subdocuments_engine_t *engine,

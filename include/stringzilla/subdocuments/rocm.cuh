@@ -56,7 +56,8 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_reserve_rocm_(sz_subdocuments_eng
                                          stream);
     if (!grown) return sz_bad_alloc_k;
     engine->scratch = grown, engine->scratch_bytes = bytes;
-    return sz_success_k;
+    // The kernels walk the block, so a host-only allocation cannot hold it.
+    return sz_memory_accessible_rocm_(grown) ? sz_success_k : sz_device_memory_mismatch_k;
 }
 
 /** Points @p round into the round block: the header, the counts, the list of deep documents, the
@@ -404,18 +405,17 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walks_rocm_(sz_subdocuments_engin
 
 /** Compiles @p paths on the device the caller made current, as
  *  @ref sz_subdocuments_engine_init_rocm does. */
-STRINGZILLA_INLINE sz_status_t sz_subdocuments_engine_init_scoped_rocm_(sz_subdocuments_engine_t *engine,
-                                                                        sz_strings_view_t const *paths,
-                                                                        sz_subdocuments_format_t format,
-                                                                        sz_size_t *malformed_index,
-                                                                        sz_allocator_t *allocator, sz_stream_t stream) {
+STRINGZILLA_INLINE sz_status_t sz_subdocuments_engine_init_scoped_rocm_(
+    sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths, sz_subdocuments_format_t format,
+    sz_subdocuments_options_t options, sz_size_t *malformed_index, sz_allocator_t *allocator, sz_stream_t stream) {
     hipPointerAttribute_t attributes;
     sz_allocator_t unified;
     sz_status_t status;
     if (!sz_device_multiprocessors_rocm_()) return sz_missing_gpu_k;
     if (allocator) unified = *allocator;
     else sz_allocator_init_unified_rocm_(&unified);
-    status = sz_subdocuments_engine_compile_(engine, paths, format, malformed_index, sz_cap_rocm_k, &unified, stream);
+    status = sz_subdocuments_engine_compile_(engine, paths, format, options, malformed_index, sz_cap_rocm_k, &unified,
+                                             stream);
     if (status != sz_success_k) return status;
     // `match()` and `search()` walk the forward DFA, which a pattern set past
     // its state budget lacks.
@@ -468,15 +468,14 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_find_scoped_rocm_(sz_subdocuments
 /*  Each export makes the stream's device current around its helper, and restores the caller's. */
 #if STRINGZILLA_TARGET_ROCM
 
-STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_rocm(sz_subdocuments_engine_t *engine,
-                                                             sz_strings_view_t const *paths,
-                                                             sz_subdocuments_format_t format,
-                                                             sz_size_t *malformed_index, sz_allocator_t *allocator,
-                                                             sz_stream_t stream) {
+STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_rocm(
+    sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths, sz_subdocuments_format_t format,
+    sz_subdocuments_options_t options, sz_size_t *malformed_index, sz_allocator_t *allocator, sz_stream_t stream) {
     int caller = 0;
     sz_status_t status = sz_device_enter_rocm_(stream, &caller);
     if (status != sz_success_k) return status;
-    status = sz_subdocuments_engine_init_scoped_rocm_(engine, paths, format, malformed_index, allocator, stream);
+    status = sz_subdocuments_engine_init_scoped_rocm_(engine, paths, format, options, malformed_index, allocator,
+                                                      stream);
     sz_device_leave_rocm_(caller);
     return status;
 }

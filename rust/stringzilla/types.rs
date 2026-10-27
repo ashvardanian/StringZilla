@@ -1084,7 +1084,7 @@ mod tests {
         assert_eq!(missing_kernel.check(), Err(Status::MissingKernel));
         assert_eq!(Status::MissingKernel.to_string(), "no kernel for these capabilities");
         // A code the header does not list, like a positive caveat, is a failure named as such.
-        let unlisted: [sz_status_t; 3] = [1, -11, -22];
+        let unlisted: [sz_status_t; 3] = [1, -11, -23];
         for code in unlisted {
             assert_eq!(code.check(), Err(Status::Unrecognized));
         }

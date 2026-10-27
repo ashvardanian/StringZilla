@@ -20,6 +20,7 @@
  *  @section regex_api Public API
  *
  *  - @ref sz_regex_engine_init → compiles a vocabulary for the best capability of a mask;
+ *  - @ref sz_regex_contains → which haystacks hold any match, one bit each;
  *  - @ref sz_regex_counts → how many matches each haystack holds;
  *  - @ref sz_regex_find → every match, located by haystack, pattern and byte span;
  *  - @ref sz_regex_replace → the haystacks rewritten with a replacement per pattern, naming groups;
@@ -84,9 +85,10 @@ extern "C" {
  *  @param[out] malformed_index Where the index of the first refused pattern is written, only when
  *      the call returns @c sz_invalid_syntax_k; may be @c STRINGZILLA_NULL.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
- *  @param[in] allocator Where both blocks come from, or @c STRINGZILLA_NULL for the tier's default:
- *      the heap on the CPU, or the device's unified allocator. Stored by value, so
- *      @ref sz_regex_engine_free needs none and cannot get the wrong one.
+ *  @param[in] allocator Where both blocks come from, or @c STRINGZILLA_NULL for
+ *      @ref sz_allocator_init_unified_best of @p capabilities. Stored by value, so
+ *      @ref sz_regex_engine_free needs none and cannot get the wrong one. Scratch grows to the
+ *      widest call seen, so a warm engine allocates nothing.
  *  @param[in] stream Null on the CPU, or the device stream the call is enqueued on.
  *  @return @c sz_success_k once the vocabulary compiled; @c sz_invalid_syntax_k for an empty
  *      vocabulary or a pattern outside the syntax above; @c sz_missing_kernel_k when no capability
@@ -102,6 +104,22 @@ STRINGZILLA_API sz_status_t sz_regex_engine_init(sz_regex_engine_t *engine, sz_s
 /** Returns both of the engine's blocks to the allocator that built them, once the work queued on
  *  @p stream is done with them, emptying @p engine. */
 STRINGZILLA_API void sz_regex_engine_free(sz_regex_engine_t *engine, sz_stream_t stream);
+
+/**
+ *  @brief Marks which haystacks hold at least one match of any pattern, stopping each walk at its
+ *      first match, the lightest verb of the engine.
+ *
+ *  @param[in] engine A compiled vocabulary, whose round scratch grows to the longest haystack.
+ *  @param[in] haystacks The texts to search, in any layout; their bytes are read in place.
+ *  @param[out] contained One bit per haystack, eight to a byte, the lowest bit first: set when that
+ *      haystack matches, with the bits past the last haystack written as zero.
+ *  @param[in] stream Null on the CPU, or the device stream the call is enqueued on.
+ *  @return @c sz_success_k once the haystacks were marked; @c sz_missing_kernel_k for an empty
+ *      engine; @c sz_bad_alloc_k if the round scratch could not grow; or
+ *      @c sz_device_memory_mismatch_k for a @p stream the engine's capability cannot use.
+ */
+STRINGZILLA_API sz_status_t sz_regex_contains(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
+                                              sz_u1x8_t *contained, sz_stream_t stream);
 
 /**
  *  @brief Counts the vocabulary's leftmost-first matches in every haystack, one count per haystack.
@@ -204,6 +222,9 @@ STRINGZILLA_API sz_status_t sz_regex_engine_init_serial(sz_regex_engine_t *engin
                                                         sz_case_sensitivity_t case_sensitivity,
                                                         sz_size_t *malformed_index, sz_allocator_t *allocator,
                                                         sz_stream_t stream);
+/** @copydoc sz_regex_contains */
+STRINGZILLA_API sz_status_t sz_regex_contains_serial(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
+                                                     sz_u1x8_t *contained, sz_stream_t stream);
 /** @copydoc sz_regex_counts */
 STRINGZILLA_API sz_status_t sz_regex_counts_serial(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
                                                    sz_size_t *counts, sz_size_t counts_stride, sz_stream_t stream);
@@ -227,6 +248,9 @@ STRINGZILLA_API sz_status_t sz_regex_engine_init_haswell(sz_regex_engine_t *engi
                                                          sz_case_sensitivity_t case_sensitivity,
                                                          sz_size_t *malformed_index, sz_allocator_t *allocator,
                                                          sz_stream_t stream);
+/** @copydoc sz_regex_contains */
+STRINGZILLA_API sz_status_t sz_regex_contains_haswell(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
+                                                      sz_u1x8_t *contained, sz_stream_t stream);
 /** @copydoc sz_regex_counts */
 STRINGZILLA_API sz_status_t sz_regex_counts_haswell(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
                                                     sz_size_t *counts, sz_size_t counts_stride, sz_stream_t stream);
@@ -251,6 +275,9 @@ STRINGZILLA_API sz_status_t sz_regex_engine_init_icelake(sz_regex_engine_t *engi
                                                          sz_case_sensitivity_t case_sensitivity,
                                                          sz_size_t *malformed_index, sz_allocator_t *allocator,
                                                          sz_stream_t stream);
+/** @copydoc sz_regex_contains */
+STRINGZILLA_API sz_status_t sz_regex_contains_icelake(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
+                                                      sz_u1x8_t *contained, sz_stream_t stream);
 /** @copydoc sz_regex_counts */
 STRINGZILLA_API sz_status_t sz_regex_counts_icelake(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
                                                     sz_size_t *counts, sz_size_t counts_stride, sz_stream_t stream);
@@ -275,6 +302,9 @@ STRINGZILLA_API sz_status_t sz_regex_engine_init_neon(sz_regex_engine_t *engine,
                                                       sz_case_sensitivity_t case_sensitivity,
                                                       sz_size_t *malformed_index, sz_allocator_t *allocator,
                                                       sz_stream_t stream);
+/** @copydoc sz_regex_contains */
+STRINGZILLA_API sz_status_t sz_regex_contains_neon(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
+                                                   sz_u1x8_t *contained, sz_stream_t stream);
 /** @copydoc sz_regex_counts */
 STRINGZILLA_API sz_status_t sz_regex_counts_neon(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
                                                  sz_size_t *counts, sz_size_t counts_stride, sz_stream_t stream);
@@ -398,6 +428,12 @@ STRINGZILLA_API sz_status_t sz_regex_engine_init(sz_regex_engine_t *engine, sz_s
 
 STRINGZILLA_API void sz_regex_engine_free(sz_regex_engine_t *engine, sz_stream_t stream) {
     sz_regex_engine_free_(engine, stream);
+}
+
+STRINGZILLA_API sz_status_t sz_regex_contains(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
+                                              sz_u1x8_t *contained, sz_stream_t stream) {
+    sz_unused_(engine), sz_unused_(haystacks), sz_unused_(contained), sz_unused_(stream);
+    return sz_missing_library_k;
 }
 
 STRINGZILLA_API sz_status_t sz_regex_counts(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,

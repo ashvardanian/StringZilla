@@ -82,6 +82,14 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init_haswell(
                                           sz_cap_haswell_k, allocator, stream);
 }
 
+STRINGZILLA_API sz_status_t sz_substrings_contains_haswell(sz_substrings_engine_t *engine,
+                                                           sz_strings_view_t const *haystacks, sz_u1x8_t *contained,
+                                                           sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_substrings_walks_t const walks = sz_substrings_walks_haswell_();
+    return sz_substrings_contains_with_(engine, &walks, haystacks, contained);
+}
+
 STRINGZILLA_API sz_status_t sz_substrings_counts_haswell(sz_substrings_engine_t *engine,
                                                          sz_strings_view_t const *haystacks, sz_size_t *counts,
                                                          sz_size_t counts_stride, sz_stream_t stream) {

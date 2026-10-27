@@ -75,6 +75,28 @@ struct rationed_heap_t {
 void test_regex_unit() {
     check_regex_unit_(regex_dispatched, regex_dispatched_rewriting);
 
+    // Containment marks the haystacks counts finds a match in, past one block of 64 and into a
+    // partial last byte, whose bits past the last haystack stay zero.
+    {
+        std::vector<std::string> haystacks(70, "plain hay");
+        for (std::size_t index = 0; index < haystacks.size(); index += 3) haystacks[index] = "hay with 42 in it";
+        haystacks[5].clear();
+        std::vector<std::string> const patterns {"\\d+", "needle"};
+        std::vector<sz_string_view_t> pattern_views, haystack_views;
+        sz_strings_view_t const pattern_strings = strings_over_(patterns, pattern_views);
+        sz_strings_view_t const haystack_strings = strings_over_(haystacks, haystack_views);
+        sz_regex_engine_t engine;
+        verify(regex_dispatched.init(&engine, &pattern_strings, sz_cased_k, nullptr, nullptr, nullptr) == sz_success_k);
+        std::vector<sz_size_t> counts(haystacks.size());
+        std::vector<sz_u1x8_t> contained((haystacks.size() + 7) / 8, 0xFF);
+        verify(sz_regex_counts(&engine, &haystack_strings, counts.data(), 1, nullptr) == sz_success_k);
+        verify(sz_regex_contains(&engine, &haystack_strings, contained.data(), nullptr) == sz_success_k);
+        for (std::size_t index = 0; index != haystacks.size(); ++index)
+            verify((contained[index >> 3] >> (index & 7) & 1) == (counts[index] != 0));
+        verify((contained.back() >> (haystacks.size() & 7)) == 0);
+        sz_regex_engine_free(&engine, nullptr);
+    }
+
     // The password rules of the known answers with a nested fourth lookaround and two more become
     // columns of both DFAs on CPUs, and with a seventh leave both DFAs, matching alike either way.
     using cases_t = std::vector<substrings_case_t>;

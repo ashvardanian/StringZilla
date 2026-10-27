@@ -398,6 +398,9 @@ typedef enum sz_kernel_kind_t {
     /** Substrings engine preparation. */
     sz_kernel_substrings_engine_init_k,
 
+    /** Haystacks holding any of the prepared needles. */
+    sz_kernel_substrings_contains_k,
+
     /** Occurrence counts of the prepared needles. */
     sz_kernel_substrings_counts_k,
 
@@ -413,6 +416,9 @@ typedef enum sz_kernel_kind_t {
     /** Regex engine preparation. */
     sz_kernel_regex_engine_init_k,
 
+    /** Haystacks matching any of the prepared patterns. */
+    sz_kernel_regex_contains_k,
+
     /** Match counts of the prepared patterns. */
     sz_kernel_regex_counts_k,
 
@@ -427,6 +433,9 @@ typedef enum sz_kernel_kind_t {
 
     /** Subdocuments engine preparation. */
     sz_kernel_subdocuments_engine_init_k,
+
+    /** Documents holding a node any of the prepared paths selects. */
+    sz_kernel_subdocuments_contains_k,
 
     /** Match counts of the prepared paths. */
     sz_kernel_subdocuments_counts_k,
@@ -510,16 +519,19 @@ STRINGZILLA_CONSTEXPR char const *sz_kernel_name(sz_kernel_kind_t kind) {
     case sz_kernel_overlap_engine_init_k: return "overlap_engine_init";
     case sz_kernel_overlap_scores_k: return "overlap_scores";
     case sz_kernel_substrings_engine_init_k: return "substrings_engine_init";
+    case sz_kernel_substrings_contains_k: return "substrings_contains";
     case sz_kernel_substrings_counts_k: return "substrings_counts";
     case sz_kernel_substrings_find_k: return "substrings_find";
     case sz_kernel_substrings_replace_k: return "substrings_replace";
     case sz_kernel_substrings_bm25_scores_k: return "substrings_bm25_scores";
     case sz_kernel_regex_engine_init_k: return "regex_engine_init";
+    case sz_kernel_regex_contains_k: return "regex_contains";
     case sz_kernel_regex_counts_k: return "regex_counts";
     case sz_kernel_regex_find_k: return "regex_find";
     case sz_kernel_regex_replace_k: return "regex_replace";
     case sz_kernel_regex_extract_k: return "regex_extract";
     case sz_kernel_subdocuments_engine_init_k: return "subdocuments_engine_init";
+    case sz_kernel_subdocuments_contains_k: return "subdocuments_contains";
     case sz_kernel_subdocuments_counts_k: return "subdocuments_counts";
     case sz_kernel_subdocuments_find_k: return "subdocuments_find";
     default: return "unknown";
@@ -602,16 +614,19 @@ STRINGZILLA_CONSTEXPR sz_kernel_kind_t sz_kernel_named(char const *name, sz_size
     if (sz_same_literal_(name, length, "overlap_engine_init")) return sz_kernel_overlap_engine_init_k;
     if (sz_same_literal_(name, length, "overlap_scores")) return sz_kernel_overlap_scores_k;
     if (sz_same_literal_(name, length, "substrings_engine_init")) return sz_kernel_substrings_engine_init_k;
+    if (sz_same_literal_(name, length, "substrings_contains")) return sz_kernel_substrings_contains_k;
     if (sz_same_literal_(name, length, "substrings_counts")) return sz_kernel_substrings_counts_k;
     if (sz_same_literal_(name, length, "substrings_find")) return sz_kernel_substrings_find_k;
     if (sz_same_literal_(name, length, "substrings_replace")) return sz_kernel_substrings_replace_k;
     if (sz_same_literal_(name, length, "substrings_bm25_scores")) return sz_kernel_substrings_bm25_scores_k;
     if (sz_same_literal_(name, length, "regex_engine_init")) return sz_kernel_regex_engine_init_k;
+    if (sz_same_literal_(name, length, "regex_contains")) return sz_kernel_regex_contains_k;
     if (sz_same_literal_(name, length, "regex_counts")) return sz_kernel_regex_counts_k;
     if (sz_same_literal_(name, length, "regex_find")) return sz_kernel_regex_find_k;
     if (sz_same_literal_(name, length, "regex_replace")) return sz_kernel_regex_replace_k;
     if (sz_same_literal_(name, length, "regex_extract")) return sz_kernel_regex_extract_k;
     if (sz_same_literal_(name, length, "subdocuments_engine_init")) return sz_kernel_subdocuments_engine_init_k;
+    if (sz_same_literal_(name, length, "subdocuments_contains")) return sz_kernel_subdocuments_contains_k;
     if (sz_same_literal_(name, length, "subdocuments_counts")) return sz_kernel_subdocuments_counts_k;
     if (sz_same_literal_(name, length, "subdocuments_find")) return sz_kernel_subdocuments_find_k;
     return sz_kernel_unknown_k;
@@ -838,6 +853,10 @@ typedef sz_status_t (*sz_kernel_substrings_engine_init_t)(struct sz_substrings_e
                                                           sz_size_t, sz_size_t, sz_size_t, sz_allocator_t *,
                                                           sz_stream_t);
 
+/** Signature of every @c sz_substrings_contains kernel. */
+typedef sz_status_t (*sz_kernel_substrings_contains_t)(struct sz_substrings_engine_t *, sz_strings_view_t const *,
+                                                       sz_u1x8_t *, sz_stream_t);
+
 /** Signature of every @c sz_substrings_counts kernel. */
 typedef sz_status_t (*sz_kernel_substrings_counts_t)(struct sz_substrings_engine_t *, sz_strings_view_t const *,
                                                      sz_size_t *, sz_size_t, sz_stream_t);
@@ -860,6 +879,10 @@ typedef sz_status_t (*sz_kernel_substrings_bm25_scores_t)(struct sz_substrings_e
 typedef sz_status_t (*sz_kernel_regex_engine_init_t)(struct sz_regex_engine_t *, sz_strings_view_t const *,
                                                      sz_case_sensitivity_t, sz_size_t *, sz_allocator_t *, sz_stream_t);
 
+/** Signature of every @c sz_regex_contains kernel. */
+typedef sz_status_t (*sz_kernel_regex_contains_t)(struct sz_regex_engine_t *, sz_strings_view_t const *, sz_u1x8_t *,
+                                                  sz_stream_t);
+
 /** Signature of every @c sz_regex_counts kernel. */
 typedef sz_status_t (*sz_kernel_regex_counts_t)(struct sz_regex_engine_t *, sz_strings_view_t const *, sz_size_t *,
                                                 sz_size_t, sz_stream_t);
@@ -880,7 +903,12 @@ typedef sz_status_t (*sz_kernel_regex_extract_t)(struct sz_regex_engine_t *, sz_
 /** Signature of every @c sz_subdocuments_engine_init kernel. */
 typedef sz_status_t (*sz_kernel_subdocuments_engine_init_t)(struct sz_subdocuments_engine_t *,
                                                             sz_strings_view_t const *, sz_subdocuments_format_t,
-                                                            sz_size_t *, sz_allocator_t *, sz_stream_t);
+                                                            sz_subdocuments_options_t, sz_size_t *, sz_allocator_t *,
+                                                            sz_stream_t);
+
+/** Signature of every @c sz_subdocuments_contains kernel. */
+typedef sz_status_t (*sz_kernel_subdocuments_contains_t)(struct sz_subdocuments_engine_t *, sz_strings_view_t const *,
+                                                         sz_u1x8_t *, sz_size_t *, sz_stream_t);
 
 /** Signature of every @c sz_subdocuments_counts kernel. */
 typedef sz_status_t (*sz_kernel_subdocuments_counts_t)(struct sz_subdocuments_engine_t *, sz_strings_view_t const *,

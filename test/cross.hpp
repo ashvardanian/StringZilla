@@ -63,13 +63,17 @@ struct compare_backend_t {
 inline void check_compare_unit_(compare_backend_t const &backend) {
     sz_kernel_equal_t const equal = backend.equal;
     sz_kernel_order_t const order = backend.order;
-    verify(kernel_result<sz_ordering_t>(order, "abc", 3, "abc", 3) == sz_equal_k);   // Equal strings
-    verify(kernel_result<sz_ordering_t>(order, "abc", 3, "abd", 3) == sz_less_k);    // Differ in the last byte
-    verify(kernel_result<sz_ordering_t>(order, "abd", 3, "abc", 3) == sz_greater_k); // Differ in the last byte
-    verify(kernel_result<sz_ordering_t>(order, "ab", 2, "abc", 3) == sz_less_k);     // Prefix orders before
-    verify(kernel_result<sz_ordering_t>(order, "abc", 3, "ab", 2) == sz_greater_k);  // Longer orders after
-    verify(kernel_result<sz_bool_t>(equal, "abc", "abc", 3) == sz_true_k);           // Identical bytes
-    verify(kernel_result<sz_bool_t>(equal, "abc", "abd", 3) == sz_false_k);          // Differing bytes
+    verify(kernel_result<sz_ordering_t>(order, "abc", 3, "abc", 3) == sz_equal_k);     // Equal strings
+    verify(kernel_result<sz_ordering_t>(order, "abc", 3, "abd", 3) == sz_less_k);      // Differ in the last byte
+    verify(kernel_result<sz_ordering_t>(order, "abd", 3, "abc", 3) == sz_greater_k);   // Differ in the last byte
+    verify(kernel_result<sz_ordering_t>(order, "ab", 2, "abc", 3) == sz_less_k);       // Prefix orders before
+    verify(kernel_result<sz_ordering_t>(order, "abc", 3, "ab", 2) == sz_greater_k);    // Longer orders after
+    verify(kernel_result<sz_bool_t>(equal, "abc", "abc", 3) == sz_true_k);             // Identical bytes
+    verify(kernel_result<sz_bool_t>(equal, "abc", "abd", 3) == sz_false_k);            // Differing bytes
+    verify(kernel_result<sz_ordering_t>(order, nullptr, 0, nullptr, 0) == sz_equal_k); // Two null empty strings
+    verify(kernel_result<sz_ordering_t>(order, nullptr, 0, "a", 1) == sz_less_k);      // A null empty one first
+    verify(kernel_result<sz_ordering_t>(order, "a", 1, nullptr, 0) == sz_greater_k);   // A null empty one last
+    verify(kernel_result<sz_bool_t>(equal, nullptr, nullptr, 0) == sz_true_k);         // Null empty bytes
 
     std::string left, right;
     for (sz_size_t const length : span_over(backend_ladder_lengths_)) {
@@ -5097,7 +5101,8 @@ inline sz_status_t subdocuments_compile_(subdocuments_tier_t const &tier, sz_sub
                                          sz_size_t *malformed_index, sz_allocator_t *allocator) {
     std::vector<sz_string_view_t> views;
     sz_strings_view_t const path_strings = strings_over_(paths, views);
-    return tier.init(engine, &path_strings, format, malformed_index, allocator, nullptr);
+    return tier.init(engine, &path_strings, format, sz_subdocuments_options_none_k, malformed_index, allocator,
+                     nullptr);
 }
 
 /** Every match @p engine reports over @p documents: a sizing call, then a filling one that must

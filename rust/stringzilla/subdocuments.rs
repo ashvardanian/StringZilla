@@ -15,6 +15,7 @@ extern "C" {
         engine: *mut SubdocumentsEngine,
         paths: *const sz_strings_view_t,
         format: SubdocumentsFormat,
+        options: u32,
         malformed_index: *mut sz_size_t,
         capabilities: sz_capability_t,
         allocator: *const c_void,
@@ -79,7 +80,8 @@ pub enum SubdocumentsFormat {
 /// let mut engine = SubdocumentsEngine::new(&paths, SubdocumentsFormat::Json, &cpu).unwrap();
 ///
 /// let document = r#"{"store": {"book": [{"title": "A", "price": 8}, {"title": "B", "price": 12}]}}"#;
-/// let documents = StringsView::from_slices(&[document]);
+/// let documents = [document];
+/// let documents = StringsView::from_slices(&documents);
 /// let (mut matches, mut offsets, mut malformed_index) = ([Match::default(); 4], [0usize; 2], 0);
 /// cpu.scope(|scope| engine.find(scope, documents, &mut matches, &mut offsets, &mut malformed_index)).unwrap();
 /// assert_eq!(offsets[1], 1);
@@ -105,6 +107,7 @@ pub struct SubdocumentsEngine {
     strings_data: *const c_char,
     final_steps: *const u64,
     root_steps: *const u64,
+    holder_steps: *const u64,
     slices: *const c_void,
     slices_offsets: *const u32,
     steps_paths: *const u32,
@@ -116,6 +119,7 @@ pub struct SubdocumentsEngine {
     regex: ManuallyDrop<RegexEngine>,
     patterns_count: u32,
     format: SubdocumentsFormat,
+    options: u32,
     capability: Capabilities,
     allocator: sz_allocator_t,
     memory: *mut c_void,
@@ -143,6 +147,7 @@ impl SubdocumentsEngine {
                 engine.as_mut_ptr(),
                 &StringsView::from_slices(paths).view,
                 format,
+                0, // `sz_subdocuments_options_none_k`
                 &mut malformed_index,
                 stream.capabilities().bits(),
                 core::ptr::null(),

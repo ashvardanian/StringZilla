@@ -1846,10 +1846,11 @@ struct subdocuments_device_engines_t {
         : stream(backend.runtime.stream) {
         sz_strings_view_t const paths = vocabulary.view();
         try {
-            verify(sz_subdocuments_engine_init_serial(&host, &paths, format, nullptr, &heap.allocator, nullptr) ==
-                   sz_success_k);
-            verify(sz_subdocuments_engine_init(&device, &paths, format, nullptr, backend.runtime.capabilities,
-                                               &vocabulary.unified, backend.runtime.stream) == sz_success_k);
+            verify(sz_subdocuments_engine_init_serial(&host, &paths, format, sz_subdocuments_options_none_k, nullptr,
+                                                      &heap.allocator, nullptr) == sz_success_k);
+            verify(sz_subdocuments_engine_init(&device, &paths, format, sz_subdocuments_options_none_k, nullptr,
+                                               backend.runtime.capabilities, &vocabulary.unified,
+                                               backend.runtime.stream) == sz_success_k);
         }
         catch (...) {
             reset();

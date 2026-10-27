@@ -115,7 +115,34 @@ static void check_build_refusals_(std::vector<std::string> const &needles, sz_ca
 #pragma region Unit Cases
 
 /** The textbook cases, where a wrong failure link or a missed output run shows up by name. */
-void test_substrings_unit() { check_substrings_unit_(substrings_dispatched); }
+void test_substrings_unit() {
+    check_substrings_unit_(substrings_dispatched);
+
+    // Containment marks the haystacks counts finds a match in under every overlap policy, past
+    // one block of 64 and into a partial last byte, whose bits past the last haystack stay zero.
+    std::vector<std::string> haystacks(70, "plain hay");
+    for (std::size_t index = 0; index < haystacks.size(); index += 3) haystacks[index] = "a needle in the hay";
+    haystacks[5].clear();
+    std::vector<std::string> const needles {"needle", "eedl", "absent"};
+    std::vector<sz_string_view_t> needle_views, haystack_views;
+    sz_strings_view_t const needle_strings = strings_over_(needles, needle_views);
+    sz_strings_view_t const haystack_strings = strings_over_(haystacks, haystack_views);
+    for (sz_substrings_overlap_policy_t const policy :
+         {sz_substrings_overlapping_k, sz_substrings_leftmost_longest_k}) {
+        sz_substrings_engine_t engine;
+        verify(substrings_dispatched.init(&engine, &needle_strings, sz_cased_k, policy,
+                                          STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0, nullptr,
+                                          nullptr) == sz_success_k);
+        std::vector<sz_size_t> counts(haystacks.size());
+        std::vector<sz_u1x8_t> contained((haystacks.size() + 7) / 8, 0xFF);
+        verify(sz_substrings_counts(&engine, &haystack_strings, counts.data(), 1, nullptr) == sz_success_k);
+        verify(sz_substrings_contains(&engine, &haystack_strings, contained.data(), nullptr) == sz_success_k);
+        for (std::size_t index = 0; index != haystacks.size(); ++index)
+            verify((contained[index >> 3] >> (index & 7) & 1) == (counts[index] != 0));
+        verify((contained.back() >> (haystacks.size() & 7)) == 0);
+        sz_substrings_engine_free(&engine, nullptr);
+    }
+}
 
 /** What the verbs refuse, which is as much of the contract as what they accept. */
 void test_substrings_safety(test_context_t &context) {

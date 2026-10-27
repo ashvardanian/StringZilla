@@ -81,13 +81,21 @@ STRINGZILLA_INLINE sz_subdocuments_block_t sz_subdocuments_classify_loongsonasx_
     return sz_subdocuments_block_settle_(quotes, backslashes, opens, closes, separators, blanks, carry);
 }
 
-STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_loongsonasx(sz_subdocuments_engine_t *engine,
-                                                                    sz_strings_view_t const *paths,
-                                                                    sz_subdocuments_format_t format,
-                                                                    sz_size_t *malformed_index,
-                                                                    sz_allocator_t *allocator, sz_stream_t stream) {
-    return sz_subdocuments_engine_compile_(engine, paths, format, malformed_index, sz_cap_loongsonasx_k, allocator,
-                                           stream);
+STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_loongsonasx(
+    sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths, sz_subdocuments_format_t format,
+    sz_subdocuments_options_t options, sz_size_t *malformed_index, sz_allocator_t *allocator, sz_stream_t stream) {
+    return sz_subdocuments_engine_compile_(engine, paths, format, options, malformed_index, sz_cap_loongsonasx_k,
+                                           allocator, stream);
+}
+
+STRINGZILLA_API sz_status_t sz_subdocuments_contains_loongsonasx(sz_subdocuments_engine_t *engine,
+                                                                 sz_strings_view_t const *documents,
+                                                                 sz_u1x8_t *contained, sz_size_t *malformed_index,
+                                                                 sz_stream_t stream) {
+    sz_unused_(stream);
+    return sz_subdocuments_contains_with_(engine, &sz_subdocuments_classify_loongsonasx_,
+                                          &sz_subdocuments_classify_loongsonasx_, &sz_find_byte_loongsonasx_, documents,
+                                          contained, malformed_index);
 }
 
 STRINGZILLA_API sz_status_t sz_subdocuments_counts_loongsonasx(sz_subdocuments_engine_t *engine,

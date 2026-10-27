@@ -137,6 +137,13 @@ STRINGZILLA_API sz_status_t sz_regex_engine_init_neon(sz_regex_engine_t *engine,
                                     sz_regex_reverse_budget_k, sz_regex_forward_budget_k, stream);
 }
 
+STRINGZILLA_API sz_status_t sz_regex_contains_neon(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
+                                                   sz_u1x8_t *contained, sz_stream_t stream) {
+    if (stream) return sz_device_memory_mismatch_k;
+    return sz_regex_contains_with_(engine, haystacks, contained, &sz_rfind_byteset_neon_, &sz_find_byteset_neon_,
+                                   &sz_regex_find_prefixes_neon_, &sz_regex_fill_looks_neon_);
+}
+
 STRINGZILLA_API sz_status_t sz_regex_counts_neon(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
                                                  sz_size_t *counts, sz_size_t counts_stride, sz_stream_t stream) {
     if (stream) return sz_device_memory_mismatch_k;

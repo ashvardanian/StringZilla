@@ -2299,6 +2299,14 @@ STRINGZILLA_INLINE void sz_substrings_visit_(sz_substrings_engine_t const *engin
 
 #pragma region Serial Backends
 
+/** Notes that a match was reported and stops the walk, which is all a containment test needs. */
+STRINGZILLA_OUTLINED_ sz_substrings_walk_t sz_substrings_first_report_(void *context, sz_size_t needle_index,
+                                                                       sz_size_t byte_offset, sz_size_t byte_length) {
+    sz_unused_(needle_index), sz_unused_(byte_offset), sz_unused_(byte_length);
+    *(sz_bool_t *)context = sz_true_k;
+    return sz_substrings_stop_k;
+}
+
 /** Tallies reported matches, which is what a leftmost count and a rewrite's sizing
  *  pass both need. */
 typedef struct sz_substrings_tally_t {
@@ -2523,6 +2531,26 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_init_cpu_(
 /** Refuses an output stride that cannot address one entry per haystack. */
 STRINGZILLA_CONSTEXPR sz_status_t sz_substrings_stride_check_(sz_size_t stride) {
     return stride == 0 ? sz_unexpected_dimensions_k : sz_success_k;
+}
+
+/** Per-haystack containment through @p walks, which is every CPU tier's containment verb. */
+STRINGZILLA_INLINE sz_status_t sz_substrings_contains_with_(sz_substrings_engine_t *engine,
+                                                            sz_substrings_walks_t const *walks,
+                                                            sz_strings_view_t const *haystacks, sz_u1x8_t *contained) {
+    sz_size_t haystack_index;
+    sz_substrings_report_clear_(sz_substrings_report_(engine));
+
+    sz_string_view_t views[64];
+    for (haystack_index = 0; haystack_index != haystacks->count; ++haystack_index) {
+        if (haystack_index % 64 == 0) sz_strings_get_block_(haystacks, haystack_index, views);
+        sz_bool_t found = sz_false_k;
+        // Any match implies a leftmost one, so the overlapping walk answers every policy, first.
+        sz_substrings_find_all_(engine, walks, views[haystack_index % 64].start, views[haystack_index % 64].length,
+                                sz_substrings_unordered_k, &sz_substrings_first_report_, &found);
+        if ((haystack_index & 7) == 0) contained[haystack_index >> 3] = 0;
+        if (found == sz_true_k) contained[haystack_index >> 3] |= (sz_u1x8_t)(1u << (haystack_index & 7));
+    }
+    return sz_success_k;
 }
 
 /** Per-haystack counts through @p walks, which is every CPU tier's counting verb. */
@@ -2803,6 +2831,14 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init_serial(
     sz_unused_(haystacks_budget);
     return sz_substrings_engine_init_cpu_(engine, needles, case_sensitivity, overlap_policy, hot_states, matches_budget,
                                           sz_cap_serial_k, allocator, stream);
+}
+
+STRINGZILLA_API sz_status_t sz_substrings_contains_serial(sz_substrings_engine_t *engine,
+                                                          sz_strings_view_t const *haystacks, sz_u1x8_t *contained,
+                                                          sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_substrings_walks_t const walks = sz_substrings_walks_serial_();
+    return sz_substrings_contains_with_(engine, &walks, haystacks, contained);
 }
 
 STRINGZILLA_API sz_status_t sz_substrings_counts_serial(sz_substrings_engine_t *engine,

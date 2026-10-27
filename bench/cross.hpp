@@ -2373,10 +2373,11 @@ inline bool subdocuments_selects(environment_t const &env, std::string_view kit)
 
 /** The engine's init over the CPU's capabilities, in the shape of its init kernels. */
 inline sz_status_t subdocuments_engine_init_cpu_(sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths,
-                                                 sz_subdocuments_format_t format, sz_size_t *malformed_index,
-                                                 sz_allocator_t *allocator, sz_stream_t stream) {
-    return sz_subdocuments_engine_init(engine, paths, format, malformed_index, sz::default_capabilities(), allocator,
-                                       stream);
+                                                 sz_subdocuments_format_t format, sz_subdocuments_options_t options,
+                                                 sz_size_t *malformed_index, sz_allocator_t *allocator,
+                                                 sz_stream_t stream) {
+    return sz_subdocuments_engine_init(engine, paths, format, options, malformed_index, sz::default_capabilities(),
+                                       allocator, stream);
 }
 
 struct subdocuments_engine_t {
@@ -2388,7 +2389,7 @@ struct subdocuments_engine_t {
                           sz_stream_t stream = nullptr)
         : stream(stream) {
         sz_strings_view_t const paths = vocabulary.strings();
-        if (init(&engine, &paths, format, nullptr, &allocator, stream) != sz_success_k)
+        if (init(&engine, &paths, format, sz_subdocuments_options_none_k, nullptr, &allocator, stream) != sz_success_k)
             throw std::runtime_error("The paths would not compile.");
     }
     subdocuments_engine_t(subdocuments_engine_t const &) = delete;

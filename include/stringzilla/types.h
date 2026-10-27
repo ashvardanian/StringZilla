@@ -867,6 +867,10 @@ typedef char const *sz_cptr_t;              // A type alias for `char const *`
 typedef sz_i8_t sz_error_cost_t;            // Character mismatch cost for fuzzy matching functions
 typedef sz_u16_t sz_error_cost_magnitude_t; // The smallest type that can hold unsigned `abs(sz_error_cost_t {})`
 
+/** Eight booleans in one byte, item 0 in the least significant bit, the order of Arrow and cuDF
+ *  validity masks and the reverse of NumKong's @c nk_u1x8_t. */
+typedef sz_u8_t sz_u1x8_t;
+
 struct sz_hash_state_t;           // Forward declaration of a hash state structure
 struct sz_sha256_state_t;         // Forward declaration of a SHA256 hash state structure
 struct sz_aes256_key_t;           // Forward declaration of an AES-256 round-key schedule
@@ -1007,6 +1011,17 @@ typedef enum sz_subdocuments_format_t {
     /** XML 1.0 documents, addressed by XPath 1.0 along forward axes. */
     sz_subdocuments_xml_k = 1,
 } sz_subdocuments_format_t;
+
+/** How a subdocuments engine reads what RFC 8259 leaves open, combined by bitwise or. */
+typedef enum sz_subdocuments_options_t {
+
+    /** Every member a name selector names is entered. */
+    sz_subdocuments_options_none_k = 0,
+
+    /** A name selector enters only the first member of an object with that name, so each field
+     *  a path names is at most one node. */
+    sz_subdocuments_duplicate_names_first_k = 1,
+} sz_subdocuments_options_t;
 
 /** How matches that share bytes resolve: reported in full, or thinned to a leftmost run. */
 typedef enum sz_substrings_overlap_policy_t {

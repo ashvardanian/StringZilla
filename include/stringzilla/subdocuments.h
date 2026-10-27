@@ -21,6 +21,7 @@
  *  @section subdocuments_api Public API
  *
  *  - @ref sz_subdocuments_engine_init → compiles a path vocabulary for a mask's best capability;
+ *  - @ref sz_subdocuments_contains → which documents hold any such node, one bit each;
  *  - @ref sz_subdocuments_counts → how many nodes each document holds that some path selects;
  *  - @ref sz_subdocuments_find → every such node, located by document, by path and by byte span;
  *  - @ref sz_subdocuments_find_kernel → the kernel any of them would run, for a caller to keep.
@@ -67,7 +68,8 @@ extern "C" {
  *  relative queries, `&&`, `||`, `!` and parentheses, and the functions `length()`, `count()`,
  *  `value()`, `match()` and `search()`, whose I-Regexp patterns compile into one regex engine owned
  *  by this one. Each path compiles into one step per segment, numbered path after path, each
- *  filter's queries taking steps of their own.
+ *  filter's queries taking steps of their own. A path may also be a bare filter `?expression`,
+ *  which tests the document's root as `$[?expression]` tests an array's elements.
  *
  *  XML paths follow XPath 1.0 along forward axes: absolute paths of `/` and `//` steps, each a name
  *  test, `*`, `@name`, `@*` or `text()` with an optional position `[n]`, which counts the siblings
@@ -77,10 +79,14 @@ extern "C" {
  *  @param[out] engine Left untouched unless the call succeeds.
  *  @param[in] paths The vocabulary, one path per string, read on the host.
  *  @param[in] format The grammar of the documents every verb of this engine reads.
+ *  @param[in] options How JSON walks read what RFC 8259 leaves open, or
+ *      @c sz_subdocuments_options_none_k for the default.
  *  @param[out] malformed_index The first path to break the grammar or leave the subset, on failure.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
- *  @param[in] allocator Where both blocks come from, or @c STRINGZILLA_NULL for the heap. Stored by
- *      value, so @ref sz_subdocuments_engine_free needs none and cannot get the wrong one.
+ *  @param[in] allocator Where both blocks come from, or @c STRINGZILLA_NULL for
+ *      @ref sz_allocator_init_unified_best of @p capabilities. Stored by value, so
+ *      @ref sz_subdocuments_engine_free needs none and cannot get the wrong one. Scratch grows to
+ *      the widest call seen, so a warm engine allocates nothing.
  *  @param[in] stream Null on the CPU.
  *  @return @c sz_success_k once the paths compiled, or one of the failures below.
  *
@@ -90,17 +96,42 @@ extern "C" {
  *  regex family refuses, and in XML a reverse axis or a predicate other than a position. It
  *  returns @c sz_missing_library_k for `match()` or `search()` in a header-only build, whose
  *  regex dispatch links no library; @c sz_missing_kernel_k when no capability of the mask has
- *  an init, or for a @p format no kernel reads yet; @c sz_unexpected_dimensions_k for an
- *  empty vocabulary; @c sz_overflow_risk_k past 32-bit step or name offsets; or
+ *  an init, for a @p format no kernel reads yet, or on a GPU for non-zero @p options or a bare
+ *  filter, which @p malformed_index then names; @c sz_unexpected_dimensions_k for an empty
+ *  vocabulary; @c sz_overflow_risk_k past 32-bit step or name offsets; or
  *  @c sz_bad_alloc_k if memory allocation failed.
  */
 STRINGZILLA_API sz_status_t sz_subdocuments_engine_init(sz_subdocuments_engine_t *engine,
                                                         sz_strings_view_t const *paths, sz_subdocuments_format_t format,
-                                                        sz_size_t *malformed_index, sz_capability_t capabilities,
-                                                        sz_allocator_t *allocator, sz_stream_t stream);
+                                                        sz_subdocuments_options_t options, sz_size_t *malformed_index,
+                                                        sz_capability_t capabilities, sz_allocator_t *allocator,
+                                                        sz_stream_t stream);
 
-/** Returns both of the engine's blocks to the allocator that built them, emptying @p engine. */
+/** Returns both of the engine's blocks to the allocator that built them, once the work queued on
+ *  @p stream is done with them, emptying @p engine. */
 STRINGZILLA_API void sz_subdocuments_engine_free(sz_subdocuments_engine_t *engine, sz_stream_t stream);
+
+/**
+ *  @brief Marks which documents hold at least one node some path selects, stopping each walk at its
+ *      first match, the lightest verb of the engine.
+ *
+ *  A walk validates nothing past the match it stops at, so a document malformed only after its
+ *  first match is marked rather than refused.
+ *
+ *  @param[in] engine Compiled paths, serving one call at a time.
+ *  @param[in] documents One document per string; their bytes are read in place and never copied.
+ *  @param[out] contained One bit per document, eight to a byte, the lowest bit first: set when that
+ *      document matches, with the bits past the last document written as zero.
+ *  @param[out] malformed_index The first malformed document, on failure.
+ *  @param[in] stream Null on the CPU.
+ *  @return @c sz_success_k once every document was marked; @c sz_invalid_syntax_k for a malformed
+ *      document, as @ref sz_subdocuments_counts defines it, leaving @p contained unspecified;
+ *      @c sz_missing_kernel_k for an empty engine; or @c sz_bad_alloc_k if the walk's depth stack
+ *      could not grow to the document's nesting.
+ */
+STRINGZILLA_API sz_status_t sz_subdocuments_contains(sz_subdocuments_engine_t *engine,
+                                                     sz_strings_view_t const *documents, sz_u1x8_t *contained,
+                                                     sz_size_t *malformed_index, sz_stream_t stream);
 
 /**
  *  @brief Counts the nodes of every document that some path selects, one count per document.
@@ -158,11 +189,13 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find(sz_subdocuments_engine_t *engin
                                                  sz_stream_t stream);
 
 /** @copydoc sz_subdocuments_engine_init */
-STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_serial(sz_subdocuments_engine_t *engine,
-                                                               sz_strings_view_t const *paths,
-                                                               sz_subdocuments_format_t format,
-                                                               sz_size_t *malformed_index, sz_allocator_t *allocator,
-                                                               sz_stream_t stream);
+STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_serial(
+    sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths, sz_subdocuments_format_t format,
+    sz_subdocuments_options_t options, sz_size_t *malformed_index, sz_allocator_t *allocator, sz_stream_t stream);
+/** @copydoc sz_subdocuments_contains */
+STRINGZILLA_API sz_status_t sz_subdocuments_contains_serial(sz_subdocuments_engine_t *engine,
+                                                            sz_strings_view_t const *documents, sz_u1x8_t *contained,
+                                                            sz_size_t *malformed_index, sz_stream_t stream);
 /** @copydoc sz_subdocuments_counts */
 STRINGZILLA_API sz_status_t sz_subdocuments_counts_serial(sz_subdocuments_engine_t *engine,
                                                           sz_strings_view_t const *documents, sz_size_t *counts,
@@ -176,11 +209,13 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_serial(sz_subdocuments_engine_t
 
 #if STRINGZILLA_TARGET_HASWELL
 /** @copydoc sz_subdocuments_engine_init */
-STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_haswell(sz_subdocuments_engine_t *engine,
-                                                                sz_strings_view_t const *paths,
-                                                                sz_subdocuments_format_t format,
-                                                                sz_size_t *malformed_index, sz_allocator_t *allocator,
-                                                                sz_stream_t stream);
+STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_haswell(
+    sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths, sz_subdocuments_format_t format,
+    sz_subdocuments_options_t options, sz_size_t *malformed_index, sz_allocator_t *allocator, sz_stream_t stream);
+/** @copydoc sz_subdocuments_contains */
+STRINGZILLA_API sz_status_t sz_subdocuments_contains_haswell(sz_subdocuments_engine_t *engine,
+                                                             sz_strings_view_t const *documents, sz_u1x8_t *contained,
+                                                             sz_size_t *malformed_index, sz_stream_t stream);
 /** @copydoc sz_subdocuments_counts */
 STRINGZILLA_API sz_status_t sz_subdocuments_counts_haswell(sz_subdocuments_engine_t *engine,
                                                            sz_strings_view_t const *documents, sz_size_t *counts,
@@ -195,11 +230,13 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_haswell(sz_subdocuments_engine_
 
 #if STRINGZILLA_TARGET_ICELAKE
 /** @copydoc sz_subdocuments_engine_init */
-STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_icelake(sz_subdocuments_engine_t *engine,
-                                                                sz_strings_view_t const *paths,
-                                                                sz_subdocuments_format_t format,
-                                                                sz_size_t *malformed_index, sz_allocator_t *allocator,
-                                                                sz_stream_t stream);
+STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_icelake(
+    sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths, sz_subdocuments_format_t format,
+    sz_subdocuments_options_t options, sz_size_t *malformed_index, sz_allocator_t *allocator, sz_stream_t stream);
+/** @copydoc sz_subdocuments_contains */
+STRINGZILLA_API sz_status_t sz_subdocuments_contains_icelake(sz_subdocuments_engine_t *engine,
+                                                             sz_strings_view_t const *documents, sz_u1x8_t *contained,
+                                                             sz_size_t *malformed_index, sz_stream_t stream);
 /** @copydoc sz_subdocuments_counts */
 STRINGZILLA_API sz_status_t sz_subdocuments_counts_icelake(sz_subdocuments_engine_t *engine,
                                                            sz_strings_view_t const *documents, sz_size_t *counts,
@@ -214,11 +251,13 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_icelake(sz_subdocuments_engine_
 
 #if STRINGZILLA_TARGET_NEON
 /** @copydoc sz_subdocuments_engine_init */
-STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_neon(sz_subdocuments_engine_t *engine,
-                                                             sz_strings_view_t const *paths,
-                                                             sz_subdocuments_format_t format,
-                                                             sz_size_t *malformed_index, sz_allocator_t *allocator,
-                                                             sz_stream_t stream);
+STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_neon(
+    sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths, sz_subdocuments_format_t format,
+    sz_subdocuments_options_t options, sz_size_t *malformed_index, sz_allocator_t *allocator, sz_stream_t stream);
+/** @copydoc sz_subdocuments_contains */
+STRINGZILLA_API sz_status_t sz_subdocuments_contains_neon(sz_subdocuments_engine_t *engine,
+                                                          sz_strings_view_t const *documents, sz_u1x8_t *contained,
+                                                          sz_size_t *malformed_index, sz_stream_t stream);
 /** @copydoc sz_subdocuments_counts */
 STRINGZILLA_API sz_status_t sz_subdocuments_counts_neon(sz_subdocuments_engine_t *engine,
                                                         sz_strings_view_t const *documents, sz_size_t *counts,
@@ -233,11 +272,13 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_neon(sz_subdocuments_engine_t *
 
 #if STRINGZILLA_TARGET_SVE2
 /** @copydoc sz_subdocuments_engine_init */
-STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_sve2(sz_subdocuments_engine_t *engine,
-                                                             sz_strings_view_t const *paths,
-                                                             sz_subdocuments_format_t format,
-                                                             sz_size_t *malformed_index, sz_allocator_t *allocator,
-                                                             sz_stream_t stream);
+STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_sve2(
+    sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths, sz_subdocuments_format_t format,
+    sz_subdocuments_options_t options, sz_size_t *malformed_index, sz_allocator_t *allocator, sz_stream_t stream);
+/** @copydoc sz_subdocuments_contains */
+STRINGZILLA_API sz_status_t sz_subdocuments_contains_sve2(sz_subdocuments_engine_t *engine,
+                                                          sz_strings_view_t const *documents, sz_u1x8_t *contained,
+                                                          sz_size_t *malformed_index, sz_stream_t stream);
 /** @copydoc sz_subdocuments_counts */
 STRINGZILLA_API sz_status_t sz_subdocuments_counts_sve2(sz_subdocuments_engine_t *engine,
                                                         sz_strings_view_t const *documents, sz_size_t *counts,
@@ -252,10 +293,13 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_sve2(sz_subdocuments_engine_t *
 
 #if STRINGZILLA_TARGET_RVV
 /** @copydoc sz_subdocuments_engine_init */
-STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_rvv(sz_subdocuments_engine_t *engine,
-                                                            sz_strings_view_t const *paths,
-                                                            sz_subdocuments_format_t format, sz_size_t *malformed_index,
-                                                            sz_allocator_t *allocator, sz_stream_t stream);
+STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_rvv(
+    sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths, sz_subdocuments_format_t format,
+    sz_subdocuments_options_t options, sz_size_t *malformed_index, sz_allocator_t *allocator, sz_stream_t stream);
+/** @copydoc sz_subdocuments_contains */
+STRINGZILLA_API sz_status_t sz_subdocuments_contains_rvv(sz_subdocuments_engine_t *engine,
+                                                         sz_strings_view_t const *documents, sz_u1x8_t *contained,
+                                                         sz_size_t *malformed_index, sz_stream_t stream);
 /** @copydoc sz_subdocuments_counts */
 STRINGZILLA_API sz_status_t sz_subdocuments_counts_rvv(sz_subdocuments_engine_t *engine,
                                                        sz_strings_view_t const *documents, sz_size_t *counts,
@@ -270,11 +314,13 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_rvv(sz_subdocuments_engine_t *e
 
 #if STRINGZILLA_TARGET_V128
 /** @copydoc sz_subdocuments_engine_init */
-STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_v128(sz_subdocuments_engine_t *engine,
-                                                             sz_strings_view_t const *paths,
-                                                             sz_subdocuments_format_t format,
-                                                             sz_size_t *malformed_index, sz_allocator_t *allocator,
-                                                             sz_stream_t stream);
+STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_v128(
+    sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths, sz_subdocuments_format_t format,
+    sz_subdocuments_options_t options, sz_size_t *malformed_index, sz_allocator_t *allocator, sz_stream_t stream);
+/** @copydoc sz_subdocuments_contains */
+STRINGZILLA_API sz_status_t sz_subdocuments_contains_v128(sz_subdocuments_engine_t *engine,
+                                                          sz_strings_view_t const *documents, sz_u1x8_t *contained,
+                                                          sz_size_t *malformed_index, sz_stream_t stream);
 /** @copydoc sz_subdocuments_counts */
 STRINGZILLA_API sz_status_t sz_subdocuments_counts_v128(sz_subdocuments_engine_t *engine,
                                                         sz_strings_view_t const *documents, sz_size_t *counts,
@@ -289,11 +335,14 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_v128(sz_subdocuments_engine_t *
 
 #if STRINGZILLA_TARGET_LOONGSONASX
 /** @copydoc sz_subdocuments_engine_init */
-STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_loongsonasx(sz_subdocuments_engine_t *engine,
-                                                                    sz_strings_view_t const *paths,
-                                                                    sz_subdocuments_format_t format,
-                                                                    sz_size_t *malformed_index,
-                                                                    sz_allocator_t *allocator, sz_stream_t stream);
+STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_loongsonasx(
+    sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths, sz_subdocuments_format_t format,
+    sz_subdocuments_options_t options, sz_size_t *malformed_index, sz_allocator_t *allocator, sz_stream_t stream);
+/** @copydoc sz_subdocuments_contains */
+STRINGZILLA_API sz_status_t sz_subdocuments_contains_loongsonasx(sz_subdocuments_engine_t *engine,
+                                                                 sz_strings_view_t const *documents,
+                                                                 sz_u1x8_t *contained, sz_size_t *malformed_index,
+                                                                 sz_stream_t stream);
 /** @copydoc sz_subdocuments_counts */
 STRINGZILLA_API sz_status_t sz_subdocuments_counts_loongsonasx(sz_subdocuments_engine_t *engine,
                                                                sz_strings_view_t const *documents, sz_size_t *counts,
@@ -308,11 +357,13 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_loongsonasx(sz_subdocuments_eng
 
 #if STRINGZILLA_TARGET_POWERVSX
 /** @copydoc sz_subdocuments_engine_init */
-STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_powervsx(sz_subdocuments_engine_t *engine,
-                                                                 sz_strings_view_t const *paths,
-                                                                 sz_subdocuments_format_t format,
-                                                                 sz_size_t *malformed_index, sz_allocator_t *allocator,
-                                                                 sz_stream_t stream);
+STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_powervsx(
+    sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths, sz_subdocuments_format_t format,
+    sz_subdocuments_options_t options, sz_size_t *malformed_index, sz_allocator_t *allocator, sz_stream_t stream);
+/** @copydoc sz_subdocuments_contains */
+STRINGZILLA_API sz_status_t sz_subdocuments_contains_powervsx(sz_subdocuments_engine_t *engine,
+                                                              sz_strings_view_t const *documents, sz_u1x8_t *contained,
+                                                              sz_size_t *malformed_index, sz_stream_t stream);
 /** @copydoc sz_subdocuments_counts */
 STRINGZILLA_API sz_status_t sz_subdocuments_counts_powervsx(sz_subdocuments_engine_t *engine,
                                                             sz_strings_view_t const *documents, sz_size_t *counts,
@@ -327,11 +378,9 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_powervsx(sz_subdocuments_engine
 
 #if STRINGZILLA_TARGET_CUDA
 /** @copydoc sz_subdocuments_engine_init */
-STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_cuda(sz_subdocuments_engine_t *engine,
-                                                             sz_strings_view_t const *paths,
-                                                             sz_subdocuments_format_t format,
-                                                             sz_size_t *malformed_index, sz_allocator_t *allocator,
-                                                             sz_stream_t stream);
+STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_cuda(
+    sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths, sz_subdocuments_format_t format,
+    sz_subdocuments_options_t options, sz_size_t *malformed_index, sz_allocator_t *allocator, sz_stream_t stream);
 /** @copydoc sz_subdocuments_counts */
 STRINGZILLA_API sz_status_t sz_subdocuments_counts_cuda(sz_subdocuments_engine_t *engine,
                                                         sz_strings_view_t const *documents, sz_size_t *counts,
@@ -346,11 +395,9 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_cuda(sz_subdocuments_engine_t *
 
 #if STRINGZILLA_TARGET_ROCM
 /** @copydoc sz_subdocuments_engine_init */
-STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_rocm(sz_subdocuments_engine_t *engine,
-                                                             sz_strings_view_t const *paths,
-                                                             sz_subdocuments_format_t format,
-                                                             sz_size_t *malformed_index, sz_allocator_t *allocator,
-                                                             sz_stream_t stream);
+STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_rocm(
+    sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths, sz_subdocuments_format_t format,
+    sz_subdocuments_options_t options, sz_size_t *malformed_index, sz_allocator_t *allocator, sz_stream_t stream);
 /** @copydoc sz_subdocuments_counts */
 STRINGZILLA_API sz_status_t sz_subdocuments_counts_rocm(sz_subdocuments_engine_t *engine,
                                                         sz_strings_view_t const *documents, sz_size_t *counts,
@@ -365,11 +412,9 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_rocm(sz_subdocuments_engine_t *
 
 #if STRINGZILLA_TARGET_METAL
 /** @copydoc sz_subdocuments_engine_init */
-STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_metal(sz_subdocuments_engine_t *engine,
-                                                              sz_strings_view_t const *paths,
-                                                              sz_subdocuments_format_t format,
-                                                              sz_size_t *malformed_index, sz_allocator_t *allocator,
-                                                              sz_stream_t stream);
+STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_metal(
+    sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths, sz_subdocuments_format_t format,
+    sz_subdocuments_options_t options, sz_size_t *malformed_index, sz_allocator_t *allocator, sz_stream_t stream);
 /** @copydoc sz_subdocuments_counts */
 STRINGZILLA_API sz_status_t sz_subdocuments_counts_metal(sz_subdocuments_engine_t *engine,
                                                          sz_strings_view_t const *documents, sz_size_t *counts,
@@ -411,15 +456,23 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_kernel(sz_kernel_kind_t kind, s
 
 STRINGZILLA_API sz_status_t sz_subdocuments_engine_init(sz_subdocuments_engine_t *engine,
                                                         sz_strings_view_t const *paths, sz_subdocuments_format_t format,
-                                                        sz_size_t *malformed_index, sz_capability_t capabilities,
-                                                        sz_allocator_t *allocator, sz_stream_t stream) {
-    sz_unused_(engine), sz_unused_(paths), sz_unused_(format), sz_unused_(malformed_index), sz_unused_(capabilities),
-        sz_unused_(allocator), sz_unused_(stream);
+                                                        sz_subdocuments_options_t options, sz_size_t *malformed_index,
+                                                        sz_capability_t capabilities, sz_allocator_t *allocator,
+                                                        sz_stream_t stream) {
+    sz_unused_(engine), sz_unused_(paths), sz_unused_(format), sz_unused_(options), sz_unused_(malformed_index),
+        sz_unused_(capabilities), sz_unused_(allocator), sz_unused_(stream);
     return sz_missing_library_k;
 }
 
 STRINGZILLA_API void sz_subdocuments_engine_free(sz_subdocuments_engine_t *engine, sz_stream_t stream) {
     sz_subdocuments_engine_free_(engine, stream);
+}
+
+STRINGZILLA_API sz_status_t sz_subdocuments_contains(sz_subdocuments_engine_t *engine,
+                                                     sz_strings_view_t const *documents, sz_u1x8_t *contained,
+                                                     sz_size_t *malformed_index, sz_stream_t stream) {
+    sz_unused_(engine), sz_unused_(documents), sz_unused_(contained), sz_unused_(malformed_index), sz_unused_(stream);
+    return sz_missing_library_k;
 }
 
 STRINGZILLA_API sz_status_t sz_subdocuments_counts(sz_subdocuments_engine_t *engine, sz_strings_view_t const *documents,

@@ -5450,6 +5450,33 @@ STRINGZILLA_INLINE sz_size_t sz_regex_walk_serial_(sz_regex_engine_t const *engi
     return found;
 }
 
+/** Marks the haystacks holding any match, one search each, skipping with @p rfind_live,
+ *  which is every CPU tier's containment verb. */
+STRINGZILLA_INLINE sz_status_t sz_regex_contains_with_(
+    sz_regex_engine_t *engine, sz_strings_view_t const *haystacks, sz_u1x8_t *contained,
+    sz_cptr_t (*rfind_live)(sz_cptr_t, sz_size_t, sz_byteset_t const *),
+    sz_cptr_t (*find_escape)(sz_cptr_t, sz_size_t, sz_byteset_t const *),
+    sz_cptr_t (*find_prefixes)(sz_cptr_t, sz_size_t, sz_regex_prefixes_t const *),
+    void (*fill_looks)(sz_cptr_t, sz_size_t, sz_u32_t const *, sz_u32_t, sz_u32_t *)) {
+    sz_string_view_t views[64];
+    if (!engine->memory) return sz_missing_kernel_k;
+    for (sz_size_t haystack_index = 0; haystack_index != haystacks->count; ++haystack_index) {
+        sz_regex_walk_t walk;
+        sz_size_t start, end, offset;
+        sz_u32_t pattern;
+        sz_status_t status;
+        if (haystack_index % 64 == 0) sz_strings_get_block_(haystacks, haystack_index, views);
+        status = sz_regex_walk_scratch_(engine, views[haystack_index % 64].start, views[haystack_index % 64].length,
+                                        rfind_live, find_escape, find_prefixes, fill_looks, 0, &walk);
+        if (status != sz_success_k) return status;
+        if ((haystack_index & 7) == 0) contained[haystack_index >> 3] = 0;
+        if (sz_regex_next_(engine, views[haystack_index % 64].start, views[haystack_index % 64].length, &walk, 0, 0,
+                           &start, &end, &pattern, &offset))
+            contained[haystack_index >> 3] |= (sz_u1x8_t)(1u << (haystack_index & 7));
+    }
+    return sz_success_k;
+}
+
 /** Counts the matches of every haystack, skipping with @p rfind_live,
  *  which is every CPU tier's counting verb. */
 STRINGZILLA_INLINE sz_status_t sz_regex_counts_with_(
@@ -5705,6 +5732,13 @@ STRINGZILLA_API sz_status_t sz_regex_engine_init_serial(sz_regex_engine_t *engin
     if (stream) return sz_device_memory_mismatch_k;
     return sz_regex_engine_compile_(engine, patterns, case_sensitivity, malformed_index, sz_cap_serial_k, allocator,
                                     sz_regex_reverse_budget_k, sz_regex_forward_budget_k, stream);
+}
+
+STRINGZILLA_API sz_status_t sz_regex_contains_serial(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
+                                                     sz_u1x8_t *contained, sz_stream_t stream) {
+    if (stream) return sz_device_memory_mismatch_k;
+    return sz_regex_contains_with_(engine, haystacks, contained, &sz_rfind_byteset_serial_, STRINGZILLA_NULL,
+                                   &sz_regex_find_prefixes_serial_, &sz_regex_fill_looks_serial_);
 }
 
 STRINGZILLA_API sz_status_t sz_regex_counts_serial(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,

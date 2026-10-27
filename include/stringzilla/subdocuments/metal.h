@@ -567,11 +567,9 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walks_metal_(sz_subdocuments_engi
                                        matches_offsets, arguments, header[1] ? 2 : 1, stream);
 }
 
-STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_metal(sz_subdocuments_engine_t *engine,
-                                                              sz_strings_view_t const *paths,
-                                                              sz_subdocuments_format_t format,
-                                                              sz_size_t *malformed_index, sz_allocator_t *allocator,
-                                                              sz_stream_t stream) {
+STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_metal(
+    sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths, sz_subdocuments_format_t format,
+    sz_subdocuments_options_t options, sz_size_t *malformed_index, sz_allocator_t *allocator, sz_stream_t stream) {
     sz_metal_context_t *const context = sz_metal_context_(stream);
     sz_allocator_t unified;
     sz_metal_bound_t bound;
@@ -579,7 +577,8 @@ STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_metal(sz_subdocuments_en
     if (!context) return sz_missing_gpu_k;
     if (allocator) unified = *allocator;
     else sz_allocator_init_unified_metal(&unified);
-    status = sz_subdocuments_engine_compile_(engine, paths, format, malformed_index, sz_cap_metal_k, &unified, stream);
+    status = sz_subdocuments_engine_compile_(engine, paths, format, options, malformed_index, sz_cap_metal_k, &unified,
+                                             stream);
     if (status != sz_success_k) return status;
     // `match()` and `search()` walk the forward DFA, which a pattern set past
     // its state budget lacks.

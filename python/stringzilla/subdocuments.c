@@ -102,8 +102,8 @@ static int SubdocumentsEngine_init(SubdocumentsEngine *self, PyObject *args, PyO
     Py_BEGIN_ALLOW_THREADS;
     sz_py_mutex_lock_(&self->mutex);
     sz_subdocuments_engine_free(&self->engine, STRINGZILLA_NULL);
-    status = sz_subdocuments_engine_init(&self->engine, &paths, format, &malformed_index, capabilities,
-                                         STRINGZILLA_NULL, stream);
+    status = sz_subdocuments_engine_init(&self->engine, &paths, format, sz_subdocuments_options_none_k,
+                                         &malformed_index, capabilities, STRINGZILLA_NULL, stream);
     sz_py_mutex_unlock_(&self->mutex);
     Py_END_ALLOW_THREADS;
     if (status != sz_success_k) {

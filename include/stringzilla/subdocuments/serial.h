@@ -185,6 +185,10 @@ typedef struct sz_subdocuments_engine_t {
      *  live only at the nodes its filter decides. */
     sz_u64_t const *root_steps;
 
+    /** The first step of every bare filter path, live at a holder above the document's root whose
+     *  one element the root is, so the filter decides the root. */
+    sz_u64_t const *holder_steps;
+
     /** The array positions of every index and slice selector, step after step. */
     sz_subdocuments_slice_t const *slices;
 
@@ -220,6 +224,9 @@ typedef struct sz_subdocuments_engine_t {
 
     /** The document grammar and the path language that goes with it. */
     sz_subdocuments_format_t format;
+
+    /** How the JSON walks read what RFC 8259 leaves open. */
+    sz_subdocuments_options_t options;
 
     /** The capability that compiled the paths. */
     sz_capability_t capability;
@@ -459,6 +466,9 @@ typedef struct sz_subdocuments_builder_t {
 
     /** Root steps being published. */
     sz_u64_t *root_steps;
+
+    /** Holder steps being published. */
+    sz_u64_t *holder_steps;
 
     /** Slices being published. */
     sz_subdocuments_slice_t *slices;
@@ -1226,11 +1236,23 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_parse_path_(sz_cptr_t path, sz_si
     sz_size_t segments_count;
     sz_bool_t singular;
     sz_status_t status;
-    if (length == 0 || path[0] != '$') return sz_invalid_syntax_k;
+    if (length == 0 || (path[0] != '$' && path[0] != '?')) return sz_invalid_syntax_k;
     parser.builder = builder, parser.path = path, parser.length = length, parser.position = 1;
     parser.path_index = path_index, parser.depth = 0, parser.stack_depth = 0, parser.filter = 0;
     parser.nesting = sz_false_k, parser.next_root = 0;
     sz_subdocuments_builder_step_(builder, sz_false_k, path_index);
+    // A bare filter is `$[?expression]` over the holder whose one element is the root.
+    if (path[0] == '?') {
+        if (sz_subdocuments_skip_filter_(path, length, 1) != length) return sz_invalid_syntax_k;
+        if (builder->holder_steps) builder->holder_steps[root >> 6] |= (sz_u64_t)1 << (root & 63);
+        sz_subdocuments_builder_step_(builder, sz_false_k, path_index);
+        sz_subdocuments_builder_filter_(builder);
+        if (builder->final_steps) builder->final_steps[(root + 1) >> 6] |= (sz_u64_t)1 << ((root + 1) & 63);
+        status = sz_subdocuments_parse_filter_(&parser, root + 1);
+        if (status != sz_success_k) return status;
+        return sz_subdocuments_skip_blanks_(path, length, parser.position) == length ? sz_success_k
+                                                                                     : sz_invalid_syntax_k;
+    }
     if (builder->root_steps) builder->root_steps[root >> 6] |= (sz_u64_t)1 << (root & 63);
     status = sz_subdocuments_parse_segments_(&parser, root, sz_false_k, &segments_count, &singular);
     // Blank space only separates segments, so none may trail the last one.
@@ -1407,6 +1429,7 @@ STRINGZILLA_INLINE void sz_subdocuments_engine_free_(sz_subdocuments_engine_t *e
     engine->filters_roots = STRINGZILLA_NULL, engine->filters = STRINGZILLA_NULL;
     engine->instructions = STRINGZILLA_NULL, engine->strings_data = STRINGZILLA_NULL;
     engine->final_steps = STRINGZILLA_NULL, engine->root_steps = STRINGZILLA_NULL;
+    engine->holder_steps = STRINGZILLA_NULL;
     engine->slices = STRINGZILLA_NULL, engine->slices_offsets = STRINGZILLA_NULL;
     engine->steps_paths = STRINGZILLA_NULL;
     engine->steps_count = 0, engine->words_count = 0, engine->names_slots_count = 0, engine->paths_count = 0;
@@ -1420,12 +1443,10 @@ STRINGZILLA_INLINE void sz_subdocuments_engine_free_(sz_subdocuments_engine_t *e
  *  and the name bytes last, so no array needs padding, over whole pages of
  *  @c sz_subdocuments_page_bytes_k from the block's first page boundary on.
  */
-STRINGZILLA_INLINE sz_status_t sz_subdocuments_engine_compile_(sz_subdocuments_engine_t *engine,
-                                                               sz_strings_view_t const *paths,
-                                                               sz_subdocuments_format_t format,
-                                                               sz_size_t *malformed_index, sz_capability_t capability,
-                                                               sz_allocator_t const *requested_allocator,
-                                                               sz_stream_t stream) {
+STRINGZILLA_INLINE sz_status_t sz_subdocuments_engine_compile_(
+    sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths, sz_subdocuments_format_t format,
+    sz_subdocuments_options_t options, sz_size_t *malformed_index, sz_capability_t capability,
+    sz_allocator_t const *requested_allocator, sz_stream_t stream) {
     sz_subdocuments_builder_t builder;
     sz_allocator_t allocator;
     sz_string_view_t views[64];
@@ -1439,6 +1460,8 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_engine_compile_(sz_subdocuments_e
 
     if (format != sz_subdocuments_json_k && format != sz_subdocuments_xml_k) return sz_missing_kernel_k;
     if (paths->count == 0) return sz_unexpected_dimensions_k;
+    // Only the host walks read the options and keep the holder a bare filter tests the root under.
+    if (options != sz_subdocuments_options_none_k && !(capability & sz_cap_cpus_k)) return sz_missing_kernel_k;
     if (requested_allocator) allocator = *requested_allocator;
     else if ((status = sz_allocator_init_heap(&allocator)) != sz_success_k) return status;
 
@@ -1451,7 +1474,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_engine_compile_(sz_subdocuments_e
     builder.relative_steps = STRINGZILLA_NULL, builder.attribute_steps = STRINGZILLA_NULL;
     builder.text_steps = STRINGZILLA_NULL, builder.filter_steps = STRINGZILLA_NULL;
     builder.filters_roots = STRINGZILLA_NULL, builder.final_steps = STRINGZILLA_NULL;
-    builder.root_steps = STRINGZILLA_NULL;
+    builder.root_steps = STRINGZILLA_NULL, builder.holder_steps = STRINGZILLA_NULL;
     builder.filters = STRINGZILLA_NULL, builder.instructions = STRINGZILLA_NULL,
     builder.strings_data = STRINGZILLA_NULL;
     builder.slices = STRINGZILLA_NULL, builder.slices_offsets = STRINGZILLA_NULL,
@@ -1459,6 +1482,8 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_engine_compile_(sz_subdocuments_e
     for (path_index = 0; path_index != paths->count; ++path_index) {
         if (path_index % 64 == 0) sz_strings_get_block_(paths, path_index, views);
         status = parse(views[path_index % 64].start, views[path_index % 64].length, path_index, &builder);
+        if (status == sz_success_k && !(capability & sz_cap_cpus_k) && views[path_index % 64].start[0] == '?')
+            status = sz_missing_kernel_k;
         if (status != sz_success_k) {
             *malformed_index = path_index;
             return status;
@@ -1473,7 +1498,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_engine_compile_(sz_subdocuments_e
     filters_bound = builder.filters_count, instructions_bound = builder.instructions_count;
     builder.words_count = sz_size_divide_round_up(steps_bound, 64);
     builder.names_slots_count = names_bound ? sz_size_bit_ceil(names_bound * 2) : 0;
-    bitset_words = (names_bound + 8 + filters_bound) * builder.words_count;
+    bitset_words = (names_bound + 9 + filters_bound) * builder.words_count;
     total_bytes = bitset_words * sizeof(sz_u64_t) + slices_bound * sizeof(sz_subdocuments_slice_t) +
                   instructions_bound * sizeof(sz_subdocuments_instruction_t) +
                   (2 * steps_bound + 1 + names_bound + 1 + builder.names_slots_count) * sizeof(sz_u32_t) +
@@ -1493,7 +1518,8 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_engine_compile_(sz_subdocuments_e
     builder.filter_steps = builder.text_steps + builder.words_count;
     builder.final_steps = builder.filter_steps + builder.words_count;
     builder.root_steps = builder.final_steps + builder.words_count;
-    builder.filters_roots = builder.root_steps + builder.words_count;
+    builder.holder_steps = builder.root_steps + builder.words_count;
+    builder.filters_roots = builder.holder_steps + builder.words_count;
     builder.slices = (sz_subdocuments_slice_t *)(builder.filters_roots + filters_bound * builder.words_count);
     builder.instructions = (sz_subdocuments_instruction_t *)(builder.slices + slices_bound);
     builder.steps_paths = (sz_u32_t *)(builder.instructions + instructions_bound);
@@ -1552,6 +1578,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_engine_compile_(sz_subdocuments_e
     engine->strings_data = builder.strings_data;
     engine->final_steps = builder.final_steps;
     engine->root_steps = builder.root_steps;
+    engine->holder_steps = builder.holder_steps;
     engine->slices = builder.slices;
     engine->slices_offsets = builder.slices_offsets;
     engine->steps_paths = builder.steps_paths;
@@ -1562,6 +1589,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_engine_compile_(sz_subdocuments_e
     engine->filters_count = (sz_u32_t)filters_bound;
     engine->patterns_count = (sz_u32_t)builder.patterns_count;
     engine->format = format;
+    engine->options = options;
     engine->capability = capability;
     engine->allocator = allocator;
     engine->memory = block;
@@ -2019,6 +2047,15 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_subdocuments_frame_header_words_(void) {
     return sz_size_divide_round_up(sizeof(sz_subdocuments_frame_t), sizeof(sz_u64_t));
 }
 
+/** 64-bit words of the names a JSON object frame met, after its live set, under
+ *  @c sz_subdocuments_duplicate_names_first_k: one bit per distinct name, and there are at most
+ *  half as many as name slots. Zero without that option. */
+STRINGZILLA_INLINE sz_size_t sz_subdocuments_names_words_(sz_subdocuments_engine_t const *engine) {
+    return (engine->options & sz_subdocuments_duplicate_names_first_k)
+               ? sz_size_divide_round_up(engine->names_slots_count / 2, 64)
+               : 0;
+}
+
 /** Grows @p engine 's depth stack to at least @p bytes, keeping the frames it holds. */
 STRINGZILLA_INLINE sz_status_t sz_subdocuments_engine_scratch_(sz_subdocuments_engine_t *engine, sz_size_t bytes) {
     sz_u64_t *grown, *const kept = (sz_u64_t *)engine->scratch;
@@ -2183,6 +2220,11 @@ STRINGZILLA_INLINE sz_bool_t sz_subdocuments_dead_(sz_u64_t const *live, sz_size
     sz_size_t word;
     for (word = 0; word != words_count; ++word) any |= live[word];
     return any ? sz_false_k : sz_true_k;
+}
+
+/** Whether @p engine compiled a bare filter, so every JSON walk keeps a holder above the root. */
+STRINGZILLA_INLINE sz_bool_t sz_subdocuments_holds_root_(sz_subdocuments_engine_t const *engine) {
+    return sz_subdocuments_dead_(engine->holder_steps, engine->words_count) == sz_true_k ? sz_false_k : sz_true_k;
 }
 
 /** Makes every filter step advancing from @p parent_live into a node select it tentatively, and its
@@ -2383,7 +2425,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_filter_holds_(sz_subdocuments_eng
                                                              sz_subdocuments_filter_t const *filter, sz_ptr_t buffer,
                                                              sz_size_t capacity, sz_bool_t *holds) {
     sz_size_t const header_words = sz_subdocuments_frame_header_words_(), words_count = engine->words_count;
-    sz_size_t const frame_words = header_words + words_count;
+    sz_size_t const frame_words = header_words + words_count + sz_subdocuments_names_words_(engine);
     sz_subdocuments_value_t values[sz_subdocuments_filter_depth_k];
     sz_size_t depth = 0, index;
     sz_status_t status = sz_success_k;
@@ -2465,8 +2507,9 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_replay_(sz_subdocuments_engine_t 
                                                        sz_match_t *matches, sz_size_t matches_capacity,
                                                        sz_size_t *emitted) {
     sz_size_t const header_words = sz_subdocuments_frame_header_words_(), words_count = engine->words_count;
-    sz_size_t const frame_words = header_words + words_count;
+    sz_size_t const frame_words = header_words + words_count + sz_subdocuments_names_words_(engine);
     sz_u64_t *const results = stack + spare * frame_words;
+    sz_bool_t const held = sz_subdocuments_holds_root_(engine);
     sz_size_t slot, word, filter;
     for (slot = begin; slot != end; ++slot) {
         sz_subdocuments_frame_t const *const frame = (sz_subdocuments_frame_t const *)(stack + slot * frame_words);
@@ -2507,6 +2550,9 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_replay_(sz_subdocuments_engine_t 
             sz_subdocuments_element_live_(engine, words_count, parent_live, frame->selector, parent->next_position,
                                           live);
         else sz_subdocuments_member_live_(engine, words_count, parent_live, frame->selector, live);
+        // The root's own paths start at it, under the holder a bare filter keeps.
+        if (held == sz_true_k && parent->parent == sz_subdocuments_no_slot_k)
+            for (word = 0; word != words_count; ++word) live[word] |= engine->root_steps[word];
         if (filtered)
             for (word = 0; word != words_count; ++word) live[word] |= results[word];
         if (emitted)
@@ -2517,6 +2563,34 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_replay_(sz_subdocuments_engine_t 
     return sz_success_k;
 }
 
+/** Settles the pending run that opened at slot @p run and holds the slots up to @p top, its
+ *  container just closed: every kept subtree's end, then the replay reporting its matches. */
+STRINGZILLA_INLINE sz_status_t sz_subdocuments_replay_run_(sz_subdocuments_engine_t *engine, sz_u8_t const *text,
+                                                           sz_size_t run, sz_size_t top, sz_size_t key_bytes,
+                                                           sz_size_t frame_words, sz_size_t document_index,
+                                                           sz_match_t *matches, sz_size_t matches_capacity,
+                                                           sz_size_t *emitted) {
+    sz_size_t const key_words = key_bytes / sizeof(sz_u64_t);
+    sz_u64_t *stack;
+    sz_size_t slot;
+    // Filters replay at one spare slot per nesting level past the kept ones.
+    sz_status_t const status = sz_subdocuments_engine_scratch_(
+        engine, (key_words + (top + engine->filters_count + 2) * frame_words) * sizeof(sz_u64_t));
+    if (status != sz_success_k) return status;
+    stack = (sz_u64_t *)engine->scratch + key_words;
+    // Kept slots are in document order, so a subtree ends one
+    // past its last descendant.
+    for (slot = run + 1; slot != top; ++slot)
+        ((sz_subdocuments_frame_t *)(stack + slot * frame_words))->subtree_end = slot + 1;
+    for (slot = top - 1; slot > run + 1; --slot) {
+        sz_subdocuments_frame_t const *const node = (sz_subdocuments_frame_t const *)(stack + slot * frame_words);
+        sz_subdocuments_frame_t *const holder = (sz_subdocuments_frame_t *)(stack + node->parent * frame_words);
+        if (node->parent != run) holder->subtree_end = sz_max_of_two(holder->subtree_end, node->subtree_end);
+    }
+    return sz_subdocuments_replay_(engine, text, stack, run + 1, top, top, (sz_ptr_t)engine->scratch, key_bytes,
+                                   document_index, matches, matches_capacity, emitted);
+}
+
 /**
  *  @brief Walks one document, reporting every node a path selects, in document order.
  *
@@ -2524,7 +2598,8 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_replay_(sz_subdocuments_engine_t 
  *  root steps at the start, a member's set from its key, an element's from its position. A
  *  container whose children a waiting step may select, counted from an array's end or decided by a
  *  filter, opens a pending run, where every node is walked with a tentative live set, a superset of
- *  the true one, and kept until the replay.
+ *  the true one, and kept until the replay. A bare filter keeps a holder in slot 0, an array whose
+ *  one element is the root, with a pending run open over it until the document ends.
  *
  *  @param[in] skim The tier's skim for the blocks a skipped container holds whole, or its
  *      classifier where the tier has none.
@@ -2532,6 +2607,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_replay_(sz_subdocuments_engine_t 
  *      batch specializes the walk for one word, so no loop over words remains.
  *  @param[in] names_lengths The lengths of the names, as @ref sz_subdocuments_names_lengths_ sets
  *      them for the batch.
+ *  @param[in] stop_after The matches count at which the walk returns, leaving the rest unread.
  *  @param[inout] matches_count Matches reported before this document, then after it; only those
  *      below @p matches_capacity are written.
  *  @return @c sz_success_k, @c sz_invalid_syntax_k for a malformed document, or @c sz_bad_alloc_k
@@ -2542,22 +2618,35 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walk_(sz_subdocuments_engine_t *e
                                                      sz_subdocuments_classify_t skim, sz_size_t words_count,
                                                      sz_cptr_t document, sz_size_t length, sz_size_t document_index,
                                                      sz_size_t key_bytes, sz_u64_t names_lengths, sz_match_t *matches,
-                                                     sz_size_t matches_capacity, sz_size_t *matches_count) {
+                                                     sz_size_t matches_capacity, sz_size_t stop_after,
+                                                     sz_size_t *matches_count) {
     sz_u64_t const *const final_steps = engine->final_steps, *const relative_steps = engine->relative_steps;
     sz_size_t const header_words = sz_subdocuments_frame_header_words_();
-    sz_size_t const frame_words = header_words + words_count, key_words = key_bytes / sizeof(sz_u64_t);
+    sz_size_t const names_words = sz_subdocuments_names_words_(engine);
+    sz_size_t const frame_words = header_words + words_count + names_words, key_words = key_bytes / sizeof(sz_u64_t);
+    sz_bool_t const held = sz_subdocuments_holds_root_(engine);
     sz_u8_t const *const text = (sz_u8_t const *)document;
     sz_subdocuments_expect_t expect = sz_subdocuments_expect_value_k;
     sz_size_t top = 0, current = sz_subdocuments_no_slot_k, run = sz_subdocuments_no_slot_k;
     sz_size_t position, closing, word, emitted = *matches_count;
     sz_subdocuments_cursor_t cursor;
     sz_u64_t *stack, *live, carried;
-    sz_status_t status = sz_subdocuments_engine_scratch_(engine, (key_words + 2 * frame_words) * sizeof(sz_u64_t));
+    sz_status_t status = sz_subdocuments_engine_scratch_(engine, (key_words + 3 * frame_words) * sizeof(sz_u64_t));
     if (status != sz_success_k) return status;
     stack = (sz_u64_t *)engine->scratch + key_words;
 
-    live = stack + header_words;
-    for (word = 0; word != words_count; ++word) live[word] = engine->root_steps[word];
+    if (held == sz_true_k) {
+        sz_subdocuments_frame_t *const holder = (sz_subdocuments_frame_t *)stack;
+        holder->parent = sz_subdocuments_no_slot_k, holder->selector = 0, holder->next_position = 0;
+        holder->byte_offset = 0, holder->byte_length = length, holder->matches_begin = emitted;
+        holder->matches_end = emitted, holder->closer = ']', holder->subtree_end = 0;
+        for (word = 0; word != words_count; ++word) stack[header_words + word] = engine->holder_steps[word];
+        current = 0, top = 1, run = 0;
+    }
+    else {
+        live = stack + header_words;
+        for (word = 0; word != words_count; ++word) live[word] = engine->root_steps[word];
+    }
 
     cursor.text = text, cursor.length = length;
     cursor.carry.escaped = 0, cursor.carry.in_string = 0, cursor.carry.scalar = 0, cursor.carry.slashes = 0;
@@ -2579,12 +2668,13 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walk_(sz_subdocuments_engine_t *e
             continue;
         }
         if (byte == ',') {
-            if (expect != sz_subdocuments_expect_comma_or_close_k) return sz_invalid_syntax_k;
+            if (expect != sz_subdocuments_expect_comma_or_close_k || (held == sz_true_k && current == 0))
+                return sz_invalid_syntax_k;
             expect = parent->closer == '}' ? sz_subdocuments_expect_key_k : sz_subdocuments_expect_value_k;
             continue;
         }
         if (byte == '}' || byte == ']') {
-            if (!parent || parent->closer != byte) return sz_invalid_syntax_k;
+            if (!parent || parent->closer != byte || (held == sz_true_k && current == 0)) return sz_invalid_syntax_k;
             if (expect != sz_subdocuments_expect_comma_or_close_k &&
                 expect !=
                     (byte == '}' ? sz_subdocuments_expect_key_or_close_k : sz_subdocuments_expect_value_or_close_k))
@@ -2597,27 +2687,14 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walk_(sz_subdocuments_engine_t *e
                 sz_subdocuments_close_matches_(matches, matches_capacity, parent->matches_begin, parent->matches_end,
                                                position + 1);
                 if (run == current) {
-                    sz_size_t slot;
-                    // Filters replay at one spare slot per nesting level past the kept ones.
-                    status = sz_subdocuments_engine_scratch_(
-                        engine, (key_words + (top + engine->filters_count + 2) * frame_words) * sizeof(sz_u64_t));
+                    status = sz_subdocuments_replay_run_(engine, text, run, top, key_bytes, frame_words, document_index,
+                                                         matches, matches_capacity, &emitted);
                     if (status != sz_success_k) return status;
                     stack = (sz_u64_t *)engine->scratch + key_words;
-                    // Kept slots are in document order, so a subtree ends one
-                    // past its last descendant.
-                    for (slot = run + 1; slot != top; ++slot)
-                        ((sz_subdocuments_frame_t *)(stack + slot * frame_words))->subtree_end = slot + 1;
-                    for (slot = top - 1; slot > run + 1; --slot) {
-                        sz_subdocuments_frame_t const *const node =
-                            (sz_subdocuments_frame_t const *)(stack + slot * frame_words);
-                        sz_subdocuments_frame_t *const holder = (sz_subdocuments_frame_t *)(stack +
-                                                                                            node->parent * frame_words);
-                        if (node->parent != run)
-                            holder->subtree_end = sz_max_of_two(holder->subtree_end, node->subtree_end);
+                    if (emitted >= stop_after) {
+                        *matches_count = emitted;
+                        return sz_success_k;
                     }
-                    status = sz_subdocuments_replay_(engine, text, stack, run + 1, top, top, (sz_ptr_t)engine->scratch,
-                                                     key_bytes, document_index, matches, matches_capacity, &emitted);
-                    if (status != sz_success_k) return status;
                     run = sz_subdocuments_no_slot_k;
                 }
                 top = current;
@@ -2663,6 +2740,12 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walk_(sz_subdocuments_engine_t *e
                             unescaped, key_length, key_bytes)];
                 }
             }
+            // A name this object met before is entered by wildcards only.
+            if (names_words && name != sz_subdocuments_no_name_k) {
+                sz_u64_t *const met = (sz_u64_t *)parent + header_words + words_count + (name >> 6);
+                if (*met >> (name & 63) & 1) name = sz_subdocuments_no_name_k;
+                else *met |= (sz_u64_t)1 << (name & 63);
+            }
             sz_subdocuments_member_live_(engine, words_count, parent_live, name, live);
             if (engine->filters_count) sz_subdocuments_filters_tentative_(engine, words_count, parent_live, live);
             frame->selector = name;
@@ -2676,6 +2759,8 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walk_(sz_subdocuments_engine_t *e
             frame->selector = parent->next_position++;
             sz_subdocuments_element_live_(engine, words_count, parent_live, frame->selector, 0, live);
             if (engine->filters_count) sz_subdocuments_filters_tentative_(engine, words_count, parent_live, live);
+            if (held == sz_true_k && current == 0)
+                for (word = 0; word != words_count; ++word) live[word] |= engine->root_steps[word];
         }
         for (word = 0; word != words_count; ++word)
             reported |= live[word] & final_steps[word], continuing |= live[word] & ~final_steps[word];
@@ -2683,6 +2768,10 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walk_(sz_subdocuments_engine_t *e
         if (run == sz_subdocuments_no_slot_k)
             sz_subdocuments_report_(engine, words_count, live, document_index, position, 0, matches, matches_capacity,
                                     &emitted);
+        if (emitted >= stop_after) {
+            *matches_count = emitted;
+            return sz_success_k;
+        }
         if ((byte == '{' || byte == '[') && continuing) {
             frame->parent = current, frame->byte_offset = position;
             frame->next_position = 0, frame->matches_begin = matches_begin, frame->matches_end = emitted;
@@ -2703,6 +2792,9 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walk_(sz_subdocuments_engine_t *e
             status = sz_subdocuments_engine_scratch_(engine, (key_words + (top + 1) * frame_words) * sizeof(sz_u64_t));
             if (status != sz_success_k) return status;
             stack = (sz_u64_t *)engine->scratch + key_words;
+            if (names_words && byte == '{')
+                for (word = 0; word != names_words; ++word)
+                    stack[current * frame_words + header_words + words_count + word] = 0;
             expect = byte == '{' ? sz_subdocuments_expect_key_or_close_k : sz_subdocuments_expect_value_or_close_k;
             continue;
         }
@@ -2735,6 +2827,13 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walk_(sz_subdocuments_engine_t *e
         }
         expect = current != sz_subdocuments_no_slot_k ? sz_subdocuments_expect_comma_or_close_k
                                                       : sz_subdocuments_expect_end_k;
+    }
+    if (held == sz_true_k) {
+        if (current != 0 || expect != sz_subdocuments_expect_comma_or_close_k) return sz_invalid_syntax_k;
+        status = sz_subdocuments_replay_run_(engine, text, 0, top, key_bytes, frame_words, document_index, matches,
+                                             matches_capacity, &emitted);
+        if (status != sz_success_k) return status;
+        current = sz_subdocuments_no_slot_k, expect = sz_subdocuments_expect_end_k;
     }
     if (current != sz_subdocuments_no_slot_k || expect != sz_subdocuments_expect_end_k || cursor.carry.slashes)
         return sz_invalid_syntax_k;
@@ -2861,6 +2960,7 @@ STRINGZILLA_INLINE sz_size_t sz_subdocuments_markup_name_(sz_subdocuments_engine
  *  names byte by byte. An element no live step advances from is lexed to its end tag without a
  *  slot, so what it holds is not validated beyond its nesting.
  *
+ *  @param[in] stop_after The matches count at which the walk returns, leaving the rest unread.
  *  @return @c sz_success_k, @c sz_invalid_syntax_k for a malformed document or a DOCTYPE with an
  *      internal subset, or @c sz_bad_alloc_k when the depth stack cannot grow.
  */
@@ -2868,7 +2968,8 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walk_markup_(sz_subdocuments_engi
                                                             sz_subdocuments_find_byte_t find_byte, sz_cptr_t document,
                                                             sz_size_t length, sz_size_t document_index,
                                                             sz_size_t key_bytes, sz_match_t *matches,
-                                                            sz_size_t matches_capacity, sz_size_t *matches_count) {
+                                                            sz_size_t matches_capacity, sz_size_t stop_after,
+                                                            sz_size_t *matches_count) {
     sz_u64_t const *const final_steps = engine->final_steps;
     sz_size_t const words_count = engine->words_count, header_words = sz_subdocuments_frame_header_words_();
     sz_size_t const counter_words = (engine->slices_offsets[engine->steps_count] + 1) / 2;
@@ -2920,6 +3021,10 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walk_markup_(sz_subdocuments_engi
                                        sz_subdocuments_no_name_k, live);
             sz_subdocuments_report_(engine, words_count, live, document_index, text_begin, opening - text_begin,
                                     matches, matches_capacity, &emitted);
+            if (emitted >= stop_after) {
+                *matches_count = emitted;
+                return sz_success_k;
+            }
         }
 
         if (kind == '!' && length - opening >= 4 && text[opening + 2] == '-' && text[opening + 3] == '-') {
@@ -2988,6 +3093,10 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walk_markup_(sz_subdocuments_engi
                                            live);
                 sz_subdocuments_report_(engine, words_count, live, document_index, opening, 0, matches,
                                         matches_capacity, &emitted);
+                if (emitted >= stop_after) {
+                    *matches_count = emitted;
+                    return sz_success_k;
+                }
                 for (word = 0; word != words_count; ++word) continuing |= live[word] & ~final_steps[word];
                 for (word = 0; word != counter_words; ++word) live[words_count + word] = 0;
                 frame->parent = current, frame->byte_offset = opening;
@@ -3032,6 +3141,10 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walk_markup_(sz_subdocuments_engi
                                                attribute_live);
                     sz_subdocuments_report_(engine, words_count, attribute_live, document_index, value_begin,
                                             value_end - value_begin, matches, matches_capacity, &emitted);
+                    if (emitted >= stop_after) {
+                        *matches_count = emitted;
+                        return sz_success_k;
+                    }
                 }
                 attribute = value_end + 1;
             }
@@ -3069,6 +3182,47 @@ STRINGZILLA_INLINE sz_size_t sz_subdocuments_buffer_bytes_(sz_subdocuments_engin
     return sz_max_of_two(key_bytes, sz_size_divide_round_up(length + 24, sizeof(sz_u64_t)) * sizeof(sz_u64_t));
 }
 
+/** Per-document containment through a tier's classifiers, each walk stopping at its first match,
+ *  which is every CPU tier's containment verb. */
+STRINGZILLA_INLINE sz_status_t sz_subdocuments_contains_with_(sz_subdocuments_engine_t *engine,
+                                                              sz_subdocuments_classify_t classify,
+                                                              sz_subdocuments_classify_t skim,
+                                                              sz_subdocuments_find_byte_t find_byte,
+                                                              sz_strings_view_t const *documents, sz_u1x8_t *contained,
+                                                              sz_size_t *malformed_index) {
+    sz_size_t const key_bytes = sz_subdocuments_key_bytes_(engine);
+    sz_u64_t const names_lengths = sz_subdocuments_names_lengths_(engine);
+    sz_string_view_t views[64];
+    sz_size_t document_index;
+    if (!engine->steps_count) return sz_missing_kernel_k;
+    for (document_index = 0; document_index != documents->count; ++document_index) {
+        sz_size_t counted = 0;
+        sz_status_t status;
+        if (document_index % 64 == 0) sz_strings_get_block_(documents, document_index, views);
+        {
+            sz_cptr_t const document = views[document_index % 64].start;
+            sz_size_t const length = views[document_index % 64].length;
+            sz_size_t const buffer_bytes = sz_subdocuments_buffer_bytes_(engine, key_bytes, length);
+            if (engine->format == sz_subdocuments_xml_k)
+                status = sz_subdocuments_walk_markup_(engine, find_byte, document, length, document_index, key_bytes,
+                                                      (sz_match_t *)STRINGZILLA_NULL, 0, 1, &counted);
+            else if (engine->words_count == 1)
+                status = sz_subdocuments_walk_(engine, classify, skim, 1, document, length, document_index,
+                                               buffer_bytes, names_lengths, (sz_match_t *)STRINGZILLA_NULL, 0, 1,
+                                               &counted);
+            else
+                status = sz_subdocuments_walk_(engine, classify, skim, engine->words_count, document, length,
+                                               document_index, buffer_bytes, names_lengths,
+                                               (sz_match_t *)STRINGZILLA_NULL, 0, 1, &counted);
+        }
+        if (status == sz_invalid_syntax_k) *malformed_index = document_index;
+        if (status != sz_success_k) return status;
+        if ((document_index & 7) == 0) contained[document_index >> 3] = 0;
+        if (counted) contained[document_index >> 3] |= (sz_u1x8_t)(1u << (document_index & 7));
+    }
+    return sz_success_k;
+}
+
 /** Per-document counts through a tier's classifiers, which is every CPU tier's counting verb. */
 STRINGZILLA_INLINE sz_status_t sz_subdocuments_counts_with_(sz_subdocuments_engine_t *engine,
                                                             sz_subdocuments_classify_t classify,
@@ -3093,15 +3247,16 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_counts_with_(sz_subdocuments_engi
             // Most vocabularies fit their steps in one word, where the walk loops over none.
             if (engine->format == sz_subdocuments_xml_k)
                 status = sz_subdocuments_walk_markup_(engine, find_byte, document, length, document_index, key_bytes,
-                                                      (sz_match_t *)STRINGZILLA_NULL, 0, &counted);
+                                                      (sz_match_t *)STRINGZILLA_NULL, 0, STRINGZILLA_SIZE_MAX,
+                                                      &counted);
             else if (engine->words_count == 1)
                 status = sz_subdocuments_walk_(engine, classify, skim, 1, document, length, document_index,
                                                buffer_bytes, names_lengths, (sz_match_t *)STRINGZILLA_NULL, 0,
-                                               &counted);
+                                               STRINGZILLA_SIZE_MAX, &counted);
             else
                 status = sz_subdocuments_walk_(engine, classify, skim, engine->words_count, document, length,
                                                document_index, buffer_bytes, names_lengths,
-                                               (sz_match_t *)STRINGZILLA_NULL, 0, &counted);
+                                               (sz_match_t *)STRINGZILLA_NULL, 0, STRINGZILLA_SIZE_MAX, &counted);
         }
         if (status == sz_invalid_syntax_k) *malformed_index = document_index;
         if (status != sz_success_k) return status;
@@ -3131,14 +3286,15 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_find_with_(
             // Most vocabularies fit their steps in one word, where the walk loops over none.
             if (engine->format == sz_subdocuments_xml_k)
                 status = sz_subdocuments_walk_markup_(engine, find_byte, document, length, document_index, key_bytes,
-                                                      matches, matches_capacity, &emitted);
+                                                      matches, matches_capacity, STRINGZILLA_SIZE_MAX, &emitted);
             else if (engine->words_count == 1)
                 status = sz_subdocuments_walk_(engine, classify, skim, 1, document, length, document_index,
-                                               buffer_bytes, names_lengths, matches, matches_capacity, &emitted);
+                                               buffer_bytes, names_lengths, matches, matches_capacity,
+                                               STRINGZILLA_SIZE_MAX, &emitted);
             else
                 status = sz_subdocuments_walk_(engine, classify, skim, engine->words_count, document, length,
                                                document_index, buffer_bytes, names_lengths, matches, matches_capacity,
-                                               &emitted);
+                                               STRINGZILLA_SIZE_MAX, &emitted);
         }
         if (status == sz_invalid_syntax_k) *malformed_index = document_index;
         if (status != sz_success_k) return status;
@@ -3153,12 +3309,19 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_find_with_(
 
 #if STRINGZILLA_TARGET_SERIAL
 
-STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_serial(sz_subdocuments_engine_t *engine,
-                                                               sz_strings_view_t const *paths,
-                                                               sz_subdocuments_format_t format,
-                                                               sz_size_t *malformed_index, sz_allocator_t *allocator,
-                                                               sz_stream_t stream) {
-    return sz_subdocuments_engine_compile_(engine, paths, format, malformed_index, sz_cap_serial_k, allocator, stream);
+STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_serial(
+    sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths, sz_subdocuments_format_t format,
+    sz_subdocuments_options_t options, sz_size_t *malformed_index, sz_allocator_t *allocator, sz_stream_t stream) {
+    return sz_subdocuments_engine_compile_(engine, paths, format, options, malformed_index, sz_cap_serial_k, allocator,
+                                           stream);
+}
+
+STRINGZILLA_API sz_status_t sz_subdocuments_contains_serial(sz_subdocuments_engine_t *engine,
+                                                            sz_strings_view_t const *documents, sz_u1x8_t *contained,
+                                                            sz_size_t *malformed_index, sz_stream_t stream) {
+    sz_unused_(stream);
+    return sz_subdocuments_contains_with_(engine, &sz_subdocuments_classify_serial_, &sz_subdocuments_skim_serial_,
+                                          &sz_find_byte_serial_, documents, contained, malformed_index);
 }
 
 STRINGZILLA_API sz_status_t sz_subdocuments_counts_serial(sz_subdocuments_engine_t *engine,
