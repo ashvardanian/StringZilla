@@ -192,18 +192,20 @@ typedef struct sz_regex_looks_simt_t {
 
 /** What one segment hands the next: where the haystack straddling them resumes, whether an empty
  *  match there is refused, the matches kept so far, the last kept match, the drift a rewrite or the
- *  rows an extraction made so far, the kept matches of the extracted pattern so far, and how many
- *  of them preceded the straddling haystack. */
+ *  rows an extraction made so far, the kept matches of the extracted pattern so far, how many of
+ *  them preceded the straddling haystack, and the contains bits of the partial words at either end
+ *  of the bitmap, the first word's in the low half and the last word's in the high half. */
 typedef struct sz_regex_carry_simt_t {
-    sz_u64_t cursor, refusing, running, last_start, last_end, summed, counted, straddle;
+    sz_u64_t cursor, refusing, running, last_start, last_end, summed, counted, straddle, contained_edges;
 } sz_regex_carry_simt_t;
 
 /**
  *  @brief What one round's kernels read and write, every pointer one the device addresses.
  *
- *  The outputs of the verb a call serves are set and the others null: matches, counts, a rewrite or
- *  rows. The set kernels read which flow they run, the lookarounds it walks, the lookaround whose
- *  body's DFA it steps instead of the NFA, and where in a walk's share its sets sit.
+ *  The outputs of the verb a call serves are set and the others null: contained bits, matches,
+ *  counts, a rewrite or rows. The set kernels read which flow they run, the lookarounds it walks,
+ *  the lookaround whose body's DFA it steps instead of the NFA, and the place its sets take in the
+ *  share of the walk.
  *
  *  Groups of walks paused at the window's end live in the checkpoints' two halves, dead once the
  *  links settle, and are found through the leaders, one per forward state; the last slide's start
@@ -226,6 +228,7 @@ typedef struct sz_regex_round_simt_t {
     sz_regex_result_simt_t *results, *links, *links_next, *groups, *groups_next;
     sz_size_t *drifts;
     sz_u8_t *walks;
+    sz_u1x8_t *contained;
     sz_size_t *matches_offsets, *counts, *offsets, *rows_offsets;
     sz_match_t *matches, *rows;
     sz_ptr_t target;
@@ -606,6 +609,31 @@ STRINGZILLA_DEVICE void sz_regex_boundary_store_simt_(sz_regex_round_simt_t cons
         if (index) round->counts[(index - 1) * round->counts_stride] = value;
     }
     else if (round->matches_offsets) round->matches_offsets[index] = value;
+}
+
+/** Sets bit @p index of a contains call's bitmap of @p count haystacks: an atomic OR into the
+ *  aligned word holding it where that word lies inside the bitmap, else into the carry's edges. */
+STRINGZILLA_DEVICE void sz_regex_contained_set_simt_(sz_regex_round_simt_t const *round, sz_size_t count,
+                                                     sz_size_t index) {
+    sz_size_t const begin = (sz_size_t)round->contained, end = begin + sz_size_divide_round_up(count, 8);
+    sz_size_t const address = begin + index / 8, word = address & ~(sz_size_t)3;
+    sz_u32_t const bit = 1u << (address % 4 * 8 + index % 8);
+    if (word >= begin && word + 4 <= end) atomicOr((unsigned *)word, bit);
+    else
+        atomicOr((unsigned long long *)&round->carry->contained_edges,
+                 (unsigned long long)bit << (word < begin ? 0 : 32));
+}
+
+/** ORs the carry's edges into the bytes of the partial words at either end of a contains call's
+ *  bitmap of @p count haystacks, which no other thread writes. */
+STRINGZILLA_DEVICE void sz_regex_contained_edges_simt_(sz_regex_round_simt_t const *round, sz_size_t count) {
+    sz_size_t const begin = (sz_size_t)round->contained, end = begin + sz_size_divide_round_up(count, 8);
+    sz_u64_t const edges = round->carry->contained_edges;
+    sz_size_t address;
+    for (address = begin; address != end && address % 4; ++address)
+        round->contained[address - begin] |= (sz_u1x8_t)(edges >> (address % 4 * 8));
+    for (address = sz_max_of_two(end & ~(sz_size_t)3, address); address != end; ++address)
+        round->contained[address - begin] |= (sz_u1x8_t)(edges >> (32 + address % 4 * 8));
 }
 
 #pragma endregion Device Helpers
@@ -3447,7 +3475,7 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
         sz_u32_t const first = (sz_u32_t)round.chunk_offsets[chunk], end = (sz_u32_t)round.chunk_offsets[chunk + 1];
         sz_size_t const base = round.storing ? round.carry->running + round.chunk_kept[chunk] : 0;
         sz_size_t haystack_index = round.chunk_haystacks[chunk], pending = haystack_index;
-        sz_size_t last_start = 0, last_end = 0, kept_pattern = 0;
+        sz_size_t last_start = 0, last_end = 0, kept_pattern = 0, marked = STRINGZILLA_SIZE_MAX;
         sz_regex_haystack_simt_t haystack = sz_regex_haystack_simt_(haystacks, haystack_index);
         sz_u32_t expected = sz_regex_none_simt_k, kept = 0, index;
         if (haystack.first < low) ++pending;
@@ -3465,6 +3493,8 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
             expected = round.nexts[index];
             result = sz_regex_settle_simt_(&round, index, mark, &haystack);
             if (result.pattern == sz_regex_none_simt_k) continue;
+            if (round.storing && round.contained && haystack_index != marked)
+                sz_regex_contained_set_simt_(&round, haystacks.count, marked = haystack_index);
             if (round.storing && base + kept < round.matches_capacity) {
                 sz_match_t match;
                 match.haystack_index = haystack_index, match.needle_index = result.pattern;
@@ -3486,8 +3516,8 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
     }
 }
 
-/** Hands the next segment its carry, launched on one thread, as the Metal kernel does, and the last
- *  boundary of whatever the call writes. */
+/** Hands the next segment its carry, launched on one thread, as the Metal kernel does, the last
+ *  boundary of whatever the call writes, and the edges of a contains call's bitmap. */
 static __global__ void __launch_bounds__(sz_regex_carry_threads_per_block_simt_k)
     sz_regex_carry_simt_kernel_(sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
     sz_regex_carry_simt_t *const carry = round.carry;
@@ -3511,6 +3541,7 @@ static __global__ void __launch_bounds__(sz_regex_carry_threads_per_block_simt_k
         carry->summed += round.chunk_covers[round.chunks_count];
         round.rows_offsets[haystacks.count] = carry->summed;
     }
+    if (round.contained) sz_regex_contained_edges_simt_(&round, haystacks.count);
 }
 
 /** Saves the total each thread's range of counts follows, before the differences overwrite it. */

@@ -3405,7 +3405,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_builder_publish_(sz_regex_builder_t *bui
     byte_to_class = (sz_u8_t *)(groups_ends + groups_count + 1);
     memcpy(byte_to_class, builder->byte_to_class, 256);
     memcpy(states, builder->forward.states, nfa_states * sizeof(sz_regex_nfa_state_t));
-    memcpy(links, builder->forward.links, nfa_links * sizeof(sz_regex_nfa_link_t));
+    if (nfa_links) memcpy(links, builder->forward.links, nfa_links * sizeof(sz_regex_nfa_link_t));
     if (lookarounds_count) memcpy(lookarounds, builder->lookarounds, lookarounds_count * sizeof(sz_regex_lookaround_t));
     if (builder->bodies_rows_count)
         memcpy(bodies_rows, builder->bodies_rows, builder->bodies_rows_count * sizeof(sz_u32_t));
@@ -3438,7 +3438,8 @@ STRINGZILLA_INLINE sz_status_t sz_regex_builder_publish_(sz_regex_builder_t *bui
     }
     if (words) {
         memcpy(program, builder->reach, reach_words * sizeof(sz_u64_t));
-        memcpy(program + reach_words, builder->records, builder->records_count * sizeof(sz_u64_t));
+        if (builder->records_count)
+            memcpy(program + reach_words, builder->records, builder->records_count * sizeof(sz_u64_t));
         memcpy(program + reach_words + builder->records_count, builder->all, 17 * words * sizeof(sz_u64_t));
         memcpy(ascii, builder->ascii, sizeof(builder->ascii));
         memcpy(ascii + ascii_count, builder->ranges_classes, ranges_count * sizeof(sz_u32_t));

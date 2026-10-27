@@ -19,7 +19,8 @@
 #include <string>      // `std::string`
 #include <vector>      // `std::vector`
 
-#include <stringzilla/stringzilla.h> // Primary C API
+#include "stringzilla/stringzilla.h"   // Primary C API
+#include "stringzilla/stringzilla.hpp" // `strings<>::view`, which `types.hpp` only declares
 
 #include "harness.hpp" // `cross_section_t`, `unified_vector`, `verify`
 #include "cross.hpp"   // `check_uncased_fold_equivalence_`, `for_each_adversarial_utf8_input_`
@@ -37,14 +38,19 @@ struct device_kernels {
 
     sz_kernel_levenshtein_distances_t levenshtein_distances;
     sz_kernel_overlap_scores_t overlap_scores;
+
+    /** The three @c contains, each null where the vendor has none, as Metal has none yet. */
+    sz_kernel_substrings_contains_t substrings_contains;
     sz_kernel_substrings_counts_t substrings_counts;
     sz_kernel_substrings_find_t substrings_find;
     sz_kernel_substrings_replace_t substrings_replace;
     sz_kernel_substrings_bm25_scores_t substrings_bm25_scores;
+    sz_kernel_regex_contains_t regex_contains;
     sz_kernel_regex_counts_t regex_counts;
     sz_kernel_regex_find_t regex_find;
     sz_kernel_regex_replace_t regex_replace;
     sz_kernel_regex_extract_t regex_extract;
+    sz_kernel_subdocuments_contains_t subdocuments_contains;
     sz_kernel_subdocuments_counts_t subdocuments_counts;
     sz_kernel_subdocuments_find_t subdocuments_find;
     fold_type_ utf8_uncased_fold;
@@ -64,6 +70,21 @@ inline auto gpu_best(sz_capability_t capabilities) {
 /** Joins @p stream, or the default one, which is what every device verb leaves the caller to do. */
 inline void join_(device_backend_t const &runtime, sz_stream_t stream) {
     verify(sz_stream_synchronize_best(runtime.capabilities, stream) == sz_success_k);
+}
+
+/** A device @p contains call's bitmap against @p expected, the serial one, byte for byte: ending
+ *  where its buffer ends, so a write past it trips the sanitizers, starting there and one byte in,
+ *  so both alignments of its head run, and filled with ones, so an unwritten tail bit shows. */
+inline void check_contains_(device_backend_t const &runtime, std::vector<sz_u1x8_t> const &expected,
+                            auto const &contains) {
+    for (std::size_t const offset : {0, 1}) {
+        unified_vector<sz_u1x8_t> buffer(offset + expected.size(), 0xFF,
+                                         unified_alloc<sz_u1x8_t>(runtime.unified, runtime.stream));
+        verify(contains(buffer.data() + offset) == sz_success_k);
+        join_(runtime, runtime.stream);
+        verify(std::equal(buffer.begin() + offset, buffer.end(), expected.begin()));
+        verify(std::all_of(buffer.begin(), buffer.begin() + offset, [](sz_u1x8_t byte) { return byte == 0xFF; }));
+    }
 }
 
 /** How the candidate lengths of a skewed batch differ by orders of magnitude. */
@@ -1128,6 +1149,21 @@ inline void check_against_serial_(auto const &backend, device_corpus_t &corpus, 
         verify(counted == device_total && "The counts and the matches come from one pass");
     }
 
+    // Contains stops each chunk at its first match, under every policy.
+    if (backend.substrings_contains) {
+        std::vector<sz_u1x8_t> serial_contained(sz_size_divide_round_up(haystacks.size(), 8), 0);
+        verify(sz_substrings_contains_serial(&engines.host, &corpus_device_tape_strings, serial_contained.data(),
+                                             nullptr) == sz_success_k);
+        check_contains_(backend.runtime, serial_contained, [&](sz_u1x8_t *contained) {
+            return backend.substrings_contains(&engines.device, &corpus_device_tape_strings, contained,
+                                               backend.runtime.stream);
+        });
+        check_contains_(backend.runtime, serial_contained, [&](sz_u1x8_t *contained) {
+            return sz_substrings_contains(&engines.device, &corpus_device_tape_strings, contained,
+                                          backend.runtime.stream);
+        });
+    }
+
     if (policy == sz_substrings_overlapping_k) return;
 
     // The rewrite, whose device path owns a block scan and a tiled copy the serial one has
@@ -1241,6 +1277,11 @@ inline void test_substrings_device_unit(auto const &backend) {
                     {std::string("ab\xFF" "cd", 5), // "\xFFc" is one escape
                      "abcd"},
                     {"ab", "cd"}, sz_uncased_k);
+
+    // 45 haystacks run past one ballot and end mid-byte, so the bitmap's tail bits count too.
+    std::vector<std::string> batch(45, "us");
+    for (std::size_t index = 1; index < batch.size(); index += 3) batch[index] = "ushers";
+    check_policies_(backend, batch, {"he", "she", "his", "hers"}, sz_cased_k);
 }
 
 /** Random corpora wide enough that the planner cuts several chunks per haystack. */
@@ -1362,6 +1403,16 @@ inline void test_substrings_device_safety(auto const &backend) {
         sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.view().raw;
         verify(backend.substrings_counts(&engines.device, &corpus_device_tape_strings, host_counts.data(), 1,
                                          backend.runtime.stream) == sz_device_memory_mismatch_k);
+    }
+
+    // A host bitmap is refused too, and an empty batch writes none.
+    if (backend.substrings_contains) {
+        std::vector<sz_u1x8_t> host_contained(1, 0);
+        sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.view().raw;
+        sz_strings_view_t const empty {};
+        verify(backend.substrings_contains(&engines.device, &corpus_device_tape_strings, host_contained.data(),
+                                           backend.runtime.stream) == sz_device_memory_mismatch_k);
+        verify(backend.substrings_contains(&engines.device, &empty, nullptr, backend.runtime.stream) == sz_success_k);
     }
 
     // An output stride of zero cannot address one entry per haystack, whatever the haystack count.
@@ -1542,6 +1593,16 @@ inline void check_regex_against_serial_(auto const &backend, std::vector<std::st
     for (std::size_t index = 0; index != count; ++index)
         verify(device_counts[index] == serial_offsets[index + 1] - serial_offsets[index] &&
                dispatched_counts[index] == device_counts[index]);
+    if (backend.regex_contains) {
+        std::vector<sz_u1x8_t> serial_contained(sz_size_divide_round_up(count, 8), 0);
+        verify(sz_regex_contains_serial(&engines.host, &tape, serial_contained.data(), nullptr) == sz_success_k);
+        check_contains_(backend.runtime, serial_contained, [&](sz_u1x8_t *contained) {
+            return backend.regex_contains(&engines.device, &tape, contained, stream);
+        });
+        check_contains_(backend.runtime, serial_contained, [&](sz_u1x8_t *contained) {
+            return sz_regex_contains(&engines.device, &tape, contained, stream);
+        });
+    }
 
     // Every match rewritten, the groups a replacement names read from its own span: sized first
     // with no target, as a caller sizes one, then under targets holding all of it and a third.
@@ -1627,6 +1688,11 @@ inline void test_regex_device_unit(auto const &backend) {
                                 {"", "a", "baaab", "\xD0\xB6" "a\xD0\xB6", "\xFF\x80"}, // "\xB6a" is one escape
                                 {"a*", "b|"});
     check_regex_against_serial_(backend, {"one\ntwo\n", "x", "  word  "}, {"(?m)^\\w+$", "\\b", "\\z"});
+
+    // 45 haystacks run past one ballot and end mid-byte, so the bitmap's tail bits count too.
+    std::vector<std::string> batch(45, "none");
+    for (std::size_t index = 2; index < batch.size(); index += 3) batch[index] = "x" + std::to_string(index);
+    check_regex_against_serial_(backend, batch, {"x([0-9]+)"});
 
     // A rewrite shrinking long matches over many scan tiles drifts below zero, which the scans
     // of the rewritten boundaries carry as exactly as they carry counts.
@@ -1793,6 +1859,13 @@ inline void test_regex_device_safety(auto const &backend) {
 
     std::vector<sz_size_t> host_counts(1, 0);
     verify(backend.regex_counts(&engines.device, &tape, host_counts.data(), 1, stream) == sz_device_memory_mismatch_k);
+    if (backend.regex_contains) {
+        std::vector<sz_u1x8_t> host_contained(1, 0);
+        sz_strings_view_t const empty {};
+        verify(backend.regex_contains(&engines.device, &tape, host_contained.data(), stream) ==
+               sz_device_memory_mismatch_k);
+        verify(backend.regex_contains(&engines.device, &empty, nullptr, stream) == sz_success_k);
+    }
     unified_vector<sz_size_t> counts(1, STRINGZILLA_SIZE_MAX,
                                      unified_alloc<sz_size_t>(backend.runtime.unified, stream));
     verify(backend.regex_counts(&engines.device, &tape, counts.data(), 0, stream) == sz_unexpected_dimensions_k);
@@ -1888,6 +1961,15 @@ inline void check_subdocuments_against_serial_(auto const &backend, std::vector<
         verify(backend.subdocuments_find(&engines.device, &tape, nullptr, 0, offsets.data(), &device_malformed,
                                          stream) == sz_invalid_syntax_k);
         verify(device_malformed == serial_malformed);
+        // Device walks run whole, so contains refuses what counts refuses, even past a first match.
+        if (backend.subdocuments_contains) {
+            unified_vector<sz_u1x8_t> contained(sz_size_divide_round_up(count, 8), 0,
+                                                unified_alloc<sz_u1x8_t>(backend.runtime.unified, stream));
+            device_malformed = STRINGZILLA_SIZE_MAX;
+            verify(backend.subdocuments_contains(&engines.device, &tape, contained.data(), &device_malformed, stream) ==
+                   sz_invalid_syntax_k);
+            verify(device_malformed == serial_malformed);
+        }
         return;
     }
     std::size_t const total = serial_offsets[count];
@@ -1925,6 +2007,17 @@ inline void check_subdocuments_against_serial_(auto const &backend, std::vector<
     for (std::size_t index = 0; index != count; ++index)
         verify(device_counts[index] == serial_offsets[index + 1] - serial_offsets[index] &&
                dispatched_counts[index] == device_counts[index]);
+    if (backend.subdocuments_contains) {
+        std::vector<sz_u1x8_t> serial_contained(sz_size_divide_round_up(count, 8), 0);
+        verify(sz_subdocuments_contains_serial(&engines.host, &tape, serial_contained.data(), &serial_malformed,
+                                               nullptr) == sz_success_k);
+        check_contains_(backend.runtime, serial_contained, [&](sz_u1x8_t *contained) {
+            return backend.subdocuments_contains(&engines.device, &tape, contained, &device_malformed, stream);
+        });
+        check_contains_(backend.runtime, serial_contained, [&](sz_u1x8_t *contained) {
+            return sz_subdocuments_contains(&engines.device, &tape, contained, &device_malformed, stream);
+        });
+    }
     engines.reset();
     verify(engines.heap.live_allocations == 0);
 }
@@ -1959,6 +2052,11 @@ inline void test_subdocuments_device_unit(auto const &backend) {
                                         "$..book[0:2]", "$..*", "$['store']['bike', 'book']"});
     check_subdocuments_against_serial_(backend, {"{\"a\\u0062\": 1, \"ab\": 2, \"\\u00e9\": [3]}"},
                                        {"$.ab", "$['\\u00e9'][0]"});
+
+    // 45 documents run past one ballot and end mid-byte, so the bitmap's tail bits count too.
+    std::vector<std::string> batch(45, "{\"b\": 2}");
+    for (std::size_t index = 0; index < batch.size(); index += 3) batch[index] = "{\"a\": [1]}";
+    check_subdocuments_against_serial_(backend, batch, {"$.a[0]"});
 
     // Negative indices and backward slices keep their array's nodes pending until it closes.
     check_subdocuments_against_serial_(
@@ -2139,6 +2237,13 @@ inline void test_subdocuments_device_safety(auto const &backend) {
     std::vector<sz_size_t> host_counts(1, 0);
     verify(backend.subdocuments_counts(&engines.device, &tape, host_counts.data(), 1, &malformed, stream) ==
            sz_device_memory_mismatch_k);
+    if (backend.subdocuments_contains) {
+        std::vector<sz_u1x8_t> host_contained(1, 0);
+        sz_strings_view_t const empty {};
+        verify(backend.subdocuments_contains(&engines.device, &tape, host_contained.data(), &malformed, stream) ==
+               sz_device_memory_mismatch_k);
+        verify(backend.subdocuments_contains(&engines.device, &empty, nullptr, &malformed, stream) == sz_success_k);
+    }
     unified_vector<sz_size_t> counts(1, STRINGZILLA_SIZE_MAX,
                                      unified_alloc<sz_size_t>(backend.runtime.unified, stream));
     verify(backend.subdocuments_counts(&engines.device, &tape, counts.data(), 0, &malformed, stream) ==
@@ -2681,18 +2786,27 @@ inline void check_device_kernels_(cross_section_t &check, auto const &backend) {
 inline std::size_t test_cross_dispatch_device(environment_t const &env, device_backend_t const &runtime,
                                               auto sha256_multistate_update, auto sha256_multistate_digest) {
     sz_capability_t const capabilities = runtime.capabilities;
+    // Only a group that has the kernel gets a dispatch point, as Metal has no contains yet.
+    auto const offered = [capabilities](sz_kernel_kind_t kind) {
+        sz_kernel_punned_t kernel = nullptr;
+        sz_capability_t capability = 0;
+        return sz_find_kernel_punned(kind, capabilities, &kernel, &capability) == sz_success_k;
+    };
     device_kernels const dispatched {"dispatched",
                                      runtime,
                                      sz_levenshtein_distances,
                                      sz_overlap_scores,
+                                     offered(sz_kernel_substrings_contains_k) ? sz_substrings_contains : nullptr,
                                      sz_substrings_counts,
                                      sz_substrings_find,
                                      sz_substrings_replace,
                                      sz_substrings_bm25_scores,
+                                     offered(sz_kernel_regex_contains_k) ? sz_regex_contains : nullptr,
                                      sz_regex_counts,
                                      sz_regex_find,
                                      sz_regex_replace,
                                      sz_regex_extract,
+                                     offered(sz_kernel_subdocuments_contains_k) ? sz_subdocuments_contains : nullptr,
                                      sz_subdocuments_counts,
                                      sz_subdocuments_find,
                                      gpu_best<sz_utf8_uncased_fold_best>(capabilities),

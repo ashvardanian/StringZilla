@@ -68,6 +68,15 @@ STRINGZILLA_DEVICE sz_size_t sz_block_scan_simt_(sz_size_t value, sz_size_t *sha
     return inclusive - value;
 }
 
+/** Stores the @p ballot of the 32 lanes marking items from @p first on, as the little-endian bytes
+ *  of @p bits they fall in among the @c ceil(count/8) a bitmap of @p count items holds. */
+STRINGZILLA_DEVICE void sz_u1x8_store_simt_(sz_u1x8_t *bits, sz_size_t count, sz_size_t first, sz_u32_t ballot) {
+    sz_size_t const bytes = sz_size_divide_round_up(count, 8);
+    sz_size_t byte;
+    for (byte = first / 8; byte != first / 8 + 4 && byte < bytes; ++byte)
+        bits[byte] = (sz_u1x8_t)(ballot >> (byte - first / 8) * 8);
+}
+
 #pragma endregion Lanes
 
 /*  A block's queue of the grid's tiles. Here every block runs its own tile; Blackwell's tier, in

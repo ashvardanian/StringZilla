@@ -519,6 +519,10 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init_cuda(
     sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
     sz_size_t haystacks_budget, sz_allocator_t *allocator, sz_stream_t stream);
+/** @copydoc sz_substrings_contains */
+STRINGZILLA_API sz_status_t sz_substrings_contains_cuda(sz_substrings_engine_t *engine,
+                                                        sz_strings_view_t const *haystacks, sz_u1x8_t *contained,
+                                                        sz_stream_t stream);
 /** @copydoc sz_substrings_counts */
 STRINGZILLA_API sz_status_t sz_substrings_counts_cuda(sz_substrings_engine_t *engine,
                                                       sz_strings_view_t const *haystacks, sz_size_t *counts,
@@ -578,6 +582,10 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init_rocm(
     sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
     sz_size_t haystacks_budget, sz_allocator_t *allocator, sz_stream_t stream);
+/** @copydoc sz_substrings_contains */
+STRINGZILLA_API sz_status_t sz_substrings_contains_rocm(sz_substrings_engine_t *engine,
+                                                        sz_strings_view_t const *haystacks, sz_u1x8_t *contained,
+                                                        sz_stream_t stream);
 /** @copydoc sz_substrings_counts */
 STRINGZILLA_API sz_status_t sz_substrings_counts_rocm(sz_substrings_engine_t *engine,
                                                       sz_strings_view_t const *haystacks, sz_size_t *counts,

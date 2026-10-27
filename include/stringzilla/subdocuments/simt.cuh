@@ -2164,6 +2164,18 @@ STRINGZILLA_DEVICE void sz_subdocuments_walk_documents_simt_(sz_subdocuments_eng
     }
 }
 
+/** Marks which documents a counting walk found a match in, a lane each, every group of 32 lanes
+ *  storing what @p ballot gathers as four bytes of @p contained. */
+STRINGZILLA_DEVICE void sz_subdocuments_contains_simt_(sz_size_t const *counted, sz_u1x8_t *contained, sz_size_t count,
+                                                       sz_u32_t (*ballot)(int)) {
+    sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x, lanes = sz_size_divide_round_up(count, 32) * 32;
+    sz_size_t index = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    for (; index < lanes; index += stride) {
+        sz_u32_t const bits = ballot(index < count && counted[index] != 0);
+        if (index % 32 == 0) sz_u1x8_store_simt_(contained, count, index, bits);
+    }
+}
+
 /** Lowers the header's @c large_bytes to one of @c large_shares of the batch's bytes once any
  *  document passes both that share and the round's @c large_bytes, so the documents past their
  *  share walk over chunks only in a batch that takes the cooperative walk anyway. */

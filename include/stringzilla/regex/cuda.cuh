@@ -824,6 +824,24 @@ STRINGZILLA_INLINE void sz_regex_round_init_cuda_(sz_regex_round_simt_t *round) 
     round->pattern_index = STRINGZILLA_SIZE_MAX;
 }
 
+STRINGZILLA_INLINE sz_status_t sz_regex_contains_scoped_cuda_(sz_regex_engine_t *engine,
+                                                              sz_strings_view_t const *haystacks, sz_u1x8_t *contained,
+                                                              sz_stream_t stream) {
+    sz_regex_round_simt_t round;
+    sz_status_t status;
+    if (!engine->memory) return sz_missing_kernel_k;
+    if (!haystacks->count) return sz_success_k;
+    if (haystacks->layout == sz_strings_accessor_k || !sz_regex_resident_cuda_(engine, haystacks) ||
+        !sz_memory_accessible_cuda_(contained))
+        return sz_device_memory_mismatch_k;
+    // The storing sweep only ever sets bits, so the bitmap starts clear, its tail bits included.
+    status = sz_fill_cuda_(contained, sz_size_divide_round_up(haystacks->count, 8), 0, stream);
+    if (status != sz_success_k) return status;
+    sz_regex_round_init_cuda_(&round);
+    round.contained = contained;
+    return sz_regex_rounds_cuda_(engine, haystacks, &round, stream);
+}
+
 STRINGZILLA_INLINE sz_status_t sz_regex_counts_scoped_cuda_(sz_regex_engine_t *engine,
                                                             sz_strings_view_t const *haystacks, sz_size_t *counts,
                                                             sz_size_t counts_stride, sz_stream_t stream) {
@@ -915,6 +933,16 @@ STRINGZILLA_API sz_status_t sz_regex_engine_init_cuda(sz_regex_engine_t *engine,
     sz_status_t status = sz_device_enter_cuda_(stream, &caller);
     if (status != sz_success_k) return status;
     status = sz_regex_engine_init_scoped_cuda_(engine, patterns, case_sensitivity, malformed_index, allocator, stream);
+    sz_device_leave_cuda_(caller);
+    return status;
+}
+
+STRINGZILLA_API sz_status_t sz_regex_contains_cuda(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
+                                                   sz_u1x8_t *contained, sz_stream_t stream) {
+    int caller = 0;
+    sz_status_t status = sz_device_enter_cuda_(stream, &caller);
+    if (status != sz_success_k) return status;
+    status = sz_regex_contains_scoped_cuda_(engine, haystacks, contained, stream);
     sz_device_leave_cuda_(caller);
     return status;
 }

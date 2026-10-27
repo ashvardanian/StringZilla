@@ -109,6 +109,8 @@ STRINGZILLA_API void sz_regex_engine_free(sz_regex_engine_t *engine, sz_stream_t
  *  @brief Marks which haystacks hold at least one match of any pattern, stopping each walk at its
  *      first match, the lightest verb of the engine.
  *
+ *  Device rounds walk every byte at once, as the counts' do, and keep only which haystacks matched.
+ *
  *  @param[in] engine A compiled vocabulary, whose round scratch grows to the longest haystack.
  *  @param[in] haystacks The texts to search, in any layout; their bytes are read in place.
  *  @param[out] contained One bit per haystack, eight to a byte, the lowest bit first: set when that
@@ -329,6 +331,9 @@ STRINGZILLA_API sz_status_t sz_regex_engine_init_cuda(sz_regex_engine_t *engine,
                                                       sz_case_sensitivity_t case_sensitivity,
                                                       sz_size_t *malformed_index, sz_allocator_t *allocator,
                                                       sz_stream_t stream);
+/** @copydoc sz_regex_contains */
+STRINGZILLA_API sz_status_t sz_regex_contains_cuda(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
+                                                   sz_u1x8_t *contained, sz_stream_t stream);
 /** @copydoc sz_regex_counts */
 STRINGZILLA_API sz_status_t sz_regex_counts_cuda(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
                                                  sz_size_t *counts, sz_size_t counts_stride, sz_stream_t stream);
@@ -353,6 +358,9 @@ STRINGZILLA_API sz_status_t sz_regex_engine_init_rocm(sz_regex_engine_t *engine,
                                                       sz_case_sensitivity_t case_sensitivity,
                                                       sz_size_t *malformed_index, sz_allocator_t *allocator,
                                                       sz_stream_t stream);
+/** @copydoc sz_regex_contains */
+STRINGZILLA_API sz_status_t sz_regex_contains_rocm(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
+                                                   sz_u1x8_t *contained, sz_stream_t stream);
 /** @copydoc sz_regex_counts */
 STRINGZILLA_API sz_status_t sz_regex_counts_rocm(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
                                                  sz_size_t *counts, sz_size_t counts_stride, sz_stream_t stream);

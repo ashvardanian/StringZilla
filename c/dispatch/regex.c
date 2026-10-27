@@ -68,12 +68,24 @@ static sz_capability_kernels_t const *sz_regex_contains_capabilities(void) {
         (sz_kernel_punned_t)&sz_regex_contains_neon,
 #endif
     };
+    static sz_kernel_punned_t const cuda[] = {
+        STRINGZILLA_NULL,
+#if STRINGZILLA_TARGET_CUDA
+        (sz_kernel_punned_t)&sz_regex_contains_cuda,
+#endif
+    };
+    static sz_kernel_punned_t const rocm[] = {
+        STRINGZILLA_NULL,
+#if STRINGZILLA_TARGET_ROCM
+        (sz_kernel_punned_t)&sz_regex_contains_rocm,
+#endif
+    };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
              sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON,
          cpu},
-        {0, sz_no_kernels_},
-        {0, sz_no_kernels_},
+        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
+        {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
         {0, sz_no_kernels_},
     };
     return lists;

@@ -212,7 +212,7 @@ typedef struct sz_substrings_engine_t {
 } sz_substrings_engine_t;
 
 /** What a GPU chunk walk does at each match: size the output so the caller can scan it, write it,
- *  or tally it. */
+ *  tally it, or stop. */
 typedef enum sz_substrings_gpu_pass_t {
 
     /** Store each chunk's match count, so a scan can hand every chunk a private output range. */
@@ -223,6 +223,9 @@ typedef enum sz_substrings_gpu_pass_t {
 
     /** Count each match against its needle in the block's tally, for scoring. */
     sz_substrings_gpu_tallying_k = 2,
+
+    /** Stop each chunk at its first match, so its slot says only whether it holds one. */
+    sz_substrings_gpu_marking_k = 3,
 } sz_substrings_gpu_pass_t;
 
 /** Fraction bits of the fixed-point sums a GPU BM25 block accumulates, so every order of adding

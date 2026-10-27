@@ -116,7 +116,8 @@ STRINGZILLA_API void sz_subdocuments_engine_free(sz_subdocuments_engine_t *engin
  *      first match, the lightest verb of the engine.
  *
  *  A walk validates nothing past the match it stops at, so a document malformed only after its
- *  first match is marked rather than refused.
+ *  first match is marked rather than refused. Device walks run whole, as the counts' do, so on a
+ *  device that document fails the call.
  *
  *  @param[in] engine Compiled paths, serving one call at a time.
  *  @param[in] documents One document per string; their bytes are read in place and never copied.
@@ -381,6 +382,10 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_powervsx(sz_subdocuments_engine
 STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_cuda(
     sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths, sz_subdocuments_format_t format,
     sz_subdocuments_options_t options, sz_size_t *malformed_index, sz_allocator_t *allocator, sz_stream_t stream);
+/** @copydoc sz_subdocuments_contains */
+STRINGZILLA_API sz_status_t sz_subdocuments_contains_cuda(sz_subdocuments_engine_t *engine,
+                                                          sz_strings_view_t const *documents, sz_u1x8_t *contained,
+                                                          sz_size_t *malformed_index, sz_stream_t stream);
 /** @copydoc sz_subdocuments_counts */
 STRINGZILLA_API sz_status_t sz_subdocuments_counts_cuda(sz_subdocuments_engine_t *engine,
                                                         sz_strings_view_t const *documents, sz_size_t *counts,
@@ -398,6 +403,10 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_cuda(sz_subdocuments_engine_t *
 STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_rocm(
     sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths, sz_subdocuments_format_t format,
     sz_subdocuments_options_t options, sz_size_t *malformed_index, sz_allocator_t *allocator, sz_stream_t stream);
+/** @copydoc sz_subdocuments_contains */
+STRINGZILLA_API sz_status_t sz_subdocuments_contains_rocm(sz_subdocuments_engine_t *engine,
+                                                          sz_strings_view_t const *documents, sz_u1x8_t *contained,
+                                                          sz_size_t *malformed_index, sz_stream_t stream);
 /** @copydoc sz_subdocuments_counts */
 STRINGZILLA_API sz_status_t sz_subdocuments_counts_rocm(sz_subdocuments_engine_t *engine,
                                                         sz_strings_view_t const *documents, sz_size_t *counts,
