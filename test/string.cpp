@@ -281,6 +281,8 @@ void test_strings_columns_unit() {
         sz_u64_t const wide_offsets[] = {0, 5, 9, 14};
         sz::strings_view_t const narrow(payload, narrow_offsets, 3), wide(payload, wide_offsets, 3);
         verify(narrow.size() == 3 && narrow[1] == "beta"_sv && wide[2] == "gamma"_sv);
+        verify(!narrow.empty() && sz::strings_view_t(std::span<sz::string_view_t const> {}).empty() &&
+               sz::strings_t {}.empty());
         verify(std::equal(narrow.begin(), narrow.end(), wide.begin(), wide.end()));
         sz_u64_t hashes[3];
         verify(wide.hashes(hashes) == sz::status_t::success_k && hashes[2] == wide[2].hash());

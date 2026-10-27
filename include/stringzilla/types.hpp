@@ -629,6 +629,7 @@ struct strings_view_t {
     strings_view_t(strings<allocator_type_> const &strings) noexcept : strings_view_t(strings.view()) {}
 
     std::size_t size() const noexcept { return raw.count; }
+    bool empty() const noexcept { return raw.count == 0; }
     string_view_t operator[](std::size_t index) const noexcept;
     iterator begin() const noexcept { return {*this, 0}; }
     iterator end() const noexcept { return {*this, size()}; }
@@ -814,6 +815,7 @@ struct strings {
     ~strings() noexcept { release_(); }
 
     std::size_t size() const noexcept { return raw.count; }
+    bool empty() const noexcept { return raw.count == 0; }
     string_view_t operator[](std::size_t index) const noexcept;
     iterator begin() const noexcept { return {*this, 0}; }
     iterator end() const noexcept { return {*this, size()}; }
