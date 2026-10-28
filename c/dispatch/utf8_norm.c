@@ -12,59 +12,72 @@
 #include "dispatch.h"
 
 static sz_capability_kernels_t const *sz_utf8_norm_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
+                   sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE | sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE |
+                   sz_cap_neon_k * STRINGZILLA_TARGET_NEON | sz_cap_sve_k * STRINGZILLA_TARGET_SVE |
+                   sz_cap_sve2_k * STRINGZILLA_TARGET_SVE2 | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV |
+                   sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
+                   sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_utf8_norm_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_norm_serial,
 #if STRINGZILLA_TARGET_HASWELL
-        (sz_kernel_punned_t)&sz_utf8_norm_haswell,
+        above_k & ~(sz_cap_haswell_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_norm_haswell,
 #endif
 #if STRINGZILLA_TARGET_SKYLAKE
-        (sz_kernel_punned_t)&sz_utf8_norm_skylake,
+        above_k & ~(sz_cap_skylake_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_norm_skylake,
 #endif
 #if STRINGZILLA_TARGET_ICELAKE
-        (sz_kernel_punned_t)&sz_utf8_norm_icelake,
+        above_k & ~(sz_cap_icelake_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_norm_icelake,
 #endif
 #if STRINGZILLA_TARGET_NEON
-        (sz_kernel_punned_t)&sz_utf8_norm_neon,
+        above_k & ~(sz_cap_neon_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_norm_neon,
 #endif
 #if STRINGZILLA_TARGET_SVE
-        (sz_kernel_punned_t)&sz_utf8_norm_sve,
+        above_k & ~(sz_cap_sve_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_norm_sve,
 #endif
 #if STRINGZILLA_TARGET_SVE2
-        (sz_kernel_punned_t)&sz_utf8_norm_sve2,
+        above_k & ~(sz_cap_sve2_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_norm_sve2,
 #endif
 #if STRINGZILLA_TARGET_RVV
-        (sz_kernel_punned_t)&sz_utf8_norm_rvv,
+        above_k & ~(sz_cap_rvv_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_norm_rvv,
 #endif
 #if STRINGZILLA_TARGET_V128
-        (sz_kernel_punned_t)&sz_utf8_norm_v128,
+        above_k & ~(sz_cap_v128_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_norm_v128,
 #endif
 #if STRINGZILLA_TARGET_V128RELAXED
-        (sz_kernel_punned_t)&sz_utf8_norm_v128relaxed,
+        above_k & ~(sz_cap_v128relaxed_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_norm_v128relaxed,
 #endif
 #if STRINGZILLA_TARGET_LOONGSONASX
-        (sz_kernel_punned_t)&sz_utf8_norm_loongsonasx,
+        above_k & ~(sz_cap_loongsonasx_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_norm_loongsonasx,
 #endif
 #if STRINGZILLA_TARGET_POWERVSX
-        (sz_kernel_punned_t)&sz_utf8_norm_powervsx,
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_norm_powervsx,
 #endif
     };
+    enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_CUDA
-        (sz_kernel_punned_t)&sz_utf8_norm_cuda,
+        cuda_above_k & ~((sz_cap_cuda_k >> 48) * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_norm_cuda,
 #endif
     };
+    enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_ROCM
-        (sz_kernel_punned_t)&sz_utf8_norm_rocm,
+        rocm_above_k & ~((sz_cap_rocm_k >> 48) * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_norm_rocm,
 #endif
     };
+    enum { metal_above_k = ((sz_cap_metal_k * STRINGZILLA_TARGET_METAL) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const metal[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_METAL
-        (sz_kernel_punned_t)&sz_utf8_norm_metal,
+        metal_above_k & ~((sz_cap_metal_k >> 48) * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_norm_metal,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
@@ -83,41 +96,57 @@ static sz_capability_kernels_t const *sz_utf8_norm_capabilities(void) {
 }
 
 static sz_capability_kernels_t const *sz_utf8_find_denormalized_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
+                   sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE | sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE |
+                   sz_cap_neon_k * STRINGZILLA_TARGET_NEON | sz_cap_sve_k * STRINGZILLA_TARGET_SVE |
+                   sz_cap_sve2_k * STRINGZILLA_TARGET_SVE2 | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV |
+                   sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
+                   sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_utf8_find_denormalized_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_find_denormalized_serial,
 #if STRINGZILLA_TARGET_HASWELL
-        (sz_kernel_punned_t)&sz_utf8_find_denormalized_haswell,
+        above_k & ~(sz_cap_haswell_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_utf8_find_denormalized_haswell,
 #endif
 #if STRINGZILLA_TARGET_SKYLAKE
-        (sz_kernel_punned_t)&sz_utf8_find_denormalized_skylake,
+        above_k & ~(sz_cap_skylake_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_utf8_find_denormalized_skylake,
 #endif
 #if STRINGZILLA_TARGET_ICELAKE
-        (sz_kernel_punned_t)&sz_utf8_find_denormalized_icelake,
+        above_k & ~(sz_cap_icelake_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_utf8_find_denormalized_icelake,
 #endif
 #if STRINGZILLA_TARGET_NEON
-        (sz_kernel_punned_t)&sz_utf8_find_denormalized_neon,
+        above_k & ~(sz_cap_neon_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_find_denormalized_neon,
 #endif
 #if STRINGZILLA_TARGET_SVE
-        (sz_kernel_punned_t)&sz_utf8_find_denormalized_sve,
+        above_k & ~(sz_cap_sve_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_find_denormalized_sve,
 #endif
 #if STRINGZILLA_TARGET_SVE2
-        (sz_kernel_punned_t)&sz_utf8_find_denormalized_sve2,
+        above_k & ~(sz_cap_sve2_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_find_denormalized_sve2,
 #endif
 #if STRINGZILLA_TARGET_RVV
-        (sz_kernel_punned_t)&sz_utf8_find_denormalized_rvv,
+        above_k & ~(sz_cap_rvv_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_find_denormalized_rvv,
 #endif
 #if STRINGZILLA_TARGET_V128
-        (sz_kernel_punned_t)&sz_utf8_find_denormalized_v128,
+        above_k & ~(sz_cap_v128_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_find_denormalized_v128,
 #endif
 #if STRINGZILLA_TARGET_V128RELAXED
-        (sz_kernel_punned_t)&sz_utf8_find_denormalized_v128relaxed,
+        above_k & ~(sz_cap_v128relaxed_k * 2 - 1) ? STRINGZILLA_NULL
+                                                  : (sz_kernel_punned_t)&sz_utf8_find_denormalized_v128relaxed,
 #endif
 #if STRINGZILLA_TARGET_LOONGSONASX
-        (sz_kernel_punned_t)&sz_utf8_find_denormalized_loongsonasx,
+        above_k & ~(sz_cap_loongsonasx_k * 2 - 1) ? STRINGZILLA_NULL
+                                                  : (sz_kernel_punned_t)&sz_utf8_find_denormalized_loongsonasx,
 #endif
 #if STRINGZILLA_TARGET_POWERVSX
-        (sz_kernel_punned_t)&sz_utf8_find_denormalized_powervsx,
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL
+                                               : (sz_kernel_punned_t)&sz_utf8_find_denormalized_powervsx,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {

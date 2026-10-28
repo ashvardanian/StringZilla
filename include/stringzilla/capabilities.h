@@ -921,31 +921,6 @@ typedef sz_status_t (*sz_kernel_subdocuments_find_t)(struct sz_subdocuments_engi
 /** Any kernel, cast back to its signature before the call. */
 typedef void (*sz_kernel_punned_t)(void);
 
-/** Returns the capabilities whose kernels were compiled into this binary, as decided by the
- *  <tt>STRINGZILLA_TARGET_*</tt> macros. Says nothing about the current CPU - see
- *  @c sz_capabilities_detected_cpu_. */
-STRINGZILLA_CONSTEXPR sz_capability_t sz_capabilities_compiled_cpu_(void) {
-    return (sz_capability_t)(                                     //
-        (sz_cap_neon_k * STRINGZILLA_TARGET_NEON) |               //
-        (sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES) |         //
-        (sz_cap_neonsha_k * STRINGZILLA_TARGET_NEONSHA) |         //
-        (sz_cap_sve_k * STRINGZILLA_TARGET_SVE) |                 //
-        (sz_cap_sve2_k * STRINGZILLA_TARGET_SVE2) |               //
-        (sz_cap_sve2aes_k * STRINGZILLA_TARGET_SVE2AES) |         //
-        (sz_cap_westmere_k * STRINGZILLA_TARGET_WESTMERE) |       //
-        (sz_cap_goldmont_k * STRINGZILLA_TARGET_GOLDMONT) |       //
-        (sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL) |         //
-        (sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE) |         //
-        (sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE) |         //
-        (sz_cap_v128_k * STRINGZILLA_TARGET_V128) |               //
-        (sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED) | //
-        (sz_cap_rvv_k * STRINGZILLA_TARGET_RVV) |                 //
-        (sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO) |     //
-        (sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX) | //
-        (sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) |       //
-        (sz_cap_serial_k));
-}
-
 /** Returns the capabilities the compiler's own flags guarantee, for the platforms whose OS cannot
  *  be asked. An engine validates a WebAssembly module whole, so there they are what it holds. */
 STRINGZILLA_CONSTEXPR sz_capability_t sz_capabilities_implied_cpu_(void) {
@@ -1299,6 +1274,31 @@ STRINGZILLA_API sz_status_t sz_capabilities_detected_cpu(sz_capability_t *capabi
 STRINGZILLA_API sz_status_t sz_capabilities_compiled_cpu(sz_capability_t *capabilities);
 STRINGZILLA_API sz_status_t sz_capabilities_enabled_cpu(sz_capability_t *capabilities);
 
+/** The capabilities whose kernels the <tt>STRINGZILLA_TARGET_*</tt> macros of the including unit
+ *  compile, as a constant for consumers picking kits at compile time; in the library, the mask
+ *  @c sz_capabilities_compiled_cpu reports. Says nothing about the current CPU. */
+STRINGZILLA_CONSTEXPR sz_capability_t sz_capabilities_compiled_cpu_mask(void) {
+    return (sz_capability_t)(                                     //
+        (sz_cap_neon_k * STRINGZILLA_TARGET_NEON) |               //
+        (sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES) |         //
+        (sz_cap_neonsha_k * STRINGZILLA_TARGET_NEONSHA) |         //
+        (sz_cap_sve_k * STRINGZILLA_TARGET_SVE) |                 //
+        (sz_cap_sve2_k * STRINGZILLA_TARGET_SVE2) |               //
+        (sz_cap_sve2aes_k * STRINGZILLA_TARGET_SVE2AES) |         //
+        (sz_cap_westmere_k * STRINGZILLA_TARGET_WESTMERE) |       //
+        (sz_cap_goldmont_k * STRINGZILLA_TARGET_GOLDMONT) |       //
+        (sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL) |         //
+        (sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE) |         //
+        (sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE) |         //
+        (sz_cap_v128_k * STRINGZILLA_TARGET_V128) |               //
+        (sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED) | //
+        (sz_cap_rvv_k * STRINGZILLA_TARGET_RVV) |                 //
+        (sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO) |     //
+        (sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX) | //
+        (sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) |       //
+        (sz_cap_serial_k));
+}
+
 /**
  *  @brief Prepares the calling thread for the kernels of @p capabilities, and only those.
  *  @param[in] capabilities The capabilities to prepare for, like @c sz_capabilities_enabled_cpu.
@@ -1349,11 +1349,11 @@ STRINGZILLA_API sz_status_t sz_capabilities_detected_cpu(sz_capability_t *capabi
     return sz_success_k;
 }
 STRINGZILLA_API sz_status_t sz_capabilities_compiled_cpu(sz_capability_t *capabilities) {
-    *capabilities = sz_capabilities_compiled_cpu_();
+    *capabilities = sz_capabilities_compiled_cpu_mask();
     return sz_success_k;
 }
 STRINGZILLA_API sz_status_t sz_capabilities_enabled_cpu(sz_capability_t *capabilities) {
-    *capabilities = sz_capabilities_detected_cpu_() & sz_capabilities_compiled_cpu_();
+    *capabilities = sz_capabilities_detected_cpu_() & sz_capabilities_compiled_cpu_mask();
     return sz_success_k;
 }
 

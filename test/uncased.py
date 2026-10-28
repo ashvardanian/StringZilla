@@ -335,11 +335,11 @@ def test_utf8_uncased_search_degenerate_offsets_report_negative_one(haystack, ne
         ("ﬂ", b"fl"),  # fl ligature (U+FB02)
         ("ﬃ", b"ffi"),  # ffi ligature (U+FB03)
         ("ﬄ", b"ffl"),  # ffl ligature (U+FB04)
-        ("Σ", "σ".encode("utf-8")),  # Greek Sigma
-        ("Ω", "ω".encode("utf-8")),  # Greek Omega
-        ("Ä", "ä".encode("utf-8")),  # German umlaut
-        ("É", "é".encode("utf-8")),  # French accent
-        ("Ñ", "ñ".encode("utf-8")),  # Spanish tilde
+        ("Σ", "σ".encode()),  # Greek Sigma
+        ("Ω", "ω".encode()),  # Greek Omega
+        ("Ä", "ä".encode()),  # German umlaut
+        ("É", "é".encode()),  # French accent
+        ("Ñ", "ñ".encode()),  # Spanish tilde
     ],
 )
 def test_utf8_uncased_fold_expansions(input_str, expected):

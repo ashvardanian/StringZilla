@@ -9,20 +9,26 @@
 #include "dispatch.h"
 
 static sz_capability_kernels_t const *sz_utf8_linebreaks_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
+                   sz_cap_sve2_k * STRINGZILLA_TARGET_SVE2) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_utf8_linebreaks_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_linebreaks_serial,
 #if STRINGZILLA_TARGET_HASWELL
-        (sz_kernel_punned_t)&sz_utf8_linebreaks_haswell,
+        above_k & ~(sz_cap_haswell_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_linebreaks_haswell,
 #endif
 #if STRINGZILLA_TARGET_ICELAKE
-        (sz_kernel_punned_t)&sz_utf8_linebreaks_icelake,
+        above_k & ~(sz_cap_icelake_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_linebreaks_icelake,
 #endif
 #if STRINGZILLA_TARGET_NEON
-        (sz_kernel_punned_t)&sz_utf8_linebreaks_neon,
+        above_k & ~(sz_cap_neon_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_linebreaks_neon,
 #endif
 #if STRINGZILLA_TARGET_SVE2
-        (sz_kernel_punned_t)&sz_utf8_linebreaks_sve2,
+        above_k & ~(sz_cap_sve2_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_linebreaks_sve2,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {

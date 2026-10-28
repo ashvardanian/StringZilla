@@ -109,17 +109,7 @@ static PyObject *String_to_unicode(String *self) {
 }
 
 static PyObject *String_repr(String *self) {
-    // Interestingly, known-length string formatting only works in Python 3.12 and later.
-    // https://docs.python.org/3/c-api/unicode.html#c.PyUnicode_FromFormat
-    if (PY_MAJOR_VERSION >= 3 && PY_MINOR_VERSION >= 12)
-        return PyUnicode_FromFormat("sz.String('%.*s')", (int)self->memory.length, self->memory.start);
-    else {
-        // Use a simpler formatting rule for older versions
-        PyObject *str_obj = PyUnicode_FromStringAndSize(self->memory.start, self->memory.length);
-        PyObject *result = PyUnicode_FromFormat("sz.String('%U')", str_obj);
-        Py_DECREF(str_obj);
-        return result;
-    }
+    return PyUnicode_FromFormat("sz.String('%.*s')", (int)self->memory.length, self->memory.start);
 }
 
 static PyObject *String_get_address(String *self, void *closure) {

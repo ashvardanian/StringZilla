@@ -9,17 +9,22 @@
 #include "dispatch.h"
 
 static sz_capability_kernels_t const *sz_intersect_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_westmere_k * STRINGZILLA_TARGET_WESTMERE |
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_intersect_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_intersect_serial,
 #if STRINGZILLA_TARGET_WESTMERE
-        (sz_kernel_punned_t)&sz_intersect_westmere,
+        above_k & ~(sz_cap_westmere_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_intersect_westmere,
 #endif
 #if STRINGZILLA_TARGET_ICELAKE
-        (sz_kernel_punned_t)&sz_intersect_icelake,
+        above_k & ~(sz_cap_icelake_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_intersect_icelake,
 #endif
 #if STRINGZILLA_TARGET_NEONAES
-        (sz_kernel_punned_t)&sz_intersect_neonaes,
+        above_k & ~(sz_cap_neonaes_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_intersect_neonaes,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {

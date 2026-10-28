@@ -132,7 +132,7 @@ STRINGZILLA_API sz_status_t sz_capabilities_detected_cpu(sz_capability_t *capabi
 }
 
 STRINGZILLA_API sz_status_t sz_capabilities_compiled_cpu(sz_capability_t *capabilities) {
-    *capabilities = sz_capabilities_compiled_cpu_();
+    *capabilities = sz_capabilities_compiled_cpu_mask();
     return sz_success_k;
 }
 
@@ -147,7 +147,7 @@ __attribute__((constructor))
 static void sz_capabilities_runnable_widen_(void) {
     sz_capability_t detected = 0;
     sz_capabilities_detected_cpu(&detected);
-    sz_capabilities_runnable_[sz_capability_group_cpu_k] = detected & sz_capabilities_compiled_cpu_();
+    sz_capabilities_runnable_[sz_capability_group_cpu_k] = detected & sz_capabilities_compiled_cpu_mask();
 }
 
 /*  MSVC has no constructor attribute, but runs every pointer in this section as the library loads. */

@@ -78,7 +78,7 @@ def test_unit_utf8_norm():
     assert sz.String("café").utf8_norm("NFD") == "café".encode()
 
     # Bytes input
-    assert sz.utf8_norm("café".encode("utf-8"), "NFC") == "café".encode("utf-8")
+    assert sz.utf8_norm("café".encode(), "NFC") == "café".encode()
 
     # Cross-check with Python unicodedata.normalize
     for sample in ("café", "Ångström", "ﬁle", "ẛ̣"):
@@ -95,9 +95,9 @@ def test_unit_utf8_norm():
         ("ﬁ", "NFKC", b"fi"),  # fi ligature compatibility composition
         ("ﬀ", "NFKD", b"ff"),  # ff ligature
         ("ﬂ", "NFKD", b"fl"),  # fl ligature
-        ("café", "NFD", "café".encode("utf-8")),  # precomposed → decomposed
-        ("café", "NFC", "café".encode("utf-8")),  # decomposed → precomposed
-        ("Å", "NFD", "Å".encode("utf-8")),  # Å → A + ring above
+        ("café", "NFD", "café".encode()),  # precomposed → decomposed
+        ("café", "NFC", "café".encode()),  # decomposed → precomposed
+        ("Å", "NFD", "Å".encode()),  # Å → A + ring above
     ],
 )
 def test_utf8_norm_expansions(input_str, form, expected):

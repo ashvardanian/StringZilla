@@ -18,7 +18,7 @@ Date: June 22, 2026
 """
 
 import itertools
-from typing import Callable, Iterable, List, Optional, Sequence, Union
+from collections.abc import Callable, Iterable, Sequence
 
 import pytest
 from base import scale_iterations
@@ -59,14 +59,14 @@ _PALETTE_CODEPOINTS = [
 combining marks, Format / ZWJ, Regional-Indicators, CJK / Hangul / Kana, astral pictographs, and the
 mandatory line separators. Built by codepoint so the file holds no raw multi-byte literals."""
 
-SEGMENTATION_PALETTE: List[str] = list("abZ59 \t\n\r.,;:!?'\"_-()") + [chr(cp) for cp in _PALETTE_CODEPOINTS]
+SEGMENTATION_PALETTE: list[str] = list("abZ59 \t\n\r.,;:!?'\"_-()") + [chr(cp) for cp in _PALETTE_CODEPOINTS]
 """Shared corner-case palette for grapheme / sentence / line fuzzing: ASCII control + the codepoints
 above. Words are not validated against ICU: its word BreakIterator is tailored for editor
 word-selection and diverges ~17-20% from raw UAX-29 on separators, spaces, and the word-joiner, so the
 word family keeps its bit-exact gate on the official WordBreakTest.txt + uniseg instead. Grapheme vs
 ICU is bit-exact, 0 of 4000."""
 
-ASTRAL_FIXTURES: List[bytes] = [
+ASTRAL_FIXTURES: list[bytes] = [
     b"\xf0\x9f\x87\xba\xf0\x9f\x87\xb8",  # RI(U) RI(S) flag pair
     b"\xf0\x9f\x87\xba\xf0\x9f\x87\xb8\xf0\x9f\x87\xab\xf0\x9f\x87\xb7",  # two flags
     b"\xf0\x9f\x91\xa9\xe2\x80\x8d\xf0\x9f\x91\xa9\xe2\x80\x8d\xf0\x9f\x91\xa7",  # family ZWJ sequence
@@ -80,7 +80,7 @@ ASTRAL_FIXTURES: List[bytes] = [
 and lone astral codepoints. Stored as raw UTF-8 bytes and reused by every family's safety and
 differential sweeps."""
 
-MALFORMED_CLASSES: List[bytes] = [
+MALFORMED_CLASSES: list[bytes] = [
     b"\xc0\x80",  # overlong 2-byte encoding of NUL
     b"\xc1\xbf",  # overlong 2-byte encoding of U+007F
     b"\xe0\x80\x80",  # overlong 3-byte encoding of NUL
@@ -105,7 +105,7 @@ MALFORMED_CLASSES: List[bytes] = [
 """One malformed-UTF-8 instance per class: overlong encodings, surrogates, lone continuations, invalid
 leads, truncated tails, out-of-range leads, and noncharacters."""
 
-_NAMED_ADVERSARIAL: List[bytes] = [
+_NAMED_ADVERSARIAL: list[bytes] = [
     b"\x80",  # lone continuation byte
     b"\xc0\x80",  # overlong encoding of NUL
     b"\xed\xa0\x80",  # surrogate-encoded codepoint (U+D800)
@@ -120,7 +120,7 @@ each paired against all 256 trailing bytes to probe lead/continuation interactio
 _BOUNDARY_CODEPOINTS = [0x007F, 0x0080, 0x07FF, 0x0800, 0xFFFF, 0x10000, 0x10FFFF, 0xFEFF, 0x200D, 0xFE0F]
 """Byte-length boundary codepoints + BOM / ZWJ / VS16 sprinkled into the random corpus."""
 
-_SNIPPETS: List[bytes] = [
+_SNIPPETS: list[bytes] = [
     b"a",
     b"Hello, world! ",
     b"don't ",
@@ -149,7 +149,7 @@ _UNIT_CAPACITY = 70
 # region Boundary helpers
 
 
-def byte_boundaries(segments: Iterable) -> List[int]:
+def byte_boundaries(segments: Iterable) -> list[int]:
     """Cumulative byte-offset boundaries of an iterable of string segments (always starting at 0)."""
     out = [0]
     for segment in segments:
@@ -157,7 +157,7 @@ def byte_boundaries(segments: Iterable) -> List[int]:
     return out
 
 
-def char_boundaries_to_bytes(text: str, char_boundaries: Iterable[int]) -> List[int]:
+def char_boundaries_to_bytes(text: str, char_boundaries: Iterable[int]) -> list[int]:
     """Convert TR29-style character-index boundaries (incl. 0 and len) to byte offsets."""
     char_boundaries = set(char_boundaries)
     out = []
@@ -176,7 +176,7 @@ def segment_bytes(segments: Iterable) -> bytes:
     return b"".join(bytes(segment) for segment in segments)
 
 
-def assert_segments_tile(segments: Iterable, original: Union[str, bytes]) -> None:
+def assert_segments_tile(segments: Iterable, original: str | bytes) -> None:
     """Metamorphic invariant: a boundary segmenter's output must reconstruct the input exactly.
 
     Applies to words / graphemes / sentences / linebreaks (which tile `[0, length)` contiguously), not to the
@@ -223,7 +223,7 @@ def apply_mutation_passes(data: bytes, rng) -> bytes:
     return bytes(buffer)
 
 
-def random_segmentation_corpus(min_length: int, flavor: str, motifs: Optional[Sequence[bytes]], rng) -> bytes:
+def random_segmentation_corpus(min_length: int, flavor: str, motifs: Sequence[bytes] | None, rng) -> bytes:
     """Build a weighted random UTF-8 corpus until at least `min_length` bytes.
 
     `flavor` is ``"valid"`` (well-formed only) or ``"malformed"`` (malformed classes mixed in). `motifs` are
@@ -246,7 +246,7 @@ def random_segmentation_corpus(min_length: int, flavor: str, motifs: Optional[Se
     return bytes(out)
 
 
-def corpus_of_byte_length(target_length: int, rng, palette: Optional[Sequence[str]] = None) -> bytes:
+def corpus_of_byte_length(target_length: int, rng, palette: Sequence[str] | None = None) -> bytes:
     """Build valid UTF-8 of exactly `target_length` bytes from `palette`, padding with ASCII to land the seam.
 
     Used by the window-seam sweep so the input ends precisely on a 63/64/65/… byte size relative to the
@@ -263,12 +263,12 @@ def corpus_of_byte_length(target_length: int, rng, palette: Optional[Sequence[st
     return bytes(out)
 
 
-def window_seam_lengths() -> List[int]:
+def window_seam_lengths() -> list[int]:
     """Byte lengths that straddle the kernel's 64-byte SIMD windows (generalizes the words-only seam regressions)."""
     return [1, 3, 16, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256]
 
 
-def adversarial_utf8_inputs(rng, random_input_count: Optional[int] = None) -> Iterable[bytes]:
+def adversarial_utf8_inputs(rng, random_input_count: int | None = None) -> Iterable[bytes]:
     """Yield the adversarial-byte battery: named shapes, astral fixtures, all 256 single bytes, every
     lead-class byte-pair, and random garbage. The Python analog of `for_each_adversarial_utf8_input_`.
     """
@@ -290,7 +290,7 @@ def adversarial_utf8_inputs(rng, random_input_count: Optional[int] = None) -> It
 # region ICU oracles
 
 
-def icu_segmenter(kind: str) -> Callable[[str], List[str]]:
+def icu_segmenter(kind: str) -> Callable[[str], list[str]]:
     """Return an ICU `BreakIterator`-backed segmenter `text -> list[str]` for the given boundary `kind`.
 
     `kind` is one of ``"word"`` / ``"grapheme"`` / ``"sentence"`` / ``"line"``. Skips the test when PyICU is
@@ -305,7 +305,7 @@ def icu_segmenter(kind: str) -> Callable[[str], List[str]]:
     }
     iterator = factories[kind](icu.Locale.getRoot())
 
-    def segments(text: str) -> List[str]:
+    def segments(text: str) -> list[str]:
         unicode_text = icu.UnicodeString(text)
         iterator.setText(unicode_text)
         parts = []
@@ -359,8 +359,8 @@ def icu_normalizer(form: str) -> Callable[[str], str]:
 
 
 def class_adjacency_strings(
-    representatives: dict, arity: int = 2, representatives_per_class: int = 1, max_cases: Optional[int] = None
-) -> List[str]:
+    representatives: dict, arity: int = 2, representatives_per_class: int = 1, max_cases: int | None = None
+) -> list[str]:
     """Build strings over the cartesian product of break classes, one representative codepoint per cell.
 
     With one representative per class this enumerates every class-adjacency pair (arity 2) or triple (arity 3)
@@ -369,7 +369,7 @@ def class_adjacency_strings(
     """
     class_names = sorted(representatives)
     chosen = {name: representatives[name][:representatives_per_class] for name in class_names}
-    results: List[str] = []
+    results: list[str] = []
     for class_combination in itertools.product(class_names, repeat=arity):
         for codepoint_combination in itertools.product(*[chosen[name] for name in class_combination]):
             results.append("".join(chr(codepoint) for codepoint in codepoint_combination))
@@ -378,14 +378,14 @@ def class_adjacency_strings(
     return results
 
 
-def combining_scrambles(combining_classes: dict, rng, count: int, max_marks: int = 4) -> List[str]:
+def combining_scrambles(combining_classes: dict, rng, count: int, max_marks: int = 4) -> list[str]:
     """Build `count` strings of a base letter followed by several non-zero-CCC combining marks in random order.
 
     The non-canonical mark order stresses canonical reordering: NFD must reorder by combining class.
     """
     marks = [codepoint for codepoint, combining_class in combining_classes.items() if codepoint <= 0xFFFF]
     base_letters = "aeoun"
-    results: List[str] = []
+    results: list[str] = []
     for _ in range(count):
         base_letter = rng.choice(base_letters)
         mark_count = rng.randint(2, max_marks)
@@ -394,7 +394,7 @@ def combining_scrambles(combining_classes: dict, rng, count: int, max_marks: int
     return results
 
 
-def decomposition_pairs(decomposition_mappings: dict, canonical_only: bool = True, limit: Optional[int] = None) -> list:
+def decomposition_pairs(decomposition_mappings: dict, canonical_only: bool = True, limit: int | None = None) -> list:
     """Build (precomposed, decomposed) canonical-equivalent string pairs from the decomposition mappings."""
     pairs = []
     for codepoint in sorted(decomposition_mappings):

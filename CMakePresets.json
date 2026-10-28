@@ -27,6 +27,11 @@
     },
     { "name": "linux", "hidden": true, "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" } },
     {
+      "name": "windows",
+      "hidden": true,
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    },
+    {
       "name": "cross",
       "hidden": true,
       "description": "Static binaries run under the toolchain file's QEMU emulator; the benchmarks stay host-only.",
@@ -40,7 +45,7 @@
 
     {
       "name": "debug",
-      "inherits": "base",
+      "inherits": ["base", "clang"],
       "displayName": "Debug, no CUDA",
       "description": "Sanitized host build for iterating on kernels and tests.",
       "cacheVariables": {
@@ -61,7 +66,7 @@
     },
     {
       "name": "release",
-      "inherits": "base",
+      "inherits": ["base", "clang"],
       "displayName": "Release, no CUDA",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "STRINGZILLA_BUILD_CUDA": "OFF" }
     },
@@ -92,17 +97,14 @@
     },
     {
       "name": "cuda",
-      "inherits": "base",
+      "inherits": ["base", "clang"],
       "displayName": "Release with CUDA",
-      "description": "NVCC over whichever host compiler it defaults to. A toolkit accepts only a range of host versions, so a machine whose default sits outside its own toolkit's range pins one through CMAKE_CUDA_HOST_COMPILER in CMakeUserPresets.json - the version that fits is a fact about the machine, not about this project.",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "STRINGZILLA_BUILD_CUDA": "ON" }
-    },
-    {
-      "name": "cuda_clang",
-      "inherits": ["cuda", "clang"],
-      "displayName": "Release with CUDA, Clang host",
       "description": "NVCC over Clang, and Clang for the C and C++ sources too - the three must agree. Clang mangles a C++20 requires-clause into the symbol name and GCC does not, so a build that compiled .cpp with GCC and .cu with NVCC-over-Clang would give the tree's constrained engine entry points two different symbols and fail to link. GCC also miscompiles the engines' return-by-value in the large benchmark translation units, handing the caller the kernel timing where the status belongs, which is why measured numbers come from here. Each toolkit supports a range of Clang versions and parses that Clang's own headers, so the version that fits belongs in CMakeUserPresets.json; Clang additionally reads its standard library from the newest GCC installed, which -Xcompiler=--gcc-install-dir=<path> redirects when that one is ahead of the toolkit too.",
-      "cacheVariables": { "CMAKE_CUDA_HOST_COMPILER": "clang++" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CUDA_HOST_COMPILER": "clang++",
+        "STRINGZILLA_BUILD_CUDA": "ON"
+      }
     },
     {
       "name": "rocm",
@@ -154,6 +156,104 @@
       "inherits": "cross",
       "toolchainFile": "${sourceDir}/cmake/toolchain-wasm32-wasi-threads.cmake",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "STRINGZILLA_BUILD_SHARED": "OFF" }
+    },
+    {
+      "name": "wasm32_emscripten",
+      "inherits": "base",
+      "displayName": "WebAssembly 32-bit under Emscripten - compile only",
+      "description": "The minimal module: one thread, SIMD128. Emscripten's own toolchain reads the processor from EMSCRIPTEN_SYSTEM_PROCESSOR.",
+      "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "EMSCRIPTEN_SYSTEM_PROCESSOR": "wasm32",
+        "STRINGZILLA_TARGET_ARCH": "v128",
+        "STRINGZILLA_BUILD_TEST": "OFF",
+        "STRINGZILLA_BUILD_BENCH": "OFF",
+        "STRINGZILLA_BUILD_SHARED": "OFF"
+      }
+    },
+    {
+      "name": "wasm64_emscripten",
+      "inherits": "wasm32_emscripten",
+      "displayName": "WebAssembly 64-bit under Emscripten - compile only",
+      "description": "The extended module: Memory64, threads and Relaxed SIMD, the flags Emscripten's toolchain reads as it loads.",
+      "cacheVariables": {
+        "EMSCRIPTEN_SYSTEM_PROCESSOR": "wasm64",
+        "STRINGZILLA_TARGET_ARCH": "v128relaxed",
+        "CMAKE_C_FLAGS": "--target=wasm64 -pthread",
+        "CMAKE_CXX_FLAGS": "--target=wasm64 -pthread"
+      }
+    },
+    {
+      "name": "android_arm64",
+      "inherits": "base",
+      "displayName": "Android ARM64 - compile only",
+      "description": "The NDK's own toolchain, from ANDROID_NDK_ROOT.",
+      "toolchainFile": "$env{ANDROID_NDK_ROOT}/build/cmake/android.toolchain.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ANDROID_ABI": "arm64-v8a",
+        "ANDROID_PLATFORM": "android-28",
+        "STRINGZILLA_BUILD_TEST": "OFF",
+        "STRINGZILLA_BUILD_BENCH": "OFF",
+        "STRINGZILLA_BUILD_SHARED": "ON"
+      }
+    },
+    {
+      "name": "msvc2026_x64",
+      "inherits": ["base", "windows"],
+      "displayName": "Windows x64 - Visual Studio 2026",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
+      "cacheVariables": { "STRINGZILLA_BUILD_SHARED": "ON" }
+    },
+    {
+      "name": "msvc2022_arm64",
+      "inherits": ["base", "windows"],
+      "displayName": "Windows ARM64 - Visual Studio 2022",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "ARM64",
+      "cacheVariables": { "STRINGZILLA_BUILD_SHARED": "ON" }
+    },
+    {
+      "name": "machine",
+      "hidden": true,
+      "inherits": ["base", "linux", "clang"],
+      "description": "Libraries for one machine: its CPU floor, the capabilities the toolchain compiles, and its one GPU code.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CUDA_HOST_COMPILER": "clang++",
+        "STRINGZILLA_BUILD_TEST": "OFF",
+        "STRINGZILLA_BUILD_BENCH": "OFF",
+        "STRINGZILLA_BUILD_SHARED": "ON",
+        "STRINGZILLA_BUILD_CUDA": "ON",
+        "STRINGZILLA_PROFILE_CAPABILITIES": "ON"
+      }
+    },
+    {
+      "name": "xeon4_hopper",
+      "inherits": "machine",
+      "displayName": "Xeon 4 with Hopper - compile only",
+      "cacheVariables": { "STRINGZILLA_TARGET_ARCH": "sapphirerapids", "STRINGZILLA_CUDA_ARCHITECTURES": "90a-real" }
+    },
+    {
+      "name": "xeon6_blackwell",
+      "inherits": "machine",
+      "displayName": "Xeon 6 with Blackwell - compile only",
+      "cacheVariables": { "STRINGZILLA_TARGET_ARCH": "graniterapids", "STRINGZILLA_CUDA_ARCHITECTURES": "100f-real" }
+    },
+    {
+      "name": "grace_hopper",
+      "inherits": "machine",
+      "displayName": "Grace with Hopper - compile only",
+      "cacheVariables": { "STRINGZILLA_TARGET_ARCH": "neoverse-v2", "STRINGZILLA_CUDA_ARCHITECTURES": "90a-real" }
+    },
+    {
+      "name": "vera_rubin",
+      "inherits": "machine",
+      "displayName": "Vera with Rubin - compile only",
+      "description": "Olympus cores need Clang 22 or GCC 15, and CUDA 13.4 names no Rubin code, so it compiles 100f.",
+      "cacheVariables": { "STRINGZILLA_TARGET_ARCH": "olympus", "STRINGZILLA_CUDA_ARCHITECTURES": "100f-real" }
     }
   ],
   "buildPresets": [
@@ -163,7 +263,6 @@
     { "name": "release_shared", "configurePreset": "release_shared" },
     { "name": "swift", "configurePreset": "swift", "configuration": "Release" },
     { "name": "cuda", "configurePreset": "cuda" },
-    { "name": "cuda_clang", "configurePreset": "cuda_clang" },
     { "name": "rocm", "configurePreset": "rocm", "targets": ["stringzilla_test"] },
     { "name": "metal", "configurePreset": "metal", "targets": ["stringzilla_test", "stringzilla_shared"] },
     { "name": "linux_arm64", "configurePreset": "linux_arm64" },
@@ -171,7 +270,16 @@
     { "name": "linux_loongarch64", "configurePreset": "linux_loongarch64" },
     { "name": "linux_ppc64le", "configurePreset": "linux_ppc64le" },
     { "name": "wasm32_wasi", "configurePreset": "wasm32_wasi", "targets": ["stringzilla_test"] },
-    { "name": "wasm32_wasi_threads", "configurePreset": "wasm32_wasi_threads", "targets": ["stringzilla_test"] }
+    { "name": "wasm32_wasi_threads", "configurePreset": "wasm32_wasi_threads", "targets": ["stringzilla_test"] },
+    { "name": "wasm32_emscripten", "configurePreset": "wasm32_emscripten" },
+    { "name": "wasm64_emscripten", "configurePreset": "wasm64_emscripten" },
+    { "name": "android_arm64", "configurePreset": "android_arm64" },
+    { "name": "msvc2026_x64", "configurePreset": "msvc2026_x64", "configuration": "Release" },
+    { "name": "msvc2022_arm64", "configurePreset": "msvc2022_arm64", "configuration": "Release" },
+    { "name": "xeon4_hopper", "configurePreset": "xeon4_hopper" },
+    { "name": "xeon6_blackwell", "configurePreset": "xeon6_blackwell" },
+    { "name": "grace_hopper", "configurePreset": "grace_hopper" },
+    { "name": "vera_rubin", "configurePreset": "vera_rubin" }
   ],
   "testPresets": [
     {
@@ -191,7 +299,6 @@
     { "name": "debug", "inherits": "base", "configurePreset": "debug" },
     { "name": "release", "inherits": "base", "configurePreset": "release" },
     { "name": "cuda", "inherits": "base", "configurePreset": "cuda" },
-    { "name": "cuda_clang", "inherits": "base", "configurePreset": "cuda_clang" },
     {
       "name": "rocm",
       "inherits": "base",
@@ -221,7 +328,9 @@
       "configurePreset": "wasm32_wasi_threads",
       "filter": { "include": { "name": "^stringzilla_test$" } },
       "environment": { "STRINGZILLA_FILTER": "utf8" }
-    }
+    },
+    { "name": "msvc2026_x64", "inherits": "base", "configurePreset": "msvc2026_x64", "configuration": "Release" },
+    { "name": "msvc2022_arm64", "inherits": "base", "configurePreset": "msvc2022_arm64", "configuration": "Release" }
   ],
   "workflowPresets": [
     {

@@ -2046,14 +2046,17 @@ check_type_suffixes() {
     unsuffixed=$(printf '%s\n' "$staged_file_text" | blank_c_comments_preserving_columns |
         added_list="$staged_added_line_numbers_list" awk '
         BEGIN { count = split(ENVIRON["added_list"], numbers, "\n"); for (index_ = 1; index_ <= count; ++index_) added[numbers[index_] + 0] = 1 }
-        function check_enumerators(body, line_number, line,    items, total, item, name) {
+        function check_enumerators(body, line_number, line,    items, total, item, name, trimmed) {
             total = split(body, items, ",")
-            for (item = 1; item <= total; ++item) {
+            for (item = fresh ? 1 : 2; item <= total; ++item) {
                 name = items[item]
                 sub(/=.*$/, "", name); gsub(/[[:space:]{}]/, "", name)
                 if (name != "" && name ~ /^[A-Za-z_][A-Za-z0-9_]*$/ && name !~ /_k$/ && (line_number in added))
                     printf "line %d: %s\n", line_number, line
             }
+            # A line not ending in a comma leaves the next one continuing its initializer, not naming an enumerator.
+            trimmed = body; gsub(/[[:space:]]/, "", trimmed)
+            if (trimmed != "") fresh = trimmed ~ /,$/
         }
         /^[[:space:]]*#/ { next }
         {
@@ -2068,6 +2071,7 @@ check_type_suffixes() {
                 body = substr(code, RSTART + RLENGTH); closing = index(body, "}")
                 if (closing) body = substr(body, 1, closing - 1)
                 else in_enum = 1
+                fresh = 1
                 check_enumerators(body, NR, $0)
             }
             else if ((NR in added) && previous !~ /(^|[^A-Za-z0-9_])template[[:space:]]*</ &&

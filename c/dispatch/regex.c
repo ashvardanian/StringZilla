@@ -12,35 +12,46 @@
  *  spans the same capabilities, so each verb has the kernel of the capability its init recorded. */
 
 static sz_capability_kernels_t const *sz_regex_engine_init_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_regex_engine_init_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_engine_init_serial,
 #if STRINGZILLA_TARGET_HASWELL
-        (sz_kernel_punned_t)&sz_regex_engine_init_haswell,
+        above_k & ~(sz_cap_haswell_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_engine_init_haswell,
 #endif
 #if STRINGZILLA_TARGET_ICELAKE
-        (sz_kernel_punned_t)&sz_regex_engine_init_icelake,
+        above_k & ~(sz_cap_icelake_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_engine_init_icelake,
 #endif
 #if STRINGZILLA_TARGET_NEON
-        (sz_kernel_punned_t)&sz_regex_engine_init_neon,
+        above_k & ~(sz_cap_neon_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_engine_init_neon,
 #endif
     };
+    enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_CUDA
-        (sz_kernel_punned_t)&sz_regex_engine_init_cuda,
+        cuda_above_k & ~((sz_cap_cuda_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                        : (sz_kernel_punned_t)&sz_regex_engine_init_cuda,
 #endif
     };
+    enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_ROCM
-        (sz_kernel_punned_t)&sz_regex_engine_init_rocm,
+        rocm_above_k & ~((sz_cap_rocm_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                        : (sz_kernel_punned_t)&sz_regex_engine_init_rocm,
 #endif
     };
+    enum { metal_above_k = ((sz_cap_metal_k * STRINGZILLA_TARGET_METAL) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const metal[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_METAL
-        (sz_kernel_punned_t)&sz_regex_engine_init_metal,
+        metal_above_k & ~((sz_cap_metal_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_regex_engine_init_metal,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
@@ -55,29 +66,38 @@ static sz_capability_kernels_t const *sz_regex_engine_init_capabilities(void) {
 }
 
 static sz_capability_kernels_t const *sz_regex_contains_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_regex_contains_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_contains_serial,
 #if STRINGZILLA_TARGET_HASWELL
-        (sz_kernel_punned_t)&sz_regex_contains_haswell,
+        above_k & ~(sz_cap_haswell_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_contains_haswell,
 #endif
 #if STRINGZILLA_TARGET_ICELAKE
-        (sz_kernel_punned_t)&sz_regex_contains_icelake,
+        above_k & ~(sz_cap_icelake_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_contains_icelake,
 #endif
 #if STRINGZILLA_TARGET_NEON
-        (sz_kernel_punned_t)&sz_regex_contains_neon,
+        above_k & ~(sz_cap_neon_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_contains_neon,
 #endif
     };
+    enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_CUDA
-        (sz_kernel_punned_t)&sz_regex_contains_cuda,
+        cuda_above_k & ~((sz_cap_cuda_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                        : (sz_kernel_punned_t)&sz_regex_contains_cuda,
 #endif
     };
+    enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_ROCM
-        (sz_kernel_punned_t)&sz_regex_contains_rocm,
+        rocm_above_k & ~((sz_cap_rocm_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                        : (sz_kernel_punned_t)&sz_regex_contains_rocm,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
@@ -92,35 +112,44 @@ static sz_capability_kernels_t const *sz_regex_contains_capabilities(void) {
 }
 
 static sz_capability_kernels_t const *sz_regex_counts_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_regex_counts_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_counts_serial,
 #if STRINGZILLA_TARGET_HASWELL
-        (sz_kernel_punned_t)&sz_regex_counts_haswell,
+        above_k & ~(sz_cap_haswell_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_counts_haswell,
 #endif
 #if STRINGZILLA_TARGET_ICELAKE
-        (sz_kernel_punned_t)&sz_regex_counts_icelake,
+        above_k & ~(sz_cap_icelake_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_counts_icelake,
 #endif
 #if STRINGZILLA_TARGET_NEON
-        (sz_kernel_punned_t)&sz_regex_counts_neon,
+        above_k & ~(sz_cap_neon_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_counts_neon,
 #endif
     };
+    enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_CUDA
-        (sz_kernel_punned_t)&sz_regex_counts_cuda,
+        cuda_above_k & ~((sz_cap_cuda_k >> 48) * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_counts_cuda,
 #endif
     };
+    enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_ROCM
-        (sz_kernel_punned_t)&sz_regex_counts_rocm,
+        rocm_above_k & ~((sz_cap_rocm_k >> 48) * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_counts_rocm,
 #endif
     };
+    enum { metal_above_k = ((sz_cap_metal_k * STRINGZILLA_TARGET_METAL) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const metal[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_METAL
-        (sz_kernel_punned_t)&sz_regex_counts_metal,
+        metal_above_k & ~((sz_cap_metal_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_regex_counts_metal,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
@@ -135,35 +164,43 @@ static sz_capability_kernels_t const *sz_regex_counts_capabilities(void) {
 }
 
 static sz_capability_kernels_t const *sz_regex_find_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_regex_find_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_find_serial,
 #if STRINGZILLA_TARGET_HASWELL
-        (sz_kernel_punned_t)&sz_regex_find_haswell,
+        above_k & ~(sz_cap_haswell_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_find_haswell,
 #endif
 #if STRINGZILLA_TARGET_ICELAKE
-        (sz_kernel_punned_t)&sz_regex_find_icelake,
+        above_k & ~(sz_cap_icelake_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_find_icelake,
 #endif
 #if STRINGZILLA_TARGET_NEON
-        (sz_kernel_punned_t)&sz_regex_find_neon,
+        above_k & ~(sz_cap_neon_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_find_neon,
 #endif
     };
+    enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_CUDA
-        (sz_kernel_punned_t)&sz_regex_find_cuda,
+        cuda_above_k & ~((sz_cap_cuda_k >> 48) * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_find_cuda,
 #endif
     };
+    enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_ROCM
-        (sz_kernel_punned_t)&sz_regex_find_rocm,
+        rocm_above_k & ~((sz_cap_rocm_k >> 48) * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_find_rocm,
 #endif
     };
+    enum { metal_above_k = ((sz_cap_metal_k * STRINGZILLA_TARGET_METAL) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const metal[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_METAL
-        (sz_kernel_punned_t)&sz_regex_find_metal,
+        metal_above_k & ~((sz_cap_metal_k >> 48) * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_find_metal,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
@@ -178,35 +215,44 @@ static sz_capability_kernels_t const *sz_regex_find_capabilities(void) {
 }
 
 static sz_capability_kernels_t const *sz_regex_replace_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_regex_replace_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_replace_serial,
 #if STRINGZILLA_TARGET_HASWELL
-        (sz_kernel_punned_t)&sz_regex_replace_haswell,
+        above_k & ~(sz_cap_haswell_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_replace_haswell,
 #endif
 #if STRINGZILLA_TARGET_ICELAKE
-        (sz_kernel_punned_t)&sz_regex_replace_icelake,
+        above_k & ~(sz_cap_icelake_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_replace_icelake,
 #endif
 #if STRINGZILLA_TARGET_NEON
-        (sz_kernel_punned_t)&sz_regex_replace_neon,
+        above_k & ~(sz_cap_neon_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_replace_neon,
 #endif
     };
+    enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_CUDA
-        (sz_kernel_punned_t)&sz_regex_replace_cuda,
+        cuda_above_k & ~((sz_cap_cuda_k >> 48) * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_replace_cuda,
 #endif
     };
+    enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_ROCM
-        (sz_kernel_punned_t)&sz_regex_replace_rocm,
+        rocm_above_k & ~((sz_cap_rocm_k >> 48) * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_replace_rocm,
 #endif
     };
+    enum { metal_above_k = ((sz_cap_metal_k * STRINGZILLA_TARGET_METAL) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const metal[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_METAL
-        (sz_kernel_punned_t)&sz_regex_replace_metal,
+        metal_above_k & ~((sz_cap_metal_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_regex_replace_metal,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
@@ -221,35 +267,44 @@ static sz_capability_kernels_t const *sz_regex_replace_capabilities(void) {
 }
 
 static sz_capability_kernels_t const *sz_regex_extract_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_regex_extract_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_extract_serial,
 #if STRINGZILLA_TARGET_HASWELL
-        (sz_kernel_punned_t)&sz_regex_extract_haswell,
+        above_k & ~(sz_cap_haswell_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_extract_haswell,
 #endif
 #if STRINGZILLA_TARGET_ICELAKE
-        (sz_kernel_punned_t)&sz_regex_extract_icelake,
+        above_k & ~(sz_cap_icelake_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_extract_icelake,
 #endif
 #if STRINGZILLA_TARGET_NEON
-        (sz_kernel_punned_t)&sz_regex_extract_neon,
+        above_k & ~(sz_cap_neon_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_extract_neon,
 #endif
     };
+    enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_CUDA
-        (sz_kernel_punned_t)&sz_regex_extract_cuda,
+        cuda_above_k & ~((sz_cap_cuda_k >> 48) * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_extract_cuda,
 #endif
     };
+    enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_ROCM
-        (sz_kernel_punned_t)&sz_regex_extract_rocm,
+        rocm_above_k & ~((sz_cap_rocm_k >> 48) * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_extract_rocm,
 #endif
     };
+    enum { metal_above_k = ((sz_cap_metal_k * STRINGZILLA_TARGET_METAL) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const metal[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_METAL
-        (sz_kernel_punned_t)&sz_regex_extract_metal,
+        metal_above_k & ~((sz_cap_metal_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_regex_extract_metal,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {

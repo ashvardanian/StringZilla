@@ -1458,6 +1458,10 @@ struct probe_tape {
 };
 enum { probe_threads_per_block_k = 256 };
 enum class probe_order_t : int { shuffled_k, sorted_k };
+enum {
+    probe_mask_k = (probe_first_bit_k | probe_second_bit_k) &
+                   probe_profile_bits_k
+};
 FIXTURE
 
 stage_fixture_with_header include/probe.hpp <<'FIXTURE'

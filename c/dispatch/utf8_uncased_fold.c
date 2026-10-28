@@ -12,50 +12,65 @@
 #include "dispatch.h"
 
 static sz_capability_kernels_t const *sz_utf8_uncased_fold_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
+                   sz_cap_sve2_k * STRINGZILLA_TARGET_SVE2 | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV |
+                   sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_utf8_uncased_fold_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_uncased_fold_serial,
 #if STRINGZILLA_TARGET_HASWELL
-        (sz_kernel_punned_t)&sz_utf8_uncased_fold_haswell,
+        above_k & ~(sz_cap_haswell_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_uncased_fold_haswell,
 #endif
 #if STRINGZILLA_TARGET_ICELAKE
-        (sz_kernel_punned_t)&sz_utf8_uncased_fold_icelake,
+        above_k & ~(sz_cap_icelake_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_uncased_fold_icelake,
 #endif
 #if STRINGZILLA_TARGET_NEON
-        (sz_kernel_punned_t)&sz_utf8_uncased_fold_neon,
+        above_k & ~(sz_cap_neon_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_uncased_fold_neon,
 #endif
 #if STRINGZILLA_TARGET_SVE2
-        (sz_kernel_punned_t)&sz_utf8_uncased_fold_sve2,
+        above_k & ~(sz_cap_sve2_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_uncased_fold_sve2,
 #endif
 #if STRINGZILLA_TARGET_RVV
-        (sz_kernel_punned_t)&sz_utf8_uncased_fold_rvv,
+        above_k & ~(sz_cap_rvv_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_uncased_fold_rvv,
 #endif
 #if STRINGZILLA_TARGET_V128
-        (sz_kernel_punned_t)&sz_utf8_uncased_fold_v128,
+        above_k & ~(sz_cap_v128_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_uncased_fold_v128,
 #endif
 #if STRINGZILLA_TARGET_LOONGSONASX
-        (sz_kernel_punned_t)&sz_utf8_uncased_fold_loongsonasx,
+        above_k & ~(sz_cap_loongsonasx_k * 2 - 1) ? STRINGZILLA_NULL
+                                                  : (sz_kernel_punned_t)&sz_utf8_uncased_fold_loongsonasx,
 #endif
 #if STRINGZILLA_TARGET_POWERVSX
-        (sz_kernel_punned_t)&sz_utf8_uncased_fold_powervsx,
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_utf8_uncased_fold_powervsx,
 #endif
     };
+    enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_CUDA
-        (sz_kernel_punned_t)&sz_utf8_uncased_fold_cuda,
+        cuda_above_k & ~((sz_cap_cuda_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                        : (sz_kernel_punned_t)&sz_utf8_uncased_fold_cuda,
 #endif
     };
+    enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_ROCM
-        (sz_kernel_punned_t)&sz_utf8_uncased_fold_rocm,
+        rocm_above_k & ~((sz_cap_rocm_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                        : (sz_kernel_punned_t)&sz_utf8_uncased_fold_rocm,
 #endif
     };
+    enum { metal_above_k = ((sz_cap_metal_k * STRINGZILLA_TARGET_METAL) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const metal[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_METAL
-        (sz_kernel_punned_t)&sz_utf8_uncased_fold_metal,
+        metal_above_k & ~((sz_cap_metal_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_utf8_uncased_fold_metal,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {

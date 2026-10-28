@@ -21,9 +21,9 @@ set(stringzilla_gcc_library_directory_ /usr/lib/gcc-cross/${stringzilla_triple_}
 set(CMAKE_C_COMPILER clang-23)
 set(CMAKE_CXX_COMPILER clang++-23)
 
-set(stringzilla_target_flags_
-    "--target=${stringzilla_triple_} --sysroot=${stringzilla_sysroot_} --gcc-toolchain=/usr -march=rv64gc"
-)
+# No `--sysroot`: the distribution cross packages install into the build root, and their `libc.so` script names
+# `/usr/riscv64-linux-gnu/lib` absolutely, which the linker would prefix with the sysroot a second time.
+set(stringzilla_target_flags_ "--target=${stringzilla_triple_} --gcc-toolchain=/usr -march=rv64gc")
 
 set(CMAKE_C_FLAGS_INIT "${stringzilla_target_flags_}")
 set(CMAKE_CXX_FLAGS_INIT "${stringzilla_target_flags_} -stdlib=libstdc++")

@@ -7,12 +7,12 @@ Date: October 27, 2026
 
 import enum
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from typing import Any, TypeAlias, overload
+from typing import Any, overload
 
 __version__: str
 
-_Buffer: TypeAlias = Any
-_StringLike: TypeAlias = String | str | bytes | bytearray | memoryview
+type _Buffer = Any
+type _StringLike = String | str | bytes | bytearray | memoryview
 
 class Capability(enum.IntFlag):
     SERIAL = ...

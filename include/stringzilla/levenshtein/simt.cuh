@@ -77,7 +77,8 @@ extern "C" {
  *  @param[in] bound The largest distance stored exactly; @c STRINGZILLA_SIZE_MAX keeps all exact.
  *  @param[in] candidate_order The round's candidates longest first, which the queue's draws index,
  *      so a block's last candidates are its shortest; or null for the batch's own order.
- *  @param[in] open, draw The tile queue's steps, which differ per generation.
+ *  @param[in] open The tile queue's opening step, which differs per generation.
+ *  @param[in] draw The tile queue's drawing step, which differs per generation.
  */
 STRINGZILLA_DEVICE void sz_levenshtein_sweep_simt_(
     sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
@@ -420,7 +421,8 @@ STRINGZILLA_DEVICE sz_ssize_t sz_levenshtein_group_distance_simt_(
  *  @param[in] lanes The group's width, a literal; a group is aligned within its warp, and all of
  *      its lanes call together with the same candidate.
  *  @param[in] lane This lane's index within its group.
- *  @param[in] shuffle_up, shuffle_index The vendor's steps across an aligned group of that width.
+ *  @param[in] shuffle_up The vendor's shuffle up across an aligned group of that width.
+ *  @param[in] shuffle_index The vendor's indexed shuffle across that group.
  *  @return The same on every lane of the group.
  */
 STRINGZILLA_DEVICE sz_ssize_t sz_levenshtein_group_score_simt_(
@@ -500,7 +502,8 @@ STRINGZILLA_DEVICE sz_ssize_t sz_levenshtein_group_score_simt_(
  *  The radius test bounds the runes left by the bytes lane zero has not decoded plus the runes it
  *  decoded ahead of the score lane, since no rune is shorter than a byte.
  *
- *  @param[in] words_per_lane, lanes, lane, radius, shuffle_up, shuffle_index As the byte scorer's.
+ *  @p words_per_lane , @p lanes , @p lane , @p radius and both shuffles are as the byte scorer's.
+ *
  *  @return The same on every lane of the group.
  */
 STRINGZILLA_DEVICE sz_ssize_t sz_levenshtein_group_score_utf8_simt_(
@@ -611,9 +614,11 @@ STRINGZILLA_DEVICE int sz_levenshtein_warp_first_simt_(
  *
  *  @param[in] bound The largest distance stored exactly and the group's radius, at which a
  *      candidate past it stops.
- *  @param[in] shuffle_up, shuffle_index The vendor's steps across an aligned group of lanes.
+ *  @param[in] shuffle_up The vendor's shuffle up across an aligned group of lanes.
+ *  @param[in] shuffle_index The vendor's indexed shuffle across that group.
  *  @param[in] broadcast The vendor's step from lane zero across the warp.
- *  @param[in] open, draw The tile queue's steps, which differ per generation.
+ *  @param[in] open The tile queue's opening step, which differs per generation.
+ *  @param[in] draw The tile queue's drawing step, which differs per generation.
  */
 STRINGZILLA_DEVICE void sz_levenshtein_warp_sweep_simt_(
     sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
@@ -847,8 +852,10 @@ static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max
  *  and so does one whose score less the bytes left exceeds @p bound, since no rune is shorter
  *  than a byte.
  *
- *  @param[in] bound, candidate_order As @p bound and @p candidate_order are in the byte sweep.
- *  @param[in] open, draw The tile queue's steps, which differ per generation.
+ *  @p bound and @p candidate_order are as in the byte sweep.
+ *
+ *  @param[in] open The tile queue's opening step, which differs per generation.
+ *  @param[in] draw The tile queue's drawing step, which differs per generation.
  */
 STRINGZILLA_DEVICE void sz_levenshtein_sweep_utf8_simt_(
     sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,

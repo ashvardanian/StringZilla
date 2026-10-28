@@ -28,9 +28,9 @@
 #if !defined(STRINGZILLA_TYPES_H_)
 #define STRINGZILLA_TYPES_H_
 
-#define STRINGZILLA_VERSION_MAJOR 5
-#define STRINGZILLA_VERSION_MINOR 1
-#define STRINGZILLA_VERSION_PATCH 2
+#define STRINGZILLA_VERSION_MAJOR 6
+#define STRINGZILLA_VERSION_MINOR 0
+#define STRINGZILLA_VERSION_PATCH 0
 
 /*  Debugging and testing. */
 #if !defined(STRINGZILLA_DEBUG)
@@ -59,6 +59,11 @@
  *  @c sz_missing_library_k, instead of linking them from the StringZilla library. */
 #if !defined(STRINGZILLA_HEADER_ONLY)
 #define STRINGZILLA_HEADER_ONLY (0) // true or false
+#endif
+
+/** The machine profile's capabilities, folding each dispatch table to its best kernel, or 0. */
+#if !defined(STRINGZILLA_PROFILE_CAPABILITIES)
+#define STRINGZILLA_PROFILE_CAPABILITIES 0
 #endif
 
 /**

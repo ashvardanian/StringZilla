@@ -1,7 +1,8 @@
 # cmake/stringzilla_compiler_flags.cmake — per-target compiler-flag helpers shared by every StringZilla target:
-# warnings, optimization, standards, architecture baselines, and the per-capability `STRINGZILLA_TARGET_*` stamps.
+# warnings, optimization, standards, sanitizers and coverage. The architecture floor is directory-wide, in
+# `CMakeLists.txt`, beside STRINGZILLA_TARGET_ARCH.
 # Included after the option block: the warnings read `STRINGZILLA_WERROR`, and the helpers read
-# `STRINGZILLA_BUILD_SANITIZERS`, `STRINGZILLA_BUILD_COVERAGE`, and the `stringzilla_arch_*_` platform facts at call time.
+# `STRINGZILLA_BUILD_SANITIZERS` and `STRINGZILLA_BUILD_COVERAGE` at call time.
 
 # Flags follow each source's language and compiler, as one target may mix C, C++, CUDA and HIP. `COMPILE_LANG_AND_ID`
 # takes one language, hence the `OR`s; "GCC-style" means every compiler but MSVC and NVCC.
@@ -133,7 +134,7 @@ function (stringzilla_set_optimization_flags target_ target_type_)
 endfunction ()
 
 # Function to set the default compiler-specific flags
-function (stringzilla_set_compiler_flags target_ cpp_standard_ target_arch_)
+function (stringzilla_set_compiler_flags target_ cpp_standard_)
     get_target_property(target_type_ ${target_} TYPE)
 
     # Set output directory for single-configuration generators (like Make)
@@ -213,48 +214,6 @@ function (stringzilla_set_compiler_flags target_ cpp_standard_ target_arch_)
         endif ()
     endif ()
 
-    # Check for ${target_arch_} and set it, or tune an executable for the current system if not defined. A library
-    # without one keeps the toolchain's default, as it may ship to any CPU of its architecture. NVCC forwards it to its
-    # host.
-    if ("${target_arch_}" STREQUAL "")
-        # Only use the current system if we are not cross compiling
-        if (target_type_ STREQUAL "EXECUTABLE" AND (((NOT MSVC) AND (NOT CMAKE_CROSSCOMPILING))
-                                                    OR (CMAKE_SYSTEM_PROCESSOR MATCHES ${CMAKE_HOST_SYSTEM_PROCESSOR}))
-        )
-            if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-                # MSVC does not have a direct equivalent to -march=native
-                if (stringzilla_arch_arm64_)
-                    set(native_arch_ "/arch:armv8.0")
-                else ()
-                    set(native_arch_ "/arch:AVX2")
-                endif ()
-                target_compile_options(
-                    ${target_} PRIVATE "$<${stringzilla_msvc_}:${native_arch_}>"
-                                       "$<${stringzilla_nvcc_}:-Xcompiler=${native_arch_}>"
-                )
-            else ()
-                check_cxx_compiler_flag("-march=native" stringzilla_supports_march_native_)
-                if (stringzilla_supports_march_native_)
-                    target_compile_options(${target_} PRIVATE "$<${stringzilla_gcc_style_}:-march=native>")
-                endif ()
-                if (stringzilla_cuda_native_arch_compiles_)
-                    target_compile_options(${target_} PRIVATE "$<${stringzilla_nvcc_}:-Xcompiler=-march=native>")
-                endif ()
-            endif ()
-        endif ()
-    elseif (NOT stringzilla_arch_wasm_) # There it names the module's SIMD capability, which a directory-wide flag sets
-        if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-            set(host_arch_ "/arch:${target_arch_}")
-        else ()
-            set(host_arch_ "-march=${target_arch_}")
-        endif ()
-        target_compile_options(
-            ${target_}
-            PRIVATE "$<${stringzilla_msvc_}:/arch:${target_arch_}>" "$<${stringzilla_nvcc_}:-Xcompiler=${host_arch_}>"
-                    "$<${stringzilla_gcc_style_}:-march=${target_arch_}>"
-        )
-    endif ()
-
     # Define STRINGZILLA_ARCH_BIG_ENDIAN_ macro based on system byte order
     target_compile_definitions(
         ${target_} PRIVATE "STRINGZILLA_ARCH_BIG_ENDIAN_=$<STREQUAL:${CMAKE_C_BYTE_ORDER},BIG_ENDIAN>"
@@ -284,50 +243,5 @@ function (stringzilla_set_compiler_flags target_ cpp_standard_ target_arch_)
         target_link_options(
             ${target_} PRIVATE "$<${stringzilla_clang_link_}:-fprofile-instr-generate;-fcoverage-mapping>"
         )
-    endif ()
-endfunction ()
-
-# Stamps the architecture id and the `STRINGZILLA_TARGET_*` verdicts of the ISA probes onto a target.
-function (stringzilla_set_architecture_simd_definitions target_)
-    target_compile_definitions(
-        ${target_}
-        PRIVATE "STRINGZILLA_ARCH_X8664_=$<BOOL:${stringzilla_arch_x8664_}>"
-                "STRINGZILLA_ARCH_ARM64_=$<BOOL:${stringzilla_arch_arm64_}>"
-                "STRINGZILLA_ARCH_RISCV64_=$<BOOL:${stringzilla_arch_riscv64_}>"
-                "STRINGZILLA_ARCH_LOONGARCH64_=$<BOOL:${stringzilla_arch_loongarch64_}>"
-                "STRINGZILLA_ARCH_PPC64_=$<BOOL:${stringzilla_arch_ppc64_}>"
-                "STRINGZILLA_ARCH_WASM_=$<BOOL:${stringzilla_arch_wasm_}>"
-    )
-    target_link_libraries(${target_} PRIVATE $<BUILD_INTERFACE:stringzilla_cpu_capabilities_compiled>)
-endfunction ()
-
-# Apply the ABI floor (`-march`/`-mcpu`/`/arch`) that lets one compilation host every SIMD
-# capability: each capability's headers scope its kernels with a target pragma, so the serial
-# code runs on every CPU of the architecture.
-# `STRINGZILLA_TARGET_ARCH` swaps the floor for a host-tuned build.
-function (stringzilla_set_baseline_architecture_flags target_)
-    if (STRINGZILLA_TARGET_ARCH)
-        stringzilla_set_compiler_flags(${target_} "" "${STRINGZILLA_TARGET_ARCH}")
-    elseif (stringzilla_arch_x8664_)
-        if (MSVC)
-            stringzilla_set_compiler_flags(${target_} "" "SSE2")
-        else ()
-            stringzilla_set_compiler_flags(${target_} "" "x86-64")
-        endif ()
-    elseif (stringzilla_arch_arm64_)
-        if (MSVC)
-            stringzilla_set_compiler_flags(${target_} "" "armv8.0")
-        else ()
-            stringzilla_set_compiler_flags(${target_} "" "armv8-a")
-        endif ()
-    elseif (stringzilla_arch_riscv64_)
-        stringzilla_set_compiler_flags(${target_} "" "rv64gc")
-    elseif (stringzilla_arch_loongarch64_)
-        stringzilla_set_compiler_flags(${target_} "" "loongarch64")
-    elseif (stringzilla_arch_ppc64_)
-        stringzilla_set_compiler_flags(${target_} "" "")
-        target_compile_options(${target_} PRIVATE "-mcpu=power8")
-    else ()
-        stringzilla_set_compiler_flags(${target_} "" "")
     endif ()
 endfunction ()

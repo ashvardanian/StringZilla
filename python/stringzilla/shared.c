@@ -193,8 +193,7 @@ void sz_py_wipe_bytes(void *start, sz_size_t length) {
 /** Helper function to wrap the current exception with a custom prefix message. An example is
  *  augmenting an argument parsing error with the name of the variable that failed validation. */
 void wrap_current_exception(sz_cptr_t comment) {
-    // ? Prior to Python 3.12 we need to fetch and restore the exception state using
-    // ? `PyErr_Fetch` and `PyErr_Restore` to avoid overwriting the current exception.
-    // ? After Python 3.12 we can use `PyErr_GetRaisedException` and `PyErr_SetRaisedException`.
+    // ? `PyErr_GetRaisedException` and `PyErr_SetRaisedException` wrap the current exception
+    // ? without overwriting it.
     sz_unused_(comment);
 }

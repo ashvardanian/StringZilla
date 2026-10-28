@@ -11,38 +11,54 @@
 /*  One list per verb: a null slot, then a kernel per capability bit, ascending by bit. */
 
 static sz_capability_kernels_t const *sz_overlap_engine_init_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
+                   sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL | sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_overlap_engine_init_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_overlap_engine_init_serial,
 #if STRINGZILLA_TARGET_HASWELL
-        (sz_kernel_punned_t)&sz_overlap_engine_init_haswell,
+        above_k & ~(sz_cap_haswell_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_overlap_engine_init_haswell,
 #endif
 #if STRINGZILLA_TARGET_SKYLAKE
-        (sz_kernel_punned_t)&sz_overlap_engine_init_skylake,
+        above_k & ~(sz_cap_skylake_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_overlap_engine_init_skylake,
 #endif
 #if STRINGZILLA_TARGET_NEON
-        (sz_kernel_punned_t)&sz_overlap_engine_init_neon,
+        above_k & ~(sz_cap_neon_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_overlap_engine_init_neon,
 #endif
+    };
+    enum {
+        cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_blackwell_k * STRINGZILLA_TARGET_BLACKWELL) &
+                        STRINGZILLA_PROFILE_CAPABILITIES) >>
+                       48
     };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_CUDA
-        (sz_kernel_punned_t)&sz_overlap_engine_init_cuda,
+        cuda_above_k & ~((sz_cap_cuda_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                        : (sz_kernel_punned_t)&sz_overlap_engine_init_cuda,
 #endif
 #if STRINGZILLA_TARGET_BLACKWELL
-        (sz_kernel_punned_t)&sz_overlap_engine_init_blackwell,
+        cuda_above_k & ~((sz_cap_blackwell_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                             : (sz_kernel_punned_t)&sz_overlap_engine_init_blackwell,
 #endif
     };
+    enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_ROCM
-        (sz_kernel_punned_t)&sz_overlap_engine_init_rocm,
+        rocm_above_k & ~((sz_cap_rocm_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                        : (sz_kernel_punned_t)&sz_overlap_engine_init_rocm,
 #endif
     };
+    enum { metal_above_k = ((sz_cap_metal_k * STRINGZILLA_TARGET_METAL) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const metal[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_METAL
-        (sz_kernel_punned_t)&sz_overlap_engine_init_metal,
+        metal_above_k & ~((sz_cap_metal_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_overlap_engine_init_metal,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
@@ -57,38 +73,54 @@ static sz_capability_kernels_t const *sz_overlap_engine_init_capabilities(void) 
 }
 
 static sz_capability_kernels_t const *sz_overlap_scores_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
+                   sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL | sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_overlap_scores_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_overlap_scores_serial,
 #if STRINGZILLA_TARGET_HASWELL
-        (sz_kernel_punned_t)&sz_overlap_scores_haswell,
+        above_k & ~(sz_cap_haswell_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_overlap_scores_haswell,
 #endif
 #if STRINGZILLA_TARGET_SKYLAKE
-        (sz_kernel_punned_t)&sz_overlap_scores_skylake,
+        above_k & ~(sz_cap_skylake_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_overlap_scores_skylake,
 #endif
 #if STRINGZILLA_TARGET_NEON
-        (sz_kernel_punned_t)&sz_overlap_scores_neon,
+        above_k & ~(sz_cap_neon_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_overlap_scores_neon,
 #endif
+    };
+    enum {
+        cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_blackwell_k * STRINGZILLA_TARGET_BLACKWELL) &
+                        STRINGZILLA_PROFILE_CAPABILITIES) >>
+                       48
     };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_CUDA
-        (sz_kernel_punned_t)&sz_overlap_scores_cuda,
+        cuda_above_k & ~((sz_cap_cuda_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                        : (sz_kernel_punned_t)&sz_overlap_scores_cuda,
 #endif
 #if STRINGZILLA_TARGET_BLACKWELL
-        (sz_kernel_punned_t)&sz_overlap_scores_blackwell,
+        cuda_above_k & ~((sz_cap_blackwell_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                             : (sz_kernel_punned_t)&sz_overlap_scores_blackwell,
 #endif
     };
+    enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_ROCM
-        (sz_kernel_punned_t)&sz_overlap_scores_rocm,
+        rocm_above_k & ~((sz_cap_rocm_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                        : (sz_kernel_punned_t)&sz_overlap_scores_rocm,
 #endif
     };
+    enum { metal_above_k = ((sz_cap_metal_k * STRINGZILLA_TARGET_METAL) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
     static sz_kernel_punned_t const metal[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_METAL
-        (sz_kernel_punned_t)&sz_overlap_scores_metal,
+        metal_above_k & ~((sz_cap_metal_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_overlap_scores_metal,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {

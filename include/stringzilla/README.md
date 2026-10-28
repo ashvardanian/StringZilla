@@ -156,11 +156,11 @@ The per-ISA SIMD kernels and the project's own tests are CI-validated with these
 | GCC       | 13 or newer          |
 | Clang     | 18 or newer          |
 | MSVC      | Visual Studio 2022   |
-| NVCC      | CUDA 12+             |
+| NVCC      | CUDA 13+             |
 
 The RVV kernels need Clang 21 or newer, as older Clang hides the 64-bit vector types from a unit compiled without `v`, and an older compiler builds the libraries without them.
 On macOS, prefer Homebrew Clang over Apple Clang; on Windows, MinGW with GCC works alongside MSVC.
-NVCC with CUDA 12 builds the device backends of the engine families, reached by building an engine with the mask `sz_capabilities_enabled_cuda` reports for a device.
+NVCC with CUDA 13 builds the device backends of the engine families, reached by building an engine with the mask `sz_capabilities_enabled_cuda` reports for a device.
 HIP-Clang builds the same sources for AMD GPUs, reached through `sz_capabilities_enabled_rocm`.
 Built with `STRINGZILLA_BUILD_METAL`, the three engines also run on Apple GPUs of the Apple7 family and newer, through the same constructors and verbs.
 
@@ -984,6 +984,7 @@ Within each architecture the bits ascend by preference, so the highest bit a mas
 ```c
 sz_status_t sz_capabilities_detected_cpu(sz_capability_t *capabilities); // what this CPU runs
 sz_status_t sz_capabilities_compiled_cpu(sz_capability_t *capabilities); // what this build holds kernels for
+sz_capability_t sz_capabilities_compiled_cpu_mask(void);                 // the same, constant in the calling unit
 sz_status_t sz_capabilities_enabled_cpu(sz_capability_t *capabilities);  // both at once, always with serial
 sz_status_t sz_thread_configure_cpu(sz_capability_t capabilities);       // once per dispatching thread
 sz_status_t sz_device_count_cuda(sz_size_t *count);

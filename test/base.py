@@ -142,7 +142,7 @@ def parse_uncased_folding_file(filepath: str) -> dict[int, bytes]:
     Uses status C (common) and F (full) mappings for full case folding.
     """
     folds = {}
-    with open(filepath, "r", encoding="utf-8") as data_file:
+    with open(filepath, encoding="utf-8") as data_file:
         for line in data_file:
             line = line.strip()
             if not line or line.startswith("#"):
@@ -220,7 +220,7 @@ def get_uncased_folding_rules_as_codepoints(
     cache_path = _download_uncased_folding_file(version)
 
     folds = {}
-    with open(cache_path, "r", encoding="utf-8") as data_file:
+    with open(cache_path, encoding="utf-8") as data_file:
         for line in data_file:
             line = line.strip()
             if not line or line.startswith("#"):
@@ -265,7 +265,7 @@ def get_normalization_props(version: str = UNICODE_VERSION) -> dict[int, dict[st
         print(f"Using cached Unicode {version} DerivedNormalizationProps.txt: {cache_path}")
 
     properties: dict[int, dict[str, str]] = {}
-    with open(cache_path, "r", encoding="utf-8") as data_file:
+    with open(cache_path, encoding="utf-8") as data_file:
         for line in data_file:
             line = line.split("#")[0].strip()
             if not line:
@@ -336,7 +336,7 @@ def get_word_break_properties(version: str = UNICODE_VERSION) -> dict[int, str]:
     cache_path = _download_word_break_property_file(version)
 
     properties: dict[int, str] = {}
-    with open(cache_path, "r", encoding="utf-8") as data_file:
+    with open(cache_path, encoding="utf-8") as data_file:
         for line in data_file:
             line = line.split("#")[0].strip()
             if not line:
@@ -394,7 +394,7 @@ def get_word_break_test_cases(version: str = UNICODE_VERSION) -> list[tuple]:
     cache_path = _download_word_break_test_file(version)
 
     test_cases = []
-    with open(cache_path, "r", encoding="utf-8") as data_file:
+    with open(cache_path, encoding="utf-8") as data_file:
         for line in data_file:
             line = line.split("#")[0].strip()
             if not line:
@@ -678,7 +678,7 @@ def _parse_break_property_file(cache_path: str) -> dict[int, str]:
     silently make every consumer agree with a broken oracle.
     """
     properties: dict[int, str] = {}
-    with open(cache_path, "r", encoding="utf-8") as data_file:
+    with open(cache_path, encoding="utf-8") as data_file:
         for line in data_file:
             line = line.split("#")[0].strip()
             if not line:
@@ -722,7 +722,7 @@ def _download_break_test_file(filename: str, version: str) -> str:
 def _parse_break_test_file(cache_path: str) -> list[tuple]:
     """Parse a UAX break-test file (``÷`` = break, ``×`` = no break) into (text, boundary_positions)."""
     test_cases = []
-    with open(cache_path, "r", encoding="utf-8") as data_file:
+    with open(cache_path, encoding="utf-8") as data_file:
         for line in data_file:
             line = line.split("#")[0].strip()
             if not line:
@@ -781,7 +781,7 @@ def get_indic_conjunct_break_properties(version: str = UNICODE_VERSION) -> dict[
         except Exception as error:
             raise UnicodeDataDownloadError(f"Could not download DerivedCoreProperties.txt from {url}: {error}")
     indic_conjunct_breaks: dict[int, str] = {}
-    with open(cache_path, "r", encoding="utf-8") as data_file:
+    with open(cache_path, encoding="utf-8") as data_file:
         for line in data_file:
             line = line.split("#")[0].strip()
             parts = [part.strip() for part in line.split(";")]
@@ -1191,7 +1191,7 @@ def get_normalization_test_cases(version: str = UNICODE_VERSION) -> list[tuple]:
         return "".join(chr(int(codepoint, 16)) for codepoint in field.split())
 
     cases = []
-    with open(cache_path, "r", encoding="utf-8") as data_file:
+    with open(cache_path, encoding="utf-8") as data_file:
         for line in data_file:
             line = line.split("#")[0].strip()
             if not line or line.startswith("@"):
@@ -1215,7 +1215,7 @@ def get_emoji_properties(version: str = UNICODE_VERSION) -> dict[int, set]:
     cache_path = _download_ucd_text("emoji-data.txt", "ucd/emoji", version)
 
     properties: dict[int, set] = {}
-    with open(cache_path, "r", encoding="utf-8") as data_file:
+    with open(cache_path, encoding="utf-8") as data_file:
         for line in data_file:
             line = line.split("#")[0].strip()
             if not line:

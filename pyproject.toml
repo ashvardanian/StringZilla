@@ -1,7 +1,7 @@
 # This file configures the StringZilla CPython bindings, which scikit-build-core compiles through `CMakeLists.txt`, and
 # their wheels, which `cibuildwheel` builds:
 #
-#   stringzilla        CPython 3.10-3.14 and 3.14t (free-threaded)
+#   stringzilla        CPython 3.12-3.15, 3.14t and 3.15t (free-threaded)
 #                      Linux `manylinux` + `musllinux` on x86_64, aarch64, i686, ppc64le, s390x,
 #                      armv7l, riscv64; macOS x86_64 + arm64; Windows AMD64, x86, ARM64.
 #
@@ -19,13 +19,11 @@ classifiers = [
   "Intended Audience :: Information Technology",
   "Programming Language :: C++",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: 3.15",
   "Programming Language :: Python :: Implementation :: CPython",
-  "Programming Language :: Python :: Implementation :: PyPy",
   "Operating System :: OS Independent",
   "Topic :: File Formats",
   "Topic :: Internet :: Log Analysis",
@@ -39,7 +37,7 @@ dynamic = ["version"]
 license = { text = "Apache-2.0" }
 name = "stringzilla"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 
 [project.urls]
 Homepage = "https://github.com/ashvardanian/StringZilla"
@@ -91,7 +89,7 @@ test = ["numpy>=1.21", "pytest>=8", "pytest-repeat>=0.9.4"]
 # Free-threaded builds only report a race if several threads actually enter the extension at once.
 test-parallel = ["pytest-run-parallel>=0.7"]
 test-oracles = ["pycryptodome", "pyahocorasick", "pyarrow"]
-test-cuda = ["cupy-cuda12x"]
+test-cuda = ["cupy-cuda13x"]
 
 [tool.black]
 line-length = 120
@@ -162,6 +160,8 @@ repair-wheel-command = "delocate-wheel --require-archs {delocate_archs} -w {dest
 
 [tool.cibuildwheel.windows]
 before-build = ["rd /s /q {project}\\build_python || echo Done"]
+# cibuildwheel 4 defaults this to `delvewheel`; we link only system DLLs.
+repair-wheel-command = ""
 
 # macOS: both arches share an 11.0 floor. The release jobs already force
 # `MACOSX_DEPLOYMENT_TARGET=11.0`, so the x86_64 wheels were built against 11.0 while declaring
@@ -181,7 +181,7 @@ test-groups = ["test", "test-parallel"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py310"
+target-version = "py312"
 
 [tool.ruff.lint]
 extend-select = [

@@ -32,9 +32,9 @@ import os
 import sys
 import tempfile
 import urllib.parse
+from collections.abc import Sequence
 from random import Random
 from string import ascii_lowercase
-from typing import Sequence
 
 import pytest
 from base import (
@@ -201,7 +201,7 @@ def test_string_write_to():
 
     try:
         big.write_to(temp_filename)
-        with open(temp_filename, "r") as file:
+        with open(temp_filename) as file:
             content = file.read()
             assert content == native, "The content of the file does not match the expected output"
     finally:
@@ -1341,9 +1341,8 @@ def test_strings_from_arrow_c_interface():
     schema_capsule, array_capsule = arrow_array.__arrow_c_array__()
 
     # Verify capsules are valid PyCapsule objects
-    if sys.version_info >= (3, 1):
-        assert str(type(schema_capsule)) == "<class 'PyCapsule'>"
-        assert str(type(array_capsule)) == "<class 'PyCapsule'>"
+    assert str(type(schema_capsule)) == "<class 'PyCapsule'>"
+    assert str(type(array_capsule)) == "<class 'PyCapsule'>"
 
     # Test actual conversion
     strings = Strings(arrow_array)

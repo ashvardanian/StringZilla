@@ -9,32 +9,41 @@
 #include "dispatch.h"
 
 static sz_capability_kernels_t const *sz_aes256_key_init_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_westmere_k * STRINGZILLA_TARGET_WESTMERE |
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES |
+                   sz_cap_sve2aes_k * STRINGZILLA_TARGET_SVE2AES | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO |
+                   sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_aes256_key_init_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_key_init_serial,
 #if STRINGZILLA_TARGET_WESTMERE
-        (sz_kernel_punned_t)&sz_aes256_key_init_westmere,
+        above_k & ~(sz_cap_westmere_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_key_init_westmere,
 #endif
 #if STRINGZILLA_TARGET_ICELAKE
-        (sz_kernel_punned_t)&sz_aes256_key_init_icelake,
+        above_k & ~(sz_cap_icelake_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_key_init_icelake,
 #endif
 #if STRINGZILLA_TARGET_NEONAES
-        (sz_kernel_punned_t)&sz_aes256_key_init_neonaes,
+        above_k & ~(sz_cap_neonaes_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_key_init_neonaes,
 #endif
 #if STRINGZILLA_TARGET_SVE2AES
-        (sz_kernel_punned_t)&sz_aes256_key_init_sve2aes,
+        above_k & ~(sz_cap_sve2aes_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_key_init_sve2aes,
 #endif
 #if STRINGZILLA_TARGET_RVVCRYPTO
-        (sz_kernel_punned_t)&sz_aes256_key_init_rvvcrypto,
+        above_k & ~(sz_cap_rvvcrypto_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_key_init_rvvcrypto,
 #endif
 #if STRINGZILLA_TARGET_V128
-        (sz_kernel_punned_t)&sz_aes256_key_init_v128,
+        above_k & ~(sz_cap_v128_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_key_init_v128,
 #endif
 #if STRINGZILLA_TARGET_V128RELAXED
-        (sz_kernel_punned_t)&sz_aes256_key_init_v128relaxed,
+        above_k & ~(sz_cap_v128relaxed_k * 2 - 1) ? STRINGZILLA_NULL
+                                                  : (sz_kernel_punned_t)&sz_aes256_key_init_v128relaxed,
 #endif
 #if STRINGZILLA_TARGET_POWERVSX
-        (sz_kernel_punned_t)&sz_aes256_key_init_powervsx,
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_key_init_powervsx,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
@@ -52,32 +61,44 @@ static sz_capability_kernels_t const *sz_aes256_key_init_capabilities(void) {
 }
 
 static sz_capability_kernels_t const *sz_aes256_gcm_key_init_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_westmere_k * STRINGZILLA_TARGET_WESTMERE |
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES |
+                   sz_cap_sve2aes_k * STRINGZILLA_TARGET_SVE2AES | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO |
+                   sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_aes256_gcm_key_init_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_gcm_key_init_serial,
 #if STRINGZILLA_TARGET_WESTMERE
-        (sz_kernel_punned_t)&sz_aes256_gcm_key_init_westmere,
+        above_k & ~(sz_cap_westmere_k * 2 - 1) ? STRINGZILLA_NULL
+                                               : (sz_kernel_punned_t)&sz_aes256_gcm_key_init_westmere,
 #endif
 #if STRINGZILLA_TARGET_ICELAKE
-        (sz_kernel_punned_t)&sz_aes256_gcm_key_init_icelake,
+        above_k & ~(sz_cap_icelake_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_gcm_key_init_icelake,
 #endif
 #if STRINGZILLA_TARGET_NEONAES
-        (sz_kernel_punned_t)&sz_aes256_gcm_key_init_neonaes,
+        above_k & ~(sz_cap_neonaes_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_gcm_key_init_neonaes,
 #endif
 #if STRINGZILLA_TARGET_SVE2AES
-        (sz_kernel_punned_t)&sz_aes256_gcm_key_init_sve2aes,
+        above_k & ~(sz_cap_sve2aes_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_gcm_key_init_sve2aes,
 #endif
 #if STRINGZILLA_TARGET_RVVCRYPTO
-        (sz_kernel_punned_t)&sz_aes256_gcm_key_init_rvvcrypto,
+        above_k & ~(sz_cap_rvvcrypto_k * 2 - 1) ? STRINGZILLA_NULL
+                                                : (sz_kernel_punned_t)&sz_aes256_gcm_key_init_rvvcrypto,
 #endif
 #if STRINGZILLA_TARGET_V128
-        (sz_kernel_punned_t)&sz_aes256_gcm_key_init_v128,
+        above_k & ~(sz_cap_v128_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_gcm_key_init_v128,
 #endif
 #if STRINGZILLA_TARGET_V128RELAXED
-        (sz_kernel_punned_t)&sz_aes256_gcm_key_init_v128relaxed,
+        above_k & ~(sz_cap_v128relaxed_k * 2 - 1) ? STRINGZILLA_NULL
+                                                  : (sz_kernel_punned_t)&sz_aes256_gcm_key_init_v128relaxed,
 #endif
 #if STRINGZILLA_TARGET_POWERVSX
-        (sz_kernel_punned_t)&sz_aes256_gcm_key_init_powervsx,
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL
+                                               : (sz_kernel_punned_t)&sz_aes256_gcm_key_init_powervsx,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
@@ -95,32 +116,41 @@ static sz_capability_kernels_t const *sz_aes256_gcm_key_init_capabilities(void) 
 }
 
 static sz_capability_kernels_t const *sz_aes256_ctr_xor_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_westmere_k * STRINGZILLA_TARGET_WESTMERE |
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES |
+                   sz_cap_sve2aes_k * STRINGZILLA_TARGET_SVE2AES | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO |
+                   sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_aes256_ctr_xor_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_ctr_xor_serial,
 #if STRINGZILLA_TARGET_WESTMERE
-        (sz_kernel_punned_t)&sz_aes256_ctr_xor_westmere,
+        above_k & ~(sz_cap_westmere_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_ctr_xor_westmere,
 #endif
 #if STRINGZILLA_TARGET_ICELAKE
-        (sz_kernel_punned_t)&sz_aes256_ctr_xor_icelake,
+        above_k & ~(sz_cap_icelake_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_ctr_xor_icelake,
 #endif
 #if STRINGZILLA_TARGET_NEONAES
-        (sz_kernel_punned_t)&sz_aes256_ctr_xor_neonaes,
+        above_k & ~(sz_cap_neonaes_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_ctr_xor_neonaes,
 #endif
 #if STRINGZILLA_TARGET_SVE2AES
-        (sz_kernel_punned_t)&sz_aes256_ctr_xor_sve2aes,
+        above_k & ~(sz_cap_sve2aes_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_ctr_xor_sve2aes,
 #endif
 #if STRINGZILLA_TARGET_RVVCRYPTO
-        (sz_kernel_punned_t)&sz_aes256_ctr_xor_rvvcrypto,
+        above_k & ~(sz_cap_rvvcrypto_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_ctr_xor_rvvcrypto,
 #endif
 #if STRINGZILLA_TARGET_V128
-        (sz_kernel_punned_t)&sz_aes256_ctr_xor_v128,
+        above_k & ~(sz_cap_v128_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_ctr_xor_v128,
 #endif
 #if STRINGZILLA_TARGET_V128RELAXED
-        (sz_kernel_punned_t)&sz_aes256_ctr_xor_v128relaxed,
+        above_k & ~(sz_cap_v128relaxed_k * 2 - 1) ? STRINGZILLA_NULL
+                                                  : (sz_kernel_punned_t)&sz_aes256_ctr_xor_v128relaxed,
 #endif
 #if STRINGZILLA_TARGET_POWERVSX
-        (sz_kernel_punned_t)&sz_aes256_ctr_xor_powervsx,
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_ctr_xor_powervsx,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
@@ -138,32 +168,42 @@ static sz_capability_kernels_t const *sz_aes256_ctr_xor_capabilities(void) {
 }
 
 static sz_capability_kernels_t const *sz_aes256_gcm_encrypt_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_westmere_k * STRINGZILLA_TARGET_WESTMERE |
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES |
+                   sz_cap_sve2aes_k * STRINGZILLA_TARGET_SVE2AES | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO |
+                   sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_aes256_gcm_encrypt_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_gcm_encrypt_serial,
 #if STRINGZILLA_TARGET_WESTMERE
-        (sz_kernel_punned_t)&sz_aes256_gcm_encrypt_westmere,
+        above_k & ~(sz_cap_westmere_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_gcm_encrypt_westmere,
 #endif
 #if STRINGZILLA_TARGET_ICELAKE
-        (sz_kernel_punned_t)&sz_aes256_gcm_encrypt_icelake,
+        above_k & ~(sz_cap_icelake_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_gcm_encrypt_icelake,
 #endif
 #if STRINGZILLA_TARGET_NEONAES
-        (sz_kernel_punned_t)&sz_aes256_gcm_encrypt_neonaes,
+        above_k & ~(sz_cap_neonaes_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_gcm_encrypt_neonaes,
 #endif
 #if STRINGZILLA_TARGET_SVE2AES
-        (sz_kernel_punned_t)&sz_aes256_gcm_encrypt_sve2aes,
+        above_k & ~(sz_cap_sve2aes_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_gcm_encrypt_sve2aes,
 #endif
 #if STRINGZILLA_TARGET_RVVCRYPTO
-        (sz_kernel_punned_t)&sz_aes256_gcm_encrypt_rvvcrypto,
+        above_k & ~(sz_cap_rvvcrypto_k * 2 - 1) ? STRINGZILLA_NULL
+                                                : (sz_kernel_punned_t)&sz_aes256_gcm_encrypt_rvvcrypto,
 #endif
 #if STRINGZILLA_TARGET_V128
-        (sz_kernel_punned_t)&sz_aes256_gcm_encrypt_v128,
+        above_k & ~(sz_cap_v128_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_gcm_encrypt_v128,
 #endif
 #if STRINGZILLA_TARGET_V128RELAXED
-        (sz_kernel_punned_t)&sz_aes256_gcm_encrypt_v128relaxed,
+        above_k & ~(sz_cap_v128relaxed_k * 2 - 1) ? STRINGZILLA_NULL
+                                                  : (sz_kernel_punned_t)&sz_aes256_gcm_encrypt_v128relaxed,
 #endif
 #if STRINGZILLA_TARGET_POWERVSX
-        (sz_kernel_punned_t)&sz_aes256_gcm_encrypt_powervsx,
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_gcm_encrypt_powervsx,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
@@ -181,32 +221,42 @@ static sz_capability_kernels_t const *sz_aes256_gcm_encrypt_capabilities(void) {
 }
 
 static sz_capability_kernels_t const *sz_aes256_gcm_decrypt_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_westmere_k * STRINGZILLA_TARGET_WESTMERE |
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES |
+                   sz_cap_sve2aes_k * STRINGZILLA_TARGET_SVE2AES | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO |
+                   sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_aes256_gcm_decrypt_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_gcm_decrypt_serial,
 #if STRINGZILLA_TARGET_WESTMERE
-        (sz_kernel_punned_t)&sz_aes256_gcm_decrypt_westmere,
+        above_k & ~(sz_cap_westmere_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_gcm_decrypt_westmere,
 #endif
 #if STRINGZILLA_TARGET_ICELAKE
-        (sz_kernel_punned_t)&sz_aes256_gcm_decrypt_icelake,
+        above_k & ~(sz_cap_icelake_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_gcm_decrypt_icelake,
 #endif
 #if STRINGZILLA_TARGET_NEONAES
-        (sz_kernel_punned_t)&sz_aes256_gcm_decrypt_neonaes,
+        above_k & ~(sz_cap_neonaes_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_gcm_decrypt_neonaes,
 #endif
 #if STRINGZILLA_TARGET_SVE2AES
-        (sz_kernel_punned_t)&sz_aes256_gcm_decrypt_sve2aes,
+        above_k & ~(sz_cap_sve2aes_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_gcm_decrypt_sve2aes,
 #endif
 #if STRINGZILLA_TARGET_RVVCRYPTO
-        (sz_kernel_punned_t)&sz_aes256_gcm_decrypt_rvvcrypto,
+        above_k & ~(sz_cap_rvvcrypto_k * 2 - 1) ? STRINGZILLA_NULL
+                                                : (sz_kernel_punned_t)&sz_aes256_gcm_decrypt_rvvcrypto,
 #endif
 #if STRINGZILLA_TARGET_V128
-        (sz_kernel_punned_t)&sz_aes256_gcm_decrypt_v128,
+        above_k & ~(sz_cap_v128_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_gcm_decrypt_v128,
 #endif
 #if STRINGZILLA_TARGET_V128RELAXED
-        (sz_kernel_punned_t)&sz_aes256_gcm_decrypt_v128relaxed,
+        above_k & ~(sz_cap_v128relaxed_k * 2 - 1) ? STRINGZILLA_NULL
+                                                  : (sz_kernel_punned_t)&sz_aes256_gcm_decrypt_v128relaxed,
 #endif
 #if STRINGZILLA_TARGET_POWERVSX
-        (sz_kernel_punned_t)&sz_aes256_gcm_decrypt_powervsx,
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_gcm_decrypt_powervsx,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
@@ -224,32 +274,48 @@ static sz_capability_kernels_t const *sz_aes256_gcm_decrypt_capabilities(void) {
 }
 
 static sz_capability_kernels_t const *sz_aes256_gcm_encryptor_init_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_westmere_k * STRINGZILLA_TARGET_WESTMERE |
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES |
+                   sz_cap_sve2aes_k * STRINGZILLA_TARGET_SVE2AES | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO |
+                   sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_init_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL
+                                             : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_init_serial,
 #if STRINGZILLA_TARGET_WESTMERE
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_init_westmere,
+        above_k & ~(sz_cap_westmere_k * 2 - 1) ? STRINGZILLA_NULL
+                                               : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_init_westmere,
 #endif
 #if STRINGZILLA_TARGET_ICELAKE
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_init_icelake,
+        above_k & ~(sz_cap_icelake_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_init_icelake,
 #endif
 #if STRINGZILLA_TARGET_NEONAES
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_init_neonaes,
+        above_k & ~(sz_cap_neonaes_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_init_neonaes,
 #endif
 #if STRINGZILLA_TARGET_SVE2AES
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_init_sve2aes,
+        above_k & ~(sz_cap_sve2aes_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_init_sve2aes,
 #endif
 #if STRINGZILLA_TARGET_RVVCRYPTO
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_init_rvvcrypto,
+        above_k & ~(sz_cap_rvvcrypto_k * 2 - 1) ? STRINGZILLA_NULL
+                                                : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_init_rvvcrypto,
 #endif
 #if STRINGZILLA_TARGET_V128
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_init_v128,
+        above_k & ~(sz_cap_v128_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_init_v128,
 #endif
 #if STRINGZILLA_TARGET_V128RELAXED
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_init_v128relaxed,
+        above_k & ~(sz_cap_v128relaxed_k * 2 - 1) ? STRINGZILLA_NULL
+                                                  : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_init_v128relaxed,
 #endif
 #if STRINGZILLA_TARGET_POWERVSX
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_init_powervsx,
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL
+                                               : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_init_powervsx,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
@@ -267,32 +333,49 @@ static sz_capability_kernels_t const *sz_aes256_gcm_encryptor_init_capabilities(
 }
 
 static sz_capability_kernels_t const *sz_aes256_gcm_encryptor_associate_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_westmere_k * STRINGZILLA_TARGET_WESTMERE |
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES |
+                   sz_cap_sve2aes_k * STRINGZILLA_TARGET_SVE2AES | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO |
+                   sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_associate_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL
+                                             : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_associate_serial,
 #if STRINGZILLA_TARGET_WESTMERE
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_associate_westmere,
+        above_k & ~(sz_cap_westmere_k * 2 - 1) ? STRINGZILLA_NULL
+                                               : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_associate_westmere,
 #endif
 #if STRINGZILLA_TARGET_ICELAKE
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_associate_icelake,
+        above_k & ~(sz_cap_icelake_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_associate_icelake,
 #endif
 #if STRINGZILLA_TARGET_NEONAES
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_associate_neonaes,
+        above_k & ~(sz_cap_neonaes_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_associate_neonaes,
 #endif
 #if STRINGZILLA_TARGET_SVE2AES
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_associate_sve2aes,
+        above_k & ~(sz_cap_sve2aes_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_associate_sve2aes,
 #endif
 #if STRINGZILLA_TARGET_RVVCRYPTO
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_associate_rvvcrypto,
+        above_k & ~(sz_cap_rvvcrypto_k * 2 - 1) ? STRINGZILLA_NULL
+                                                : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_associate_rvvcrypto,
 #endif
 #if STRINGZILLA_TARGET_V128
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_associate_v128,
+        above_k & ~(sz_cap_v128_k * 2 - 1) ? STRINGZILLA_NULL
+                                           : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_associate_v128,
 #endif
 #if STRINGZILLA_TARGET_V128RELAXED
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_associate_v128relaxed,
+        above_k & ~(sz_cap_v128relaxed_k * 2 - 1) ? STRINGZILLA_NULL
+                                                  : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_associate_v128relaxed,
 #endif
 #if STRINGZILLA_TARGET_POWERVSX
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_associate_powervsx,
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL
+                                               : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_associate_powervsx,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
@@ -310,32 +393,49 @@ static sz_capability_kernels_t const *sz_aes256_gcm_encryptor_associate_capabili
 }
 
 static sz_capability_kernels_t const *sz_aes256_gcm_encryptor_update_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_westmere_k * STRINGZILLA_TARGET_WESTMERE |
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES |
+                   sz_cap_sve2aes_k * STRINGZILLA_TARGET_SVE2AES | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO |
+                   sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_update_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL
+                                             : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_update_serial,
 #if STRINGZILLA_TARGET_WESTMERE
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_update_westmere,
+        above_k & ~(sz_cap_westmere_k * 2 - 1) ? STRINGZILLA_NULL
+                                               : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_update_westmere,
 #endif
 #if STRINGZILLA_TARGET_ICELAKE
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_update_icelake,
+        above_k & ~(sz_cap_icelake_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_update_icelake,
 #endif
 #if STRINGZILLA_TARGET_NEONAES
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_update_neonaes,
+        above_k & ~(sz_cap_neonaes_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_update_neonaes,
 #endif
 #if STRINGZILLA_TARGET_SVE2AES
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_update_sve2aes,
+        above_k & ~(sz_cap_sve2aes_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_update_sve2aes,
 #endif
 #if STRINGZILLA_TARGET_RVVCRYPTO
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_update_rvvcrypto,
+        above_k & ~(sz_cap_rvvcrypto_k * 2 - 1) ? STRINGZILLA_NULL
+                                                : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_update_rvvcrypto,
 #endif
 #if STRINGZILLA_TARGET_V128
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_update_v128,
+        above_k & ~(sz_cap_v128_k * 2 - 1) ? STRINGZILLA_NULL
+                                           : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_update_v128,
 #endif
 #if STRINGZILLA_TARGET_V128RELAXED
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_update_v128relaxed,
+        above_k & ~(sz_cap_v128relaxed_k * 2 - 1) ? STRINGZILLA_NULL
+                                                  : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_update_v128relaxed,
 #endif
 #if STRINGZILLA_TARGET_POWERVSX
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_update_powervsx,
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL
+                                               : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_update_powervsx,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
@@ -353,32 +453,49 @@ static sz_capability_kernels_t const *sz_aes256_gcm_encryptor_update_capabilitie
 }
 
 static sz_capability_kernels_t const *sz_aes256_gcm_encryptor_digest_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_westmere_k * STRINGZILLA_TARGET_WESTMERE |
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES |
+                   sz_cap_sve2aes_k * STRINGZILLA_TARGET_SVE2AES | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO |
+                   sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_digest_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL
+                                             : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_digest_serial,
 #if STRINGZILLA_TARGET_WESTMERE
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_digest_westmere,
+        above_k & ~(sz_cap_westmere_k * 2 - 1) ? STRINGZILLA_NULL
+                                               : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_digest_westmere,
 #endif
 #if STRINGZILLA_TARGET_ICELAKE
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_digest_icelake,
+        above_k & ~(sz_cap_icelake_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_digest_icelake,
 #endif
 #if STRINGZILLA_TARGET_NEONAES
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_digest_neonaes,
+        above_k & ~(sz_cap_neonaes_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_digest_neonaes,
 #endif
 #if STRINGZILLA_TARGET_SVE2AES
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_digest_sve2aes,
+        above_k & ~(sz_cap_sve2aes_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_digest_sve2aes,
 #endif
 #if STRINGZILLA_TARGET_RVVCRYPTO
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_digest_rvvcrypto,
+        above_k & ~(sz_cap_rvvcrypto_k * 2 - 1) ? STRINGZILLA_NULL
+                                                : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_digest_rvvcrypto,
 #endif
 #if STRINGZILLA_TARGET_V128
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_digest_v128,
+        above_k & ~(sz_cap_v128_k * 2 - 1) ? STRINGZILLA_NULL
+                                           : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_digest_v128,
 #endif
 #if STRINGZILLA_TARGET_V128RELAXED
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_digest_v128relaxed,
+        above_k & ~(sz_cap_v128relaxed_k * 2 - 1) ? STRINGZILLA_NULL
+                                                  : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_digest_v128relaxed,
 #endif
 #if STRINGZILLA_TARGET_POWERVSX
-        (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_digest_powervsx,
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL
+                                               : (sz_kernel_punned_t)&sz_aes256_gcm_encryptor_digest_powervsx,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
@@ -396,32 +513,48 @@ static sz_capability_kernels_t const *sz_aes256_gcm_encryptor_digest_capabilitie
 }
 
 static sz_capability_kernels_t const *sz_aes256_gcm_decryptor_init_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_westmere_k * STRINGZILLA_TARGET_WESTMERE |
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES |
+                   sz_cap_sve2aes_k * STRINGZILLA_TARGET_SVE2AES | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO |
+                   sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_init_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL
+                                             : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_init_serial,
 #if STRINGZILLA_TARGET_WESTMERE
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_init_westmere,
+        above_k & ~(sz_cap_westmere_k * 2 - 1) ? STRINGZILLA_NULL
+                                               : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_init_westmere,
 #endif
 #if STRINGZILLA_TARGET_ICELAKE
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_init_icelake,
+        above_k & ~(sz_cap_icelake_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_init_icelake,
 #endif
 #if STRINGZILLA_TARGET_NEONAES
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_init_neonaes,
+        above_k & ~(sz_cap_neonaes_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_init_neonaes,
 #endif
 #if STRINGZILLA_TARGET_SVE2AES
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_init_sve2aes,
+        above_k & ~(sz_cap_sve2aes_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_init_sve2aes,
 #endif
 #if STRINGZILLA_TARGET_RVVCRYPTO
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_init_rvvcrypto,
+        above_k & ~(sz_cap_rvvcrypto_k * 2 - 1) ? STRINGZILLA_NULL
+                                                : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_init_rvvcrypto,
 #endif
 #if STRINGZILLA_TARGET_V128
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_init_v128,
+        above_k & ~(sz_cap_v128_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_init_v128,
 #endif
 #if STRINGZILLA_TARGET_V128RELAXED
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_init_v128relaxed,
+        above_k & ~(sz_cap_v128relaxed_k * 2 - 1) ? STRINGZILLA_NULL
+                                                  : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_init_v128relaxed,
 #endif
 #if STRINGZILLA_TARGET_POWERVSX
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_init_powervsx,
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL
+                                               : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_init_powervsx,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
@@ -439,32 +572,49 @@ static sz_capability_kernels_t const *sz_aes256_gcm_decryptor_init_capabilities(
 }
 
 static sz_capability_kernels_t const *sz_aes256_gcm_decryptor_associate_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_westmere_k * STRINGZILLA_TARGET_WESTMERE |
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES |
+                   sz_cap_sve2aes_k * STRINGZILLA_TARGET_SVE2AES | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO |
+                   sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_associate_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL
+                                             : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_associate_serial,
 #if STRINGZILLA_TARGET_WESTMERE
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_associate_westmere,
+        above_k & ~(sz_cap_westmere_k * 2 - 1) ? STRINGZILLA_NULL
+                                               : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_associate_westmere,
 #endif
 #if STRINGZILLA_TARGET_ICELAKE
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_associate_icelake,
+        above_k & ~(sz_cap_icelake_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_associate_icelake,
 #endif
 #if STRINGZILLA_TARGET_NEONAES
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_associate_neonaes,
+        above_k & ~(sz_cap_neonaes_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_associate_neonaes,
 #endif
 #if STRINGZILLA_TARGET_SVE2AES
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_associate_sve2aes,
+        above_k & ~(sz_cap_sve2aes_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_associate_sve2aes,
 #endif
 #if STRINGZILLA_TARGET_RVVCRYPTO
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_associate_rvvcrypto,
+        above_k & ~(sz_cap_rvvcrypto_k * 2 - 1) ? STRINGZILLA_NULL
+                                                : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_associate_rvvcrypto,
 #endif
 #if STRINGZILLA_TARGET_V128
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_associate_v128,
+        above_k & ~(sz_cap_v128_k * 2 - 1) ? STRINGZILLA_NULL
+                                           : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_associate_v128,
 #endif
 #if STRINGZILLA_TARGET_V128RELAXED
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_associate_v128relaxed,
+        above_k & ~(sz_cap_v128relaxed_k * 2 - 1) ? STRINGZILLA_NULL
+                                                  : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_associate_v128relaxed,
 #endif
 #if STRINGZILLA_TARGET_POWERVSX
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_associate_powervsx,
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL
+                                               : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_associate_powervsx,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
@@ -482,32 +632,53 @@ static sz_capability_kernels_t const *sz_aes256_gcm_decryptor_associate_capabili
 }
 
 static sz_capability_kernels_t const *sz_aes256_gcm_decryptor_update_unverified_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_westmere_k * STRINGZILLA_TARGET_WESTMERE |
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES |
+                   sz_cap_sve2aes_k * STRINGZILLA_TARGET_SVE2AES | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO |
+                   sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_update_unverified_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL
+                                             : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_update_unverified_serial,
 #if STRINGZILLA_TARGET_WESTMERE
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_update_unverified_westmere,
+        above_k & ~(sz_cap_westmere_k * 2 - 1)
+            ? STRINGZILLA_NULL
+            : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_update_unverified_westmere,
 #endif
 #if STRINGZILLA_TARGET_ICELAKE
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_update_unverified_icelake,
+        above_k & ~(sz_cap_icelake_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_update_unverified_icelake,
 #endif
 #if STRINGZILLA_TARGET_NEONAES
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_update_unverified_neonaes,
+        above_k & ~(sz_cap_neonaes_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_update_unverified_neonaes,
 #endif
 #if STRINGZILLA_TARGET_SVE2AES
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_update_unverified_sve2aes,
+        above_k & ~(sz_cap_sve2aes_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_update_unverified_sve2aes,
 #endif
 #if STRINGZILLA_TARGET_RVVCRYPTO
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_update_unverified_rvvcrypto,
+        above_k & ~(sz_cap_rvvcrypto_k * 2 - 1)
+            ? STRINGZILLA_NULL
+            : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_update_unverified_rvvcrypto,
 #endif
 #if STRINGZILLA_TARGET_V128
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_update_unverified_v128,
+        above_k & ~(sz_cap_v128_k * 2 - 1) ? STRINGZILLA_NULL
+                                           : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_update_unverified_v128,
 #endif
 #if STRINGZILLA_TARGET_V128RELAXED
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_update_unverified_v128relaxed,
+        above_k & ~(sz_cap_v128relaxed_k * 2 - 1)
+            ? STRINGZILLA_NULL
+            : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_update_unverified_v128relaxed,
 #endif
 #if STRINGZILLA_TARGET_POWERVSX
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_update_unverified_powervsx,
+        above_k & ~(sz_cap_powervsx_k * 2 - 1)
+            ? STRINGZILLA_NULL
+            : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_update_unverified_powervsx,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
@@ -525,32 +696,49 @@ static sz_capability_kernels_t const *sz_aes256_gcm_decryptor_update_unverified_
 }
 
 static sz_capability_kernels_t const *sz_aes256_gcm_decryptor_verify_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_westmere_k * STRINGZILLA_TARGET_WESTMERE |
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES |
+                   sz_cap_sve2aes_k * STRINGZILLA_TARGET_SVE2AES | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO |
+                   sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_verify_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL
+                                             : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_verify_serial,
 #if STRINGZILLA_TARGET_WESTMERE
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_verify_westmere,
+        above_k & ~(sz_cap_westmere_k * 2 - 1) ? STRINGZILLA_NULL
+                                               : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_verify_westmere,
 #endif
 #if STRINGZILLA_TARGET_ICELAKE
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_verify_icelake,
+        above_k & ~(sz_cap_icelake_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_verify_icelake,
 #endif
 #if STRINGZILLA_TARGET_NEONAES
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_verify_neonaes,
+        above_k & ~(sz_cap_neonaes_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_verify_neonaes,
 #endif
 #if STRINGZILLA_TARGET_SVE2AES
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_verify_sve2aes,
+        above_k & ~(sz_cap_sve2aes_k * 2 - 1) ? STRINGZILLA_NULL
+                                              : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_verify_sve2aes,
 #endif
 #if STRINGZILLA_TARGET_RVVCRYPTO
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_verify_rvvcrypto,
+        above_k & ~(sz_cap_rvvcrypto_k * 2 - 1) ? STRINGZILLA_NULL
+                                                : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_verify_rvvcrypto,
 #endif
 #if STRINGZILLA_TARGET_V128
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_verify_v128,
+        above_k & ~(sz_cap_v128_k * 2 - 1) ? STRINGZILLA_NULL
+                                           : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_verify_v128,
 #endif
 #if STRINGZILLA_TARGET_V128RELAXED
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_verify_v128relaxed,
+        above_k & ~(sz_cap_v128relaxed_k * 2 - 1) ? STRINGZILLA_NULL
+                                                  : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_verify_v128relaxed,
 #endif
 #if STRINGZILLA_TARGET_POWERVSX
-        (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_verify_powervsx,
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL
+                                               : (sz_kernel_punned_t)&sz_aes256_gcm_decryptor_verify_powervsx,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {

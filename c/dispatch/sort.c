@@ -9,23 +9,29 @@
 #include "dispatch.h"
 
 static sz_capability_kernels_t const *sz_sort_order_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
+                   sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
+                   sz_cap_sve_k * STRINGZILLA_TARGET_SVE | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_sort_order_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_sort_order_serial,
 #if STRINGZILLA_TARGET_HASWELL
-        (sz_kernel_punned_t)&sz_sort_order_haswell,
+        above_k & ~(sz_cap_haswell_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_sort_order_haswell,
 #endif
 #if STRINGZILLA_TARGET_SKYLAKE
-        (sz_kernel_punned_t)&sz_sort_order_skylake,
+        above_k & ~(sz_cap_skylake_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_sort_order_skylake,
 #endif
 #if STRINGZILLA_TARGET_NEON
-        (sz_kernel_punned_t)&sz_sort_order_neon,
+        above_k & ~(sz_cap_neon_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_sort_order_neon,
 #endif
 #if STRINGZILLA_TARGET_SVE
-        (sz_kernel_punned_t)&sz_sort_order_sve,
+        above_k & ~(sz_cap_sve_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_sort_order_sve,
 #endif
 #if STRINGZILLA_TARGET_RVV
-        (sz_kernel_punned_t)&sz_sort_order_rvv,
+        above_k & ~(sz_cap_rvv_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_sort_order_rvv,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
@@ -41,23 +47,29 @@ static sz_capability_kernels_t const *sz_sort_order_capabilities(void) {
 }
 
 static sz_capability_kernels_t const *sz_sort_uncased_order_capabilities(void) {
+    enum {
+        above_k = (sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
+                   sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
+                   sz_cap_sve_k * STRINGZILLA_TARGET_SVE | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV) &
+                  STRINGZILLA_PROFILE_CAPABILITIES
+    };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_sort_uncased_order_serial,
+        above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_sort_uncased_order_serial,
 #if STRINGZILLA_TARGET_HASWELL
-        (sz_kernel_punned_t)&sz_sort_uncased_order_haswell,
+        above_k & ~(sz_cap_haswell_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_sort_uncased_order_haswell,
 #endif
 #if STRINGZILLA_TARGET_SKYLAKE
-        (sz_kernel_punned_t)&sz_sort_uncased_order_skylake,
+        above_k & ~(sz_cap_skylake_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_sort_uncased_order_skylake,
 #endif
 #if STRINGZILLA_TARGET_NEON
-        (sz_kernel_punned_t)&sz_sort_uncased_order_neon,
+        above_k & ~(sz_cap_neon_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_sort_uncased_order_neon,
 #endif
 #if STRINGZILLA_TARGET_SVE
-        (sz_kernel_punned_t)&sz_sort_uncased_order_sve,
+        above_k & ~(sz_cap_sve_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_sort_uncased_order_sve,
 #endif
 #if STRINGZILLA_TARGET_RVV
-        (sz_kernel_punned_t)&sz_sort_uncased_order_rvv,
+        above_k & ~(sz_cap_rvv_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_sort_uncased_order_rvv,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {

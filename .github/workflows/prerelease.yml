@@ -103,7 +103,7 @@ jobs:
 
       - name: Build C/C++
         run: |
-          cmake --preset release
+          cmake --preset release -D CMAKE_C_COMPILER="$CC" -D CMAKE_CXX_COMPILER="$CXX"
 
           cmake --build --preset release > build_release/logs.txt 2>&1 || {
             echo "Compilation failed. Here are the logs:"
@@ -131,13 +131,6 @@ jobs:
       - name: Test Go binding
         working-directory: golang
         run: go test -v -tags no_sha256 # Skip SHA tests for GCC
-      - name: Test on Real World Data
-        run: build_release/stringzilla_bench
-        env:
-          STRINGWARS_DATASET: ./README.md
-        # Don't overload GitHub with our benchmarks.
-        # The results in such an unstable environment will be meaningless anyway.
-        if: 0
 
         # Python
       - name: Set up Python ${{ env.PYTHON_VERSION }}
@@ -211,7 +204,7 @@ jobs:
 
       - name: Build C/C++
         run: |
-          cmake --preset release
+          cmake --preset release -D CMAKE_C_COMPILER="$CC" -D CMAKE_CXX_COMPILER="$CXX"
 
           cmake --build --preset release > build_release/logs.txt 2>&1 || {
             echo "Compilation failed. Here are the logs:"
@@ -239,13 +232,6 @@ jobs:
       - name: Test Go binding
         working-directory: golang
         run: go test -v
-      - name: Test on Real World Data
-        run: build_release/stringzilla_bench
-        env:
-          STRINGWARS_DATASET: ./README.md
-        # Don't overload GitHub with our benchmarks.
-        # The results in such an unstable environment will be meaningless anyway.
-        if: 0
 
         # Python
       - name: Set up Python ${{ env.PYTHON_VERSION }}
@@ -295,7 +281,7 @@ jobs:
         # Debug sanitizes the executables and builds the shared library alongside, all with `STRINGZILLA_DEBUG` asserts live.
       - name: Build C/C++
         run: |
-          cmake --preset debug
+          cmake --preset debug -D CMAKE_C_COMPILER="$CC" -D CMAKE_CXX_COMPILER="$CXX"
           cmake --build --preset debug
       - name: Test C++
         env:
@@ -309,7 +295,7 @@ jobs:
         # cGo links no sanitizer runtime, so the Go binding takes a Debug archive built without them.
       - name: Build Debug static library for Go binding
         run: |
-          cmake --preset debug -B build_golang -D STRINGZILLA_BUILD_SANITIZERS=off
+          cmake --preset debug -B build_golang -D STRINGZILLA_BUILD_SANITIZERS=off -D CMAKE_C_COMPILER="$CC" -D CMAKE_CXX_COMPILER="$CXX"
           cmake --build build_golang --target stringzilla_static
       - name: Test Go binding against the Debug static library
         working-directory: golang
@@ -330,8 +316,7 @@ jobs:
   test_ubuntu_cuda:
     name: Ubuntu CUDA
     runs-on: ubuntu-26.04
-    # NVIDIA publishes no Ubuntu 26.04 CUDA image yet, so the toolkit comes in a 24.04 container.
-    container: nvidia/cuda:13.0.1-devel-ubuntu24.04
+    container: nvidia/cuda:13.4.3-devel-ubuntu26.04
 
     steps:
       - name: Checkout
@@ -348,16 +333,22 @@ jobs:
           nvcc --version
           nvidia-smi 2>/dev/null || echo "nvidia-smi not available, as expected on a GPU-less runner"
 
-        # C/C++
+        # C/C++, where the family codes like `100f` need CMake 3.31, and Ubuntu 24.04 ships 3.28.
       - name: Install dependencies
         run: |
           apt-get update
-          apt-get install -y cmake ninja-build build-essential git
+          apt-get install -y ninja-build build-essential git python3-pip curl gnupg
+          pip install --break-system-packages "cmake>=3.31"
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor -o /usr/share/keyrings/llvm.gpg
+          echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/resolute/ llvm-toolchain-resolute-22 main" \
+            > /etc/apt/sources.list.d/llvm.list
+          apt-get update && apt-get install -y clang-22
 
       - name: Build C/C++ with CUDA
         run: |
           # Release rather than RelWithDebInfo: optimized debugging is unsupported in CUDA and fails in PTXAS
-          cmake --preset cuda
+          cmake --preset cuda \
+            -D CMAKE_C_COMPILER=clang-22 -D CMAKE_CXX_COMPILER=clang++-22 -D CMAKE_CUDA_HOST_COMPILER=clang++-22
 
           cmake --build --preset cuda > build_cuda/logs.txt 2>&1 || {
             echo "Compilation failed. Here are the logs:"
@@ -366,12 +357,42 @@ jobs:
             cat build_cuda/compile_commands.json
             echo "CUDA Version:"
             nvcc --version
-            echo "G++ Version:"
-            g++ --version
+            echo "Clang++ Version:"
+            clang++-22 --version
             exit 1
           }
       - name: Test C++
         run: ctest --preset cuda -R '^stringzilla_test$'
+
+  # Each machine profile builds the libraries for one CPU and one GPU code; the Arm ones build natively on Arm runners,
+  # where the CUDA image also exists. Clang 22 compiles the C units and hosts NVCC, as Ubuntu 24.04's GCC predates Olympus.
+  build_machine_profile:
+    name: Build Machine Profile ${{ matrix.preset }}
+    runs-on: ${{ contains(fromJSON('["grace_hopper", "vera_rubin"]'), matrix.preset) && 'ubuntu-24.04-arm' || 'ubuntu-26.04' }}
+    container: nvidia/cuda:13.4.3-devel-ubuntu26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [xeon4_hopper, xeon6_blackwell, grace_hopper, vera_rubin]
+    env:
+      CC: clang-22
+      CXX: clang++-22
+    steps:
+      - name: Install Dependencies
+        run: |
+          apt-get update && apt-get install -y ninja-build g++ git python3-pip curl gnupg
+          pip install --break-system-packages "cmake>=3.31"
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor -o /usr/share/keyrings/llvm.gpg
+          echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/resolute/ llvm-toolchain-resolute-22 main" \
+            > /etc/apt/sources.list.d/llvm.list
+          apt-get update && apt-get install -y clang-22
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Build
+        run: |
+          cmake --preset ${{ matrix.preset }} \
+            -D CMAKE_C_COMPILER="$CC" -D CMAKE_CXX_COMPILER="$CXX" -D CMAKE_CUDA_HOST_COMPILER="$CXX"
+          cmake --build --preset ${{ matrix.preset }}
 
   # Compile-only in practice: no hosted runner has an AMD GPU, and the test exits zero without one.
   test_ubuntu_rocm:
@@ -412,11 +433,12 @@ jobs:
   build_rust_cuda:
     name: Build Rust with CUDA
     runs-on: ubuntu-26.04
-    # NVIDIA publishes no Ubuntu 26.04 CUDA image yet, so the toolkit comes in a 24.04 container.
-    container: nvidia/cuda:13.0.1-devel-ubuntu24.04
+    container: nvidia/cuda:13.4.3-devel-ubuntu26.04
     steps:
       - name: Install dependencies
-        run: apt-get update && apt-get install -y cmake build-essential git curl
+        run: |
+          apt-get update && apt-get install -y build-essential git curl python3-pip
+          pip install --break-system-packages "cmake>=3.31"
       - name: Checkout
         uses: actions/checkout@v7
       - name: Set up Rust
@@ -618,7 +640,7 @@ jobs:
           # cross dynamic loader + sysroot library paths. `clang` drives the GNU linker directly and does not
           # add `-lstdc++` on its own, so we point it at the cross libstdc++ and pull it in explicitly.
           gcc_libdir=$(dirname "$(find /usr/lib/gcc-cross/${{ matrix.target }} -name 'libstdc++.a' 2>/dev/null | head -1)")
-          cmake --preset release \
+          cmake --preset release -D CMAKE_C_COMPILER="$CC" -D CMAKE_CXX_COMPILER="$CXX" \
             -D CMAKE_C_COMPILER_TARGET=${{ matrix.target }} \
             -D CMAKE_CXX_COMPILER_TARGET=${{ matrix.target }} \
             -D CMAKE_SYSTEM_NAME=Linux \
@@ -814,13 +836,6 @@ jobs:
           cmake --build --preset release
       - name: Test C++
         run: ctest --preset release
-      - name: Test on Real World Data
-        run: build_release/stringzilla_bench
-        env:
-          STRINGWARS_DATASET: ./README.md
-        # Don't overload GitHub with our benchmarks.
-        # The results in such an unstable environment will be meaningless anyway.
-        if: 0
 
         # Python
       - name: Set up Python ${{ env.PYTHON_VERSION }}
@@ -957,16 +972,14 @@ jobs:
         run: ~/.wasmtime/bin/wasmtime run -S inherit-env=y --dir / .build/debug/StringZillaTests-test-runner.wasm --testing-library swift-testing
 
   test_windows:
-    name: Windows - ${{ matrix.os }}
+    name: Windows ${{ matrix.arch }} on ${{ matrix.os }} with ${{ matrix.preset }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: windows-2022
-            arch: x64
-          - os: windows-11-arm
-            arch: arm64
+          - { os: windows-2025-vs2026, arch: x64, preset: msvc2026_x64 }
+          - { os: windows-11-arm, arch: arm64, preset: msvc2022_arm64 }
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -983,24 +996,15 @@ jobs:
       - name: Build C/C++
         shell: cmd
         run: |
-          cmake --preset release
+          cmake --preset ${{ matrix.preset }}
 
-          cmake --build --preset release > build_release/logs.txt 2>&1 || (
+          cmake --build --preset ${{ matrix.preset }} > build_${{ matrix.preset }}/logs.txt 2>&1 || (
             echo "Compilation failed. Here are the logs:"
-            type build_release\logs.txt
-            echo "The original compilation commands:"
-            type build_release\compile_commands.json
+            type build_${{ matrix.preset }}\logs.txt
             exit 1
           )
       - name: Test C++
-        run: ctest --preset release
-      - name: Test on Real World Data
-        run: .\build_release\stringzilla_bench.exe
-        env:
-          STRINGWARS_DATASET: ./README.md
-        # Don't overload GitHub with our benchmarks.
-        # The results in such an unstable environment will be meaningless anyway.
-        if: 0
+        run: ctest --preset ${{ matrix.preset }}
 
         # Python
       - name: Set up Python ${{ env.PYTHON_VERSION }}
@@ -1052,7 +1056,7 @@ jobs:
       - name: Build C/C++
         run: |
           apk add --update cmake samurai g++ gcc
-          cmake --preset release
+          cmake --preset release -D CMAKE_C_COMPILER=gcc -D CMAKE_CXX_COMPILER=g++
           cmake --build --preset release
       - name: Test C++
         run: ctest --preset release
@@ -1182,7 +1186,7 @@ jobs:
           ./consumer/build/consumer
 
   # Native wheels - each runner's native arch (Linux pinned to x86_64; emulated arches in `build_wheels_emulated`).
-  # windows-11-arm validates the Windows ARM64 wheel that release ships; ARM64 CPython is official from 3.11.
+  # windows-11-arm validates the Windows ARM64 wheel that release ships.
   build_wheels_native:
     name: Build Python ${{ matrix.python-version }} for ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -1198,10 +1202,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-26.04, macos-15, windows-2022, windows-11-arm]
-        python-version: ["310", "311", "312", "313", "314", "314t"]
-        exclude:
-          - os: windows-11-arm
-            python-version: "310"
+        python-version: ["312", "313", "314", "314t", "315", "315t"]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -1210,7 +1211,7 @@ jobs:
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.4.1
+        run: python -m pip install cibuildwheel==4.3.5
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -1243,11 +1244,11 @@ jobs:
       - name: Setup QEMU
         uses: docker/setup-qemu-action@v4
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.4.1
+        run: python -m pip install cibuildwheel==4.3.5
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
-          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
+          CIBW_BUILD: "cp312-* cp313-* cp314-* cp315-*"
           CIBW_ARCHS_LINUX: ${{ matrix.arch }}
           # QEMU_CPU drops the SVE kits, whose emulation is flaky; STRINGZILLA_SCALE matches `test_cross_qemu`.
           CIBW_ENVIRONMENT_LINUX: >-

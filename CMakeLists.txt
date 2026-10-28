@@ -46,6 +46,8 @@ project(
 # standard they pick for themselves.
 set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_CXX_EXTENSIONS OFF)
+# No target uses C++20 modules, and a Clang installed without `clang-scan-deps` would fail every C++ unit.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 message(STATUS "C Compiler ID: ${CMAKE_C_COMPILER_ID}")
 message(STATUS "C Compiler Version: ${CMAKE_C_COMPILER_VERSION}")
@@ -128,11 +130,6 @@ else ()
     set(stringzilla_with_libc_ 1)
 endif ()
 
-# One compile probe per capability under `probes/`, defining `STRINGZILLA_TARGET_<CAPABILITY>` as the toolchain
-# compiles it through `stringzilla::cpu_capabilities_compiled`, and as 0 through
-# `stringzilla_cpu_capabilities_disabled_`.
-include(cmake/stringzilla_probes.cmake)
-
 # Enable the in-repo Git hooks. Git will not auto-run hooks shipped inside a clone (that would let any cloned repo
 # execute code), so point `core.hooksPath` at `.githooks` here - configuring the build arms the `pre-commit` checks.
 # Skipped when built as a subproject or without `.git` (tarball / export builds).
@@ -150,7 +147,7 @@ endif ()
 
 # Every binding's build runs this file as the top-level project, so the tests, the benchmarks and the GPUs stay off
 # unless asked for, as the presets do: none of them fetches {fmt} or sprouts CUDA just because `nvcc` is on the PATH.
-option(STRINGZILLA_INSTALL "Install CMake targets" OFF)
+option(STRINGZILLA_INSTALL "Install CMake targets" ${PROJECT_IS_TOP_LEVEL})
 option(STRINGZILLA_BUILD_TEST "Compile a native unit test in C++" OFF)
 option(STRINGZILLA_BUILD_BENCH "Compile a native benchmark in C++" OFF)
 option(STRINGZILLA_BUILD_SHARED "Compile a dynamic library" ${PROJECT_IS_TOP_LEVEL})
@@ -161,6 +158,7 @@ option(STRINGZILLA_BUILD_CUDA "Add CUDA to the libraries and to the tests and be
 option(STRINGZILLA_BUILD_ROCM "Add ROCm for AMD GPUs to the libraries and to the tests and benchmarks built" OFF)
 option(STRINGZILLA_BUILD_METAL "Add Metal for Apple GPUs to the libraries and to the tests and benchmarks built" OFF)
 option(STRINGZILLA_WERROR "Treat compiler warnings as errors" OFF)
+option(STRINGZILLA_PROFILE_CAPABILITIES "Keep only the best enabled capability's kernel of each operation" OFF)
 set(STRINGZILLA_BUILD_SANITIZERS
     "off"
     CACHE STRING "Sanitizers for StringZilla's tests, benchmarks and archives: off, address with undefined, or thread"
@@ -181,46 +179,148 @@ option(STRINGZILLA_BUILD_COVERAGE "Instrument with Clang source-based coverage" 
 # Seeded from the environment at the first configure, so `cargo` and `cmake-js` honour `STRINGZILLA_TARGET_ARCH=native`.
 set(STRINGZILLA_TARGET_ARCH
     "$ENV{STRINGZILLA_TARGET_ARCH}"
-    CACHE STRING "Host-tuned `-march`, like native, or a WebAssembly SIMD capability: serial, v128 or v128relaxed"
+    CACHE STRING "CPU to tune for, like native or graniterapids, or the WebAssembly SIMD: serial, v128 or v128relaxed"
 )
 
-# An engine validates a WebAssembly module whole, so every unit carries the module's one SIMD capability, whatever
-# flags a binding passes, and `types.h` reads it back off the predefined macros.
-if (stringzilla_arch_wasm_)
-    if (STRINGZILLA_TARGET_ARCH STREQUAL "v128relaxed")
+# One compile probe per capability under `probes/`, defining `STRINGZILLA_TARGET_<CAPABILITY>` as the toolchain
+# compiles it through `stringzilla::cpu_capabilities_compiled`, and as 0 through
+# `stringzilla_cpu_capabilities_disabled_`. Below the options, as a native build also asks which ones this host runs.
+include(cmake/stringzilla_probes.cmake)
+
+# Each unit gets the architecture's ABI floor, and SIMD kernels opt in via per-function target pragmas, so the library
+# runs on every CPU of its architecture. STRINGZILLA_TARGET_ARCH opts out for a build tuned to one CPU: `native` for this
+# host, or a CPU name like `graniterapids`, also when cross-compiling. Only C and C++ units take the flags, as nvcc would
+# read them as its own; the CUDA block below hands them to its host compiler.
+set(stringzilla_host_arch_flags_)
+if (STRINGZILLA_TARGET_ARCH STREQUAL "native" AND CMAKE_CROSSCOMPILING)
+    message(FATAL_ERROR "STRINGZILLA_TARGET_ARCH=native needs the host as the target; name a CPU instead")
+elseif (STRINGZILLA_TARGET_ARCH AND NOT stringzilla_arch_wasm_)
+    message(
+        WARNING
+            "STRINGZILLA_TARGET_ARCH=${STRINGZILLA_TARGET_ARCH}: baking specific instructions; result may not run elsewhere"
+    )
+    if (MSVC AND STRINGZILLA_TARGET_ARCH STREQUAL "native")
+        # MSVC has no `/arch:native`, so it takes the `/arch:` of the widest capability this host runs.
+        if (stringzilla_target_icelake_runs)
+            set(stringzilla_host_arch_flags_ ${stringzilla_target_icelake_flags})
+        elseif (stringzilla_target_skylake_runs)
+            set(stringzilla_host_arch_flags_ ${stringzilla_target_skylake_flags})
+        elseif (stringzilla_target_haswell_runs)
+            set(stringzilla_host_arch_flags_ ${stringzilla_target_haswell_flags})
+        endif ()
+    elseif (MSVC)
+        message(
+            FATAL_ERROR
+                "MSVC takes STRINGZILLA_TARGET_ARCH=native only; pass an /arch: value such as AVX2, AVX512 or AVX10.2 "
+                "through CMAKE_C_FLAGS instead of `${STRINGZILLA_TARGET_ARCH}`"
+        )
+    elseif (stringzilla_arch_arm64_)
+        # AArch64 names CPUs through `-mcpu`, like `neoverse-v2`, as `-march` takes only architecture versions; Apple
+        # Clang's `-march=native` also advertises just a subset of host features.
+        set(stringzilla_host_arch_flags_ -mcpu=${STRINGZILLA_TARGET_ARCH})
+    else ()
+        set(stringzilla_host_arch_flags_ -march=${STRINGZILLA_TARGET_ARCH})
+    endif ()
+    add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:${stringzilla_host_arch_flags_}>")
+elseif (stringzilla_arch_wasm_)
+    # An engine validates a WebAssembly module whole, so every unit carries the module's one SIMD capability, whatever
+    # flags a binding passes, and `types.h` reads it back off the predefined macros. Empty is the portable floor.
+    set(stringzilla_wasm_simd_ ${STRINGZILLA_TARGET_ARCH})
+    if (NOT stringzilla_wasm_simd_)
+        set(stringzilla_wasm_simd_ serial)
+    endif ()
+    if (stringzilla_wasm_simd_ STREQUAL "v128relaxed")
         add_compile_options(-msimd128 -mrelaxed-simd)
-    elseif (STRINGZILLA_TARGET_ARCH STREQUAL "v128")
+    elseif (stringzilla_wasm_simd_ STREQUAL "v128")
         add_compile_options(-msimd128)
-    elseif (NOT STRINGZILLA_TARGET_ARCH STREQUAL "serial")
+    elseif (NOT stringzilla_wasm_simd_ STREQUAL "serial")
         message(
             FATAL_ERROR
                 "STRINGZILLA_TARGET_ARCH on WebAssembly: serial, v128 or v128relaxed, not `${STRINGZILLA_TARGET_ARCH}`"
         )
     endif ()
+elseif (MSVC)
+    if (stringzilla_arch_x8664_)
+        add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:/arch:SSE2>)
+    elseif (stringzilla_arch_arm64_)
+        add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:/arch:armv8.0>)
+    endif ()
+elseif (APPLE)
+    # `-arch` already pins the ABI floor of the one slice this build compiles.
+elseif (stringzilla_arch_x8664_)
+    add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:-march=x86-64>)
+elseif (stringzilla_arch_arm64_)
+    add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:-march=armv8-a>)
+elseif (stringzilla_arch_riscv64_)
+    add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:-march=rv64gc>)
+elseif (stringzilla_arch_loongarch64_)
+    add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:-march=loongarch64>)
+elseif (stringzilla_arch_ppc64_)
+    add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:-mcpu=power8>)
+endif ()
+# Every capability's kernels are written by hand, so auto-vectorizing the portable build only bloats its scalar code.
+if (NOT STRINGZILLA_TARGET_ARCH AND CMAKE_C_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang|IntelLLVM)$")
+    add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-fno-tree-vectorize;-fno-tree-slp-vectorize>")
 endif ()
 
 # Enable CUDA if requested
 if (STRINGZILLA_BUILD_CUDA)
     enable_language(CUDA)
+    if (CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 13)
+        message(FATAL_ERROR "StringZilla needs CUDA 13 or newer, found ${CMAKE_CUDA_COMPILER_VERSION}")
+    endif ()
     set(CMAKE_CUDA_STANDARD 20)
     set(CMAKE_CUDA_STANDARD_REQUIRED ON)
     set(CMAKE_CUDA_EXTENSIONS OFF)
-    # Real SASS for every generation CUDA 13 targets, one family-wide cubin each for Blackwell (`f`) rather than the
-    # arch-locked `a`, and forward PTX for the Hopper and Blackwell tiers, which a listed GPU never JITs.
+    # One cubin per device family, Hopper's arch-locked `90a` and family-wide `f` cubins from Blackwell on, plus a PTX
+    # tail; every repo carries the same list.
     set(STRINGZILLA_CUDA_ARCHITECTURES
-        "75-real;80-real;90-real;100f-real;120f-real;90-virtual;100-virtual"
+        "75-real;80-real;89-real;90a-real;100f-real;120f-real;80-virtual"
         CACHE STRING "Codes every CUDA target carries; override to match the machine at hand"
     )
-    set(CMAKE_CUDA_ARCHITECTURES ${STRINGZILLA_CUDA_ARCHITECTURES})
     set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
     find_package(CUDAToolkit REQUIRED)
-    include(cmake/stringzilla_cuda_probes.cmake)
-    stringzilla_probe_cuda_native_arch()
-    # "native", "all" and "all-major" stand for the lists CMake resolved them to, which the capability rows read.
+    # NVCC's host compiler takes the tuning flags too, where the pair accepts them.
+    if (stringzilla_host_arch_flags_)
+        include(cmake/stringzilla_cuda_probes.cmake)
+        stringzilla_probe_cuda_native_arch("${stringzilla_host_arch_flags_}")
+        if (stringzilla_cuda_native_arch_compiles_)
+            add_compile_options("$<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=${stringzilla_host_arch_flags_}>")
+        endif ()
+    endif ()
+    # "native" maps each visible GPU to the code its capability rows need, family suffix included, where CMake's own
+    # resolution would drop it; "all" and "all-major" stand for the lists CMake resolved them to.
+    set(stringzilla_cuda_native_codes_
+        75-real=75-real
+        80-real=80-real
+        86-real=86-real
+        89-real=89-real
+        90-real=90a-real
+        100-real=100f-real
+        103-real=103f-real
+        110-real=110f-real
+        120-real=120f-real
+        121-real=121f-real
+    )
     set(stringzilla_cuda_resolved_architectures_)
     foreach (code_ IN LISTS STRINGZILLA_CUDA_ARCHITECTURES)
         if (code_ STREQUAL "native")
-            list(APPEND stringzilla_cuda_resolved_architectures_ ${CMAKE_CUDA_ARCHITECTURES_NATIVE})
+            foreach (visible_ IN LISTS CMAKE_CUDA_ARCHITECTURES_NATIVE)
+                set(native_code_)
+                foreach (pair_ IN LISTS stringzilla_cuda_native_codes_)
+                    if (pair_ MATCHES "^${visible_}=(.+)$")
+                        set(native_code_ ${CMAKE_MATCH_1})
+                    endif ()
+                endforeach ()
+                if (NOT native_code_)
+                    message(
+                        FATAL_ERROR
+                            "STRINGZILLA_CUDA_ARCHITECTURES=native has no code for the visible ${visible_} GPU; "
+                            "name its code instead"
+                    )
+                endif ()
+                list(APPEND stringzilla_cuda_resolved_architectures_ ${native_code_})
+            endforeach ()
         elseif (code_ STREQUAL "all")
             list(APPEND stringzilla_cuda_resolved_architectures_ ${CMAKE_CUDA_ARCHITECTURES_ALL})
         elseif (code_ STREQUAL "all-major")
@@ -229,9 +329,16 @@ if (STRINGZILLA_BUILD_CUDA)
             list(APPEND stringzilla_cuda_resolved_architectures_ ${code_})
         endif ()
     endforeach ()
+    if (CMAKE_VERSION VERSION_LESS 3.31 AND stringzilla_cuda_resolved_architectures_ MATCHES "1[0-9][0-9][af]")
+        message(FATAL_ERROR "Three-digit \"a\" and \"f\" CUDA codes need CMake 3.31, found ${CMAKE_VERSION}")
+    endif ()
+    set(CMAKE_CUDA_ARCHITECTURES "${stringzilla_cuda_resolved_architectures_}")
+    # NVCC's default leaves Turing and Ampere cubins uncompressed, ten times their compressed size.
+    add_compile_options($<$<COMPILE_LANGUAGE:CUDA>:--compress-mode=size>)
     # Clusters and their distributed shared memory: H100, H200, GH200, and every GPU since.
     stringzilla_add_gpu_capability(
         hopper STRINGZILLA_TARGET_HOPPER
+        BIT 51
         CUDA_ARCHITECTURES
             90
             90a
@@ -255,6 +362,7 @@ if (STRINGZILLA_BUILD_CUDA)
     # GPU since.
     stringzilla_add_gpu_capability(
         blackwell STRINGZILLA_TARGET_BLACKWELL
+        BIT 52
         CUDA_ARCHITECTURES
             100
             100a
@@ -285,7 +393,7 @@ endif ()
 if (STRINGZILLA_BUILD_ROCM)
     enable_language(HIP)
     set(STRINGZILLA_ROCM_ARCHITECTURES
-        "gfx942;gfx950"
+        "gfx942;gfx950;gfx1250;gfx1251"
         CACHE STRING "AMD targets the ROCm unit and test carry; override to match the machine at hand"
     )
     set(CMAKE_HIP_ARCHITECTURES "${STRINGZILLA_ROCM_ARCHITECTURES}")
@@ -295,10 +403,13 @@ endif ()
 if (STRINGZILLA_BUILD_METAL AND NOT APPLE)
     message(FATAL_ERROR "STRINGZILLA_BUILD_METAL needs an Apple platform")
 endif ()
+set(STRINGZILLA_METAL_ARCHITECTURES
+    "apple7;apple9;apple10"
+    CACHE STRING "Apple GPU families the Metal unit serves"
+)
 
 # Configuration
 include(GNUInstallDirs)
-include(CheckCXXCompilerFlag)
 set(stringzilla_include_build_dir_ "${PROJECT_SOURCE_DIR}/include/")
 set(stringzilla_include_install_dir_ "${CMAKE_INSTALL_INCLUDEDIR}")
 
@@ -334,10 +445,10 @@ endif ()
 # Native vendor sources remain separate objects so one C++ runner can link both CUDA and HIP.
 function (stringzilla_add_gpu_suite target_ language_ source_)
     add_library(${target_} OBJECT ${source_})
-    stringzilla_set_compiler_flags(${target_} 20 "${STRINGZILLA_TARGET_ARCH}")
+    stringzilla_set_compiler_flags(${target_} 20)
     set_target_properties(
         ${target_}
-        PROPERTIES CUDA_ARCHITECTURES "${STRINGZILLA_CUDA_ARCHITECTURES}"
+        PROPERTIES CUDA_ARCHITECTURES "${stringzilla_cuda_resolved_architectures_}"
                    HIP_ARCHITECTURES "${STRINGZILLA_ROCM_ARCHITECTURES}"
                    HIP_STANDARD 20
     )
@@ -355,11 +466,11 @@ endfunction ()
 # the dispatch points (SERIAL).
 function (stringzilla_add_cpu_launcher executable_ library_ verdicts_)
     add_executable(${executable_} ${ARGN})
-    stringzilla_set_compiler_flags(${executable_} 20 "${STRINGZILLA_TARGET_ARCH}")
+    stringzilla_set_compiler_flags(${executable_} 20)
     if (verdicts_ STREQUAL "SERIAL")
         target_link_libraries(${executable_} PRIVATE stringzilla_cpu_capabilities_disabled_)
     else ()
-        stringzilla_set_architecture_simd_definitions(${executable_})
+        target_link_libraries(${executable_} PRIVATE stringzilla_cpu_capabilities_compiled)
     endif ()
     target_link_libraries(${executable_} PRIVATE ${library_} fmt::fmt)
 endfunction ()
@@ -396,9 +507,10 @@ if (APPLE)
 endif ()
 
 # The compiled core: `c/stringzilla.c` owns the cross-family exports (versions, capabilities, the kernel finder), each
-# `c/target/<capability>.c` defines that capability's kernels once, and each `c/dispatch/<family>.c` holds its family's
-# lists, dispatch points and finder. Globbed, so a new unit needs no entry; the Metal unit joins below, with its own
-# frameworks, beside the CUDA and ROCm ones.
+# enabled capability's `c/target/<capability>.c` defines that capability's kernels once, and each
+# `c/dispatch/<family>.c` holds its family's lists, dispatch points and finder. Globbed, so a new unit needs no entry;
+# WebAssembly enables its capabilities through STRINGZILLA_TARGET_ARCH, so its units follow the platform, and the Metal
+# unit joins below, with its own frameworks, beside the CUDA and ROCm ones.
 file(
     GLOB stringzilla_globbed_units_ CONFIGURE_DEPENDS
     RELATIVE ${PROJECT_SOURCE_DIR}
@@ -406,9 +518,16 @@ file(
 )
 set(stringzilla_shim_sources_ c/stringzilla.c)
 foreach (unit_ IN LISTS stringzilla_globbed_units_)
-    if (NOT unit_ STREQUAL "c/target/metal.c")
-        list(APPEND stringzilla_shim_sources_ ${unit_})
+    if (unit_ MATCHES "^c/target/([a-z0-9]+)")
+        set(capability_ ${CMAKE_MATCH_1})
+        if (NOT capability_ STREQUAL "serial"
+            AND NOT (stringzilla_arch_wasm_ AND capability_ MATCHES "^v128")
+            AND NOT stringzilla_target_${capability_}_enabled
+        )
+            continue()
+        endif ()
     endif ()
+    list(APPEND stringzilla_shim_sources_ ${unit_})
 endforeach ()
 
 # Defines `stringzilla_shared` or `stringzilla_static` over the sources that follow.
@@ -445,11 +564,10 @@ function (stringzilla_add_library target_ public_name_ library_type_)
                    POSITION_INDEPENDENT_CODE ON
     )
 
-    # Set the baseline architecture; the dispatch points pick each SIMD capability by the mask each call passes.
-    stringzilla_set_baseline_architecture_flags(${target_})
-
-    # Enable every capability the toolchain can compile; `sz_capabilities_enabled_cpu` masks what the CPU lacks.
-    stringzilla_set_architecture_simd_definitions(${target_})
+    # The units hold the directory's architecture floor, and the dispatch points pick each SIMD capability by the mask
+    # each call passes: every capability the toolchain compiles, which `sz_capabilities_enabled_cpu` masks to the CPU's.
+    stringzilla_set_compiler_flags(${target_} "")
+    target_link_libraries(${target_} PRIVATE $<BUILD_INTERFACE:stringzilla_cpu_capabilities_compiled>)
 
 endfunction ()
 
@@ -491,6 +609,34 @@ foreach (library_ IN LISTS stringzilla_libraries_)
     endif ()
 endforeach ()
 
+# A machine profile hands the dispatch units every capability it enables, each GPU vendor's baseline included, so each
+# table keeps only the kernel of the best capability implementing its operation. Its static archive links as bitcode,
+# so the folded tables leave the kernels they skip out of the products' links; any other static archive ships machine
+# code any toolchain, cGo included, can link. MSVC's `/GL` objects hide the symbols `WINDOWS_EXPORT_ALL_SYMBOLS` must
+# list.
+if (STRINGZILLA_PROFILE_CAPABILITIES)
+    set(profile_ ${stringzilla_capabilities_enabled_})
+    if (STRINGZILLA_BUILD_CUDA)
+        math(EXPR profile_ "${profile_} | (1 << 48)" OUTPUT_FORMAT HEXADECIMAL)
+    endif ()
+    if (STRINGZILLA_BUILD_ROCM)
+        math(EXPR profile_ "${profile_} | (1 << 56)" OUTPUT_FORMAT HEXADECIMAL)
+    endif ()
+    if (STRINGZILLA_BUILD_METAL)
+        math(EXPR profile_ "${profile_} | (1 << 60)" OUTPUT_FORMAT HEXADECIMAL)
+    endif ()
+    foreach (library_ IN LISTS stringzilla_libraries_)
+        target_compile_definitions(${library_} PRIVATE STRINGZILLA_PROFILE_CAPABILITIES=${profile_})
+    endforeach ()
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT stringzilla_ipo_supported_ OUTPUT stringzilla_ipo_support_output_)
+    if (stringzilla_ipo_supported_ AND NOT MSVC)
+        set_target_properties(stringzilla_static PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
+    else ()
+        message(STATUS "Link-time optimization not available: ${stringzilla_ipo_support_output_}")
+    endif ()
+endif ()
+
 # Adds one GPU unit, like `c/target/cuda.cu`, to the archive and the shared library: compiled for `codes_` alone,
 # without the CPU capabilities and with the GPU ones the build's codes run, and linked with the runtime libraries that
 # follow. A unit without codes to compile is skipped. Both the unit and the libraries' host units see `definition_`,
@@ -514,8 +660,20 @@ function (stringzilla_add_gpu_unit source_ codes_ definition_)
                    CUDA_ARCHITECTURES "${codes_}"
                    HIP_ARCHITECTURES "${codes_}"
     )
-    stringzilla_set_compiler_flags(stringzilla_${unit_}_ "" "")
+    stringzilla_set_compiler_flags(stringzilla_${unit_}_ "")
     target_compile_definitions(stringzilla_${unit_}_ PRIVATE "STRINGZILLA_WITH_LIBC=1" "${definition_}")
+    # A machine profile links the host side as bitcode too, but only bitcode the C units' compiler can read back.
+    if (STRINGZILLA_PROFILE_CAPABILITIES
+        AND stringzilla_ipo_supported_
+        AND CMAKE_CUDA_HOST_COMPILER_ID STREQUAL CMAKE_C_COMPILER_ID
+        AND CMAKE_CUDA_HOST_COMPILER_VERSION STREQUAL CMAKE_C_COMPILER_VERSION
+    )
+        if (CMAKE_C_COMPILER_ID STREQUAL "Clang")
+            target_compile_options(stringzilla_${unit_}_ PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-flto=thin>")
+        elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
+            target_compile_options(stringzilla_${unit_}_ PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-flto>")
+        endif ()
+    endif ()
     target_link_libraries(
         stringzilla_${unit_}_ PRIVATE stringzilla_cpu_capabilities_disabled_ stringzilla_cuda_capabilities_compiled_
                                       ${ARGN}
@@ -533,14 +691,21 @@ endfunction ()
 
 if (STRINGZILLA_BUILD_CUDA)
     # One unit per tier, compiled only for the codes running it, so no cubin carries another tier's kernels.
-    stringzilla_select_gpu_codes(
-        stringzilla_hopper_unit_codes_ "${stringzilla_cuda_resolved_architectures_}"
-        "${stringzilla_target_hopper_architectures}"
-    )
-    stringzilla_select_gpu_codes(
-        stringzilla_blackwell_unit_codes_ "${stringzilla_cuda_resolved_architectures_}"
-        "${stringzilla_target_blackwell_architectures}"
-    )
+    # A capability switched off keeps its unit out, as no code then carries its kernels.
+    set(stringzilla_hopper_unit_codes_)
+    set(stringzilla_blackwell_unit_codes_)
+    if (stringzilla_target_hopper_enabled)
+        stringzilla_select_gpu_codes(
+            stringzilla_hopper_unit_codes_ "${stringzilla_cuda_resolved_architectures_}"
+            "${stringzilla_target_hopper_architectures}"
+        )
+    endif ()
+    if (stringzilla_target_blackwell_enabled)
+        stringzilla_select_gpu_codes(
+            stringzilla_blackwell_unit_codes_ "${stringzilla_cuda_resolved_architectures_}"
+            "${stringzilla_target_blackwell_architectures}"
+        )
+    endif ()
     stringzilla_add_gpu_unit(
         c/target/cuda.cu "${stringzilla_cuda_resolved_architectures_}" "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart
     )
@@ -555,9 +720,10 @@ if (STRINGZILLA_BUILD_ROCM)
     stringzilla_add_gpu_unit(c/target/rocm.hip "${STRINGZILLA_ROCM_ARCHITECTURES}" "STRINGZILLA_ARCH_ROCM_=1" hip::host)
 endif ()
 if (STRINGZILLA_BUILD_METAL)
-    # Metal compiles on the device, so its one code names the family the baseline needs.
+    # Metal compiles on the device, so its codes name the families the unit serves.
     stringzilla_add_gpu_unit(
-        c/target/metal.c "apple7" "STRINGZILLA_ARCH_METAL_=1" "-framework Metal" "-framework Foundation"
+        c/target/metal.c "${STRINGZILLA_METAL_ARCHITECTURES}" "STRINGZILLA_ARCH_METAL_=1" "-framework Metal"
+        "-framework Foundation"
     )
     target_compile_options(stringzilla_metal_ PRIVATE ${stringzilla_embed_options_})
     foreach (library_ IN LISTS stringzilla_libraries_)
@@ -568,7 +734,7 @@ endif ()
 # The `stringzilla` extension module, which scikit-build-core builds and packages from `pyproject.toml`, installed at the
 # wheel's root, where `import stringzilla` finds it.
 if (STRINGZILLA_BUILD_PYTHON)
-    find_package(Python 3.10 REQUIRED COMPONENTS Interpreter Development.Module)
+    find_package(Python 3.12 REQUIRED COMPONENTS Interpreter Development.Module)
     find_package(OpenMP COMPONENTS C)
     python_add_library(
         stringzilla_python
@@ -616,6 +782,13 @@ if (STRINGZILLA_BUILD_PYTHON)
         stringzilla_python PRIVATE stringzilla_static
                                    $<$<AND:$<BOOL:${OpenMP_C_FOUND}>,$<PLATFORM_ID:Linux,FreeBSD>>:OpenMP::OpenMP_C>
     )
+    # The module's one export is its init function; the static library's kernels stay inside it.
+    set_target_properties(stringzilla_python PROPERTIES C_VISIBILITY_PRESET hidden)
+    if (APPLE)
+        target_link_options(stringzilla_python PRIVATE "LINKER:-exported_symbol,_PyInit_stringzilla")
+    elseif (NOT MSVC)
+        target_link_options(stringzilla_python PRIVATE "LINKER:--exclude-libs,ALL")
+    endif ()
     install(
         TARGETS stringzilla_python
         DESTINATION .
