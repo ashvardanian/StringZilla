@@ -1,6 +1,6 @@
 # cmake/stringzilla_compiler_flags.cmake — per-target compiler-flag helpers shared by every StringZilla target:
 # warnings, optimization, standards, sanitizers and coverage. The architecture floor is directory-wide, in
-# `CMakeLists.txt`, beside STRINGZILLA_TARGET_ARCH.
+# `cmake/stringzilla_platform.cmake`.
 # Included after the option block: the warnings read `STRINGZILLA_WERROR`, and the helpers read
 # `STRINGZILLA_BUILD_SANITIZERS` and `STRINGZILLA_BUILD_COVERAGE` at call time.
 

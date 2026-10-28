@@ -4,7 +4,7 @@
 # the selected runtime.
 #
 # One module carries one SIMD kit, `STRINGZILLA_TARGET_ARCH`: `serial`, `v128`, or the default
-# `v128relaxed`, taken from `-D` or the environment. `CMakeLists.txt` turns it into `-msimd128` and
+# `v128relaxed`, taken from `-D` or the environment. `cmake/stringzilla_platform.cmake` turns it into `-msimd128` and
 # `-mrelaxed-simd` for every unit, as an engine validates a module whole. Both kits build with
 # Clang 20 or newer.
 #

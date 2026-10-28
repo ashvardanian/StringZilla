@@ -264,3 +264,15 @@ function (stringzilla_select_gpu_codes output_ codes_ capability_codes_)
         PARENT_SCOPE
     )
 endfunction ()
+
+if (MSVC AND STRINGZILLA_TARGET_ARCH STREQUAL "native")
+    # MSVC has no `/arch:native`, so it takes the `/arch:` of the widest capability this host runs.
+    if (stringzilla_target_icelake_runs)
+        set(stringzilla_host_arch_flags_ ${stringzilla_target_icelake_flags})
+    elseif (stringzilla_target_skylake_runs)
+        set(stringzilla_host_arch_flags_ ${stringzilla_target_skylake_flags})
+    elseif (stringzilla_target_haswell_runs)
+        set(stringzilla_host_arch_flags_ ${stringzilla_target_haswell_flags})
+    endif ()
+    add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:${stringzilla_host_arch_flags_}>")
+endif ()
