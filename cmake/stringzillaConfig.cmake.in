@@ -2,10 +2,10 @@
 
 # The libraries link the runtimes of the GPU units they carry.
 include(CMakeFindDependencyMacro)
-if (@STRINGZILLA_BUILD_CUDA@)
+if (NOT "@STRINGZILLA_CUDA_ARCH@" STREQUAL "")
     find_dependency(CUDAToolkit)
 endif ()
-if (@STRINGZILLA_BUILD_ROCM@)
+if (NOT "@STRINGZILLA_ROCM_ARCH@" STREQUAL "")
     find_dependency(hip)
 endif ()
 

@@ -65,7 +65,7 @@ It also loads on __Bun__ and __Deno__ through their Node-API compatibility layer
 No Bun- or Deno-specific build is required; the addon and its `node-gyp-build`-based loader are shared across all three runtimes.
 
 Separately, StringZilla's C/C++ core __compiles to WebAssembly__.
-Targeting `wasm32-wasip1` with `STRINGZILLA_TARGET_ARCH` set to `v128` or `v128relaxed` enables the core's `STRINGZILLA_TARGET_V128` and `STRINGZILLA_TARGET_V128RELAXED` SIMD backends — the same v128 kernels the native addon uses.
+Targeting `wasm32-wasip1` with `STRINGZILLA_MARCH` set to `v128` or `v128relaxed` enables the core's `STRINGZILLA_TARGET_V128` and `STRINGZILLA_TARGET_V128RELAXED` SIMD backends — the same v128 kernels the native addon uses.
 This is a capability of the C core, exercised by the WebAssembly test builds; the npm package itself ships the N-API native addon and does not bundle a prebuilt `.wasm` artifact.
 
 ## Searching and Counting

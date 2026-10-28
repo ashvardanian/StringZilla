@@ -61,9 +61,9 @@
 #define STRINGZILLA_HEADER_ONLY (0) // true or false
 #endif
 
-/** The machine profile's capabilities, folding each dispatch table to its best kernel, or 0. */
-#if !defined(STRINGZILLA_PROFILE_CAPABILITIES)
-#define STRINGZILLA_PROFILE_CAPABILITIES 0
+/** 0 folds each dispatch table to its best kernel; 1, the default, keeps every compiled one. */
+#if !defined(STRINGZILLA_MULTIVERSIONED)
+#define STRINGZILLA_MULTIVERSIONED 1
 #endif
 
 /**

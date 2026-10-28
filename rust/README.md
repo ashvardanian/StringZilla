@@ -62,8 +62,8 @@ A WebAssembly module carries the one SIMD kit the Rust target declares: `+relaxe
 The build script forwards these environment variables to CMake, and rebuilds when one changes:
 
 - `STRINGZILLA_TARGET_<CAPABILITY>`, like `STRINGZILLA_TARGET_SVE2=0 cargo build`, forces one capability on or off, though never past what the toolchain can compile.
-- `STRINGZILLA_TARGET_ARCH=native` tunes the library for the building machine.
-- `STRINGZILLA_CUDA_ARCHITECTURES` and `STRINGZILLA_ROCM_ARCHITECTURES` narrow the GPU code the features compile.
+- `STRINGZILLA_MARCH=native` tunes the library for the building machine, and `STRINGZILLA_MULTIVERSIONED=OFF` keeps only the capabilities it implies.
+- `STRINGZILLA_CUDA_ARCH`, `STRINGZILLA_ROCM_ARCH` and `STRINGZILLA_METAL_ARCH` narrow the GPU code the features compile to one code, like `100f`.
 
 An engine fixes its capability once, when it is constructed, and every round dispatches on that.
 

@@ -35,7 +35,7 @@
  *  under the vocabularies their CPU benchmarks run, so a device row and its baseline share inputs.
  *
  *  @code{.sh}
- *  cmake -D STRINGZILLA_BUILD_BENCH=1 -D STRINGZILLA_BUILD_CUDA=1 -D CMAKE_BUILD_TYPE=Release -B build_release
+ *  cmake -D STRINGZILLA_BUILD_BENCH=1 -D STRINGZILLA_CUDA_ARCH=native -D CMAKE_BUILD_TYPE=Release -B build_release
  *  cmake --build build_release --config Release --target stringzilla_bench
  *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_FILTER=cuda build_release/stringzilla_bench
  *  @endcode

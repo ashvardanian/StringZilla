@@ -31,7 +31,7 @@ It is the convenient way to produce one, though, so most of the examples below r
 Building from source goes through CMake, which scikit-build-core drives, so it needs a C compiler and pulls CMake and Ninja from PyPI when the system has none recent enough.
 The build probes the compiler for every SIMD kit it can emit and compiles them all, and every call picks among them by its capability mask, as [Runtime Dispatch](#runtime-dispatch) describes.
 Build parallelism follows `CMAKE_BUILD_PARALLEL_LEVEL`, which should be lowered in memory-constrained containers.
-`STRINGZILLA_TARGET_ARCH=native` in the environment tunes the build for the machine it runs on, and `-C cmake.define.STRINGZILLA_BUILD_CUDA=ON` adds the CUDA backends of the batch engines, as `STRINGZILLA_BUILD_ROCM=ON` does the ROCm ones.
+`STRINGZILLA_MARCH=native` in the environment tunes the build for the machine it runs on, and `-C cmake.define.STRINGZILLA_CUDA_ARCH=all` adds the CUDA backends of the batch engines, as `STRINGZILLA_ROCM_ARCH=all` does the ROCm ones.
 
 ```sh
 CMAKE_BUILD_PARALLEL_LEVEL=2 pip install .

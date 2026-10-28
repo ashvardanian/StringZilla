@@ -852,13 +852,13 @@ inline machine_t probe_machine() noexcept {
 
 /** Prints the version line, the capabilities as "- Compiled for:" and "- This machine:", and in
  *  GPU builds "- CUDA:", "- ROCm:" or "- Metal:". */
-inline void print(machine_t const &machine) {
+inline void print(machine_t const &machine, std::FILE *stream = stdout) {
     char compiled[STRINGZILLA_CAPABILITIES_NAME_CAPACITY], detected[STRINGZILLA_CAPABILITIES_NAME_CAPACITY];
     sz_capabilities_name(machine.compiled, compiled, sizeof(compiled));
     sz_capabilities_name(machine.detected, detected, sizeof(detected));
-    fmt::println("StringZilla {}.{}.{}", machine.version[0], machine.version[1], machine.version[2]);
-    fmt::println("- Compiled for: {}", compiled);
-    fmt::println("- This machine: {}", detected);
+    fmt::println(stream, "StringZilla {}.{}.{}", machine.version[0], machine.version[1], machine.version[2]);
+    fmt::println(stream, "- Compiled for: {}", compiled);
+    fmt::println(stream, "- This machine: {}", detected);
 }
 
 /** Everything a test reads, built once in @c main and passed down by reference. */

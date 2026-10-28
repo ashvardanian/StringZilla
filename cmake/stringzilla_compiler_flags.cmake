@@ -79,11 +79,6 @@ function (stringzilla_set_optimization_flags target_ target_type_)
     endif ()
     target_compile_options(${target_} PRIVATE "$<$<AND:${stringzilla_msvc_},$<CONFIG:Release,RelWithDebInfo>>:/O2;/Zi>")
 
-    set(gcc_ "$<OR:${stringzilla_gnu_},${stringzilla_clang_}>")
-    target_compile_options(${target_} PRIVATE "$<$<AND:${gcc_},$<CONFIG:Debug>>:-O0;-g>")
-    target_compile_options(${target_} PRIVATE "$<$<AND:${gcc_},$<CONFIG:RelWithDebInfo>>:-O2;-g>")
-    target_compile_options(${target_} PRIVATE "$<$<AND:${gcc_},$<CONFIG:Release>>:-O2>")
-
     if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
         set(nvcc_debug_
             "-G" # Device debug symbols

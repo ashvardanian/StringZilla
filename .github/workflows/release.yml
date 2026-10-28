@@ -654,7 +654,7 @@ jobs:
       - name: Build Docs
         run: cd docs && doxygen conf.dox && sphinx-build -M html . ../build/docs -W
       - name: Compress Docs
-        run: tar -czvf docs.tar.gz build/docs/html/
+        run: tar -czf docs.tar.gz build/docs/html/
       - name: Upload Docs to Release
         uses: xresloader/upload-to-github-release@v1
         env:

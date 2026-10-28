@@ -3,7 +3,7 @@
 # Usage: cmake --preset wasm32_wasi, then ctest --preset wasm32_wasi, which runs each .wasm under
 # the selected runtime.
 #
-# One module carries one SIMD kit, `STRINGZILLA_TARGET_ARCH`: `serial`, `v128`, or the default
+# One module carries one SIMD kit, `STRINGZILLA_MARCH`: `serial`, `v128`, or the default
 # `v128relaxed`, taken from `-D` or the environment. `cmake/stringzilla_platform.cmake` turns it into `-msimd128` and
 # `-mrelaxed-simd` for every unit, as an engine validates a module whole. Both kits build with
 # Clang 20 or newer.
@@ -52,12 +52,12 @@ set(stringzilla_sysroot_ "${WASI_SDK_PREFIX}/share/wasi-sysroot")
 set(stringzilla_target_flags_ "--target=wasm32-wasip1 --sysroot=${stringzilla_sysroot_}")
 
 # Set here, ahead of `project()`, so the environment reaches it as it would `CMakeLists.txt`'s own default.
-set(stringzilla_target_arch_default_ "$ENV{STRINGZILLA_TARGET_ARCH}")
-if (NOT stringzilla_target_arch_default_)
-    set(stringzilla_target_arch_default_ "v128relaxed")
+set(stringzilla_march_default_ "$ENV{STRINGZILLA_MARCH}")
+if (NOT stringzilla_march_default_)
+    set(stringzilla_march_default_ "v128relaxed")
 endif ()
-set(STRINGZILLA_TARGET_ARCH
-    "${stringzilla_target_arch_default_}"
+set(STRINGZILLA_MARCH
+    "${stringzilla_march_default_}"
     CACHE STRING "The module's SIMD kit: serial, v128 or v128relaxed"
 )
 

@@ -38,8 +38,7 @@
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "STRINGZILLA_BUILD_BENCH": "OFF",
-        "STRINGZILLA_BUILD_CUDA": "OFF"
+        "STRINGZILLA_BUILD_BENCH": "OFF"
       }
     },
 
@@ -50,7 +49,6 @@
       "description": "Sanitized host build for iterating on kernels and tests.",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "STRINGZILLA_BUILD_CUDA": "OFF",
         "STRINGZILLA_BUILD_SANITIZERS": "address"
       }
     },
@@ -60,7 +58,8 @@
       "displayName": "Clang with warnings as errors, no CUDA",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "STRINGZILLA_BUILD_CUDA": "OFF",
+        "CMAKE_C_FLAGS_RELWITHDEBINFO": "-O0 -g0 -DNDEBUG",
+        "CMAKE_CXX_FLAGS_RELWITHDEBINFO": "-O0 -g0 -DNDEBUG",
         "STRINGZILLA_WERROR": "ON"
       }
     },
@@ -68,7 +67,7 @@
       "name": "release",
       "inherits": ["base", "clang"],
       "displayName": "Release, no CUDA",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "STRINGZILLA_BUILD_CUDA": "OFF" }
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
     },
     {
       "name": "release_shared",
@@ -78,8 +77,7 @@
         "CMAKE_BUILD_TYPE": "Release",
         "STRINGZILLA_BUILD_TEST": "OFF",
         "STRINGZILLA_BUILD_BENCH": "OFF",
-        "STRINGZILLA_BUILD_SHARED": "ON",
-        "STRINGZILLA_BUILD_CUDA": "OFF"
+        "STRINGZILLA_BUILD_SHARED": "ON"
       }
     },
     {
@@ -103,7 +101,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_CUDA_HOST_COMPILER": "clang++",
-        "STRINGZILLA_BUILD_CUDA": "ON"
+        "STRINGZILLA_CUDA_ARCH": "all"
       }
     },
     {
@@ -113,8 +111,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "STRINGZILLA_BUILD_BENCH": "OFF",
-        "STRINGZILLA_BUILD_CUDA": "OFF",
-        "STRINGZILLA_BUILD_ROCM": "ON"
+        "STRINGZILLA_ROCM_ARCH": "all"
       }
     },
     {
@@ -124,8 +121,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "STRINGZILLA_BUILD_BENCH": "OFF",
-        "STRINGZILLA_BUILD_CUDA": "OFF",
-        "STRINGZILLA_BUILD_METAL": "ON"
+        "STRINGZILLA_METAL_ARCH": "all"
       }
     },
 
@@ -166,7 +162,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "EMSCRIPTEN_SYSTEM_PROCESSOR": "wasm32",
-        "STRINGZILLA_TARGET_ARCH": "v128",
+        "STRINGZILLA_MARCH": "v128",
         "STRINGZILLA_BUILD_TEST": "OFF",
         "STRINGZILLA_BUILD_BENCH": "OFF",
         "STRINGZILLA_BUILD_SHARED": "OFF"
@@ -179,7 +175,7 @@
       "description": "The extended module: Memory64, threads and Relaxed SIMD, the flags Emscripten's toolchain reads as it loads.",
       "cacheVariables": {
         "EMSCRIPTEN_SYSTEM_PROCESSOR": "wasm64",
-        "STRINGZILLA_TARGET_ARCH": "v128relaxed",
+        "STRINGZILLA_MARCH": "v128relaxed",
         "CMAKE_C_FLAGS": "--target=wasm64 -pthread",
         "CMAKE_CXX_FLAGS": "--target=wasm64 -pthread"
       }
@@ -219,41 +215,90 @@
       "name": "machine",
       "hidden": true,
       "inherits": ["base", "linux", "clang"],
-      "description": "Libraries for one machine: its CPU floor, the capabilities the toolchain compiles, and its one GPU code.",
+      "description": "Libraries for one machine: its CPU floor, every kernel-library capability spelled as 1 or 0, and its one GPU code.",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_CUDA_HOST_COMPILER": "clang++",
         "STRINGZILLA_BUILD_TEST": "OFF",
         "STRINGZILLA_BUILD_BENCH": "OFF",
         "STRINGZILLA_BUILD_SHARED": "ON",
-        "STRINGZILLA_BUILD_CUDA": "ON",
-        "STRINGZILLA_PROFILE_CAPABILITIES": "ON"
+        "STRINGZILLA_MULTIVERSIONED": "OFF"
       }
     },
     {
       "name": "xeon4_hopper",
       "inherits": "machine",
       "displayName": "Xeon 4 with Hopper - compile only",
-      "cacheVariables": { "STRINGZILLA_TARGET_ARCH": "sapphirerapids", "STRINGZILLA_CUDA_ARCHITECTURES": "90a-real" }
+      "cacheVariables": {
+        "STRINGZILLA_MARCH": "sapphirerapids",
+        "STRINGZILLA_CUDA_ARCH": "90a",
+        "STRINGZILLA_TARGET_WESTMERE": "1",
+        "STRINGZILLA_TARGET_GOLDMONT": "1",
+        "STRINGZILLA_TARGET_HASWELL": "1",
+        "STRINGZILLA_TARGET_SKYLAKE": "1",
+        "STRINGZILLA_TARGET_ICELAKE": "1"
+      }
     },
     {
       "name": "xeon6_blackwell",
       "inherits": "machine",
       "displayName": "Xeon 6 with Blackwell - compile only",
-      "cacheVariables": { "STRINGZILLA_TARGET_ARCH": "graniterapids", "STRINGZILLA_CUDA_ARCHITECTURES": "100f-real" }
+      "cacheVariables": {
+        "STRINGZILLA_MARCH": "graniterapids",
+        "STRINGZILLA_CUDA_ARCH": "100f",
+        "STRINGZILLA_TARGET_WESTMERE": "1",
+        "STRINGZILLA_TARGET_GOLDMONT": "1",
+        "STRINGZILLA_TARGET_HASWELL": "1",
+        "STRINGZILLA_TARGET_SKYLAKE": "1",
+        "STRINGZILLA_TARGET_ICELAKE": "1"
+      }
     },
     {
       "name": "grace_hopper",
       "inherits": "machine",
       "displayName": "Grace with Hopper - compile only",
-      "cacheVariables": { "STRINGZILLA_TARGET_ARCH": "neoverse-v2", "STRINGZILLA_CUDA_ARCHITECTURES": "90a-real" }
+      "description": "Grace's 128-bit SVE gains nothing over NEON, so every SVE capability is off.",
+      "cacheVariables": {
+        "STRINGZILLA_MARCH": "grace",
+        "STRINGZILLA_CUDA_ARCH": "90a",
+        "STRINGZILLA_TARGET_NEON": "1",
+        "STRINGZILLA_TARGET_NEONAES": "1",
+        "STRINGZILLA_TARGET_NEONSHA": "1",
+        "STRINGZILLA_TARGET_SVE": "0",
+        "STRINGZILLA_TARGET_SVE2": "0",
+        "STRINGZILLA_TARGET_SVE2AES": "0"
+      }
     },
     {
       "name": "vera_rubin",
       "inherits": "machine",
       "displayName": "Vera with Rubin - compile only",
-      "description": "Olympus cores need Clang 22 or GCC 15, and CUDA 13.4 names no Rubin code, so it compiles 100f.",
-      "cacheVariables": { "STRINGZILLA_TARGET_ARCH": "olympus", "STRINGZILLA_CUDA_ARCHITECTURES": "100f-real" }
+      "description": "Olympus cores need Clang 22 or GCC 15 and CUDA 13.4 names no Rubin code, so it compiles 100f; WFET is on, as no compiler macro reports it, and SVE off, as on Grace.",
+      "cacheVariables": {
+        "STRINGZILLA_MARCH": "olympus",
+        "STRINGZILLA_CUDA_ARCH": "100f",
+        "STRINGZILLA_TARGET_NEON": "1",
+        "STRINGZILLA_TARGET_NEONAES": "1",
+        "STRINGZILLA_TARGET_NEONSHA": "1",
+        "STRINGZILLA_TARGET_SVE": "0",
+        "STRINGZILLA_TARGET_SVE2": "0",
+        "STRINGZILLA_TARGET_SVE2AES": "0"
+      }
+    },
+    {
+      "name": "venice_mi450",
+      "inherits": "machine",
+      "displayName": "EPYC Venice with MI450 - compile only",
+      "description": "Clang 22 names no Zen 6 core, so it compiles at znver5 and spells the rows GCC 16's znver6 implies; gfx1250 covers MI450X and MI455X.",
+      "cacheVariables": {
+        "STRINGZILLA_MARCH": "znver5",
+        "STRINGZILLA_ROCM_ARCH": "gfx1250",
+        "STRINGZILLA_TARGET_WESTMERE": "1",
+        "STRINGZILLA_TARGET_GOLDMONT": "1",
+        "STRINGZILLA_TARGET_HASWELL": "1",
+        "STRINGZILLA_TARGET_SKYLAKE": "1",
+        "STRINGZILLA_TARGET_ICELAKE": "1"
+      }
     }
   ],
   "buildPresets": [
@@ -279,7 +324,8 @@
     { "name": "xeon4_hopper", "configurePreset": "xeon4_hopper" },
     { "name": "xeon6_blackwell", "configurePreset": "xeon6_blackwell" },
     { "name": "grace_hopper", "configurePreset": "grace_hopper" },
-    { "name": "vera_rubin", "configurePreset": "vera_rubin" }
+    { "name": "vera_rubin", "configurePreset": "vera_rubin" },
+    { "name": "venice_mi450", "configurePreset": "venice_mi450" }
   ],
   "testPresets": [
     {

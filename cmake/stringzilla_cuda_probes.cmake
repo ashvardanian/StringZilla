@@ -4,7 +4,7 @@
 # host compiler together: NVCC delegates host compilation but parses the host's headers itself on the device pass, so
 # the pair decides, and the C++ compiler's answer is about the wrong toolchain - it accepts flags NVCC then chokes on.
 
-# Probes `probes/cuda_native_arch.cu` with the host compiler taking `host_flags_`, the flags of STRINGZILLA_TARGET_ARCH,
+# Probes `probes/cuda_native_arch.cu` with the host compiler taking `host_flags_`, the flags of STRINGZILLA_MARCH,
 # into the cached `stringzilla_cuda_native_arch_compiles_`. A failed probe leaves the `.cu` units on the baseline
 # architecture and says nothing of the CPU capabilities.
 function (stringzilla_probe_cuda_native_arch host_flags_)

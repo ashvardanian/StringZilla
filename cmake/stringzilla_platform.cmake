@@ -45,7 +45,7 @@ elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64|powerpc64|PPC64|POWERPC64")
     set(stringzilla_arch_ppc64_ TRUE)
     message(STATUS "Platform: PowerPC64 (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
 elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "^wasm(32|64)$")
-    # A module's one SIMD capability is `STRINGZILLA_TARGET_ARCH`, which `types.h` reads back off the predefined
+    # A module's one SIMD capability is `STRINGZILLA_MARCH`, which `types.h` reads back off the predefined
     # macros, so no probe verdict is set here.
     set(stringzilla_arch_wasm_ TRUE)
     message(STATUS "Platform: WebAssembly (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
@@ -61,37 +61,38 @@ else ()
 endif ()
 
 # Each unit gets the architecture's ABI floor, and SIMD kernels opt in via per-function target pragmas, so the library
-# runs on every CPU of its architecture. STRINGZILLA_TARGET_ARCH opts out for a build tuned to one CPU: `native` for this
-# host, or a CPU name like `graniterapids`, also when cross-compiling. Only C and C++ units take the flags, as nvcc would
-# read them as its own; the CUDA block below hands them to its host compiler.
+# runs on every CPU of its architecture. STRINGZILLA_MARCH raises the floor: an ISA level like `x86-64-v3`, `native` for
+# this host, or a CPU name like `graniterapids`, also when cross-compiling. Only C and C++ units take the flags, as nvcc
+# would read them as its own; the CUDA block below hands them to its host compiler. The probes compile at
+# `stringzilla_unit_arch_flags_`, the floor either way.
 set(stringzilla_host_arch_flags_)
-if (STRINGZILLA_TARGET_ARCH STREQUAL "native" AND CMAKE_CROSSCOMPILING)
-    message(FATAL_ERROR "STRINGZILLA_TARGET_ARCH=native needs the host as the target; name a CPU instead")
-elseif (STRINGZILLA_TARGET_ARCH AND NOT stringzilla_arch_wasm_)
+set(stringzilla_unit_arch_flags_)
+if (STRINGZILLA_MARCH STREQUAL "native" AND CMAKE_CROSSCOMPILING)
+    message(FATAL_ERROR "STRINGZILLA_MARCH=native needs the host as the target; name a CPU instead")
+elseif (STRINGZILLA_MARCH AND NOT stringzilla_arch_wasm_)
     message(
-        WARNING
-            "STRINGZILLA_TARGET_ARCH=${STRINGZILLA_TARGET_ARCH}: baking specific instructions; result may not run elsewhere"
+        WARNING "STRINGZILLA_MARCH=${STRINGZILLA_MARCH}: baking specific instructions; result may not run elsewhere"
     )
-    if (MSVC AND STRINGZILLA_TARGET_ARCH STREQUAL "native")
+    if (MSVC AND STRINGZILLA_MARCH STREQUAL "native")
         # MSVC has no `/arch:native`, so it takes its flags from the probes below.
     elseif (MSVC)
         message(
             FATAL_ERROR
-                "MSVC takes STRINGZILLA_TARGET_ARCH=native only; pass an /arch: value such as AVX2, AVX512 or AVX10.2 "
-                "through CMAKE_C_FLAGS instead of `${STRINGZILLA_TARGET_ARCH}`"
+                "MSVC takes STRINGZILLA_MARCH=native only; pass an /arch: value such as AVX2, AVX512 or AVX10.2 "
+                "through CMAKE_C_FLAGS instead of `${STRINGZILLA_MARCH}`"
         )
     elseif (stringzilla_arch_arm64_)
         # AArch64 names CPUs through `-mcpu`, like `neoverse-v2`, as `-march` takes only architecture versions; Apple
         # Clang's `-march=native` also advertises just a subset of host features.
-        set(stringzilla_host_arch_flags_ -mcpu=${STRINGZILLA_TARGET_ARCH})
+        set(stringzilla_host_arch_flags_ -mcpu=${STRINGZILLA_MARCH})
     else ()
-        set(stringzilla_host_arch_flags_ -march=${STRINGZILLA_TARGET_ARCH})
+        set(stringzilla_host_arch_flags_ -march=${STRINGZILLA_MARCH})
     endif ()
-    add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:${stringzilla_host_arch_flags_}>")
+    set(stringzilla_unit_arch_flags_ ${stringzilla_host_arch_flags_})
 elseif (stringzilla_arch_wasm_)
     # An engine validates a WebAssembly module whole, so every unit carries the module's one SIMD capability, whatever
     # flags a binding passes, and `types.h` reads it back off the predefined macros. Empty is the portable floor.
-    set(stringzilla_wasm_simd_ ${STRINGZILLA_TARGET_ARCH})
+    set(stringzilla_wasm_simd_ ${STRINGZILLA_MARCH})
     if (NOT stringzilla_wasm_simd_)
         set(stringzilla_wasm_simd_ serial)
     endif ()
@@ -100,31 +101,29 @@ elseif (stringzilla_arch_wasm_)
     elseif (stringzilla_wasm_simd_ STREQUAL "v128")
         add_compile_options(-msimd128)
     elseif (NOT stringzilla_wasm_simd_ STREQUAL "serial")
-        message(
-            FATAL_ERROR
-                "STRINGZILLA_TARGET_ARCH on WebAssembly: serial, v128 or v128relaxed, not `${STRINGZILLA_TARGET_ARCH}`"
-        )
+        message(FATAL_ERROR "STRINGZILLA_MARCH on WebAssembly: serial, v128 or v128relaxed, not `${STRINGZILLA_MARCH}`")
     endif ()
 elseif (MSVC)
     if (stringzilla_arch_x8664_)
-        add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:/arch:SSE2>)
+        set(stringzilla_unit_arch_flags_ /arch:SSE2)
     elseif (stringzilla_arch_arm64_)
-        add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:/arch:armv8.0>)
+        set(stringzilla_unit_arch_flags_ /arch:armv8.0)
     endif ()
 elseif (APPLE)
     # `-arch` already pins the ABI floor of the one slice this build compiles.
 elseif (stringzilla_arch_x8664_)
-    add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:-march=x86-64>)
+    set(stringzilla_unit_arch_flags_ -march=x86-64)
 elseif (stringzilla_arch_arm64_)
-    add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:-march=armv8-a>)
+    set(stringzilla_unit_arch_flags_ -march=armv8-a)
 elseif (stringzilla_arch_riscv64_)
-    add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:-march=rv64gc>)
+    set(stringzilla_unit_arch_flags_ -march=rv64gc)
 elseif (stringzilla_arch_loongarch64_)
-    add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:-march=loongarch64>)
+    set(stringzilla_unit_arch_flags_ -march=loongarch64)
 elseif (stringzilla_arch_ppc64_)
-    add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:-mcpu=power8>)
+    set(stringzilla_unit_arch_flags_ -mcpu=power8)
 endif ()
+add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:${stringzilla_unit_arch_flags_}>")
 # Every capability's kernels are written by hand, so auto-vectorizing the portable build only bloats its scalar code.
-if (NOT STRINGZILLA_TARGET_ARCH AND CMAKE_C_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang|IntelLLVM)$")
+if (NOT STRINGZILLA_MARCH AND CMAKE_C_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang|IntelLLVM)$")
     add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-fno-tree-vectorize;-fno-tree-slp-vectorize>")
 endif ()

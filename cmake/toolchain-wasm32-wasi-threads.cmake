@@ -49,12 +49,12 @@ set(stringzilla_sysroot_ "${WASI_SDK_PREFIX}/share/wasi-sysroot")
 set(stringzilla_target_flags_ "--target=wasm32-wasip1-threads --sysroot=${stringzilla_sysroot_} -pthread")
 
 # Set here, ahead of `project()`, so the environment reaches it as it would `CMakeLists.txt`'s own default.
-set(stringzilla_target_arch_default_ "$ENV{STRINGZILLA_TARGET_ARCH}")
-if (NOT stringzilla_target_arch_default_)
-    set(stringzilla_target_arch_default_ "v128relaxed")
+set(stringzilla_march_default_ "$ENV{STRINGZILLA_MARCH}")
+if (NOT stringzilla_march_default_)
+    set(stringzilla_march_default_ "v128relaxed")
 endif ()
-set(STRINGZILLA_TARGET_ARCH
-    "${stringzilla_target_arch_default_}"
+set(STRINGZILLA_MARCH
+    "${stringzilla_march_default_}"
     CACHE STRING "The module's SIMD kit: serial, v128 or v128relaxed"
 )
 

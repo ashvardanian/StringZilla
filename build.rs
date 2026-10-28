@@ -8,19 +8,20 @@
 use std::env;
 use std::path::{Path, PathBuf};
 
-/// The Cargo features that switch a CMake option, each passed as ON or OFF, never left to the host.
+/// The Cargo features that switch a GPU vendor on, each passed to CMake as `all` or as the code
+/// the environment names, like `STRINGZILLA_CUDA_ARCH=120f`, and as empty without it, never left
+/// to the host.
 const FEATURE_OPTIONS: &[(&str, &str)] = &[
-    ("CUDA", "STRINGZILLA_BUILD_CUDA"),
-    ("ROCM", "STRINGZILLA_BUILD_ROCM"),
-    ("METAL", "STRINGZILLA_BUILD_METAL"),
+    ("CUDA", "STRINGZILLA_CUDA_ARCH"),
+    ("ROCM", "STRINGZILLA_ROCM_ARCH"),
+    ("METAL", "STRINGZILLA_METAL_ARCH"),
 ];
 
-/// The CMake cache variables read from the environment, like `STRINGZILLA_TARGET_ARCH=native`, a
-/// GPU architecture list, or a capability override such as `STRINGZILLA_TARGET_SVE2=0`.
+/// The CMake cache variables read from the environment, like `STRINGZILLA_MARCH=native`, the
+/// build kind, or a capability override such as `STRINGZILLA_TARGET_SVE2=0`.
 const ENVIRONMENT_VARIABLES: &[&str] = &[
-    "STRINGZILLA_TARGET_ARCH",
-    "STRINGZILLA_CUDA_ARCHITECTURES",
-    "STRINGZILLA_ROCM_ARCHITECTURES",
+    "STRINGZILLA_MARCH",
+    "STRINGZILLA_MULTIVERSIONED",
     "STRINGZILLA_TARGET_WESTMERE",
     "STRINGZILLA_TARGET_GOLDMONT",
     "STRINGZILLA_TARGET_HASWELL",
@@ -113,8 +114,13 @@ fn build_library(manifest: &Path, enabled: impl Fn(&str) -> bool) -> PathBuf {
         .profile("Release")
         .define("STRINGZILLA_BUILD_SHARED", "OFF")
         .build_target("stringzilla_static");
-    for (feature, option) in FEATURE_OPTIONS {
-        library.define(option, if enabled(feature) { "ON" } else { "OFF" });
+    for (feature, variable) in FEATURE_OPTIONS {
+        println!("cargo:rerun-if-env-changed={variable}");
+        let codes = match enabled(feature) {
+            true => env::var(variable).unwrap_or_else(|_| "all".into()),
+            false => String::new(),
+        };
+        library.define(variable, codes);
     }
     let arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
     let os = env::var("CARGO_CFG_TARGET_OS").unwrap();
@@ -126,7 +132,7 @@ fn build_library(manifest: &Path, enabled: impl Fn(&str) -> bool) -> PathBuf {
     for variable in ENVIRONMENT_VARIABLES {
         println!("cargo:rerun-if-env-changed={variable}");
         // A WebAssembly module's kit follows the Rust target's features instead, below.
-        if is_wasm && *variable == "STRINGZILLA_TARGET_ARCH" {
+        if is_wasm && *variable == "STRINGZILLA_MARCH" {
             continue;
         }
         match env::var(variable) {
@@ -146,7 +152,7 @@ fn build_library(manifest: &Path, enabled: impl Fn(&str) -> bool) -> PathBuf {
             (false, true) => "v128",
             (false, false) => "serial",
         };
-        library.define("STRINGZILLA_TARGET_ARCH", kit);
+        library.define("STRINGZILLA_MARCH", kit);
         // The checked-in toolchains name the SDK and its sysroot, which `cmake-rs` cannot.
         println!("cargo:rerun-if-env-changed=WASI_SDK_PATH");
         println!("cargo:rerun-if-env-changed=WASI_SDK_PREFIX");

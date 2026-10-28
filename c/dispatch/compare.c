@@ -18,8 +18,8 @@ static sz_capability_kernels_t const *sz_equal_capabilities(void) {
                    sz_cap_rvv_k * STRINGZILLA_TARGET_RVV | sz_cap_v128_k * STRINGZILLA_TARGET_V128 |
                    sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
                    sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
-                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
-                  STRINGZILLA_PROFILE_CAPABILITIES
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
+                  !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -78,8 +78,8 @@ static sz_capability_kernels_t const *sz_order_capabilities(void) {
                    sz_cap_rvv_k * STRINGZILLA_TARGET_RVV | sz_cap_v128_k * STRINGZILLA_TARGET_V128 |
                    sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
                    sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
-                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
-                  STRINGZILLA_PROFILE_CAPABILITIES
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
+                  !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,

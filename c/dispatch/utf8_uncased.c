@@ -14,7 +14,7 @@
 #include "dispatch.h"
 
 static sz_capability_kernels_t const *sz_utf8_uncased_needle_init_capabilities(void) {
-    enum { above_k = sz_cap_serial_k & STRINGZILLA_PROFILE_CAPABILITIES };
+    enum { above_k = sz_cap_serial_k * !STRINGZILLA_MULTIVERSIONED };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
         above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL
@@ -35,8 +35,8 @@ static sz_capability_kernels_t const *sz_utf8_uncased_search_capabilities(void) 
                    sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
                    sz_cap_sve2_k * STRINGZILLA_TARGET_SVE2 | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV |
                    sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
-                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
-                  STRINGZILLA_PROFILE_CAPABILITIES
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
+                  !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -88,8 +88,8 @@ static sz_capability_kernels_t const *sz_utf8_uncased_order_capabilities(void) {
                    sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
                    sz_cap_sve2_k * STRINGZILLA_TARGET_SVE2 | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV |
                    sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
-                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
-                  STRINGZILLA_PROFILE_CAPABILITIES
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
+                  !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -140,8 +140,8 @@ static sz_capability_kernels_t const *sz_utf8_find_cased_capabilities(void) {
                    sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
                    sz_cap_sve2_k * STRINGZILLA_TARGET_SVE2 | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV |
                    sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
-                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
-                  STRINGZILLA_PROFILE_CAPABILITIES
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
+                  !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,

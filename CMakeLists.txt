@@ -3,8 +3,8 @@
 # This file defines several library build & installation targets:
 #
 # * stringzilla_header: A header-only library with the StringZilla C and C++ headers.
-# * stringzilla_static: A static library with dynamic SIMD dispatch, and the GPU backends STRINGZILLA_BUILD_CUDA,
-#   STRINGZILLA_BUILD_ROCM and STRINGZILLA_BUILD_METAL ask for, side by side.
+# * stringzilla_static: A static library with dynamic SIMD dispatch, and the GPU backends STRINGZILLA_CUDA_ARCH,
+#   STRINGZILLA_ROCM_ARCH and STRINGZILLA_METAL_ARCH ask for, side by side.
 # * stringzilla_shared: The same as a shared library.
 # * stringzilla_python: The CPython extension over `stringzilla_static`, with STRINGZILLA_BUILD_PYTHON.
 # * stringzilla_node: The Node addon over `stringzilla_static`, with STRINGZILLA_BUILD_NODE, which cmake-js sets.
@@ -41,6 +41,13 @@ project(
     DESCRIPTION "Search, hash, sort, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU"
     HOMEPAGE_URL "https://github.com/ashvardanian/StringZilla"
 )
+
+# Release compiles at -O2 rather than CMake's -O3, set here rather than per target so that presets and parent projects
+# can still lower RelWithDebInfo and Debug, which keep CMake's defaults.
+if (NOT MSVC)
+    set(CMAKE_C_FLAGS_RELEASE "-O2 -DNDEBUG")
+    set(CMAKE_CXX_FLAGS_RELEASE "-O2 -DNDEBUG")
+endif ()
 
 # Standards are floors each target declares, so a parent project's units and the fetched dependencies build at the
 # standard they pick for themselves.
@@ -94,11 +101,19 @@ option(STRINGZILLA_BUILD_SHARED "Compile a dynamic library" ${PROJECT_IS_TOP_LEV
 option(STRINGZILLA_BUILD_PYTHON "Compile the CPython extension over the static library" OFF)
 option(STRINGZILLA_BUILD_NODE "Compile the Node addon over the static library; cmake-js switches it on" OFF)
 option(STRINGZILLA_BUILD_SWIFT "Package the static library for SwiftPM, as an XCFramework or an artifact bundle" OFF)
-option(STRINGZILLA_BUILD_CUDA "Add CUDA to the libraries and to the tests and benchmarks built" OFF)
-option(STRINGZILLA_BUILD_ROCM "Add ROCm for AMD GPUs to the libraries and to the tests and benchmarks built" OFF)
-option(STRINGZILLA_BUILD_METAL "Add Metal for Apple GPUs to the libraries and to the tests and benchmarks built" OFF)
+set(STRINGZILLA_CUDA_ARCH
+    ""
+    CACHE STRING "NVIDIA code the libraries, tests and benchmarks build for: all, native or one"
+)
+set(STRINGZILLA_ROCM_ARCH
+    ""
+    CACHE STRING "AMD target the libraries, tests and benchmarks build for: all, native or one"
+)
+set(STRINGZILLA_METAL_ARCH
+    ""
+    CACHE STRING "Apple GPU family the Metal unit serves: all or one"
+)
 option(STRINGZILLA_WERROR "Treat compiler warnings as errors" OFF)
-option(STRINGZILLA_PROFILE_CAPABILITIES "Keep only the best enabled capability's kernel of each operation" OFF)
 set(STRINGZILLA_BUILD_SANITIZERS
     "off"
     CACHE STRING "Sanitizers for StringZilla's tests, benchmarks and archives: off, address with undefined, or thread"
@@ -116,10 +131,13 @@ endif ()
 # faithful picture needs `llvm-profdata merge` across per-ISA builds (native x86 + qemu-aarch64 for NEON/SVE + the RVV
 # qemu toolchain).
 option(STRINGZILLA_BUILD_COVERAGE "Instrument with Clang source-based coverage" OFF)
-# Seeded from the environment at the first configure, so `cargo` and `cmake-js` honour `STRINGZILLA_TARGET_ARCH=native`.
-set(STRINGZILLA_TARGET_ARCH
-    "$ENV{STRINGZILLA_TARGET_ARCH}"
-    CACHE STRING "CPU to tune for, like native or graniterapids, or the WebAssembly SIMD: serial, v128 or v128relaxed"
+# Seeded from the environment at the first configure, so `cargo` and `cmake-js` honour `STRINGZILLA_MARCH=native`.
+set(STRINGZILLA_MARCH
+    "$ENV{STRINGZILLA_MARCH}"
+    CACHE STRING "The `-march` floor, like x86-64-v3 or native, or a WebAssembly module's SIMD capability, like v128"
+)
+option(STRINGZILLA_MULTIVERSIONED
+       "Keep every capability above the floor, or only the best one STRINGZILLA_MARCH implies" ON
 )
 
 include(cmake/stringzilla_platform.cmake)
@@ -130,6 +148,19 @@ include(cmake/stringzilla_platform.cmake)
 include(cmake/stringzilla_probes.cmake)
 
 include(cmake/stringzilla_gpu.cmake)
+
+if (STRINGZILLA_MARCH)
+    set(stringzilla_floor_ "${STRINGZILLA_MARCH}")
+else ()
+    set(stringzilla_floor_ "the portable floor")
+endif ()
+get_property(stringzilla_capabilities_enabled_ GLOBAL PROPERTY stringzilla_capabilities_enabled)
+list(JOIN stringzilla_capabilities_enabled_ " " stringzilla_capabilities_summary_)
+if (STRINGZILLA_MULTIVERSIONED)
+    message(STATUS "StringZilla: multiversioned above ${stringzilla_floor_}")
+else ()
+    message(STATUS "StringZilla: monoversioned for ${stringzilla_floor_}: ${stringzilla_capabilities_summary_}")
+endif ()
 
 # Configuration
 include(GNUInstallDirs)
@@ -172,7 +203,7 @@ function (stringzilla_add_gpu_suite target_ language_ source_)
     set_target_properties(
         ${target_}
         PROPERTIES CUDA_ARCHITECTURES "${stringzilla_cuda_resolved_architectures_}"
-                   HIP_ARCHITECTURES "${STRINGZILLA_ROCM_ARCHITECTURES}"
+                   HIP_ARCHITECTURES "${stringzilla_rocm_resolved_architectures_}"
                    HIP_STANDARD 20
     )
     if (MSVC AND language_ STREQUAL "CUDA")
@@ -232,7 +263,7 @@ endif ()
 # The compiled core: `c/stringzilla.c` owns the cross-family exports (versions, capabilities, the kernel finder), each
 # enabled capability's `c/target/<capability>.c` defines that capability's kernels once, and each
 # `c/dispatch/<family>.c` holds its family's lists, dispatch points and finder. Globbed, so a new unit needs no entry;
-# WebAssembly enables its capabilities through STRINGZILLA_TARGET_ARCH, so its units follow the platform, and the Metal
+# WebAssembly enables its capabilities through STRINGZILLA_MARCH, so its units follow the platform, and the Metal
 # unit joins below, with its own frameworks, beside the CUDA and ROCm ones.
 file(
     GLOB stringzilla_globbed_units_ CONFIGURE_DEPENDS
@@ -302,7 +333,16 @@ if (NOT PROJECT_IS_TOP_LEVEL)
     set_target_properties(stringzilla_static PROPERTIES EXCLUDE_FROM_ALL ON)
 endif ()
 if (STRINGZILLA_BUILD_SHARED)
-    stringzilla_add_library(stringzilla_shared shared SHARED ${stringzilla_shim_sources_})
+    # Both compile alike, so the shared library links the archive's objects, except where sanitizers, a monoversioned
+    # build's link-time optimization, or MSVC's debug checks apply to the archive alone.
+    set(shared_sources_ $<TARGET_OBJECTS:stringzilla_static>)
+    if (MSVC
+        OR NOT STRINGZILLA_MULTIVERSIONED
+        OR NOT STRINGZILLA_BUILD_SANITIZERS STREQUAL "off"
+    )
+        set(shared_sources_ ${stringzilla_shim_sources_})
+    endif ()
+    stringzilla_add_library(stringzilla_shared shared SHARED ${shared_sources_})
     set(stringzilla_libraries_ stringzilla_static stringzilla_shared)
 else ()
     set(stringzilla_libraries_ stringzilla_static)
@@ -332,24 +372,13 @@ foreach (library_ IN LISTS stringzilla_libraries_)
     endif ()
 endforeach ()
 
-# A machine profile hands the dispatch units every capability it enables, each GPU vendor's baseline included, so each
-# table keeps only the kernel of the best capability implementing its operation. Its static archive links as bitcode,
-# so the folded tables leave the kernels they skip out of the products' links; any other static archive ships machine
-# code any toolchain, cGo included, can link. MSVC's `/GL` objects hide the symbols `WINDOWS_EXPORT_ALL_SYMBOLS` must
-# list.
-if (STRINGZILLA_PROFILE_CAPABILITIES)
-    set(profile_ ${stringzilla_capabilities_enabled_})
-    if (STRINGZILLA_BUILD_CUDA)
-        math(EXPR profile_ "${profile_} | (1 << 48)" OUTPUT_FORMAT HEXADECIMAL)
-    endif ()
-    if (STRINGZILLA_BUILD_ROCM)
-        math(EXPR profile_ "${profile_} | (1 << 56)" OUTPUT_FORMAT HEXADECIMAL)
-    endif ()
-    if (STRINGZILLA_BUILD_METAL)
-        math(EXPR profile_ "${profile_} | (1 << 60)" OUTPUT_FORMAT HEXADECIMAL)
-    endif ()
+# A monoversioned build folds each dispatch table to the kernel of the best enabled capability implementing its
+# operation. Its static archive links as bitcode, so the folded tables leave the kernels they skip out of the products'
+# links; any other static archive ships machine code any toolchain, cGo included, can link. MSVC's `/GL` objects hide
+# the symbols `WINDOWS_EXPORT_ALL_SYMBOLS` must list.
+if (NOT STRINGZILLA_MULTIVERSIONED)
     foreach (library_ IN LISTS stringzilla_libraries_)
-        target_compile_definitions(${library_} PRIVATE STRINGZILLA_PROFILE_CAPABILITIES=${profile_})
+        target_compile_definitions(${library_} PRIVATE STRINGZILLA_MULTIVERSIONED=0)
     endforeach ()
     include(CheckIPOSupported)
     check_ipo_supported(RESULT stringzilla_ipo_supported_ OUTPUT stringzilla_ipo_support_output_)
@@ -385,8 +414,8 @@ function (stringzilla_add_gpu_unit source_ codes_ definition_)
     )
     stringzilla_set_compiler_flags(stringzilla_${unit_}_ "")
     target_compile_definitions(stringzilla_${unit_}_ PRIVATE "STRINGZILLA_WITH_LIBC=1" "${definition_}")
-    # A machine profile links the host side as bitcode too, but only bitcode the C units' compiler can read back.
-    if (STRINGZILLA_PROFILE_CAPABILITIES
+    # A monoversioned build links the host side as bitcode too, but only bitcode the C units' compiler can read back.
+    if (NOT STRINGZILLA_MULTIVERSIONED
         AND stringzilla_ipo_supported_
         AND CMAKE_CUDA_HOST_COMPILER_ID STREQUAL CMAKE_C_COMPILER_ID
         AND CMAKE_CUDA_HOST_COMPILER_VERSION STREQUAL CMAKE_C_COMPILER_VERSION
@@ -412,7 +441,7 @@ function (stringzilla_add_gpu_unit source_ codes_ definition_)
     endforeach ()
 endfunction ()
 
-if (STRINGZILLA_BUILD_CUDA)
+if (STRINGZILLA_CUDA_ARCH)
     # One unit per tier, compiled only for the codes running it, so no cubin carries another tier's kernels.
     # A capability switched off keeps its unit out, as no code then carries its kernels.
     set(stringzilla_hopper_unit_codes_)
@@ -429,9 +458,11 @@ if (STRINGZILLA_BUILD_CUDA)
             "${stringzilla_target_blackwell_architectures}"
         )
     endif ()
-    stringzilla_add_gpu_unit(
-        c/target/cuda.cu "${stringzilla_cuda_resolved_architectures_}" "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart
+    string(REGEX REPLACE "-(real|virtual)" "" stringzilla_cuda_codes_ "${stringzilla_cuda_resolved_architectures_}")
+    stringzilla_select_gpu_codes(
+        stringzilla_cuda_unit_codes_ "${stringzilla_cuda_resolved_architectures_}" "${stringzilla_cuda_codes_}"
     )
+    stringzilla_add_gpu_unit(c/target/cuda.cu "${stringzilla_cuda_unit_codes_}" "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart)
     stringzilla_add_gpu_unit(
         c/target/hopper.cu "${stringzilla_hopper_unit_codes_}" "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart
     )
@@ -439,13 +470,15 @@ if (STRINGZILLA_BUILD_CUDA)
         c/target/blackwell.cu "${stringzilla_blackwell_unit_codes_}" "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart
     )
 endif ()
-if (STRINGZILLA_BUILD_ROCM)
-    stringzilla_add_gpu_unit(c/target/rocm.hip "${STRINGZILLA_ROCM_ARCHITECTURES}" "STRINGZILLA_ARCH_ROCM_=1" hip::host)
+if (STRINGZILLA_ROCM_ARCH)
+    stringzilla_add_gpu_unit(
+        c/target/rocm.hip "${stringzilla_rocm_resolved_architectures_}" "STRINGZILLA_ARCH_ROCM_=1" hip::host
+    )
 endif ()
-if (STRINGZILLA_BUILD_METAL)
+if (STRINGZILLA_METAL_ARCH)
     # Metal compiles on the device, so its codes name the families the unit serves.
     stringzilla_add_gpu_unit(
-        c/target/metal.c "${STRINGZILLA_METAL_ARCHITECTURES}" "STRINGZILLA_ARCH_METAL_=1" "-framework Metal"
+        c/target/metal.c "${stringzilla_metal_resolved_architectures_}" "STRINGZILLA_ARCH_METAL_=1" "-framework Metal"
         "-framework Foundation"
     )
     target_compile_options(stringzilla_metal_ PRIVATE ${stringzilla_embed_options_})
@@ -651,14 +684,14 @@ foreach (suite_ bench test)
         set(language_ CXX)
         if (vendor_ STREQUAL "cuda")
             set(source_ "${suite_}/cross_cuda.cu")
-            if (STRINGZILLA_BUILD_CUDA)
+            if (STRINGZILLA_CUDA_ARCH)
                 set(language_ CUDA)
             else ()
                 set_source_files_properties(${source_} PROPERTIES LANGUAGE CXX)
             endif ()
         elseif (vendor_ STREQUAL "rocm")
             set(source_ "${suite_}/cross_rocm.hip")
-            if (STRINGZILLA_BUILD_ROCM)
+            if (STRINGZILLA_ROCM_ARCH)
                 set(language_ HIP)
             else ()
                 set_source_files_properties(${source_} PROPERTIES LANGUAGE CXX)
@@ -668,7 +701,7 @@ foreach (suite_ bench test)
         endif ()
         set(unit_ "stringzilla_${vendor_}_${suite_}_")
         stringzilla_add_gpu_suite(${unit_} ${language_} ${source_})
-        if (vendor_ STREQUAL "metal" AND STRINGZILLA_BUILD_METAL)
+        if (vendor_ STREQUAL "metal" AND STRINGZILLA_METAL_ARCH)
             target_compile_definitions(${unit_} PRIVATE STRINGZILLA_ARCH_METAL_=1)
         endif ()
         target_sources(stringzilla_${suite_} PRIVATE $<TARGET_OBJECTS:${unit_}>)

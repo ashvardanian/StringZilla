@@ -52,8 +52,7 @@ def pytest_report_header() -> list[str]:
     return [
         f"- Platform: {platform.platform()}",
         f"- Architecture: {platform.machine()}",
-        f"- Python: {platform.python_version()}",
-        f"- StringZilla: {sz.__version__}",
+        f"- StringZilla: {sz.__version__} from {sz.__file__}",
         f"- Capabilities: {sz.cpu_capabilities_enabled()!r}",
         f"- NumPy: {np.__version__ if numpy_available else 'none'}",
         f"- PyArrow: {pa.__version__ if pyarrow_available else 'none'}",

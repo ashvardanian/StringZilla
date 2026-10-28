@@ -162,7 +162,7 @@ The RVV kernels need Clang 21 or newer, as older Clang hides the 64-bit vector t
 On macOS, prefer Homebrew Clang over Apple Clang; on Windows, MinGW with GCC works alongside MSVC.
 NVCC with CUDA 13 builds the device backends of the engine families, reached by building an engine with the mask `sz_capabilities_enabled_cuda` reports for a device.
 HIP-Clang builds the same sources for AMD GPUs, reached through `sz_capabilities_enabled_rocm`.
-Built with `STRINGZILLA_BUILD_METAL`, the three engines also run on Apple GPUs of the Apple7 family and newer, through the same constructors and verbs.
+Built with `STRINGZILLA_METAL_ARCH`, the three engines also run on Apple GPUs of the Apple7 family and newer, through the same constructors and verbs.
 
 A device round reads memory the device reaches, and strings only as a tape, never through an accessor, which is host code. `strings.h` declares allocation and gathering into tapes; `capabilities.h` declares stream creation, synchronization and release. Their `_best` dispatch points take a mask, with `_serial`, `_cuda`, `_rocm` and `_metal` twins, the GPU ones exported only where built:
 
@@ -187,7 +187,7 @@ sz_strings_span_free(&tape, &unified, stream);
 
 A null stream is the default stream of the default device, and a vendor's devices are only numbered by its producers, like `sz_capabilities_enabled_cuda(ordinal, &caps)`.
 
-StringZilla also __compiles to WebAssembly__: the `wasm32` toolchain targets `wasm32-wasip1`, and `STRINGZILLA_TARGET_ARCH` names the module's one SIMD capability, `serial`, `v128` or the default `v128relaxed`, which enables the `STRINGZILLA_TARGET_V128` and `STRINGZILLA_TARGET_V128RELAXED` kernels listed above.
+StringZilla also __compiles to WebAssembly__: the `wasm32` toolchain targets `wasm32-wasip1`, and `STRINGZILLA_MARCH` names the module's one SIMD capability, `serial`, `v128` or the default `v128relaxed`, which enables the `STRINGZILLA_TARGET_V128` and `STRINGZILLA_TARGET_V128RELAXED` kernels listed above.
 
 ## Types
 
@@ -1260,7 +1260,7 @@ __`STRINGZILLA_TARGET_GOLDMONT`, `STRINGZILLA_TARGET_WESTMERE`, `STRINGZILLA_TAR
 
 __`STRINGZILLA_TARGET_CUDA`, `STRINGZILLA_TARGET_ROCM`, `STRINGZILLA_TARGET_METAL`__:
 
-> Compile the GPU kernels of one vendor: CUDA wherever the unit is compiled as CUDA, by nvcc or by Clang, ROCm wherever it is compiled as HIP, and Metal wherever the build links Metal and Foundation, as `STRINGZILLA_BUILD_METAL` does.
+> Compile the GPU kernels of one vendor: CUDA wherever the unit is compiled as CUDA, by nvcc or by Clang, ROCm wherever it is compiled as HIP, and Metal wherever the build links Metal and Foundation, as `STRINGZILLA_METAL_ARCH` does.
 > The Metal kernels travel as embedded source and compile on the device at first use.
 > Each defaults to 1 wherever its vendor is present, and setting it to 0 keeps the host API while dropping that vendor's kernels.
 
@@ -1285,7 +1285,7 @@ __`STRINGZILLA_WITH_STL`__:
 > When using the C++ interface one can disable implicit conversions from `std::string` to `sz::string_t` and back.
 > If not needed, the `<string>` and `<string_view>` headers will be excluded, reducing compilation time.
 
-__`STRINGZILLA_BUILD_SHARED`, `STRINGZILLA_BUILD_TEST`, `STRINGZILLA_BUILD_BENCH`, `STRINGZILLA_TARGET_ARCH`__ for CMake users:
+__`STRINGZILLA_BUILD_SHARED`, `STRINGZILLA_BUILD_TEST`, `STRINGZILLA_BUILD_BENCH`, `STRINGZILLA_MARCH`__ for CMake users:
 
 > When compiling the tests and benchmarks, you can explicitly set the target hardware architecture.
 > It's synonymous to GCC's `-march` flag and is used to enable/disable the appropriate instruction sets.

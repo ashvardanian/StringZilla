@@ -15,11 +15,11 @@ c/stringzilla.c           Library exports shared by every family — versions, s
 c/target/*.c              Library units, one per CPU capability, each defining that capability's kernels once
 c/dispatch/               Library units, one per kernel family, with its capability lists, dispatch points and finder
 c/dispatch.h              The capability lists' shape and the kernel pick the dispatch units share, internal to the library
-c/target/cuda.cu          The engines' cuda kernels and the CUDA device exports, under STRINGZILLA_BUILD_CUDA
+c/target/cuda.cu          The engines' cuda kernels and the CUDA device exports, under STRINGZILLA_CUDA_ARCH
 c/target/hopper.cu        The engines' hopper kernels, for the codes the build carries from compute capability 9.0
 c/target/blackwell.cu     The engines' blackwell kernels, for the codes the build carries from compute capability 10.0
-c/target/rocm.hip         The engines' rocm kernels and the ROCm device exports, under STRINGZILLA_BUILD_ROCM
-c/target/metal.c          The engines' metal kernels and the Metal device exports, under STRINGZILLA_BUILD_METAL
+c/target/rocm.hip         The engines' rocm kernels and the ROCm device exports, under STRINGZILLA_ROCM_ARCH
+c/target/metal.c          The engines' metal kernels and the Metal device exports, under STRINGZILLA_METAL_ARCH
 c/parallel.h, .c          Tile-parallel runs on each platform's thread pool, compiled into the Python and Node extensions only
 probes/                   ISA probe sources, one per capability mirroring c/target/, each calling one of its kernels as the library compiles it
 test/                     C++ and Python tests — see test/README.md
@@ -194,20 +194,22 @@ ctest --preset release
 
 `cmake --list-presets` shows the rest - `debug`, `cuda`, `rocm`, `metal`, `swift`, the `linux_<arch>` cross builds, and WASI.
 Machine-specific settings, like a CUDA host compiler, belong in an untracked `CMakeUserPresets.json`.
-Without a preset, a configure builds the libraries alone, as every binding's build does: `-D STRINGZILLA_BUILD_TEST=1` and `-D STRINGZILLA_BUILD_BENCH=1` add the suites, and `-D STRINGZILLA_BUILD_CUDA=1`, `_ROCM` or `_METAL` the GPUs.
+Without a preset, a configure builds the libraries alone, as every binding's build does: `-D STRINGZILLA_BUILD_TEST=1` and `-D STRINGZILLA_BUILD_BENCH=1` add the suites, and `-D STRINGZILLA_CUDA_ARCH=all`, `STRINGZILLA_ROCM_ARCH` or `STRINGZILLA_METAL_ARCH` the GPUs.
 
 Every binding builds the libraries through `CMakeLists.txt`, so CMake is the one place that probes which capabilities the toolchain builds.
 Each capability's probe, `probes/<capability>.c`, calls one of its kernels, compiled header-only at the baseline flags as the library compiles it.
 Each capability's headers scope its kernels with `#pragma clang attribute` or `#pragma GCC target`, on every platform.
 LASX and POWER9 scope per function only under GCC 15 or newer, whose target pragma defines `__loongarch_asx` and `__POWER9_VECTOR__` inside the region, so `types.h` opens `lasxintrin.h` and `altivec.h` there; Clang's headers stay closed without `-mlasx` or `-mcpu=power9`, so a Clang build leaves both off.
 The libraries compile every capability the toolchain builds and dispatch by runtime detection, so one artifact runs on any CPU of its architecture.
-`-D STRINGZILLA_TARGET_<CAPABILITY>=0` drops a capability, and `=1` keeps one only where its probe compiles.
+A monoversioned build, `-D STRINGZILLA_MULTIVERSIONED=OFF`, keeps only the capabilities whose predefined macros `STRINGZILLA_MARCH` implies, as `probes/implied.c` reads them through `types.h`, and folds each dispatch table to its best kernel.
+The `xeon4_hopper`, `xeon6_blackwell`, `venice_mi450`, `grace_hopper` and `vera_rubin` presets build that way for one machine and its one GPU code, spelling every capability as 1 or 0 rather than trusting the macros.
+`-D STRINGZILLA_TARGET_<CAPABILITY>=0` drops a capability, and `=1` keeps one only where its probe compiles, in a monoversioned build vouching for what no compiler macro reports.
 Units calling capability kernels link `stringzilla::cpu_capabilities_compiled`, the build-tree twin of `sz_capabilities_compiled_cpu()`: every CPU capability the toolchain compiles.
 `stringzilla::header` carries no verdict, so a header-only consumer enables what its own flags name, and the runtime mask picks the compiled capabilities the CPU runs.
 Each capability's flags for a unit compiled whole for it are cached as `stringzilla_target_<capability>_flags`.
 
 The baseline is each architecture's floor: `-march=x86-64`, `-march=armv8-a`, `-march=rv64gc`, `-mcpu=power8`, and `-march=loongarch64`.
-WebAssembly is the exception, as an engine validates a module whole, so its one capability, `STRINGZILLA_TARGET_ARCH`, reaches every unit.
+WebAssembly is the exception, as an engine validates a module whole, so its one capability, `STRINGZILLA_MARCH`, reaches every unit.
 The RVV kernels need Clang 21 or newer; an older compiler probes those capabilities as 0.
 The `linux_arm64` and `linux_riscv64` presets cross-compile with Clang, through `cmake/toolchain-<arch>-llvm.cmake`, and `linux_ppc64le` and `linux_loongarch64` with GCC 15, through `cmake/toolchain-<arch>-gnu.cmake`, as only GCC scopes POWER9 and LASX per function; each runs the tests under QEMU.
 Each toolchain emulates the richest CPU by default, so the tests reach every capability, and its `<ARCH>_QEMU_CPU` variable, like `-D PPC_QEMU_CPU=power8`, runs them on the floor instead.
@@ -259,7 +261,7 @@ Kernel cross-checks are named `test_<family>_<tier>_<capability>`, so `STRINGZIL
 
 There is no separate SIMD-disabled target.
 To get a build with SIMD dispatch narrowed, pass `-D STRINGZILLA_TARGET_<CAPABILITY>=0` at configure time for each capability to leave out, for example `-D STRINGZILLA_TARGET_SKYLAKE=0 -D STRINGZILLA_TARGET_ICELAKE=0` for x86 without AVX-512, then rebuild `stringzilla_test` against that configuration.
-`-D STRINGZILLA_TARGET_ARCH=<name>`, like `native`, tunes the libraries for one CPU in place of their portable floor, without narrowing the capabilities.
+`-D STRINGZILLA_MARCH=<name>`, like `x86-64-v3` or `native`, raises the libraries' floor in place of the portable one, without narrowing the capabilities.
 
 Note, that Address Sanitizers have a hard time with masked load and store instructions in AVX-512 and SVE.
 
@@ -408,7 +410,7 @@ Each capability's kernels, like `sz_find_haswell`, are timed against the serial 
 The header-only twin has no dispatch points to time, but it reaches the private helpers, like the SIMD sorts of pgrams and the Levenshtein and overlap steps.
 
 The same `stringzilla_bench` runs CPU rows once and then all selected GPU backends enabled by
-`STRINGZILLA_BUILD_CUDA`, `STRINGZILLA_BUILD_ROCM`, and `STRINGZILLA_BUILD_METAL`.
+`STRINGZILLA_CUDA_ARCH`, `STRINGZILLA_ROCM_ARCH`, and `STRINGZILLA_METAL_ARCH`.
 CUDA and ROCm can coexist in one build. `STRINGWARS_DEVICES=cuda:0,rocm:1` selects vendor-qualified
 ordinals; unset, each available compiled vendor runs device zero. Explicit unavailable devices are errors.
 The tests follow the same rule with `stringzilla_test` and `STRINGZILLA_DEVICES`.
@@ -476,13 +478,13 @@ On x86_64, you can use the following commands to compile for Sandy Bridge, Haswe
 
 ```bash
 cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCH=1 \
-    -D STRINGZILLA_TARGET_ARCH="ivybridge" -B build_release/ivybridge && \
+    -D STRINGZILLA_MARCH="ivybridge" -B build_release/ivybridge && \
     cmake --build build_release/ivybridge --config Release --parallel
 cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCH=1 \
-    -D STRINGZILLA_TARGET_ARCH="haswell" -B build_release/haswell && \
+    -D STRINGZILLA_MARCH="haswell" -B build_release/haswell && \
     cmake --build build_release/haswell --config Release --parallel
 cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCH=1 \
-    -D STRINGZILLA_TARGET_ARCH="sapphirerapids" -B build_release/sapphirerapids && \
+    -D STRINGZILLA_MARCH="sapphirerapids" -B build_release/sapphirerapids && \
     cmake --build build_release/sapphirerapids --config Release --parallel
 ```
 
@@ -573,7 +575,7 @@ sudo docker run -it --rm -v "$(pwd)":/workspace/StringZilla amazonlinux:2023 bas
 cd /workspace/StringZilla
 yum install -y make cmake3 gcc g++
 cmake3 -D STRINGZILLA_BUILD_TEST=1 -D CMAKE_BUILD_TYPE=Debug \
-    -D CMAKE_CXX_COMPILER=g++ -D CMAKE_C_COMPILER=gcc -D STRINGZILLA_TARGET_ARCH="ivybridge" \
+    -D CMAKE_CXX_COMPILER=g++ -D CMAKE_C_COMPILER=gcc -D STRINGZILLA_MARCH="ivybridge" \
     -B build_debug
 cmake3 --build build_debug --config Debug --target stringzilla_test
 build_debug/stringzilla_test
@@ -640,22 +642,24 @@ cmake --build build_wasm --target stringzilla_test
 ctest --test-dir build_wasm # runs each .wasm under Wasmtime
 ```
 
-A module carries one SIMD capability, `STRINGZILLA_TARGET_ARCH`, so the relaxed-SIMD `v128relaxed` build above is a separate artifact from the strict `v128` one and the SIMD-free `serial` one.
-Pass `-DSTRINGZILLA_TARGET_ARCH=v128` or `=serial`, or set the environment variable, for the others; CMake turns the capability into `-msimd128` and `-mrelaxed-simd` for every unit, so no other opcode reaches the binary.
+A module carries one SIMD capability, `STRINGZILLA_MARCH`, so the relaxed-SIMD `v128relaxed` build above is a separate artifact from the strict `v128` one and the SIMD-free `serial` one.
+Pass `-DSTRINGZILLA_MARCH=v128` or `=serial`, or set the environment variable, for the others; CMake turns the capability into `-msimd128` and `-mrelaxed-simd` for every unit, so no other opcode reaches the binary.
 Shared libraries stay off in both configurations, since WASI has no dynamic loader.
 
 ## CUDA
 
-`STRINGZILLA_BUILD_CUDA` adds `c/target/cuda.cu` to `stringzilla_static` and `stringzilla_shared`: the engines' `cuda` kernels, compiled from each family's `simt.cuh`, and the CUDA device exports: the producers `sz_device_count_cuda`, `sz_capabilities_detected_cuda` and `sz_stream_init_cuda`, and the twins behind the `_best` dispatch points in `strings.h`, like `sz_allocator_init_unified_cuda` and `sz_strings_to_tape_cuda`.
+`STRINGZILLA_CUDA_ARCH` adds `c/target/cuda.cu` to `stringzilla_static` and `stringzilla_shared`: the engines' `cuda` kernels, compiled from each family's `simt.cuh`, and the CUDA device exports: the producers `sz_device_count_cuda`, `sz_capabilities_detected_cuda` and `sz_stream_init_cuda`, and the twins behind the `_best` dispatch points in `strings.h`, like `sz_allocator_init_unified_cuda` and `sz_strings_to_tape_cuda`.
+`STRINGZILLA_CUDA_ARCH=all` compiles each GPU unit once, as PTX at the lowest code its capability needs: `compute_75` for the CUDA baseline, `compute_90` for Hopper's clusters, and `compute_100` for Blackwell's cluster launch control.
+A named code, like `100f`, or `native` compiles as SASS alone.
 `stringzilla_test` includes CUDA checks from `test/cross_cuda.cu` alongside the CPU checks and other enabled vendors:
 
 ```sh
-cmake -D CMAKE_BUILD_TYPE=Debug -D STRINGZILLA_BUILD_TEST=1 -D STRINGZILLA_BUILD_CUDA=1 -B build_debug
+cmake -D CMAKE_BUILD_TYPE=Debug -D STRINGZILLA_BUILD_TEST=1 -D STRINGZILLA_CUDA_ARCH=native -B build_debug
 cmake --build build_debug --config Debug --target stringzilla_test --parallel
 ```
 
 ```sh
-cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_TEST=1 -D STRINGZILLA_BUILD_CUDA=1 -B build_release
+cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_TEST=1 -D STRINGZILLA_CUDA_ARCH=native -B build_release
 cmake --build build_release --config Release --target stringzilla_test --parallel
 ```
 
@@ -666,10 +670,10 @@ cuda-memcheck ./build_debug/stringzilla_test
 
 ## Metal and ROCm
 
-`STRINGZILLA_BUILD_METAL` adds `c/target/metal.c` to the same libraries on Apple platforms: the engines' `metal` kernels, whose `metal.metal` shaders travel as embedded source and compile on the device at first use, and the Metal device exports, the producers and the `_metal` twins behind the `strings.h` dispatch points, like `sz_stream_synchronize_metal`.
-`STRINGZILLA_BUILD_ROCM` adds `c/target/rocm.hip` the same way, with the `rocm` kernels and the `sz_rocm_*` device exports, and every vendor asked for sits side by side in one library.
+`STRINGZILLA_METAL_ARCH` adds `c/target/metal.c` to the same libraries on Apple platforms: the engines' `metal` kernels, whose `metal.metal` shaders travel as embedded source and compile on the device at first use, and the Metal device exports, the producers and the `_metal` twins behind the `strings.h` dispatch points, like `sz_stream_synchronize_metal`.
+`STRINGZILLA_ROCM_ARCH` adds `c/target/rocm.hip` the same way, with the `rocm` kernels and the `sz_rocm_*` device exports, and every vendor asked for sits side by side in one library.
 
-The Metal backends of all three engine families build into `stringzilla_test` on Apple platforms, which needs `STRINGZILLA_BUILD_METAL` on and checks them against the serial answers:
+The Metal backends of all three engine families build into `stringzilla_test` on Apple platforms, which needs `STRINGZILLA_METAL_ARCH` set and checks them against the serial answers:
 
 ```sh
 cmake --preset metal
@@ -677,8 +681,8 @@ cmake --build --preset metal
 ctest --preset metal
 ```
 
-`STRINGZILLA_BUILD_ROCM` adds the ROCm checks from `test/cross_rocm.hip` to the same `stringzilla_test`; CUDA and ROCm share `test/cross_simt.cuh`.
-It builds beside the CUDA test when both options are on:
+`STRINGZILLA_ROCM_ARCH` adds the ROCm checks from `test/cross_rocm.hip` to the same `stringzilla_test`; CUDA and ROCm share `test/cross_simt.cuh`.
+It builds beside the CUDA test when both are set:
 
 ```sh
 cmake --preset rocm
@@ -703,8 +707,8 @@ CMake options pass through `-C`:
 
 ```bash
 uv pip install . -C cmake.build-type=Debug                                               # debug asserts on
-uv pip install . -C cmake.define.STRINGZILLA_BUILD_CUDA=ON                               # CUDA backends too
-STRINGZILLA_TARGET_ARCH=native uv pip install .                                           # tuned for this machine
+uv pip install . -C cmake.define.STRINGZILLA_CUDA_ARCH=all                               # CUDA backends too
+STRINGZILLA_MARCH=native uv pip install .                                                # tuned for this machine
 ```
 
 To check the installed version and capabilities, try:
@@ -857,8 +861,8 @@ Other options include:
 - `metal`: the Metal backend for Apple GPUs, which implies `std`.
 
 Each GPU feature lets `Stream::new` make a stream on that vendor's devices, which every engine constructor takes.
-`build.rs` builds `stringzilla_static` through CMake, with every capability the toolchain can emit, picked per call by the capability mask, and each GPU feature switches on its `STRINGZILLA_BUILD_*` option.
-It forwards `STRINGZILLA_TARGET_ARCH`, the `STRINGZILLA_TARGET_<CAPABILITY>` overrides and the GPU architecture lists from the environment, rebuilding when one changes.
+`build.rs` builds `stringzilla_static` through CMake, with every capability the toolchain can emit, picked per call by the capability mask, and each GPU feature sets its `STRINGZILLA_*_ARCH` to `all`, or to the code the environment names.
+It forwards `STRINGZILLA_MARCH`, `STRINGZILLA_MULTIVERSIONED` and the `STRINGZILLA_TARGET_<CAPABILITY>` overrides from the environment, rebuilding when one changes.
 `STRINGZILLA_LIBRARY_DIR=<directory>` links an archive CMake already built there instead:
 
 ```bash

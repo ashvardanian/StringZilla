@@ -16,8 +16,8 @@ static sz_capability_kernels_t const *sz_bytesum_capabilities(void) {
                    sz_cap_sve2_k * STRINGZILLA_TARGET_SVE2 | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV |
                    sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
                    sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
-                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
-                  STRINGZILLA_PROFILE_CAPABILITIES
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
+                  !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -79,8 +79,8 @@ static sz_capability_kernels_t const *sz_hash_capabilities(void) {
                    sz_cap_rvv_k * STRINGZILLA_TARGET_RVV | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO |
                    sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
                    sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
-                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
-                  STRINGZILLA_PROFILE_CAPABILITIES
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
+                  !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -137,8 +137,8 @@ static sz_capability_kernels_t const *sz_hash_capabilities(void) {
 static sz_capability_kernels_t const *sz_hash_strings_capabilities(void) {
     enum {
         above_k = (sz_cap_serial_k | sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE |
-                   sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES) &
-                  STRINGZILLA_PROFILE_CAPABILITIES
+                   sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES) *
+                  !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -167,8 +167,8 @@ static sz_capability_kernels_t const *sz_hash_multiseed_capabilities(void) {
                    sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES |
                    sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO | sz_cap_v128_k * STRINGZILLA_TARGET_V128 |
                    sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
-                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
-                  STRINGZILLA_PROFILE_CAPABILITIES
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
+                  !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -218,8 +218,8 @@ static sz_capability_kernels_t const *sz_fill_random_capabilities(void) {
                    sz_cap_rvv_k * STRINGZILLA_TARGET_RVV | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO |
                    sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
                    sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
-                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
-                  STRINGZILLA_PROFILE_CAPABILITIES
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
+                  !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -281,8 +281,8 @@ static sz_capability_kernels_t const *sz_hash_state_init_capabilities(void) {
                    sz_cap_rvv_k * STRINGZILLA_TARGET_RVV | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO |
                    sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
                    sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
-                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
-                  STRINGZILLA_PROFILE_CAPABILITIES
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
+                  !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -346,8 +346,8 @@ static sz_capability_kernels_t const *sz_hash_state_update_capabilities(void) {
                    sz_cap_rvv_k * STRINGZILLA_TARGET_RVV | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO |
                    sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
                    sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
-                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
-                  STRINGZILLA_PROFILE_CAPABILITIES
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
+                  !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -412,8 +412,8 @@ static sz_capability_kernels_t const *sz_hash_state_digest_capabilities(void) {
                    sz_cap_rvv_k * STRINGZILLA_TARGET_RVV | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO |
                    sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
                    sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
-                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
-                  STRINGZILLA_PROFILE_CAPABILITIES
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
+                  !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -478,8 +478,8 @@ static sz_capability_kernels_t const *sz_sha256_state_init_capabilities(void) {
                    sz_cap_neonsha_k * STRINGZILLA_TARGET_NEONSHA | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV |
                    sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO | sz_cap_v128_k * STRINGZILLA_TARGET_V128 |
                    sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
-                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
-                  STRINGZILLA_PROFILE_CAPABILITIES
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
+                  !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -527,8 +527,8 @@ static sz_capability_kernels_t const *sz_sha256_state_update_capabilities(void) 
                    sz_cap_neonsha_k * STRINGZILLA_TARGET_NEONSHA | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV |
                    sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO | sz_cap_v128_k * STRINGZILLA_TARGET_V128 |
                    sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
-                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
-                  STRINGZILLA_PROFILE_CAPABILITIES
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
+                  !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -578,8 +578,8 @@ static sz_capability_kernels_t const *sz_sha256_state_digest_capabilities(void) 
                    sz_cap_neonsha_k * STRINGZILLA_TARGET_NEONSHA | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV |
                    sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO | sz_cap_v128_k * STRINGZILLA_TARGET_V128 |
                    sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
-                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) &
-                  STRINGZILLA_PROFILE_CAPABILITIES
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
+                  !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -627,8 +627,8 @@ static sz_capability_kernels_t const *sz_sha256_multistate_update_capabilities(v
     enum {
         above_k = (sz_cap_serial_k | sz_cap_goldmont_k * STRINGZILLA_TARGET_GOLDMONT |
                    sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL | sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE |
-                   sz_cap_neonsha_k * STRINGZILLA_TARGET_NEONSHA | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO) &
-                  STRINGZILLA_PROFILE_CAPABILITIES
+                   sz_cap_neonsha_k * STRINGZILLA_TARGET_NEONSHA | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO) *
+                  !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -655,7 +655,7 @@ static sz_capability_kernels_t const *sz_sha256_multistate_update_capabilities(v
                                                 : (sz_kernel_punned_t)&sz_sha256_multistate_update_rvvcrypto,
 #endif
     };
-    enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
+    enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_CUDA
@@ -663,7 +663,7 @@ static sz_capability_kernels_t const *sz_sha256_multistate_update_capabilities(v
                                                         : (sz_kernel_punned_t)&sz_sha256_multistate_update_cuda,
 #endif
     };
-    enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
+    enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_ROCM
@@ -687,8 +687,8 @@ static sz_capability_kernels_t const *sz_sha256_multistate_digest_capabilities(v
     enum {
         above_k = (sz_cap_serial_k | sz_cap_goldmont_k * STRINGZILLA_TARGET_GOLDMONT |
                    sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL | sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE |
-                   sz_cap_neonsha_k * STRINGZILLA_TARGET_NEONSHA | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO) &
-                  STRINGZILLA_PROFILE_CAPABILITIES
+                   sz_cap_neonsha_k * STRINGZILLA_TARGET_NEONSHA | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO) *
+                  !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -715,7 +715,7 @@ static sz_capability_kernels_t const *sz_sha256_multistate_digest_capabilities(v
                                                 : (sz_kernel_punned_t)&sz_sha256_multistate_digest_rvvcrypto,
 #endif
     };
-    enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
+    enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_CUDA
@@ -723,7 +723,7 @@ static sz_capability_kernels_t const *sz_sha256_multistate_digest_capabilities(v
                                                         : (sz_kernel_punned_t)&sz_sha256_multistate_digest_cuda,
 #endif
     };
-    enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) & STRINGZILLA_PROFILE_CAPABILITIES) >> 48 };
+    enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_ROCM

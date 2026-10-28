@@ -1,7 +1,7 @@
 # GPU languages and architectures, and the GPU capability rows.
 
 # Enable CUDA if requested
-if (STRINGZILLA_BUILD_CUDA)
+if (STRINGZILLA_CUDA_ARCH)
     enable_language(CUDA)
     if (CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 13)
         message(FATAL_ERROR "StringZilla needs CUDA 13 or newer, found ${CMAKE_CUDA_COMPILER_VERSION}")
@@ -9,12 +9,6 @@ if (STRINGZILLA_BUILD_CUDA)
     set(CMAKE_CUDA_STANDARD 20)
     set(CMAKE_CUDA_STANDARD_REQUIRED ON)
     set(CMAKE_CUDA_EXTENSIONS OFF)
-    # One cubin per device family, Hopper's arch-locked `90a` and family-wide `f` cubins from Blackwell on, plus a PTX
-    # tail; every repo carries the same list.
-    set(STRINGZILLA_CUDA_ARCHITECTURES
-        "75-real;80-real;89-real;90a-real;100f-real;120f-real;80-virtual"
-        CACHE STRING "Codes every CUDA target carries; override to match the machine at hand"
-    )
     set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
     find_package(CUDAToolkit REQUIRED)
     # NVCC's host compiler takes the tuning flags too, where the pair accepts them.
@@ -25,8 +19,10 @@ if (STRINGZILLA_BUILD_CUDA)
             add_compile_options("$<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=${stringzilla_host_arch_flags_}>")
         endif ()
     endif ()
-    # "native" maps each visible GPU to the code its capability rows need, family suffix included, where CMake's own
-    # resolution would drop it; "all" and "all-major" stand for the lists CMake resolved them to.
+    # `all` is the release set, of which each unit compiles only the lowest code its capability row lists, as PTX, so it
+    # runs on every later GPU: the CUDA baseline at `compute_75`, clusters at `compute_90`, and cluster launch control at
+    # `compute_100`. `native` maps each visible GPU to the code its capability rows need, family suffix included, where
+    # CMake's own resolution would drop it. A native or named code compiles as SASS alone.
     set(stringzilla_cuda_native_codes_
         75-real=75-real
         80-real=80-real
@@ -39,33 +35,32 @@ if (STRINGZILLA_BUILD_CUDA)
         120-real=120f-real
         121-real=121f-real
     )
-    set(stringzilla_cuda_resolved_architectures_)
-    foreach (code_ IN LISTS STRINGZILLA_CUDA_ARCHITECTURES)
-        if (code_ STREQUAL "native")
-            foreach (visible_ IN LISTS CMAKE_CUDA_ARCHITECTURES_NATIVE)
-                set(native_code_)
-                foreach (pair_ IN LISTS stringzilla_cuda_native_codes_)
-                    if (pair_ MATCHES "^${visible_}=(.+)$")
-                        set(native_code_ ${CMAKE_MATCH_1})
-                    endif ()
-                endforeach ()
-                if (NOT native_code_)
-                    message(
-                        FATAL_ERROR
-                            "STRINGZILLA_CUDA_ARCHITECTURES=native has no code for the visible ${visible_} GPU; "
-                            "name its code instead"
-                    )
+    if (STRINGZILLA_CUDA_ARCH STREQUAL "all")
+        set(stringzilla_cuda_resolved_architectures_ 75-virtual 90-virtual 100-virtual)
+    elseif (STRINGZILLA_CUDA_ARCH STREQUAL "native")
+        set(stringzilla_cuda_resolved_architectures_)
+        foreach (visible_ IN LISTS CMAKE_CUDA_ARCHITECTURES_NATIVE)
+            set(native_code_)
+            foreach (pair_ IN LISTS stringzilla_cuda_native_codes_)
+                if (pair_ MATCHES "^${visible_}=(.+)$")
+                    set(native_code_ ${CMAKE_MATCH_1})
                 endif ()
-                list(APPEND stringzilla_cuda_resolved_architectures_ ${native_code_})
             endforeach ()
-        elseif (code_ STREQUAL "all")
-            list(APPEND stringzilla_cuda_resolved_architectures_ ${CMAKE_CUDA_ARCHITECTURES_ALL})
-        elseif (code_ STREQUAL "all-major")
-            list(APPEND stringzilla_cuda_resolved_architectures_ ${CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR})
-        else ()
-            list(APPEND stringzilla_cuda_resolved_architectures_ ${code_})
-        endif ()
-    endforeach ()
+            if (NOT native_code_)
+                message(
+                    FATAL_ERROR
+                        "STRINGZILLA_CUDA_ARCH=native has no code for the visible ${visible_} GPU; name its code instead"
+                )
+            endif ()
+            list(APPEND stringzilla_cuda_resolved_architectures_ ${native_code_})
+        endforeach ()
+    elseif (STRINGZILLA_CUDA_ARCH MATCHES "^[0-9]+[af]?$")
+        set(stringzilla_cuda_resolved_architectures_ ${STRINGZILLA_CUDA_ARCH}-real)
+    else ()
+        message(
+            FATAL_ERROR "STRINGZILLA_CUDA_ARCH takes all, native or one code like 100f, not `${STRINGZILLA_CUDA_ARCH}`"
+        )
+    endif ()
     if (CMAKE_VERSION VERSION_LESS 3.31 AND stringzilla_cuda_resolved_architectures_ MATCHES "1[0-9][0-9][af]")
         message(FATAL_ERROR "Three-digit \"a\" and \"f\" CUDA codes need CMake 3.31, found ${CMAKE_VERSION}")
     endif ()
@@ -75,7 +70,6 @@ if (STRINGZILLA_BUILD_CUDA)
     # Clusters and their distributed shared memory: H100, H200, GH200, and every GPU since.
     stringzilla_add_gpu_capability(
         hopper STRINGZILLA_TARGET_HOPPER
-        BIT 51
         CUDA_ARCHITECTURES
             90
             90a
@@ -99,7 +93,6 @@ if (STRINGZILLA_BUILD_CUDA)
     # GPU since.
     stringzilla_add_gpu_capability(
         blackwell STRINGZILLA_TARGET_BLACKWELL
-        BIT 52
         CUDA_ARCHITECTURES
             100
             100a
@@ -126,21 +119,26 @@ if (STRINGZILLA_BUILD_CUDA)
 endif ()
 
 # HIP comes on before any target, as the libraries carry the ROCm unit. The package lands `hip_DIR` in the cache, where
-# the Rust `rocm` feature finds the runtime to link.
-if (STRINGZILLA_BUILD_ROCM)
+# the Rust `rocm` feature finds the runtime to link. One code object per listed target; `native` leaves CMake to list
+# the visible GPUs through `rocm_agent_enumerator`.
+if (STRINGZILLA_ROCM_ARCH)
+    if (STRINGZILLA_ROCM_ARCH STREQUAL "all")
+        set(CMAKE_HIP_ARCHITECTURES gfx942 gfx950 gfx1250 gfx1251)
+    elseif (NOT STRINGZILLA_ROCM_ARCH STREQUAL "native")
+        set(CMAKE_HIP_ARCHITECTURES ${STRINGZILLA_ROCM_ARCH})
+    endif ()
     enable_language(HIP)
-    set(STRINGZILLA_ROCM_ARCHITECTURES
-        "gfx942;gfx950;gfx1250;gfx1251"
-        CACHE STRING "AMD targets the ROCm unit and test carry; override to match the machine at hand"
-    )
-    set(CMAKE_HIP_ARCHITECTURES "${STRINGZILLA_ROCM_ARCHITECTURES}")
-    find_package(hip REQUIRED)
+    set(stringzilla_rocm_resolved_architectures_ ${CMAKE_HIP_ARCHITECTURES})
+    find_package(hip REQUIRED GLOBAL)
 endif ()
 
-if (STRINGZILLA_BUILD_METAL AND NOT APPLE)
-    message(FATAL_ERROR "STRINGZILLA_BUILD_METAL needs an Apple platform")
+# Metal compiles on the device, so the families only name the ones the unit serves.
+if (STRINGZILLA_METAL_ARCH AND NOT APPLE)
+    message(FATAL_ERROR "STRINGZILLA_METAL_ARCH needs an Apple platform")
+elseif (STRINGZILLA_METAL_ARCH STREQUAL "native")
+    message(FATAL_ERROR "STRINGZILLA_METAL_ARCH takes all or one family like apple9, as Metal compiles on the device")
+elseif (STRINGZILLA_METAL_ARCH STREQUAL "all")
+    set(stringzilla_metal_resolved_architectures_ apple7 apple9 apple10)
+elseif (STRINGZILLA_METAL_ARCH)
+    set(stringzilla_metal_resolved_architectures_ ${STRINGZILLA_METAL_ARCH})
 endif ()
-set(STRINGZILLA_METAL_ARCHITECTURES
-    "apple7;apple9;apple10"
-    CACHE STRING "Apple GPU families the Metal unit serves"
-)

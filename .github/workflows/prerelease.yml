@@ -87,15 +87,9 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Log hardware capabilities
-        run: |
-          lscpu
-          echo ""
-          echo "CPU Info:"
-          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
+        run: lscpu
 
         # C/C++
-        # If the compilation fails, we want to log the compilation commands in addition to
-        # the standard output.
       - name: Install dependencies
         run: |
           sudo apt update
@@ -105,17 +99,7 @@ jobs:
         run: |
           cmake --preset release -D CMAKE_C_COMPILER="$CC" -D CMAKE_CXX_COMPILER="$CXX"
 
-          cmake --build --preset release > build_release/logs.txt 2>&1 || {
-            echo "Compilation failed. Here are the logs:"
-            cat build_release/logs.txt
-            echo "The original compilation commands:"
-            cat build_release/compile_commands.json
-            echo "GCC Version:"
-            gcc-13 --version
-            echo "G++ Version:"
-            g++-13 --version
-            exit 1
-          }
+          cmake --build --preset release > build_release/logs.txt 2>&1 || { cat build_release/logs.txt; exit 1; }
       - name: Test C++
         run: ctest --preset release
       - name: Build static library for Go binding
@@ -141,15 +125,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install --group test --group test-oracles .
-      - name: Log Python capabilities
-        run: |
-          python - << 'PY'
-          import platform
-          import stringzilla as sz
-          print("platform:", platform.platform())
-          print("machine:", platform.machine(), "processor:", platform.processor())
-          print("capabilities:", repr(sz.cpu_capabilities_enabled()))
-          PY
       - name: Test Python
         run: python -X faulthandler -m pytest -x
 
@@ -190,11 +165,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Log hardware capabilities
-        run: |
-          lscpu
-          echo ""
-          echo "CPU Info:"
-          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
+        run: lscpu
 
         # C/C++
       - name: Install dependencies
@@ -206,17 +177,7 @@ jobs:
         run: |
           cmake --preset release -D CMAKE_C_COMPILER="$CC" -D CMAKE_CXX_COMPILER="$CXX"
 
-          cmake --build --preset release > build_release/logs.txt 2>&1 || {
-            echo "Compilation failed. Here are the logs:"
-            cat build_release/logs.txt
-            echo "The original compilation commands:"
-            cat build_release/compile_commands.json
-            echo "Clang Version:"
-            clang-18 --version
-            echo "Clang++ Version:"
-            clang++-18 --version
-            exit 1
-          }
+          cmake --build --preset release > build_release/logs.txt 2>&1 || { cat build_release/logs.txt; exit 1; }
       - name: Test C++
         run: ctest --preset release
       - name: Build static library for Go binding
@@ -242,15 +203,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install --group test --group test-oracles .
-      - name: Log Python capabilities
-        run: |
-          python - << 'PY'
-          import platform
-          import stringzilla as sz
-          print("platform:", platform.platform())
-          print("machine:", platform.machine(), "processor:", platform.processor())
-          print("capabilities:", repr(sz.cpu_capabilities_enabled()))
-          PY
       - name: Test Python
         run: python -X faulthandler -m pytest -x
 
@@ -326,9 +278,6 @@ jobs:
         run: |
           lscpu
           echo ""
-          echo "CPU Info:"
-          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
-          echo ""
           echo "GPU Info:"
           nvcc --version
           nvidia-smi 2>/dev/null || echo "nvidia-smi not available, as expected on a GPU-less runner"
@@ -350,17 +299,7 @@ jobs:
           cmake --preset cuda \
             -D CMAKE_C_COMPILER=clang-22 -D CMAKE_CXX_COMPILER=clang++-22 -D CMAKE_CUDA_HOST_COMPILER=clang++-22
 
-          cmake --build --preset cuda > build_cuda/logs.txt 2>&1 || {
-            echo "Compilation failed. Here are the logs:"
-            cat build_cuda/logs.txt
-            echo "The original compilation commands:"
-            cat build_cuda/compile_commands.json
-            echo "CUDA Version:"
-            nvcc --version
-            echo "Clang++ Version:"
-            clang++-22 --version
-            exit 1
-          }
+          cmake --build --preset cuda > build_cuda/logs.txt 2>&1 || { cat build_cuda/logs.txt; exit 1; }
       - name: Test C++
         run: ctest --preset cuda -R '^stringzilla_test$'
 
@@ -398,7 +337,7 @@ jobs:
   test_ubuntu_rocm:
     name: Ubuntu ROCm
     runs-on: ubuntu-26.04
-    container: rocm/dev-ubuntu-26.04:latest
+    container: rocm/dev-ubuntu-26.04:10.0.0-full
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -449,7 +388,7 @@ jobs:
   build_rust_rocm:
     name: Build Rust with ROCm
     runs-on: ubuntu-26.04
-    container: rocm/dev-ubuntu-26.04:latest
+    container: rocm/dev-ubuntu-26.04:10.0.0-full
     steps:
       - name: Install dependencies
         run: apt-get update && apt-get install -y cmake make git curl
@@ -485,11 +424,7 @@ jobs:
           name: swift-artifactbundle
 
       - name: Log hardware capabilities
-        run: |
-          lscpu || true
-          echo ""
-          echo "CPU Info:"
-          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
+        run: lscpu || true
 
       - name: Test Swift
         run: swift test
@@ -621,14 +556,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Log hardware capabilities
-        run: |
-          echo "Cross-Compilation: ${{ matrix.arch }} → ${{ matrix.target_arch }}"
-          lscpu
-          echo ""
-          echo "CPU Info:"
-          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
-
       - name: Install cross-compilation toolchain
         run: |
           sudo apt-get update
@@ -667,11 +594,11 @@ jobs:
   # Run the cross-compiled (static) test binaries under QEMU user-mode. Build-and-verify alone never exercised
   # the SIMD kernels. Each row is its own pass/fail status; RVV/SVE are vector-length-agnostic, so the RISC-V
   # binary built once above is swept across VLEN 128/256/512 here (`-cpu rv64,v=true,vlen=N`) with no rebuild —
-  # a single width under-tests VLA code.
+  # a single width under-tests VLA code. The 256 row runs `max`, so `rvvcrypto` dispatches too.
   test_cross_qemu:
     name: QEMU Tests ${{ matrix.target_arch }}${{ matrix.variant }}
     needs: test_cross_linux
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
@@ -680,43 +607,43 @@ jobs:
           # (`sve=off`, else dynamic dispatch always prefers SVE2 and NEON is never exercised) plus SVE at
           # 128/256/512-bit (`sve-max-vq` = VL/128).
           - target_arch: aarch64
-            qemu: qemu-aarch64-static
+            qemu: qemu-aarch64
             qemu_cpu: "max,sve=off"
             variant: " @ neon"
           - target_arch: aarch64
-            qemu: qemu-aarch64-static
+            qemu: qemu-aarch64
             qemu_cpu: "max,sve-max-vq=1"
             variant: " @ sve=128"
           - target_arch: aarch64
-            qemu: qemu-aarch64-static
+            qemu: qemu-aarch64
             qemu_cpu: "max,sve-max-vq=2"
             variant: " @ sve=256"
           - target_arch: aarch64
-            qemu: qemu-aarch64-static
+            qemu: qemu-aarch64
             qemu_cpu: "max,sve-max-vq=4"
             variant: " @ sve=512"
           - target_arch: x86-64
-            qemu: qemu-x86_64-static
+            qemu: qemu-x86_64
             qemu_cpu: max
             variant: ""
           - target_arch: riscv64
-            qemu: qemu-riscv64-static
+            qemu: qemu-riscv64
             qemu_cpu: "rv64,v=true,vlen=128"
             variant: " @ vlen=128"
           - target_arch: riscv64
-            qemu: qemu-riscv64-static
-            qemu_cpu: "rv64,v=true,vlen=256"
+            qemu: qemu-riscv64
+            qemu_cpu: "max,vlen=256"
             variant: " @ vlen=256"
           - target_arch: riscv64
-            qemu: qemu-riscv64-static
+            qemu: qemu-riscv64
             qemu_cpu: "rv64,v=true,vlen=512"
             variant: " @ vlen=512"
           - target_arch: loongarch64
-            qemu: qemu-loongarch64-static
+            qemu: qemu-loongarch64
             qemu_cpu: la464
             variant: ""
           - target_arch: ppc64le
-            qemu: qemu-ppc64le-static
+            qemu: qemu-ppc64le
             qemu_cpu: power9
             variant: ""
 
@@ -724,7 +651,7 @@ jobs:
       - name: Install QEMU user-mode
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-user-static
+          sudo apt-get install -y qemu-user
 
       - name: Download ${{ matrix.target_arch }} test binaries
         uses: actions/download-artifact@v8
@@ -826,10 +753,6 @@ jobs:
           system_profiler SPHardwareDataType || true
 
         # C/C++
-      - name: Install dependencies
-        run: |
-          brew update
-          brew reinstall cmake
       - name: Build C/C++
         run: |
           cmake --preset release
@@ -1046,11 +969,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Log hardware capabilities
-        run: |
-          lscpu || true
-          echo ""
-          echo "CPU Info:"
-          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
+        run: lscpu || true
 
         # C/C++
       - name: Build C/C++

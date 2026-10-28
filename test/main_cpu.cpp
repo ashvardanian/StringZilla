@@ -254,6 +254,10 @@ int main(int, char const **argv) {
     auto const devices = select_devices(env.settings.devices);
     print(env.machine);
     print(env.settings);
+    // ctest hides passing output; the blank line keeps the next binary's header out of this list
+    if (char const *summary_path = std::getenv("GITHUB_STEP_SUMMARY"))
+        if (std::FILE *summary = std::fopen(summary_path, "a"))
+            std::fputc('\n', summary), print(env.machine, summary), std::fclose(summary);
 
     std::size_t failures = 0;
     failures += run_test(env.settings, "test_find_kernel_unit", test_find_kernel_unit);
