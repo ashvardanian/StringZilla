@@ -8,7 +8,7 @@
  *  A 64-byte block is one register, so one pair of nibble lookups classifies all of it and each
  *  class mask is a single byte test into a mask register.
  *
- *  @sa include/stringzilla/subdocuments.h
+ *  @sa c/stringzilla/subdocuments.h
  */
 #ifndef STRINGZILLA_SUBDOCUMENTS_ICELAKE_H_
 #define STRINGZILLA_SUBDOCUMENTS_ICELAKE_H_

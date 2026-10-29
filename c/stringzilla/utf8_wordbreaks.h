@@ -1,5 +1,5 @@
 /**
- *  @file include/stringzilla/utf8_wordbreaks.h
+ *  @file c/stringzilla/utf8_wordbreaks.h
  *  @author Ash Vardanian
  *  @date November 30, 2025
  *  @brief Hardware-accelerated UAX-29 word boundary segmentation.
@@ -43,30 +43,6 @@ STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_best(sz_cptr_t text, sz_size_t le
                                                     sz_stream_t stream);
 
 /**
- *  @brief Get the Unicode TR29 Word_Break property for a codepoint.
- *
- *  Returns one of the 16 Word_Break property values, @c sz_utf8_word_break_other_k through
- *  @c sz_utf8_word_break_mid_quotes_k: the foundation of TR29-compliant word boundary detection.
- *
- *  @param[in] rune The Unicode codepoint to classify.
- *  @return The Word_Break property value (0-15).
- *
- *  @see Unicode Text Segmentation: https://www.unicode.org/reports/tr29/
- */
-STRINGZILLA_CONSTEXPR sz_u8_t sz_rune_word_break_property(sz_rune_t rune);
-
-/**
- *  @brief Check if a codepoint is a "word character" (has word-forming property).
- *
- *  Returns true if the codepoint has a Word_Break property that typically forms words:
- *  ALetter, Hebrew_Letter, Numeric, Katakana, ExtendNumLet, or mid-word punctuation.
- *
- *  @param[in] rune The Unicode codepoint to check.
- *  @return @c sz_true_k if the codepoint is a word character, @c sz_false_k otherwise.
- */
-STRINGZILLA_CONSTEXPR sz_bool_t sz_rune_is_word_char(sz_rune_t rune);
-
-/**
  *  @brief Suggested batch size for streaming boundaries through the segmenting kernels.
  *
  *  Iterators that emit one segment/delimiter at a time buffer this many boundaries per call so
@@ -75,25 +51,6 @@ STRINGZILLA_CONSTEXPR sz_bool_t sz_rune_is_word_char(sz_rune_t rune);
  *  full output buffer.
  */
 enum { sz_iterators_default_steps_k = 64 };
-
-/**
- *  @brief Check if a position in UTF-8 text is a word boundary per Unicode TR29.
- *
- *  Implements the full TR29 word boundary algorithm including:
- *  - WB3: Do not break between CR and LF
- *  - WB4: Ignore Extend/Format/ZWJ characters for boundary purposes
- *  - WB5-WB13: Letter, number, and punctuation rules
- *  - WB15-WB16: Regional Indicator pair rules
- *
- *  @param[in] text UTF-8 encoded text.
- *  @param[in] length Byte length of @p text.
- *  @param[in] position Byte offset to check (must be start of a UTF-8 codepoint).
- *  @return @c sz_true_k if @p position is a word boundary, @c sz_false_k otherwise.
- *
- *  @note Position 0 and position == length are always boundaries (SOT/EOT).
- *  @note This is an internal helper used by the iterators; not part of stable ABI.
- */
-STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t position);
 
 /**
  *  @brief Finds the UTF-8 word break kernel of @p kind, from the best of @p capabilities.
@@ -168,9 +125,9 @@ STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_powervsx(sz_cptr_t text, sz_size_
 #pragma endregion
 
 /*  Header-only builds define each kernel inline from its tier header, while the library defines
- *  every kernel once, in its capability's unit under `c/target/`. */
-#include "stringzilla/utf8_wordbreaks/serial.h"
+ *  every kernel once, in its capability's unit under `src/capabilities/`. */
 #if STRINGZILLA_HEADER_ONLY
+#include "stringzilla/utf8_wordbreaks/serial.h"
 #include "stringzilla/utf8_wordbreaks/icelake.h"
 #include "stringzilla/utf8_wordbreaks/haswell.h"
 #include "stringzilla/utf8_wordbreaks/neon.h"

@@ -1,5 +1,5 @@
 /**
- *  @file c/dispatch/utf8_linebreaks.c
+ *  @file src/dispatch/utf8_linebreaks.c
  *  @author Ash Vardanian
  *  @date June 20, 2026
  *  @brief The UAX-14 line break capability list, dispatch point and finder.

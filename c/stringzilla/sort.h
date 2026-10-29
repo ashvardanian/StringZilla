@@ -1,5 +1,5 @@
 /**
- *  @file include/stringzilla/sort.h
+ *  @file c/stringzilla/sort.h
  *  @author Ash Vardanian
  *  @date February 15, 2025
  *  @brief Hardware-accelerated sorting of string collections.
@@ -207,8 +207,8 @@ STRINGZILLA_API sz_status_t sz_sort_find_kernel(sz_kernel_kind_t kind, sz_capabi
 
 #pragma endregion
 
-#include "stringzilla/sort/serial.h"
 #if STRINGZILLA_HEADER_ONLY
+#include "stringzilla/sort/serial.h"
 #include "stringzilla/sort/haswell.h"
 #include "stringzilla/sort/skylake.h"
 #include "stringzilla/sort/sve.h"

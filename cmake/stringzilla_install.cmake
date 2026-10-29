@@ -51,11 +51,16 @@ if (STRINGZILLA_BUILD_SWIFT)
                                       "STRINGZILLA_SWIFT_VERSION=${PROJECT_VERSION}"
         )
     endif ()
+    # The C headers reach the kernels' inline helpers, so the artifact ships both header roots as one.
+    set(stringzilla_swift_headers_ "${PROJECT_BINARY_DIR}/stringzilla_swift_headers")
     add_custom_target(
         stringzilla_swift ALL
+        COMMAND "${CMAKE_COMMAND}" -E rm -rf "${stringzilla_swift_headers_}"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory "${PROJECT_SOURCE_DIR}/c" "${PROJECT_SOURCE_DIR}/include"
+                "${stringzilla_swift_headers_}"
         COMMAND
             "${CMAKE_COMMAND}" -D "STRINGZILLA_SWIFT_ARCHIVE=$<TARGET_FILE:stringzilla_static>" -D
-            "STRINGZILLA_SWIFT_HEADERS=${PROJECT_SOURCE_DIR}/include" -D
+            "STRINGZILLA_SWIFT_HEADERS=${stringzilla_swift_headers_}" -D
             "STRINGZILLA_SWIFT_DIRECTORY=${STRINGZILLA_SWIFT_DIRECTORY}" ${stringzilla_swift_target_} -P
             "${PROJECT_SOURCE_DIR}/cmake/stringzilla_swift_artifact.cmake"
         DEPENDS stringzilla_static
@@ -95,14 +100,11 @@ if (STRINGZILLA_INSTALL)
             DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/stringzilla
     )
 
-    # SwiftPM reads `module.modulemap` from the XCFramework or artifact bundle `stringzilla_swift` packs. At an installed
-    # include root it is a hazard: Clang treats whichever one it finds there as authoritative for the whole prefix.
-    install(
-        DIRECTORY ${stringzilla_include_build_dir_}
-        DESTINATION ${stringzilla_include_install_dir_}
-        PATTERN "module.modulemap" EXCLUDE
-    )
-    install(DIRECTORY c/ DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/src)
+    # The three header roots merge into one `stringzilla/` folder. `c/module.modulemap` stays out: SwiftPM reads it from
+    # the artifact `stringzilla_swift` packs, and at an installed include root Clang treats it as authoritative for the
+    # whole prefix.
+    install(DIRECTORY c/stringzilla include/stringzilla cpp/stringzilla DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+    install(DIRECTORY src/ DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/src)
 
     # A `.pc` for the consumers CMake never reaches - cgo among them. Spelling the prefix against `${pcfiledir}` keeps it
     # correct after `cmake --install --prefix` moves the tree. `GNUInstallDirs` returns a relative path unless a distro

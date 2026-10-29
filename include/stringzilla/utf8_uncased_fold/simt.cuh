@@ -19,7 +19,7 @@
  *  Written in C, as every <tt>.cuh</tt> in this library is. Only device code lives here; each vendor
  *  launches the kernel from its own host side, in <tt>cuda.cuh</tt> and <tt>rocm.cuh</tt> beside this file.
  *
- *  @sa include/stringzilla/utf8_uncased_fold.h
+ *  @sa c/stringzilla/utf8_uncased_fold.h
  *  @sa include/stringzilla/utf8_uncased_fold/cuda.cuh
  *  @sa include/stringzilla/utf8_uncased_fold/rocm.cuh
  */

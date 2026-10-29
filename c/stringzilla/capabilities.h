@@ -1,5 +1,5 @@
 /**
- *  @file include/stringzilla/capabilities.h
+ *  @file c/stringzilla/capabilities.h
  *  @author Ash Vardanian
  *  @date September 29, 2026
  *  @brief Capabilities and their groups, kernel kinds and signatures, and CPU and GPU detection.

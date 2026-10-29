@@ -4,7 +4,7 @@
  *  @date December 1, 2024
  *  @brief Skylake (AVX-512) backend for string hashing and checksums.
  *
- *  @sa include/stringzilla/hash.h
+ *  @sa c/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_SKYLAKE_H_
 #define STRINGZILLA_HASH_SKYLAKE_H_

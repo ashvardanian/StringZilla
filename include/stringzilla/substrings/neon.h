@@ -8,7 +8,7 @@
  *  chains. This tier replaces the text-side stages around it, through @ref sz_substrings_walks_t,
  *  and inherits every other stage from the serial one.
  *
- *  @sa include/stringzilla/substrings.h
+ *  @sa c/stringzilla/substrings.h
  */
 #ifndef STRINGZILLA_SUBSTRINGS_NEON_H_
 #define STRINGZILLA_SUBSTRINGS_NEON_H_

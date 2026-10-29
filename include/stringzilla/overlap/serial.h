@@ -6,7 +6,7 @@
  *      at any width and offset, and the prepared-query B-tree every candidate probes, plus the
  *      constants its SIMD backends share.
  *
- *  @sa include/stringzilla/overlap.h
+ *  @sa c/stringzilla/overlap.h
  */
 #ifndef STRINGZILLA_OVERLAP_SERIAL_H_
 #define STRINGZILLA_OVERLAP_SERIAL_H_

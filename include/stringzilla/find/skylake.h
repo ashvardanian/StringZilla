@@ -4,7 +4,7 @@
  *  @date December 9, 2023
  *  @brief Skylake (AVX-512) backend for substring & byte-set search.
  *
- *  @sa include/stringzilla/find.h
+ *  @sa c/stringzilla/find.h
  */
 #ifndef STRINGZILLA_FIND_SKYLAKE_H_
 #define STRINGZILLA_FIND_SKYLAKE_H_

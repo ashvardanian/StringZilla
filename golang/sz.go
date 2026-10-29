@@ -21,7 +21,7 @@
 // Date: September 24, 2026
 package sz
 
-// #cgo CFLAGS: -O3 -I${SRCDIR}/../include
+// #cgo CFLAGS: -O3 -I${SRCDIR}/../c -I${SRCDIR}/../include
 // #cgo LDFLAGS: -L${SRCDIR} -lstringzilla_static
 // #cgo noescape sz_find_best
 // #cgo nocallback sz_find_best

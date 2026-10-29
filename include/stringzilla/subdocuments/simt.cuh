@@ -40,7 +40,7 @@
  *  Each vendor's host side, in <tt>subdocuments/cuda.cuh</tt> and <tt>subdocuments/rocm.cuh</tt>,
  *  sizes and launches these.
  *
- *  @sa include/stringzilla/subdocuments.h
+ *  @sa c/stringzilla/subdocuments.h
  *  @sa include/stringzilla/subdocuments/metal.metal, which these mirror kernel for kernel
  */
 #ifndef STRINGZILLA_SUBDOCUMENTS_SIMT_CUH_

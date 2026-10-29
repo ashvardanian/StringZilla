@@ -1,5 +1,5 @@
 /**
- *  @file c/dispatch/hash.c
+ *  @file src/dispatch/hash.c
  *  @author Ash Vardanian
  *  @date January 16, 2024
  *  @brief The hashing, checksum, SHA-256 and random-fill lists, dispatch points and finder.

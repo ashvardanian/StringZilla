@@ -1,5 +1,5 @@
 /**
- *  @file c/dispatch/compare.c
+ *  @file src/dispatch/compare.c
  *  @author Ash Vardanian
  *  @date January 16, 2024
  *  @brief Comparison dispatch points @c sz_equal_best and @c sz_order_best, their lists and finder.

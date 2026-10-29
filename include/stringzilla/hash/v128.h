@@ -4,7 +4,7 @@
  *  @date June 7, 2026
  *  @brief WebAssembly SIMD128 backend for hash.
  *
- *  @sa include/stringzilla/hash.h
+ *  @sa c/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_V128_H_
 #define STRINGZILLA_HASH_V128_H_

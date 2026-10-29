@@ -17,7 +17,7 @@
  *  window; any window that survives the gate is resolved by the shared cold per-codepoint verify,
  *  @c sz_utf8_norm_verify_block_.
  *
- *  @sa include/stringzilla/utf8_norm.h
+ *  @sa c/stringzilla/utf8_norm.h
  */
 #ifndef STRINGZILLA_UTF8_NORM_V128_H_
 #define STRINGZILLA_UTF8_NORM_V128_H_

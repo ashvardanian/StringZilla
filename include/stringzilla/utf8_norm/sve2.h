@@ -12,7 +12,7 @@
  *  so SVE2-tier dispatch resolves to named @c _sve2 symbols, while the hot loop stays byte-for-byte
  *  identical to the SVE one.
  *
- *  @sa include/stringzilla/utf8_norm.h
+ *  @sa c/stringzilla/utf8_norm.h
  */
 #ifndef STRINGZILLA_UTF8_NORM_SVE2_H_
 #define STRINGZILLA_UTF8_NORM_SVE2_H_

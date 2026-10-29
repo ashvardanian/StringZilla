@@ -6,7 +6,7 @@
  *      hashes four positions at a time, the sort over eight-key registers, and the B-tree probe
  *      eight keys at a time.
  *
- *  @sa include/stringzilla/overlap.h
+ *  @sa c/stringzilla/overlap.h
  */
 #ifndef STRINGZILLA_OVERLAP_HASWELL_H_
 #define STRINGZILLA_OVERLAP_HASWELL_H_

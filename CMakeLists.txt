@@ -165,7 +165,6 @@ endif ()
 # Configuration
 include(GNUInstallDirs)
 set(stringzilla_include_build_dir_ "${PROJECT_SOURCE_DIR}/include/")
-set(stringzilla_include_install_dir_ "${CMAKE_INSTALL_INCLUDEDIR}")
 
 # CTest machinery only for top-level builds: a parent project decides its own testing story, and
 # `add_test` calls below are inert without `enable_testing()`.
@@ -239,8 +238,9 @@ add_library(stringzilla_header INTERFACE)
 add_library(${PROJECT_NAME}::header ALIAS stringzilla_header)
 set_target_properties(stringzilla_header PROPERTIES EXPORT_NAME header)
 target_include_directories(
-    stringzilla_header INTERFACE $<BUILD_INTERFACE:${stringzilla_include_build_dir_}>
-                                 $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    stringzilla_header
+    INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/c> $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+              $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/cpp> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 # Consumers of the header target compile every kernel themselves, and link no dispatch points.
 target_compile_definitions(stringzilla_header INTERFACE STRINGZILLA_HEADER_ONLY=1)
@@ -260,19 +260,19 @@ if (APPLE)
     target_compile_options(stringzilla_header INTERFACE ${stringzilla_embed_options_})
 endif ()
 
-# The compiled core: `c/stringzilla.c` owns the cross-family exports (versions, capabilities, the kernel finder), each
-# enabled capability's `c/target/<capability>.c` defines that capability's kernels once, and each
-# `c/dispatch/<family>.c` holds its family's lists, dispatch points and finder. Globbed, so a new unit needs no entry;
+# The compiled core: `src/stringzilla.c` owns the cross-family exports (versions, capabilities, the kernel finder), each
+# enabled capability's `src/capabilities/<capability>.c` defines that capability's kernels once, and each
+# `src/dispatch/<family>.c` holds its family's lists, dispatch points and finder. Globbed, so a new unit needs no entry;
 # WebAssembly enables its capabilities through STRINGZILLA_MARCH, so its units follow the platform, and the Metal
 # unit joins below, with its own frameworks, beside the CUDA and ROCm ones.
 file(
     GLOB stringzilla_globbed_units_ CONFIGURE_DEPENDS
     RELATIVE ${PROJECT_SOURCE_DIR}
-    ${PROJECT_SOURCE_DIR}/c/target/*.c ${PROJECT_SOURCE_DIR}/c/dispatch/*.c
+    ${PROJECT_SOURCE_DIR}/src/capabilities/*.c ${PROJECT_SOURCE_DIR}/src/dispatch/*.c
 )
-set(stringzilla_shim_sources_ c/stringzilla.c)
+set(stringzilla_shim_sources_ src/stringzilla.c)
 foreach (unit_ IN LISTS stringzilla_globbed_units_)
-    if (unit_ MATCHES "^c/target/([a-z0-9]+)")
+    if (unit_ MATCHES "^src/capabilities/([a-z0-9]+)")
         set(capability_ ${CMAKE_MATCH_1})
         if (NOT capability_ STREQUAL "serial"
             AND NOT (stringzilla_arch_wasm_ AND capability_ MATCHES "^v128")
@@ -288,13 +288,13 @@ endforeach ()
 function (stringzilla_add_library target_ public_name_ library_type_)
     add_library(${target_} ${library_type_} ${ARGN})
 
-    # The library, unlike the headers, may use C11: `c/stringzilla.c` caches detection in a <stdatomic.h> atomic, which
+    # The library, unlike the headers, may use C11: `src/stringzilla.c` caches detection in a <stdatomic.h> atomic, which
     # MSVC gates behind a flag.
     target_compile_features(${target_} PRIVATE c_std_11)
     target_compile_options(${target_} PRIVATE $<$<COMPILE_LANG_AND_ID:C,MSVC>:/experimental:c11atomics>)
 
-    # The dispatch units share the private `c/dispatch.h`.
-    target_include_directories(${target_} PRIVATE ${PROJECT_SOURCE_DIR}/c)
+    # The dispatch units share the private `src/dispatch.h`.
+    target_include_directories(${target_} PRIVATE ${PROJECT_SOURCE_DIR}/src)
 
     # Only `STRINGZILLA_API` functions leave the library; Windows exports every symbol, as it spells no `__declspec`.
     set_target_properties(
@@ -351,8 +351,9 @@ endif ()
 foreach (library_ IN LISTS stringzilla_libraries_)
     target_compile_definitions(${library_} PRIVATE "STRINGZILLA_WITH_LIBC=${stringzilla_with_libc_}")
     target_include_directories(
-        ${library_} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-                           $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+        ${library_}
+        PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/c> $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+               $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/cpp> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
 
     # Force aggressive inlining for SHA-256 functions to avoid stack overflow in Go CGO (-mno-red-zone) The SHA-256
@@ -384,12 +385,14 @@ if (NOT STRINGZILLA_MULTIVERSIONED)
     check_ipo_supported(RESULT stringzilla_ipo_supported_ OUTPUT stringzilla_ipo_support_output_)
     if (stringzilla_ipo_supported_ AND NOT MSVC)
         set_target_properties(stringzilla_static PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
+        # Its objects are bitcode, so every link that takes them must optimize at link time too.
+        target_link_options(stringzilla_static INTERFACE ${CMAKE_C_COMPILE_OPTIONS_IPO} ${CMAKE_C_LINK_OPTIONS_IPO})
     else ()
         message(STATUS "Link-time optimization not available: ${stringzilla_ipo_support_output_}")
     endif ()
 endif ()
 
-# Adds one GPU unit, like `c/target/cuda.cu`, to the archive and the shared library: compiled for `codes_` alone,
+# Adds one GPU unit, like `src/capabilities/cuda.cu`, to the archive and the shared library: compiled for `codes_` alone,
 # without the CPU capabilities and with the GPU ones the build's codes run, and linked with the runtime libraries that
 # follow. A unit without codes to compile is skipped. Both the unit and the libraries' host units see `definition_`,
 # so the dispatch lists name the unit's kernels.
@@ -399,7 +402,9 @@ function (stringzilla_add_gpu_unit source_ codes_ definition_)
     endif ()
     get_filename_component(unit_ "${source_}" NAME_WE)
     add_library(stringzilla_${unit_}_ OBJECT ${source_})
-    target_include_directories(stringzilla_${unit_}_ PRIVATE ${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/c)
+    target_include_directories(
+        stringzilla_${unit_}_ PRIVATE ${PROJECT_SOURCE_DIR}/c ${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/src
+    )
     set_target_properties(
         stringzilla_${unit_}_
         PROPERTIES POSITION_INDEPENDENT_CODE ON
@@ -462,24 +467,26 @@ if (STRINGZILLA_CUDA_ARCH)
     stringzilla_select_gpu_codes(
         stringzilla_cuda_unit_codes_ "${stringzilla_cuda_resolved_architectures_}" "${stringzilla_cuda_codes_}"
     )
-    stringzilla_add_gpu_unit(c/target/cuda.cu "${stringzilla_cuda_unit_codes_}" "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart)
     stringzilla_add_gpu_unit(
-        c/target/hopper.cu "${stringzilla_hopper_unit_codes_}" "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart
+        src/capabilities/cuda.cu "${stringzilla_cuda_unit_codes_}" "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart
     )
     stringzilla_add_gpu_unit(
-        c/target/blackwell.cu "${stringzilla_blackwell_unit_codes_}" "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart
+        src/capabilities/hopper.cu "${stringzilla_hopper_unit_codes_}" "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart
+    )
+    stringzilla_add_gpu_unit(
+        src/capabilities/blackwell.cu "${stringzilla_blackwell_unit_codes_}" "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart
     )
 endif ()
 if (STRINGZILLA_ROCM_ARCH)
     stringzilla_add_gpu_unit(
-        c/target/rocm.hip "${stringzilla_rocm_resolved_architectures_}" "STRINGZILLA_ARCH_ROCM_=1" hip::host
+        src/capabilities/rocm.hip "${stringzilla_rocm_resolved_architectures_}" "STRINGZILLA_ARCH_ROCM_=1" hip::host
     )
 endif ()
 if (STRINGZILLA_METAL_ARCH)
     # Metal compiles on the device, so its codes name the families the unit serves.
     stringzilla_add_gpu_unit(
-        c/target/metal.c "${stringzilla_metal_resolved_architectures_}" "STRINGZILLA_ARCH_METAL_=1" "-framework Metal"
-        "-framework Foundation"
+        src/capabilities/metal.c "${stringzilla_metal_resolved_architectures_}" "STRINGZILLA_ARCH_METAL_=1"
+        "-framework Metal" "-framework Foundation"
     )
     target_compile_options(stringzilla_metal_ PRIVATE ${stringzilla_embed_options_})
     foreach (library_ IN LISTS stringzilla_libraries_)
@@ -522,7 +529,7 @@ if (STRINGZILLA_BUILD_PYTHON)
         python/stringzilla/utf8_uncased_fold.c
         python/stringzilla/utf8_uncased.c
         python/stringzilla/utf8_norm.c
-        c/parallel.c
+        src/parallel.c
     )
     set_target_properties(stringzilla_python PROPERTIES OUTPUT_NAME stringzilla)
     target_compile_features(stringzilla_python PRIVATE c_std_11)
@@ -550,9 +557,11 @@ if (STRINGZILLA_BUILD_PYTHON)
         DESTINATION .
         COMPONENT stringzilla_python
     )
+    # Type checkers skip a bare `.pyi` beside a single-file module, so the stubs ship as a PEP 561 stub package.
     install(
         FILES python/stringzilla.pyi
-        DESTINATION .
+        DESTINATION stringzilla-stubs
+        RENAME __init__.pyi
         COMPONENT stringzilla_python
     )
 endif ()
@@ -566,7 +575,7 @@ if (STRINGZILLA_BUILD_NODE)
     endif ()
     find_package(OpenMP COMPONENTS C)
     # `CMAKE_JS_SRC` is the Windows delay-load hook and empty everywhere else.
-    add_library(stringzilla_node SHARED javascript/stringzilla.c c/parallel.c ${CMAKE_JS_SRC})
+    add_library(stringzilla_node SHARED javascript/stringzilla.c src/parallel.c ${CMAKE_JS_SRC})
     set_target_properties(
         stringzilla_node
         PROPERTIES PREFIX ""

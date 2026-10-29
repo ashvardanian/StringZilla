@@ -28,7 +28,7 @@
  *  truncated. Each vendor's host side, in <tt>substrings/cuda.cuh</tt> and <tt>substrings/rocm.cuh</tt>, sizes
  *  and launches them.
  *
- *  @sa include/stringzilla/substrings.h
+ *  @sa c/stringzilla/substrings.h
  */
 #ifndef STRINGZILLA_SUBSTRINGS_SIMT_CUH_
 #define STRINGZILLA_SUBSTRINGS_SIMT_CUH_

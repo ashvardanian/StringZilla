@@ -4,7 +4,7 @@
  *  @date March 13, 2025
  *  @brief SVE2 + AES backend for string hashing and checksums.
  *
- *  @sa include/stringzilla/hash.h
+ *  @sa c/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_SVE2AES_H_
 #define STRINGZILLA_HASH_SVE2AES_H_

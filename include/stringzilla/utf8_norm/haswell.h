@@ -15,7 +15,7 @@
  *  16-byte @c vpshufb quadrants selected by @c vpblendvb: the emulation Skylake uses, narrowed to
  *  one YMM lane pair.
  *
- *  @sa include/stringzilla/utf8_norm.h
+ *  @sa c/stringzilla/utf8_norm.h
  */
 #ifndef STRINGZILLA_UTF8_NORM_HASWELL_H_
 #define STRINGZILLA_UTF8_NORM_HASWELL_H_

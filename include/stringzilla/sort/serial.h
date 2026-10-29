@@ -4,7 +4,7 @@
  *  @date February 15, 2025
  *  @brief Serial backend for sorting string collections.
  *
- *  @sa include/stringzilla/sort.h
+ *  @sa c/stringzilla/sort.h
  */
 #ifndef STRINGZILLA_SORT_SERIAL_H_
 #define STRINGZILLA_SORT_SERIAL_H_

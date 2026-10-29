@@ -12,7 +12,7 @@
  *  Where every match starts with a few literal bytes, nibble lookups at each offset find the
  *  candidates instead of the start pass, 32 positions per step.
  *
- *  @sa include/stringzilla/regex.h
+ *  @sa c/stringzilla/regex.h
  */
 #ifndef STRINGZILLA_REGEX_HASWELL_H_
 #define STRINGZILLA_REGEX_HASWELL_H_

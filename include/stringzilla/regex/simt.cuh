@@ -42,7 +42,7 @@
  *
  *  Each vendor's host side, in <tt>regex/cuda.cuh</tt> and <tt>regex/rocm.cuh</tt>, sizes and launches these.
  *
- *  @sa include/stringzilla/regex.h
+ *  @sa c/stringzilla/regex.h
  *  @sa include/stringzilla/regex/metal.metal, the Metal sibling these mirror kernel for kernel
  */
 #ifndef STRINGZILLA_REGEX_SIMT_CUH_

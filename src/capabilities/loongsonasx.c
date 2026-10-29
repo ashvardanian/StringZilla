@@ -1,5 +1,5 @@
 /**
- *  @file c/target/loongsonasx.c
+ *  @file src/capabilities/loongsonasx.c
  *  @author Ash Vardanian
  *  @date September 29, 2026
  *  @brief Every family's @c loongsonasx kernels, defined once for the StringZilla library.

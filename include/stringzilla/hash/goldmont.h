@@ -4,7 +4,7 @@
  *  @date October 6, 2025
  *  @brief Goldmont (SHA-NI) backend for string hashing and checksums.
  *
- *  @sa include/stringzilla/hash.h
+ *  @sa c/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_GOLDMONT_H_
 #define STRINGZILLA_HASH_GOLDMONT_H_

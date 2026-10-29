@@ -645,7 +645,7 @@ The folding paths live in the `utf8_uncased*` files.
 Codepoint decoding walks the input in register-wide chunks, classifying each lead byte by its continuation-byte count through a register-resident lookup table rather than branching byte by byte.
 It runs under a __fill-and-drain__ contract: a decode-once step fills a buffer of runes, and a separate drain step emits them, which keeps the hot loop tight and lets callers consume runes at their own pace.
 Ill-formed input is handled without derailing the stream, re-syncing on the maximal-subpart rule and substituting exactly one U+FFFD before continuing.
-The decoder lives in `include/stringzilla/utf8_runes.h`.
+The decoder lives in `include/stringzilla/utf8_runes/`, declared in `c/stringzilla/utf8_runes.h`.
 
 UAX-29 word, grapheme, and sentence boundaries, together with UAX-14 line-break opportunities, are found in a single pass.
 Each codepoint is classified against register-resident property tables and the boundary rules are applied directly, so combining marks, emoji zero-width-joiner sequences, and regional-indicator flags are all handled without a second traversal.
@@ -661,7 +661,7 @@ The normalizers live in the `utf8_norm*` files.
 
 StringZilla intersects two deduplicated string collections through a power-of-two open-addressing hash table.
 The hash is seeded for adversarial resistance and the probe sequence runs under a bounded collision budget, so the intersection completes in linear time and space rather than degrading on crafted inputs.
-The implementation lives in `include/stringzilla/intersect.h`.
+The implementation lives in `include/stringzilla/intersect/`, declared in `c/stringzilla/intersect.h`.
 
 ### Window Overlap
 
@@ -669,7 +669,7 @@ For near-duplicate detection and candidate filtering, StringZilla slides Rabin-K
 A candidate then streams through the forest, hashing its own windows and probing, so nothing is stored per candidate and the candidates may change round to round while the queries and the widths stay.
 A window hash is a prefix difference, one modular multiply-add at any width and any offset, against a 32-bit prime chosen for collision weight rather than for size.
 The measure is asymmetric: a candidate's window occurrences count against a query's distinct windows, so swapping the sides changes the score when either repeats a window.
-The implementation lives in `include/stringzilla/overlap.h` and the backends beside it.
+The implementation lives in `include/stringzilla/overlap/`, one backend per capability, declared in `c/stringzilla/overlap.h`.
 
 ### GPU Edit Distances
 
@@ -677,7 +677,7 @@ On the GPU a candidate's recurrence is a dependency chain, so it stays on one th
 The verticals live in the thread's own registers while the match masks are read-only and shared, every thread indexing the same plane by the class of the byte it is stepping, so the rows stay hot in cache instead of being rebuilt per candidate.
 Myers is add-with-carry and bitwise operations over 64-bit words, all of which the device runs at its integer rate, so each vendor has one GPU tier rather than a ladder of them: `cuda`, `rocm` and `metal`.
 Long byte pairs use an internal tiled wavefront across tile columns on CUDA, ROCm and Metal; long rune queries use dynamic Myers state.
-The CUDA and ROCm kernels share `include/stringzilla/levenshtein/simt.cuh`, each vendor launches them from its own host code in `cuda.cuh` and `rocm.cuh`, compiled into the library by `c/target/cuda.cu` and `c/target/rocm.hip`, and the Metal ones live beside them in `metal.h` and `metal.metal`, compiled by `c/target/metal.c`.
+The CUDA and ROCm kernels share `include/stringzilla/levenshtein/simt.cuh`, each vendor launches them from its own host code in `cuda.cuh` and `rocm.cuh`, compiled into the library by `src/capabilities/cuda.cu` and `src/capabilities/rocm.hip`, and the Metal ones live beside them in `metal.h` and `metal.metal`, compiled by `src/capabilities/metal.c`.
 
 ## Dynamic Dispatch
 

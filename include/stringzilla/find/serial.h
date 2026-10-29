@@ -4,7 +4,7 @@
  *  @date August 14, 2020
  *  @brief Serial backend for substring & byte-set search.
  *
- *  @sa include/stringzilla/find.h
+ *  @sa c/stringzilla/find.h
  */
 #ifndef STRINGZILLA_FIND_SERIAL_H_
 #define STRINGZILLA_FIND_SERIAL_H_
@@ -841,6 +841,80 @@ STRINGZILLA_API sz_status_t sz_rfind_serial(sz_cptr_t haystack, sz_size_t haysta
 }
 
 #endif // STRINGZILLA_TARGET_SERIAL
+
+#pragma region Helper Shortcuts
+
+/**
+ *  @brief Finds the first byte in @p haystack that is present in @p needle.
+ *
+ *  @param[in] haystack String to be scanned.
+ *  @param[in] haystack_length Number of bytes in the haystack.
+ *  @param[in] needle String whose bytes form the accepted set.
+ *  @param[in] needle_length Number of bytes in the needle.
+ *  @return Pointer to the first matching byte, or NULL if not found.
+ */
+STRINGZILLA_INLINE sz_cptr_t sz_find_byte_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                               sz_size_t needle_length) {
+    sz_byteset_t set;
+    sz_byteset_init(&set);
+    for (; needle_length; ++needle, --needle_length) sz_byteset_add(&set, *needle);
+    return sz_find_byteset_serial_(haystack, haystack_length, &set);
+}
+
+/**
+ *  @brief Finds the first byte in @p haystack that is not present in @p needle.
+ *
+ *  @param[in] haystack String to be scanned.
+ *  @param[in] haystack_length Number of bytes in the haystack.
+ *  @param[in] needle String whose bytes form the rejected set.
+ *  @param[in] needle_length Number of bytes in the needle.
+ *  @return Pointer to the first non-matching byte, or NULL if not found.
+ */
+STRINGZILLA_INLINE sz_cptr_t sz_find_byte_not_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                   sz_size_t needle_length) {
+    sz_byteset_t set;
+    sz_byteset_init(&set);
+    for (; needle_length; ++needle, --needle_length) sz_byteset_add(&set, *needle);
+    sz_byteset_invert(&set);
+    return sz_find_byteset_serial_(haystack, haystack_length, &set);
+}
+
+/**
+ *  @brief Finds the last byte in @p haystack that is present in @p needle.
+ *
+ *  @param[in] haystack String to be scanned.
+ *  @param[in] haystack_length Number of bytes in the haystack.
+ *  @param[in] needle String whose bytes form the accepted set.
+ *  @param[in] needle_length Number of bytes in the needle.
+ *  @return Pointer to the last matching byte, or NULL if not found.
+ */
+STRINGZILLA_INLINE sz_cptr_t sz_rfind_byte_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                sz_size_t needle_length) {
+    sz_byteset_t set;
+    sz_byteset_init(&set);
+    for (; needle_length; ++needle, --needle_length) sz_byteset_add(&set, *needle);
+    return sz_rfind_byteset_serial_(haystack, haystack_length, &set);
+}
+
+/**
+ *  @brief Finds the last byte in @p haystack that is not present in @p needle.
+ *
+ *  @param[in] haystack String to be scanned.
+ *  @param[in] haystack_length Number of bytes in the haystack.
+ *  @param[in] needle String whose bytes form the rejected set.
+ *  @param[in] needle_length Number of bytes in the needle.
+ *  @return Pointer to the last non-matching byte, or NULL if not found.
+ */
+STRINGZILLA_INLINE sz_cptr_t sz_rfind_byte_not_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                    sz_size_t needle_length) {
+    sz_byteset_t set;
+    sz_byteset_init(&set);
+    for (; needle_length; ++needle, --needle_length) sz_byteset_add(&set, *needle);
+    sz_byteset_invert(&set);
+    return sz_rfind_byteset_serial_(haystack, haystack_length, &set);
+}
+
+#pragma endregion Helper Shortcuts
 
 #ifdef __cplusplus
 }

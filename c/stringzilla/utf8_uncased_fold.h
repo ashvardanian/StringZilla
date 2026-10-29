@@ -1,5 +1,5 @@
 /**
- *  @file include/stringzilla/utf8_uncased_fold.h
+ *  @file c/stringzilla/utf8_uncased_fold.h
  *  @author Ash Vardanian
  *  @date November 23, 2025
  *  @brief Hardware-accelerated UTF-8 case folding.
@@ -11,7 +11,6 @@
 #ifndef STRINGZILLA_UTF8_UNCASED_FOLD_H_
 #define STRINGZILLA_UTF8_UNCASED_FOLD_H_
 
-#include "stringzilla/utf8_runes/serial.h"
 #include "stringzilla/capabilities.h" // `sz_capability_t`
 
 #ifdef __cplusplus
@@ -177,8 +176,8 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_metal(                         
 
 #pragma region Backends
 
-#include "stringzilla/utf8_uncased_fold/serial.h"
 #if STRINGZILLA_HEADER_ONLY
+#include "stringzilla/utf8_uncased_fold/serial.h"
 #include "stringzilla/utf8_uncased_fold/icelake.h"
 #include "stringzilla/utf8_uncased_fold/haswell.h"
 #include "stringzilla/utf8_uncased_fold/neon.h"

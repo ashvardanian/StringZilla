@@ -9,7 +9,7 @@
  *  class bit to the top of its byte makes that class's mask one movemask per register, and the
  *  bytes inside strings are one carry-less multiply of the quotes by all ones.
  *
- *  @sa include/stringzilla/subdocuments.h
+ *  @sa c/stringzilla/subdocuments.h
  */
 #ifndef STRINGZILLA_SUBDOCUMENTS_HASWELL_H_
 #define STRINGZILLA_SUBDOCUMENTS_HASWELL_H_

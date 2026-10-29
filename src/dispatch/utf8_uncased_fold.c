@@ -1,5 +1,5 @@
 /**
- *  @file c/dispatch/utf8_uncased_fold.c
+ *  @file src/dispatch/utf8_uncased_fold.c
  *  @author Ash Vardanian
  *  @date November 23, 2025
  *  @brief The UTF-8 case folding capability list, dispatch point and finder.

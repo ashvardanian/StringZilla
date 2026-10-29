@@ -1,5 +1,5 @@
 /**
- *  @file c/target/icelake.c
+ *  @file src/capabilities/icelake.c
  *  @author Ash Vardanian
  *  @date September 29, 2026
  *  @brief Every family's @c icelake kernels, defined once for the StringZilla library.

@@ -4,7 +4,7 @@
  *  @date June 7, 2026
  *  @brief RISC-V Vector (RVV 1.0) backend for collections of strings.
  *
- *  @sa include/stringzilla/strings.h
+ *  @sa c/stringzilla/strings.h
  */
 #ifndef STRINGZILLA_STRINGS_RVV_H_
 #define STRINGZILLA_STRINGS_RVV_H_

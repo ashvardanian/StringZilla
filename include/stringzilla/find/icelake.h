@@ -4,7 +4,7 @@
  *  @date January 6, 2024
  *  @brief Ice Lake (AVX-512 VBMI+VAES) backend for substring & byte-set search.
  *
- *  @sa include/stringzilla/find.h
+ *  @sa c/stringzilla/find.h
  */
 #ifndef STRINGZILLA_FIND_ICELAKE_H_
 #define STRINGZILLA_FIND_ICELAKE_H_

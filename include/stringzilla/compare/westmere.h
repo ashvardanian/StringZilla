@@ -4,7 +4,7 @@
  *  @date October 2, 2025
  *  @brief Westmere (SSE4.2) backend for string comparison utilities.
  *
- *  @sa include/stringzilla/compare.h
+ *  @sa c/stringzilla/compare.h
  */
 #ifndef STRINGZILLA_COMPARE_WESTMERE_H_
 #define STRINGZILLA_COMPARE_WESTMERE_H_

@@ -4,7 +4,7 @@
  *  @date July 17, 2026
  *  @brief Arm SVE2 backend for UTF-8 case-insensitive substring search.
  *
- *  @sa include/stringzilla/utf8_uncased.h
+ *  @sa c/stringzilla/utf8_uncased.h
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_SVE2_H_
 #define STRINGZILLA_UTF8_UNCASED_SVE2_H_

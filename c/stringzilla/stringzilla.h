@@ -1,5 +1,5 @@
 /**
- *  @file include/stringzilla/stringzilla.h
+ *  @file c/stringzilla/stringzilla.h
  *  @author Ash Vardanian
  *  @date August 14, 2020
  *  @brief StringZilla is a collection of advanced string algorithms, designed for Big Data.

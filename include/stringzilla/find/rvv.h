@@ -4,7 +4,7 @@
  *  @date June 7, 2026
  *  @brief RISC-V Vector (RVV 1.0) backend for find.
  *
- *  @sa include/stringzilla/find.h
+ *  @sa c/stringzilla/find.h
  */
 #ifndef STRINGZILLA_FIND_RVV_H_
 #define STRINGZILLA_FIND_RVV_H_

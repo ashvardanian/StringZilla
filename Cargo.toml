@@ -1,6 +1,6 @@
 [package]
 authors = ["Ash Vardanian <1983160+ashvardanian@users.noreply.github.com>"]
-# Not `external-ffi-bindings`: that is for a library built elsewhere, and `c/` is vendored and built by `build.rs`.
+# Not `external-ffi-bindings`: that is for a library built elsewhere, and `src/` is vendored and built by `build.rs`.
 categories = ["text-processing", "hardware-support", "no-std", "wasm"]
 description = "Search, hash, sort, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU"
 documentation = "https://docs.rs/stringzilla"
@@ -15,7 +15,9 @@ include = [
   "/CMakeLists.txt",
   "/cmake/*",
   "/c/**",
+  "/cpp/**",
   "/include/**",
+  "/src/**",
   "/probes/*.c",
   "/VERSION",
 ]

@@ -4,7 +4,7 @@
  *  @date June 7, 2026
  *  @brief LoongArch LASX (256-bit) backend for hash.
  *
- *  @sa include/stringzilla/hash.h
+ *  @sa c/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_LOONGSONASX_H_
 #define STRINGZILLA_HASH_LOONGSONASX_H_

@@ -1,5 +1,5 @@
 /**
- *  @file include/stringzilla/utf8_graphemes.h
+ *  @file c/stringzilla/utf8_graphemes.h
  *  @author Ash Vardanian
  *  @date June 20, 2026
  *  @brief Hardware-accelerated UAX-29 grapheme cluster segmentation.
@@ -91,9 +91,9 @@ STRINGZILLA_API sz_status_t sz_utf8_graphemes_sve2(sz_cptr_t text, sz_size_t len
 #pragma endregion
 
 /*  Header-only builds define each kernel inline from its tier header, while the library defines
- *  every kernel once, in its capability's unit under `c/target/`. */
-#include "stringzilla/utf8_graphemes/serial.h"
+ *  every kernel once, in its capability's unit under `src/capabilities/`. */
 #if STRINGZILLA_HEADER_ONLY
+#include "stringzilla/utf8_graphemes/serial.h"
 #include "stringzilla/utf8_graphemes/haswell.h"
 #include "stringzilla/utf8_graphemes/icelake.h"
 #include "stringzilla/utf8_graphemes/neon.h"

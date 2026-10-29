@@ -1,5 +1,5 @@
 /**
- *  @file c/target/rocm.hip
+ *  @file src/capabilities/rocm.hip
  *  @author Ash Vardanian
  *  @date September 29, 2026
  *  @brief The @c rocm kernels and the ROCm device exports, defined once for the library.

@@ -4,7 +4,7 @@
  *  @date June 7, 2026
  *  @brief WebAssembly relaxed-SIMD backend for find (level above SIMD128).
  *
- *  @sa include/stringzilla/find.h
+ *  @sa c/stringzilla/find.h
  */
 #ifndef STRINGZILLA_FIND_V128RELAXED_H_
 #define STRINGZILLA_FIND_V128RELAXED_H_

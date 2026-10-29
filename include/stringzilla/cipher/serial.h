@@ -4,7 +4,7 @@
  *  @date August 4, 2026
  *  @brief Serial (scalar) backend for AES-256 encryption in counter and Galois/counter modes.
  *
- *  @sa include/stringzilla/cipher.h
+ *  @sa c/stringzilla/cipher.h
  */
 #ifndef STRINGZILLA_CIPHER_SERIAL_H_
 #define STRINGZILLA_CIPHER_SERIAL_H_

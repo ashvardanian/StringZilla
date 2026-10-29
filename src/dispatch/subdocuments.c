@@ -1,5 +1,5 @@
 /**
- *  @file c/dispatch/subdocuments.c
+ *  @file src/dispatch/subdocuments.c
  *  @author Ash Vardanian
  *  @date October 13, 2026
  *  @brief The path query engine's dispatch points, their lists and finder.

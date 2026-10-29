@@ -1,5 +1,5 @@
 /**
- *  @file c/dispatch/overlap.c
+ *  @file src/dispatch/overlap.c
  *  @author Ash Vardanian
  *  @date January 27, 2024
  *  @brief The window-overlap engine's dispatch points, their lists and finder.

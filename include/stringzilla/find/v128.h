@@ -4,7 +4,7 @@
  *  @date June 7, 2026
  *  @brief WebAssembly SIMD128 backend for find.
  *
- *  @sa include/stringzilla/find.h
+ *  @sa c/stringzilla/find.h
  */
 #ifndef STRINGZILLA_FIND_V128_H_
 #define STRINGZILLA_FIND_V128_H_

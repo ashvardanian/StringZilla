@@ -4,7 +4,7 @@
  *  @date October 3, 2024
  *  @brief SVE backend for string comparison utilities.
  *
- *  @sa include/stringzilla/compare.h
+ *  @sa c/stringzilla/compare.h
  */
 #ifndef STRINGZILLA_COMPARE_SVE_H_
 #define STRINGZILLA_COMPARE_SVE_H_

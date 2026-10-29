@@ -8,7 +8,7 @@
  *  so one @c AESE covers as many blocks as the vector happens to hold and counter mode only has to
  *  spread consecutive block indices across the segments.
  *
- *  @sa include/stringzilla/cipher.h
+ *  @sa c/stringzilla/cipher.h
  */
 #ifndef STRINGZILLA_CIPHER_SVE2AES_H_
 #define STRINGZILLA_CIPHER_SVE2AES_H_

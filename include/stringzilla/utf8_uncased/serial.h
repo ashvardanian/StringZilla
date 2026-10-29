@@ -4,7 +4,7 @@
  *  @date November 23, 2025
  *  @brief Uncased UTF-8 search, comparison & invariance checks: serial scaffolding.
  *
- *  @sa include/stringzilla/utf8_uncased.h
+ *  @sa c/stringzilla/utf8_uncased.h
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_SERIAL_H_
 #define STRINGZILLA_UTF8_UNCASED_SERIAL_H_

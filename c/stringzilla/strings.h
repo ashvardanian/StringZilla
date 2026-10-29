@@ -1,5 +1,5 @@
 /**
- *  @file include/stringzilla/strings.h
+ *  @file c/stringzilla/strings.h
  *  @author Ash Vardanian
  *  @date October 7, 2023
  *  @brief Hardware-accelerated conversions and byte transforms over strings and their collections.
@@ -1193,8 +1193,8 @@ STRINGZILLA_CONSTEXPR void sz_strings_lookup_init_ascii(char lut[sz_at_least_(25
 
 #pragma endregion Helper API
 
-#include "stringzilla/strings/serial.h"
 #if STRINGZILLA_HEADER_ONLY
+#include "stringzilla/strings/serial.h"
 #include "stringzilla/strings/haswell.h"
 #include "stringzilla/strings/icelake.h"
 #include "stringzilla/strings/neon.h"

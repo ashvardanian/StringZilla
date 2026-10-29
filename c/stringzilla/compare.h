@@ -1,5 +1,5 @@
 /**
- *  @file include/stringzilla/compare.h
+ *  @file c/stringzilla/compare.h
  *  @author Ash Vardanian
  *  @date August 14, 2020
  *  @brief Hardware-accelerated string comparison utilities.
@@ -241,8 +241,8 @@ STRINGZILLA_API sz_status_t sz_compare_find_kernel(sz_kernel_kind_t kind, sz_cap
 
 #pragma endregion Core API
 
-#include "stringzilla/compare/serial.h"
 #if STRINGZILLA_HEADER_ONLY
+#include "stringzilla/compare/serial.h"
 #include "stringzilla/compare/westmere.h"
 #include "stringzilla/compare/haswell.h"
 #include "stringzilla/compare/skylake.h"

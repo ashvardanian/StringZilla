@@ -11,7 +11,7 @@
  *  affine classifier is a possible future micro-optimization, but a true 64-entry table is not
  *  affine, so @c vpermb is the right primitive.
  *
- *  @sa include/stringzilla/utf8_norm.h
+ *  @sa c/stringzilla/utf8_norm.h
  */
 #ifndef STRINGZILLA_UTF8_NORM_ICELAKE_H_
 #define STRINGZILLA_UTF8_NORM_ICELAKE_H_

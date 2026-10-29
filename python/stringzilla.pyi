@@ -7,7 +7,7 @@ Date: October 27, 2026
 
 import enum
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from typing import Any, overload
+from typing import Any, final, overload
 
 __version__: str
 
@@ -45,6 +45,7 @@ class AuthenticationError(ValueError):
       True
     """
 
+@final
 class Aes256CtrKey:
     """Aes256CtrKey(secret, *, capabilities=None)
 
@@ -89,6 +90,7 @@ class Aes256CtrKey:
           True
         """
 
+@final
 class Aes256GcmKey:
     """Aes256GcmKey(secret, *, capabilities=None)
 
@@ -158,6 +160,7 @@ class Aes256GcmKey:
           b'hello'
         """
 
+@final
 class Aes256GcmEncryptor:
     """Aes256GcmEncryptor(key, nonce, *, capabilities=None)
 
@@ -181,7 +184,7 @@ class Aes256GcmEncryptor:
     """
 
     def __init__(self, key: Aes256GcmKey, nonce: str | bytes, *, capabilities: Capability | None = None) -> None: ...
-    def associate(self, data: str | bytes) -> Aes256GcmEncryptor:
+    def associate(self, data: str | bytes, /) -> Aes256GcmEncryptor:
         """associate(data) -> Aes256GcmEncryptor
 
         Absorb bytes that are authenticated but not encrypted, and return self for chaining.
@@ -198,7 +201,7 @@ class Aes256GcmEncryptor:
           >>> sealed.encrypt(b'body') == ciphertext
           True
         """
-    def encrypt(self, data: str | bytes) -> bytes:
+    def encrypt(self, data: str | bytes, /) -> bytes:
         """encrypt(data) -> bytes
 
         Encrypt one chunk and absorb its ciphertext into the running tag.
@@ -228,6 +231,7 @@ class Aes256GcmEncryptor:
           True
         """
 
+@final
 class Aes256GcmDecryptor:
     """Aes256GcmDecryptor(key, nonce, *, capabilities=None)
 
@@ -249,7 +253,7 @@ class Aes256GcmDecryptor:
     """
 
     def __init__(self, key: Aes256GcmKey, nonce: str | bytes, *, capabilities: Capability | None = None) -> None: ...
-    def associate(self, data: str | bytes) -> Aes256GcmDecryptor:
+    def associate(self, data: str | bytes, /) -> Aes256GcmDecryptor:
         """associate(data) -> Aes256GcmDecryptor
 
         Absorb bytes that are authenticated but not encrypted, and return self for chaining.
@@ -266,7 +270,7 @@ class Aes256GcmDecryptor:
           >>> opened.decrypt_unverified(ciphertext)
           b'body'
         """
-    def decrypt_unverified(self, data: str | bytes) -> bytes:
+    def decrypt_unverified(self, data: str | bytes, /) -> bytes:
         """decrypt_unverified(data) -> bytes
 
         Decrypt one chunk and absorb its ciphertext into the running tag. The bytes returned are
@@ -284,7 +288,7 @@ class Aes256GcmDecryptor:
           >>> opened.decrypt_unverified(ciphertext)
           b'hello'
         """
-    def verify(self, tag: str | bytes) -> None:
+    def verify(self, tag: str | bytes, /) -> None:
         """verify(tag) -> None
 
         Check `tag` against everything absorbed so far, in time independent of where it differs.
@@ -303,6 +307,7 @@ class Aes256GcmDecryptor:
           True
         """
 
+@final
 class File:
     r"""File(path, mode='r')
 
@@ -1949,6 +1954,7 @@ def utf8_uncased_matches(
         [sz.String('Straße'), sz.String('STRASSE')]
     """
 
+@final
 class FindSplits:
     """FindSplits(string, separator, ...)
 
@@ -1978,6 +1984,7 @@ class FindSplits:
     def __iter__(self) -> Iterator[String]: ...
     def __next__(self) -> String: ...
 
+@final
 class Hasher:
     """Hasher(seed=0, *, capabilities=None)
 
@@ -1996,7 +2003,7 @@ class Hasher:
     """
 
     def __init__(self, seed: int = 0, *, capabilities: Capability | None = None) -> None: ...
-    def update(self, data: str | bytes) -> Hasher:
+    def update(self, data: str | bytes, /) -> Hasher:
         """update(data) -> Hasher
 
         Absorb more bytes into the running hash and return self for chaining.
@@ -2044,6 +2051,7 @@ class Hasher:
           True
         """
 
+@final
 class Sha256:
     """Sha256(*, capabilities=None)
 
@@ -2059,7 +2067,7 @@ class Sha256:
 
     digest_length: int
     def __init__(self, *, capabilities: Capability | None = None) -> None: ...
-    def update(self, data: str | bytes) -> Sha256:
+    def update(self, data: str | bytes, /) -> Sha256:
         """update(data) -> Sha256
 
         Absorb more bytes into the running SHA-256 state and return self for chaining.
@@ -2121,6 +2129,7 @@ class Sha256:
           True
         """
 
+@final
 class Sha256s:
     """Sha256s(lanes, *, capabilities=None)
 
@@ -2148,11 +2157,11 @@ class Sha256s:
     """
 
     digest_length: int
-    def __init__(self, lanes: int, *, capabilities: Capability | None = None) -> None: ...
+    def __init__(self, lanes: int, /, *, capabilities: Capability | None = None) -> None: ...
     def __len__(self) -> int: ...
-    def __getitem__(self, index: int) -> Sha256: ...
-    def __setitem__(self, index: int, lane: Sha256) -> None: ...
-    def update(self, chunks: Strings | Sequence[str | bytes]) -> Sha256s:
+    def __getitem__(self, index: int, /) -> Sha256: ...
+    def __setitem__(self, index: int, lane: Sha256, /) -> None: ...
+    def update(self, chunks: Strings | Sequence[str | bytes], /) -> Sha256s:
         """update(chunks) -> Sha256s
 
         Append the next chunk of every lane's message.
@@ -2206,6 +2215,7 @@ class Sha256s:
           Sha256s: A new object that can be advanced separately from the original.
         """
 
+@final
 class LevenshteinEngine:
     """LevenshteinEngine(queries, symbol='bytes', *, capabilities=None, stream=None)
 
@@ -2254,6 +2264,7 @@ class LevenshteinEngine:
           1
         """
 
+@final
 class OverlapEngine:
     """OverlapEngine(queries, widths, *, candidates_budget=0, capabilities=None, stream=None)
 
@@ -2407,6 +2418,7 @@ class Utf8Sentences:
     def __iter__(self) -> Iterator[String]: ...
     def __next__(self) -> String: ...
 
+@final
 class Utf8Wordbreaks:
     """Utf8Wordbreaks(string, ...)
 
@@ -2454,30 +2466,37 @@ class Utf8UncasedMatches:
     def __iter__(self) -> Iterator[String]: ...
     def __next__(self) -> String: ...
 
+@final
 class Utf8SplitNewlines:
     def __iter__(self) -> Iterator[String]: ...
     def __next__(self) -> String: ...
 
+@final
 class Utf8Newlines:
     def __iter__(self) -> Iterator[String]: ...
     def __next__(self) -> String: ...
 
+@final
 class Utf8SplitWhitespaces:
     def __iter__(self) -> Iterator[String]: ...
     def __next__(self) -> String: ...
 
+@final
 class Utf8Whitespaces:
     def __iter__(self) -> Iterator[String]: ...
     def __next__(self) -> String: ...
 
+@final
 class Utf8SplitDelimiters:
     def __iter__(self) -> Iterator[String]: ...
     def __next__(self) -> String: ...
 
+@final
 class Utf8Delimiters:
     def __iter__(self) -> Iterator[String]: ...
     def __next__(self) -> String: ...
 
+@final
 class RegexEngine:
     """RegexEngine(patterns, case_sensitivity='cased', *, capabilities=None, stream=None)
 
@@ -2600,6 +2619,7 @@ class RegexEngine:
           ([b'12-34', b'12', b'34'], 3)
         """
 
+@final
 class SubdocumentsEngine:
     """SubdocumentsEngine(paths, format='json', *, capabilities=None, stream=None)
 
@@ -2680,6 +2700,7 @@ class SubdocumentsEngine:
           2
         """
 
+@final
 class SubstringsEngine:
     """SubstringsEngine(needles, case_sensitivity='cased', overlap_policy='overlapping',
                      hot_states=None, matches_budget=0, *, haystacks_budget=0,
@@ -2857,6 +2878,7 @@ class SubstringsEngine:
           0.0
         """
 
+@final
 class Strings:
     """Strings(sequence=())
 
@@ -2883,12 +2905,12 @@ class Strings:
 
     def __init__(self, sequence: Any = ()) -> None: ...
     def __len__(self) -> int: ...
-    def __contains__(self, item: _StringLike) -> bool: ...
+    def __contains__(self, item: _StringLike, /) -> bool: ...
     def __iter__(self) -> Iterator[String]: ...
     @overload
-    def __getitem__(self, index: int) -> String: ...
+    def __getitem__(self, index: int, /) -> String: ...
     @overload
-    def __getitem__(self, index: slice) -> Strings: ...
+    def __getitem__(self, index: slice, /) -> Strings: ...
     @property
     def tape_address(self) -> int:
         """Memory address of the first byte of the tape, which the offsets count from, as an integer."""
@@ -3194,6 +3216,7 @@ class Strings:
           b'["Ada","Grace"]'
         """
 
+@final
 class String:
     """String(source)
 
@@ -3220,13 +3243,14 @@ class String:
 
     def __init__(self, source: Any) -> None: ...
     def __len__(self) -> int: ...
-    def __contains__(self, item: _StringLike) -> bool: ...
-    def __add__(self, other: _StringLike) -> String: ...
+    def __contains__(self, item: _StringLike, /) -> bool: ...
+    def __add__(self, other: _StringLike, /) -> String: ...
+    def __radd__(self, other: _StringLike, /) -> String: ...
     def __hash__(self) -> int: ...
     @overload
-    def __getitem__(self, index: int) -> str: ...
+    def __getitem__(self, index: int, /) -> str: ...
     @overload
-    def __getitem__(self, index: slice) -> String: ...
+    def __getitem__(self, index: slice, /) -> String: ...
     @property
     def address(self) -> int:
         """Memory address of the first byte of the string, as an integer.

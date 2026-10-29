@@ -1,5 +1,5 @@
 /**
- *  @file c/dispatch/regex.c
+ *  @file src/dispatch/regex.c
  *  @author Ash Vardanian
  *  @date October 13, 2026
  *  @brief The regular expression engine's dispatch points, their lists and finder.

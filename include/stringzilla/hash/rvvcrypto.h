@@ -10,7 +10,7 @@
  *  @c vsha2ch and @c vsha2ms instructions. Both produce byte- and bit-identical results to the
  *  serial reference, so digests are interchangeable.
  *
- *  @sa include/stringzilla/hash.h
+ *  @sa c/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_RVVCRYPTO_H_
 #define STRINGZILLA_HASH_RVVCRYPTO_H_

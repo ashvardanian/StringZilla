@@ -13,7 +13,7 @@
  *  candidates instead of the start pass, 64 positions per step. The lookaround table's one-byte
  *  lookarounds fill by byte permutations, 64 positions per step.
  *
- *  @sa include/stringzilla/regex.h
+ *  @sa c/stringzilla/regex.h
  */
 #ifndef STRINGZILLA_REGEX_ICELAKE_H_
 #define STRINGZILLA_REGEX_ICELAKE_H_

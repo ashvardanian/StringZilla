@@ -19,7 +19,7 @@
  *  two such selects, for index < 32 and index ≥ 32, are blended by @c __lasx_xvbitsel_v on bit five
  *  of the index to cover all 64 entries.
  *
- *  @sa include/stringzilla/utf8_norm.h
+ *  @sa c/stringzilla/utf8_norm.h
  */
 #ifndef STRINGZILLA_UTF8_NORM_LOONGSONASX_H_
 #define STRINGZILLA_UTF8_NORM_LOONGSONASX_H_

@@ -4,7 +4,7 @@
  *  @date June 7, 2026
  *  @brief IBM Power VSX backend for find.
  *
- *  @sa include/stringzilla/find.h
+ *  @sa c/stringzilla/find.h
  */
 #ifndef STRINGZILLA_FIND_POWERVSX_H_
 #define STRINGZILLA_FIND_POWERVSX_H_

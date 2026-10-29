@@ -6,7 +6,7 @@
  *
  *  The round loop stays a loop, where every other backend writes its fourteen rounds out.
  *
- *  @sa include/stringzilla/cipher.h
+ *  @sa c/stringzilla/cipher.h
  */
 #ifndef STRINGZILLA_CIPHER_V128_H_
 #define STRINGZILLA_CIPHER_V128_H_

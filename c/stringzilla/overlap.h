@@ -1,5 +1,5 @@
 /**
- *  @file include/stringzilla/overlap.h
+ *  @file c/stringzilla/overlap.h
  *  @author Ash Vardanian
  *  @date January 27, 2024
  *  @brief Window overlap between a batch of prepared queries and a batch of candidates, at one or

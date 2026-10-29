@@ -4,7 +4,7 @@
  *  @date December 1, 2024
  *  @brief NEON backend for string hashing and checksums.
  *
- *  @sa include/stringzilla/hash.h
+ *  @sa c/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_NEON_H_
 #define STRINGZILLA_HASH_NEON_H_

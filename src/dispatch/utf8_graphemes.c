@@ -1,5 +1,5 @@
 /**
- *  @file c/dispatch/utf8_graphemes.c
+ *  @file src/dispatch/utf8_graphemes.c
  *  @author Ash Vardanian
  *  @date June 20, 2026
  *  @brief The UAX-29 grapheme cluster capability list, dispatch point and finder.

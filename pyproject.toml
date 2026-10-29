@@ -55,7 +55,7 @@ wheel.packages = []
 STRINGZILLA_BUILD_PYTHON = "ON"
 STRINGZILLA_BUILD_SHARED = "OFF"
 STRINGZILLA_INSTALL = "OFF"
-STRINGZILLA_TARGET_ARCH = { default = "", env = "STRINGZILLA_TARGET_ARCH" }
+STRINGZILLA_MARCH = { default = "", env = "STRINGZILLA_MARCH" }
 
 [tool.scikit-build.metadata.version]
 input = "VERSION"

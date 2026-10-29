@@ -4,7 +4,7 @@
  *  @date June 7, 2026
  *  @brief WebAssembly SIMD128 backend for collections of strings.
  *
- *  @sa include/stringzilla/strings.h
+ *  @sa c/stringzilla/strings.h
  */
 #ifndef STRINGZILLA_STRINGS_V128_H_
 #define STRINGZILLA_STRINGS_V128_H_

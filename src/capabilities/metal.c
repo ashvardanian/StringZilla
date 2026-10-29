@@ -1,5 +1,5 @@
 /**
- *  @file c/target/metal.c
+ *  @file src/capabilities/metal.c
  *  @author Ash Vardanian
  *  @date September 29, 2026
  *  @brief The engines' @c metal kernels and the Metal runtime exports, defined once for the library.

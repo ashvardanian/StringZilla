@@ -13,7 +13,7 @@
  *  stable-by-default contract - and the recursion/stability/reverse/top-K/uncased machinery is
  *  reused verbatim from <tt>sort/serial.h</tt>.
  *
- *  @sa include/stringzilla/sort.h
+ *  @sa c/stringzilla/sort.h
  */
 #ifndef STRINGZILLA_SORT_NEON_H_
 #define STRINGZILLA_SORT_NEON_H_

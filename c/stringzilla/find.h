@@ -1,5 +1,5 @@
 /**
- *  @file include/stringzilla/find.h
+ *  @file c/stringzilla/find.h
  *  @author Ash Vardanian
  *  @date August 14, 2020
  *  @brief Hardware-accelerated sub-string and character-set search utilities.
@@ -10,7 +10,8 @@
  *  - @c sz_find_byte_best and reverse-order @c sz_rfind_byte_best
  *  - @c sz_find_byteset_best and reverse-order @c sz_rfind_byteset_best
  *
- *  Convenience functions for character-set matching, on the serial kernels:
+ *  Convenience functions for character-set matching live with the serial kernels in
+ *  @c stringzilla/find/serial.h:
  *
  *  - @c sz_find_byte_from shortcut for @c sz_find_byteset_serial
  *  - @c sz_find_byte_not_from shortcut for @c sz_find_byteset_serial with inverted set
@@ -508,8 +509,8 @@ STRINGZILLA_API sz_status_t sz_find_find_kernel(sz_kernel_kind_t kind, sz_capabi
 
 #pragma endregion Core API
 
-#include "stringzilla/find/serial.h"
 #if STRINGZILLA_HEADER_ONLY
+#include "stringzilla/find/serial.h"
 #include "stringzilla/find/westmere.h"
 #include "stringzilla/find/haswell.h"
 #include "stringzilla/find/skylake.h"
@@ -523,80 +524,6 @@ STRINGZILLA_API sz_status_t sz_find_find_kernel(sz_kernel_kind_t kind, sz_capabi
 #include "stringzilla/find/loongsonasx.h"
 #include "stringzilla/find/powervsx.h"
 #endif // STRINGZILLA_HEADER_ONLY
-
-#pragma region Helper Shortcuts
-
-/**
- *  @brief Finds the first byte in @p haystack that is present in @p needle.
- *
- *  @param[in] haystack String to be scanned.
- *  @param[in] haystack_length Number of bytes in the haystack.
- *  @param[in] needle String whose bytes form the accepted set.
- *  @param[in] needle_length Number of bytes in the needle.
- *  @return Pointer to the first matching byte, or NULL if not found.
- */
-STRINGZILLA_INLINE sz_cptr_t sz_find_byte_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                               sz_size_t needle_length) {
-    sz_byteset_t set;
-    sz_byteset_init(&set);
-    for (; needle_length; ++needle, --needle_length) sz_byteset_add(&set, *needle);
-    return sz_find_byteset_serial_(haystack, haystack_length, &set);
-}
-
-/**
- *  @brief Finds the first byte in @p haystack that is not present in @p needle.
- *
- *  @param[in] haystack String to be scanned.
- *  @param[in] haystack_length Number of bytes in the haystack.
- *  @param[in] needle String whose bytes form the rejected set.
- *  @param[in] needle_length Number of bytes in the needle.
- *  @return Pointer to the first non-matching byte, or NULL if not found.
- */
-STRINGZILLA_INLINE sz_cptr_t sz_find_byte_not_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                   sz_size_t needle_length) {
-    sz_byteset_t set;
-    sz_byteset_init(&set);
-    for (; needle_length; ++needle, --needle_length) sz_byteset_add(&set, *needle);
-    sz_byteset_invert(&set);
-    return sz_find_byteset_serial_(haystack, haystack_length, &set);
-}
-
-/**
- *  @brief Finds the last byte in @p haystack that is present in @p needle.
- *
- *  @param[in] haystack String to be scanned.
- *  @param[in] haystack_length Number of bytes in the haystack.
- *  @param[in] needle String whose bytes form the accepted set.
- *  @param[in] needle_length Number of bytes in the needle.
- *  @return Pointer to the last matching byte, or NULL if not found.
- */
-STRINGZILLA_INLINE sz_cptr_t sz_rfind_byte_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                sz_size_t needle_length) {
-    sz_byteset_t set;
-    sz_byteset_init(&set);
-    for (; needle_length; ++needle, --needle_length) sz_byteset_add(&set, *needle);
-    return sz_rfind_byteset_serial_(haystack, haystack_length, &set);
-}
-
-/**
- *  @brief Finds the last byte in @p haystack that is not present in @p needle.
- *
- *  @param[in] haystack String to be scanned.
- *  @param[in] haystack_length Number of bytes in the haystack.
- *  @param[in] needle String whose bytes form the rejected set.
- *  @param[in] needle_length Number of bytes in the needle.
- *  @return Pointer to the last non-matching byte, or NULL if not found.
- */
-STRINGZILLA_INLINE sz_cptr_t sz_rfind_byte_not_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                    sz_size_t needle_length) {
-    sz_byteset_t set;
-    sz_byteset_init(&set);
-    for (; needle_length; ++needle, --needle_length) sz_byteset_add(&set, *needle);
-    sz_byteset_invert(&set);
-    return sz_rfind_byteset_serial_(haystack, haystack_length, &set);
-}
-
-#pragma endregion Helper Shortcuts
 
 /*  Header-only builds link no library, so their dispatch points only report it missing. */
 #if STRINGZILLA_HEADER_ONLY

@@ -4,7 +4,7 @@
  *  @date June 14, 2026
  *  @brief RISC-V Vector backend for UTF-8 case folding.
  *
- *  @sa include/stringzilla/utf8_uncased_fold.h
+ *  @sa c/stringzilla/utf8_uncased_fold.h
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_FOLD_RVV_H_
 #define STRINGZILLA_UTF8_UNCASED_FOLD_RVV_H_

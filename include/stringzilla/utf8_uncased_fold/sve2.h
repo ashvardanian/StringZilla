@@ -4,7 +4,7 @@
  *  @date July 17, 2026
  *  @brief Arm SVE2 backend for UTF-8 case folding.
  *
- *  @sa include/stringzilla/utf8_uncased_fold.h
+ *  @sa c/stringzilla/utf8_uncased_fold.h
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_FOLD_SVE2_H_
 #define STRINGZILLA_UTF8_UNCASED_FOLD_SVE2_H_

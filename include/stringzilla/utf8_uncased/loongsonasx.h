@@ -4,7 +4,7 @@
  *  @date June 7, 2026
  *  @brief LoongArch LASX uncased UTF-8 search, comparison & invariance backend.
  *
- *  @sa include/stringzilla/utf8_uncased.h
+ *  @sa c/stringzilla/utf8_uncased.h
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_LOONGSONASX_H_
 #define STRINGZILLA_UTF8_UNCASED_LOONGSONASX_H_

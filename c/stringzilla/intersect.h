@@ -1,5 +1,5 @@
 /**
- *  @file include/stringzilla/intersect.h
+ *  @file c/stringzilla/intersect.h
  *  @author Ash Vardanian
  *  @date March 7, 2025
  *  @brief Hardware-accelerated string collection intersections for JOIN-like DBMS operations.
@@ -14,8 +14,7 @@
 #define STRINGZILLA_INTERSECT_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/capabilities.h"     // `sz_capability_t`
-#include "stringzilla/intersect/serial.h" // `STRINGZILLA_INTERSECT_BUDGET`
+#include "stringzilla/capabilities.h" // `sz_capability_t`
 
 #ifdef __cplusplus
 extern "C" {
@@ -290,6 +289,7 @@ STRINGZILLA_API sz_status_t sz_intersect_find_kernel(sz_kernel_kind_t kind, sz_c
 #pragma endregion
 
 #if STRINGZILLA_HEADER_ONLY
+#include "stringzilla/intersect/serial.h"
 #include "stringzilla/intersect/westmere.h"
 #include "stringzilla/intersect/icelake.h"
 #include "stringzilla/intersect/neonaes.h"

@@ -18,7 +18,7 @@
  *  then the first malformed position and the payload of the strings before it, then the block sums
  *  of the scan.
  *
- *  @sa include/stringzilla/strings.h
+ *  @sa c/stringzilla/strings.h
  *  @sa include/stringzilla/strings/cuda.cuh
  *  @sa include/stringzilla/strings/rocm.cuh
  */

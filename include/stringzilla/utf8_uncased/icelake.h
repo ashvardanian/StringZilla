@@ -4,7 +4,7 @@
  *  @date November 30, 2025
  *  @brief Ice Lake (AVX-512) uncased UTF-8 search, comparison & invariance kernels.
  *
- *  @sa include/stringzilla/utf8_uncased.h
+ *  @sa c/stringzilla/utf8_uncased.h
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_ICELAKE_H_
 #define STRINGZILLA_UTF8_UNCASED_ICELAKE_H_

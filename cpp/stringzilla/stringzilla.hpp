@@ -1,5 +1,5 @@
 /**
- *  @file include/stringzilla/stringzilla.hpp
+ *  @file cpp/stringzilla/stringzilla.hpp
  *  @author Ash Vardanian
  *  @date December 19, 2023
  *  @brief StringZilla C++ wrapper improving over the performance of @c std::string_view and

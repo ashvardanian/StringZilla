@@ -1,5 +1,5 @@
 /**
- *  @file c/target/blackwell.cu
+ *  @file src/capabilities/blackwell.cu
  *  @author Ash Vardanian
  *  @date October 8, 2026
  *  @brief The @c blackwell kernels and their exports, defined once for the library.

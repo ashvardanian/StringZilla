@@ -19,7 +19,7 @@
  *  Written in C, as every <tt>.cuh</tt> in this library is. Only device code lives here; each vendor
  *  uploads the tables and launches the kernel from its own host side, in <tt>cuda.cuh</tt> and <tt>rocm.cuh</tt>.
  *
- *  @sa include/stringzilla/utf8_norm.h
+ *  @sa c/stringzilla/utf8_norm.h
  *  @sa include/stringzilla/utf8_norm/cuda.cuh
  *  @sa include/stringzilla/utf8_norm/rocm.cuh
  */

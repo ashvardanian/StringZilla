@@ -17,7 +17,7 @@
  *  in rounds of windows whose matches it buffers and flushes in window order. A SIMD tier replaces
  *  the stages in @ref sz_substrings_walks_t and inherits the verb drivers.
  *
- *  @sa include/stringzilla/substrings.h
+ *  @sa c/stringzilla/substrings.h
  */
 #ifndef STRINGZILLA_SUBSTRINGS_SERIAL_H_
 #define STRINGZILLA_SUBSTRINGS_SERIAL_H_

@@ -1,5 +1,5 @@
 /**
- *  @file c/dispatch/utf8_norm.c
+ *  @file src/dispatch/utf8_norm.c
  *  @author Ash Vardanian
  *  @date June 14, 2026
  *  @brief The normalization capability lists, dispatch points and finder.

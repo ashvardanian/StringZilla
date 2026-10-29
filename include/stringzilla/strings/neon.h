@@ -4,7 +4,7 @@
  *  @date October 3, 2024
  *  @brief NEON backend for collections of strings on 64-bit Arm CPUs.
  *
- *  @sa include/stringzilla/strings.h
+ *  @sa c/stringzilla/strings.h
  */
 #ifndef STRINGZILLA_STRINGS_NEON_H_
 #define STRINGZILLA_STRINGS_NEON_H_

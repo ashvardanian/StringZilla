@@ -4,7 +4,7 @@
  *  @date June 7, 2026
  *  @brief WebAssembly relaxed-SIMD backend for compare (level above SIMD128).
  *
- *  @sa include/stringzilla/compare.h
+ *  @sa c/stringzilla/compare.h
  */
 #ifndef STRINGZILLA_COMPARE_V128RELAXED_H_
 #define STRINGZILLA_COMPARE_V128RELAXED_H_

@@ -4,7 +4,7 @@
  *  @date March 9, 2025
  *  @brief SVE (Arm) backend for sorting string collections.
  *
- *  @sa include/stringzilla/sort.h
+ *  @sa c/stringzilla/sort.h
  */
 #ifndef STRINGZILLA_SORT_SVE_H_
 #define STRINGZILLA_SORT_SVE_H_

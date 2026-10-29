@@ -1,5 +1,5 @@
 /**
- *  @file include/stringzilla/types.hpp
+ *  @file cpp/stringzilla/types.hpp
  *  @author Ash Vardanian
  *  @date March 28, 2025
  *  @brief Shared definitions for the StringZilla C++ library.

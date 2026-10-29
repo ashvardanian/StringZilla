@@ -1,5 +1,5 @@
 /**
- *  @file include/stringzilla/types.h
+ *  @file c/stringzilla/types.h
  *  @author Ash Vardanian
  *  @date August 14, 2020
  *  @brief Shared definitions for the StringZilla library.

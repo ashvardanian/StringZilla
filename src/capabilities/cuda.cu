@@ -1,5 +1,5 @@
 /**
- *  @file c/target/cuda.cu
+ *  @file src/capabilities/cuda.cu
  *  @author Ash Vardanian
  *  @date September 29, 2026
  *  @brief The @c cuda kernels and the CUDA device exports, defined once for the library.

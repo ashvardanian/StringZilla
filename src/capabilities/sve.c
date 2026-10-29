@@ -1,5 +1,5 @@
 /**
- *  @file c/target/sve.c
+ *  @file src/capabilities/sve.c
  *  @author Ash Vardanian
  *  @date September 29, 2026
  *  @brief Every family's @c sve kernels, defined once for the StringZilla library.

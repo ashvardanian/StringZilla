@@ -4,7 +4,7 @@
  *  @date June 12, 2026
  *  @brief NEON (Arm) uncased UTF-8 search, comparison & invariance backend.
  *
- *  @sa include/stringzilla/utf8_uncased.h
+ *  @sa c/stringzilla/utf8_uncased.h
  *
  *  Ports the validated AVX2 architecture to 32-byte NEON chunks held as @c uint8x16x2_t, two
  *  16-byte registers mirroring a 32-byte YMM. The needle classification, match verification, and

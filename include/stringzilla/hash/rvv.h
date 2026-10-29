@@ -4,7 +4,7 @@
  *  @date June 7, 2026
  *  @brief RISC-V Vector (RVV 1.0) backend for hash.
  *
- *  @sa include/stringzilla/hash.h
+ *  @sa c/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_RVV_H_
 #define STRINGZILLA_HASH_RVV_H_

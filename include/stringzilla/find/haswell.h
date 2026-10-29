@@ -4,7 +4,7 @@
  *  @date August 14, 2020
  *  @brief Haswell (AVX2) backend for substring & byte-set search.
  *
- *  @sa include/stringzilla/find.h
+ *  @sa c/stringzilla/find.h
  */
 #ifndef STRINGZILLA_FIND_HASWELL_H_
 #define STRINGZILLA_FIND_HASWELL_H_

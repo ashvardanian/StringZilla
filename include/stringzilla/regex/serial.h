@@ -31,7 +31,7 @@
  *  columns: each set of them that may hold at a boundary takes a block of the row, which a step
  *  picks from the table; a vocabulary with more walks positions and the PikeVM.
  *
- *  @sa include/stringzilla/regex.h
+ *  @sa c/stringzilla/regex.h
  */
 #ifndef STRINGZILLA_REGEX_SERIAL_H_
 #define STRINGZILLA_REGEX_SERIAL_H_

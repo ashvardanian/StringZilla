@@ -4,7 +4,7 @@
  *  @date January 15, 2024
  *  @brief AVX2 backend for collections of strings on Haswell and newer x86 CPUs.
  *
- *  @sa include/stringzilla/strings.h
+ *  @sa c/stringzilla/strings.h
  */
 #ifndef STRINGZILLA_STRINGS_HASWELL_H_
 #define STRINGZILLA_STRINGS_HASWELL_H_

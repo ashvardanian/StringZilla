@@ -10,7 +10,7 @@
  *  walk reads only the structural bytes of 64-byte blocks, and steps over a container no live step
  *  can enter by counting its brackets a block at a time.
  *
- *  @sa include/stringzilla/subdocuments.h
+ *  @sa c/stringzilla/subdocuments.h
  */
 #ifndef STRINGZILLA_SUBDOCUMENTS_SERIAL_H_
 #define STRINGZILLA_SUBDOCUMENTS_SERIAL_H_

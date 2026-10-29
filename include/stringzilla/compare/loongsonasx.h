@@ -4,7 +4,7 @@
  *  @date June 7, 2026
  *  @brief LoongArch LASX (256-bit) backend for compare.
  *
- *  @sa include/stringzilla/compare.h
+ *  @sa c/stringzilla/compare.h
  */
 #ifndef STRINGZILLA_COMPARE_LOONGSONASX_H_
 #define STRINGZILLA_COMPARE_LOONGSONASX_H_

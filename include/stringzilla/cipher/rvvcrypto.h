@@ -6,7 +6,7 @@
  *
  *  Two vector-crypto extensions carry this backend.
  *
- *  @sa include/stringzilla/cipher.h
+ *  @sa c/stringzilla/cipher.h
  */
 #ifndef STRINGZILLA_CIPHER_RVVCRYPTO_H_
 #define STRINGZILLA_CIPHER_RVVCRYPTO_H_

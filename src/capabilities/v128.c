@@ -1,5 +1,5 @@
 /**
- *  @file c/target/v128.c
+ *  @file src/capabilities/v128.c
  *  @author Ash Vardanian
  *  @date September 29, 2026
  *  @brief Every family's @c v128 kernels, defined once for the StringZilla library.

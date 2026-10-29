@@ -8,7 +8,7 @@
  *  masks read by a @c VPERMB; every wider query runs the Skylake eight-wide kernel, which needs
  *  nothing above AVX-512F.
  *
- *  @sa include/stringzilla/levenshtein.h
+ *  @sa c/stringzilla/levenshtein.h
  */
 #ifndef STRINGZILLA_LEVENSHTEIN_ICELAKE_H_
 #define STRINGZILLA_LEVENSHTEIN_ICELAKE_H_

@@ -1,5 +1,5 @@
 /**
- *  @file include/stringzilla/utf8_runes.h
+ *  @file c/stringzilla/utf8_runes.h
  *  @author Ash Vardanian
  *  @date November 19, 2025
  *  @brief Hardware-accelerated UTF-8 codepoint mechanics: count, find-nth, and chunk unpacking.
@@ -317,9 +317,9 @@ STRINGZILLA_API sz_status_t sz_utf8_decode_powervsx( //
 #pragma endregion
 
 /*  Header-only builds define each kernel inline from its tier header, while the library defines
- *  every kernel once, in its capability's unit under `c/target/`. */
-#include "stringzilla/utf8_runes/serial.h"
+ *  every kernel once, in its capability's unit under `src/capabilities/`. */
 #if STRINGZILLA_HEADER_ONLY
+#include "stringzilla/utf8_runes/serial.h"
 #include "stringzilla/utf8_runes/icelake.h"
 #include "stringzilla/utf8_runes/haswell.h"
 #include "stringzilla/utf8_runes/neon.h"

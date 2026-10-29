@@ -18,7 +18,7 @@
  *  index. The LUT bytes load naturally: ppc64le is little-endian and @c vec_xl handles the load, so
  *  neither the table nor the window needs endian fixups.
  *
- *  @sa include/stringzilla/utf8_norm.h
+ *  @sa c/stringzilla/utf8_norm.h
  */
 #ifndef STRINGZILLA_UTF8_NORM_POWERVSX_H_
 #define STRINGZILLA_UTF8_NORM_POWERVSX_H_

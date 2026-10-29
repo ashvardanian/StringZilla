@@ -4,7 +4,7 @@
  *  @date October 11, 2024
  *  @brief AVX-512 VBMI backend for collections of strings on Ice Lake and newer x86 CPUs.
  *
- *  @sa include/stringzilla/strings.h
+ *  @sa c/stringzilla/strings.h
  */
 #ifndef STRINGZILLA_STRINGS_ICELAKE_H_
 #define STRINGZILLA_STRINGS_ICELAKE_H_

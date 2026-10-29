@@ -6,7 +6,7 @@
  *      window hashes eight positions at a time, the sort over sixteen-key registers, and the B-tree
  *      probe sixteen keys at a time.
  *
- *  @sa include/stringzilla/overlap.h
+ *  @sa c/stringzilla/overlap.h
  */
 #ifndef STRINGZILLA_OVERLAP_SKYLAKE_H_
 #define STRINGZILLA_OVERLAP_SKYLAKE_H_

@@ -9,7 +9,7 @@
  *  takes within each 128-bit lane. Shifting a class bit to the top of its byte makes that class's
  *  mask one movemask per register.
  *
- *  @sa include/stringzilla/subdocuments.h
+ *  @sa c/stringzilla/subdocuments.h
  */
 #ifndef STRINGZILLA_SUBDOCUMENTS_LOONGSONASX_H_
 #define STRINGZILLA_SUBDOCUMENTS_LOONGSONASX_H_

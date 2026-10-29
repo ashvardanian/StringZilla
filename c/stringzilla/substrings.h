@@ -1,5 +1,5 @@
 /**
- *  @file include/stringzilla/substrings.h
+ *  @file c/stringzilla/substrings.h
  *  @author Ash Vardanian
  *  @date August 8, 2026
  *  @brief Multi-pattern substring search: one compiled Aho-Corasick engine over many haystacks.

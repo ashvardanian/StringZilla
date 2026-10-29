@@ -40,6 +40,8 @@
 
 #include <fmt/format.h>
 
+#include "stringzilla/utf8_norm/serial.h" // `sz_utf8_norm_decomp_max_k`
+
 #include "cross.hpp"
 
 namespace ashvardanian::stringzilla::bench {

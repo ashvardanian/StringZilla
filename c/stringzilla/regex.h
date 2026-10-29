@@ -1,5 +1,5 @@
 /**
- *  @file include/stringzilla/regex.h
+ *  @file c/stringzilla/regex.h
  *  @author Ash Vardanian
  *  @date October 13, 2026
  *  @brief Multi-pattern regular expressions: one compiled pair of automata over many haystacks.

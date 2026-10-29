@@ -4,7 +4,7 @@
  *  @date June 7, 2026
  *  @brief LoongArch LASX (256-bit) backend for collections of strings.
  *
- *  @sa include/stringzilla/strings.h
+ *  @sa c/stringzilla/strings.h
  */
 #ifndef STRINGZILLA_STRINGS_LOONGSONASX_H_
 #define STRINGZILLA_STRINGS_LOONGSONASX_H_

@@ -4,7 +4,7 @@
  *  @date June 7, 2026
  *  @brief WebAssembly relaxed-SIMD backend for hash (level above SIMD128).
  *
- *  @sa include/stringzilla/hash.h
+ *  @sa c/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_V128RELAXED_H_
 #define STRINGZILLA_HASH_V128RELAXED_H_

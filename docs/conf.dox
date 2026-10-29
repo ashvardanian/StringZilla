@@ -1,6 +1,6 @@
 PROJECT_NAME           = StringZilla
 OUTPUT_DIRECTORY       = ../build/
-INPUT                  = ../include/stringzilla
+INPUT                  = ../c/stringzilla ../include/stringzilla ../cpp/stringzilla
 RECURSIVE              = YES
 FILE_PATTERNS          = *.h *.hpp
 EXTENSION_MAPPING      = cuh=C++

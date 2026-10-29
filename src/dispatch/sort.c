@@ -1,5 +1,5 @@
 /**
- *  @file c/dispatch/sort.c
+ *  @file src/dispatch/sort.c
  *  @author Ash Vardanian
  *  @date February 15, 2025
  *  @brief The cased and uncased arg-sort capability lists, dispatch points and finder.

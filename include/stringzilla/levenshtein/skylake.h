@@ -9,7 +9,7 @@
  *  Every intrinsic here is AVX-512F, so Skylake-SP, Cascade Lake and Cooper Lake run the
  *  eight-wide kernel too.
  *
- *  @sa include/stringzilla/levenshtein.h
+ *  @sa c/stringzilla/levenshtein.h
  */
 #ifndef STRINGZILLA_LEVENSHTEIN_SKYLAKE_H_
 #define STRINGZILLA_LEVENSHTEIN_SKYLAKE_H_

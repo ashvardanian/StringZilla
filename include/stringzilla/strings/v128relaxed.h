@@ -4,7 +4,7 @@
  *  @date June 7, 2026
  *  @brief WebAssembly relaxed-SIMD backend for collections of strings, a level above SIMD128.
  *
- *  @sa include/stringzilla/strings.h
+ *  @sa c/stringzilla/strings.h
  */
 #ifndef STRINGZILLA_STRINGS_V128RELAXED_H_
 #define STRINGZILLA_STRINGS_V128RELAXED_H_

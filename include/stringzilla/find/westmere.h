@@ -4,7 +4,7 @@
  *  @date October 2, 2025
  *  @brief Westmere (SSE4.2) backend for substring & byte-set search.
  *
- *  @sa include/stringzilla/find.h
+ *  @sa c/stringzilla/find.h
  */
 #ifndef STRINGZILLA_FIND_WESTMERE_H_
 #define STRINGZILLA_FIND_WESTMERE_H_

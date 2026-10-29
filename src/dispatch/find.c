@@ -1,5 +1,5 @@
 /**
- *  @file c/dispatch/find.c
+ *  @file src/dispatch/find.c
  *  @author Ash Vardanian
  *  @date January 16, 2024
  *  @brief Search dispatch points, <tt>sz_find*_best</tt> and <tt>sz_rfind*_best</tt>, and their finder.

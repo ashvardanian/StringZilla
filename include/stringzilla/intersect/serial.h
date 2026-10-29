@@ -4,7 +4,7 @@
  *  @date March 7, 2025
  *  @brief Serial backend for set intersection.
  *
- *  @sa include/stringzilla/intersect.h
+ *  @sa c/stringzilla/intersect.h
  */
 #ifndef STRINGZILLA_INTERSECT_SERIAL_H_
 #define STRINGZILLA_INTERSECT_SERIAL_H_

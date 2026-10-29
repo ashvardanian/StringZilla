@@ -1,5 +1,5 @@
 /**
- *  @file c/dispatch/substrings.c
+ *  @file src/dispatch/substrings.c
  *  @author Ash Vardanian
  *  @date August 8, 2026
  *  @brief The multi-pattern search engine's dispatch points, their lists and finder.

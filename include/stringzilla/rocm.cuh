@@ -364,7 +364,8 @@ STRINGZILLA_DEVICE sz_u32_t sz_lanes_ballot_rocm_(int predicate) {
 
 #pragma endregion Device Primitives
 
-/*  The library defines these once, in `c/target/rocm.hip`; header-only builds define them here. */
+/*  The library defines these once, in `src/capabilities/rocm.hip`; header-only builds define them
+ *  here. */
 #if STRINGZILLA_HEADER_ONLY
 
 STRINGZILLA_API sz_status_t sz_device_count_rocm(sz_size_t *count) {

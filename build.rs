@@ -66,7 +66,9 @@ fn main() {
     println!("cargo:rustc-link-search=native={}", build.display());
     println!("cargo:rustc-link-search=native={}", build.join("Release").display());
     println!("cargo:rustc-link-lib=static=stringzilla_static");
-    println!("cargo:include={}", manifest.join("include").display());
+    // The header roots, joined like `PATH`, for a dependent to split with `env::split_paths`.
+    let roots = env::join_paths(["c", "include", "cpp"].map(|root| manifest.join(root))).unwrap();
+    println!("cargo:include={}", roots.to_string_lossy());
     // The whole tree, so a dependent's CMake adds the checkout Cargo resolved as a subdirectory.
     println!("cargo:source={}", manifest.display());
 
@@ -105,7 +107,7 @@ fn main() {
 fn build_library(manifest: &Path, enabled: impl Fn(&str) -> bool) -> PathBuf {
     println!("cargo:rerun-if-changed={}", manifest.join("CMakeLists.txt").display());
     println!("cargo:rerun-if-changed={}", manifest.join("VERSION").display());
-    for directory in ["cmake", "c", "include", "probes"] {
+    for directory in ["cmake", "c", "cpp", "include", "probes", "src"] {
         watch(&manifest.join(directory));
     }
 

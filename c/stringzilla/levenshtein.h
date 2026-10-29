@@ -1,5 +1,5 @@
 /**
- *  @file include/stringzilla/levenshtein.h
+ *  @file c/stringzilla/levenshtein.h
  *  @author Ash Vardanian
  *  @date September 6, 2023
  *  @brief Hardware-accelerated Levenshtein edit distances under unit costs.

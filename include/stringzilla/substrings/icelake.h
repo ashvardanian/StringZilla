@@ -10,7 +10,7 @@
  *  chain's slice at once, so each step issues one load fewer. This tier replaces the text-side
  *  stages through @ref sz_substrings_walks_t and inherits every other stage from the serial one.
  *
- *  @sa include/stringzilla/substrings.h
+ *  @sa c/stringzilla/substrings.h
  */
 #ifndef STRINGZILLA_SUBSTRINGS_ICELAKE_H_
 #define STRINGZILLA_SUBSTRINGS_ICELAKE_H_

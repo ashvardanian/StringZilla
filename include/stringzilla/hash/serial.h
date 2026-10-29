@@ -4,7 +4,7 @@
  *  @date December 1, 2024
  *  @brief Serial (scalar) backend for string hashing and checksums.
  *
- *  @sa include/stringzilla/hash.h
+ *  @sa c/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_SERIAL_H_
 #define STRINGZILLA_HASH_SERIAL_H_

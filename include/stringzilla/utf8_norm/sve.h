@@ -18,7 +18,7 @@
  *  the @c svcmplt and @c svcmpge predicates. For a 64-byte or wider vector the upper predicates
  *  fold away to a single @c svtbl_u8.
  *
- *  @sa include/stringzilla/utf8_norm.h
+ *  @sa c/stringzilla/utf8_norm.h
  */
 #ifndef STRINGZILLA_UTF8_NORM_SVE_H_
 #define STRINGZILLA_UTF8_NORM_SVE_H_

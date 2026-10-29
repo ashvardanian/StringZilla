@@ -1,5 +1,5 @@
 /**
- *  @file c/target/serial.c
+ *  @file src/capabilities/serial.c
  *  @author Ash Vardanian
  *  @date September 29, 2026
  *  @brief Every family's @c serial kernels, defined once for the StringZilla library.

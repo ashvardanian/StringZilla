@@ -4,7 +4,7 @@
  *  @date October 3, 2025
  *  @brief NEON + SHA2 backend for string hashing and checksums.
  *
- *  @sa include/stringzilla/hash.h
+ *  @sa c/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_NEONSHA_H_
 #define STRINGZILLA_HASH_NEONSHA_H_

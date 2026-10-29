@@ -11,7 +11,7 @@
  *  byte-for-byte identical. With no win on offer, both public entry points delegate to the baseline
  *  SIMD128 implementation.
  *
- *  @sa include/stringzilla/utf8_norm.h
+ *  @sa c/stringzilla/utf8_norm.h
  */
 #ifndef STRINGZILLA_UTF8_NORM_V128RELAXED_H_
 #define STRINGZILLA_UTF8_NORM_V128RELAXED_H_

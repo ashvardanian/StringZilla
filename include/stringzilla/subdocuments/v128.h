@@ -8,7 +8,7 @@
  *  A 64-byte block is four registers, each classified by one pair of nibble swizzles. Shifting a
  *  class bit to the top of its byte makes that class's mask one bitmask per register.
  *
- *  @sa include/stringzilla/subdocuments.h
+ *  @sa c/stringzilla/subdocuments.h
  */
 #ifndef STRINGZILLA_SUBDOCUMENTS_V128_H_
 #define STRINGZILLA_SUBDOCUMENTS_V128_H_

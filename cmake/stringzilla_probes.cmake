@@ -46,7 +46,7 @@ function (stringzilla_add_cpu_capability capability_name_ capability_macro_)
         try_compile(
             stringzilla_target_${capability_name_}_compiles ${CMAKE_BINARY_DIR}/stringzilla_probes
             ${PROJECT_SOURCE_DIR}/probes/${capability_name_}.c
-            CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${PROJECT_SOURCE_DIR}/include" C_STANDARD 99
+            CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${PROJECT_SOURCE_DIR}/c;${PROJECT_SOURCE_DIR}/include" C_STANDARD 99
         )
     endif ()
     message(
@@ -64,9 +64,10 @@ function (stringzilla_add_cpu_capability capability_name_ capability_macro_)
         AND STRINGZILLA_MARCH STREQUAL "native"
     )
         if (NOT DEFINED stringzilla_target_${capability_name_}_exit_code)
-            try_run(stringzilla_target_${capability_name_}_exit_code stringzilla_target_${capability_name_}_built
-                    ${CMAKE_BINARY_DIR}/stringzilla_probes ${PROJECT_SOURCE_DIR}/probes/${capability_name_}.c
-                    CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${PROJECT_SOURCE_DIR}/include" C_STANDARD 99
+            try_run(
+                stringzilla_target_${capability_name_}_exit_code stringzilla_target_${capability_name_}_built
+                ${CMAKE_BINARY_DIR}/stringzilla_probes ${PROJECT_SOURCE_DIR}/probes/${capability_name_}.c
+                CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${PROJECT_SOURCE_DIR}/c;${PROJECT_SOURCE_DIR}/include" C_STANDARD 99
             )
         endif ()
         if (stringzilla_target_${capability_name_}_exit_code STREQUAL "0")
@@ -75,16 +76,24 @@ function (stringzilla_add_cpu_capability capability_name_ capability_macro_)
         set(capability_implied_ ${capability_runs_})
         message(STATUS "Performing ISA probe ${capability_macro_} - runs: ${capability_runs_}")
     elseif (capability_enabled_ AND NOT STRINGZILLA_MULTIVERSIONED)
+        # A verdict holds for the floor it was probed at, so a build tree whose floor changed probes again.
+        if (NOT "${stringzilla_unit_arch_flags_}" STREQUAL "${stringzilla_target_${capability_name_}_implied_floor}")
+            unset(stringzilla_target_${capability_name_}_implied CACHE)
+        endif ()
         if (NOT DEFINED stringzilla_target_${capability_name_}_implied)
             # The probe holds no `main`, as it only asks the preprocessor.
             set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
             try_compile(
                 stringzilla_target_${capability_name_}_implied ${CMAKE_BINARY_DIR}/stringzilla_probes
                 ${PROJECT_SOURCE_DIR}/probes/implied.c
-                CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${PROJECT_SOURCE_DIR}/include" C_STANDARD 99
+                CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${PROJECT_SOURCE_DIR}/c;${PROJECT_SOURCE_DIR}/include" C_STANDARD 99
                 COMPILE_DEFINITIONS ${stringzilla_unit_arch_flags_} -DSTRINGZILLA_PROBE_MACRO=${capability_macro_}
             )
         endif ()
+        set(stringzilla_target_${capability_name_}_implied_floor
+            "${stringzilla_unit_arch_flags_}"
+            CACHE INTERNAL "The floor ${capability_macro_} was last probed at"
+        )
         set(capability_implied_ ${stringzilla_target_${capability_name_}_implied})
         message(STATUS "Performing ISA probe ${capability_macro_} - implied: ${capability_implied_}")
     endif ()

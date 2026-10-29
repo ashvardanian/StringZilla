@@ -1,5 +1,5 @@
 /**
- *  @file c/dispatch/utf8_wordbreaks.c
+ *  @file src/dispatch/utf8_wordbreaks.c
  *  @author Ash Vardanian
  *  @date November 30, 2025
  *  @brief The UAX-29 word boundary capability list, dispatch point and finder.

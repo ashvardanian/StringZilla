@@ -16,7 +16,7 @@
  *  scanner never compacts, returning the first non-inert byte instead, so AVX-512 VBMI2
  *  @c vpcompressb is irrelevant here.
  *
- *  @sa include/stringzilla/utf8_norm.h
+ *  @sa c/stringzilla/utf8_norm.h
  */
 #ifndef STRINGZILLA_UTF8_NORM_SKYLAKE_H_
 #define STRINGZILLA_UTF8_NORM_SKYLAKE_H_

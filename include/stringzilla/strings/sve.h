@@ -4,7 +4,7 @@
  *  @date October 3, 2024
  *  @brief SVE backend for collections of strings on Arm v9 CPUs.
  *
- *  @sa include/stringzilla/strings.h
+ *  @sa c/stringzilla/strings.h
  */
 #ifndef STRINGZILLA_STRINGS_SVE_H_
 #define STRINGZILLA_STRINGS_SVE_H_

@@ -1,5 +1,5 @@
 /**
- *  @file c/target/hopper.cu
+ *  @file src/capabilities/hopper.cu
  *  @author Ash Vardanian
  *  @date October 8, 2026
  *  @brief The @c hopper kernels and their exports, defined once for the library.

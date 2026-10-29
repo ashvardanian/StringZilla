@@ -1,5 +1,5 @@
 /**
- *  @file c/target/rvv.c
+ *  @file src/capabilities/rvv.c
  *  @author Ash Vardanian
  *  @date September 29, 2026
  *  @brief Every family's @c rvv kernels, defined once for the StringZilla library.

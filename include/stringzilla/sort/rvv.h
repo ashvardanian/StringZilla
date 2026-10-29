@@ -16,7 +16,7 @@
  *  Vector-length-agnostic: correct at VLEN 128 / 256 / 512 / 1024, because every strip is bounded
  *  by @c __riscv_vsetvl_e64m1 and stores are masked to the per-strip surviving count.
  *
- *  @sa include/stringzilla/sort.h
+ *  @sa c/stringzilla/sort.h
  */
 #ifndef STRINGZILLA_SORT_RVV_H_
 #define STRINGZILLA_SORT_RVV_H_

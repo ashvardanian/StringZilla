@@ -36,7 +36,7 @@
  *  Only device code lives here; each vendor wraps the walk in its own kernel and prepares the
  *  forest, sizes the grid and launches from its own host side, in <tt>cuda.cuh</tt> and <tt>rocm.cuh</tt>.
  *
- *  @sa include/stringzilla/overlap.h
+ *  @sa c/stringzilla/overlap.h
  *  @sa include/stringzilla/overlap/cuda.cuh
  *  @sa include/stringzilla/overlap/rocm.cuh
  */

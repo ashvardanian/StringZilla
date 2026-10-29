@@ -32,6 +32,10 @@
 #include <string_view> // `std::string_view`
 #include <vector>      // `std::vector`
 
+#include "stringzilla/utf8_graphemes/serial.h"  // `sz_utf8_is_grapheme_boundary_serial`
+#include "stringzilla/utf8_norm/serial.h"       // `sz_utf8_norm_decomp_max_k`
+#include "stringzilla/utf8_wordbreaks/serial.h" // `sz_utf8_is_word_boundary_serial`, `sz_rune_is_word_char`
+
 #include "harness.hpp"
 #include "utf8.hpp"
 

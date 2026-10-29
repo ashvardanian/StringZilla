@@ -10,7 +10,7 @@
  *  in one move. A nibble lookup would cost a permutation across the group, which grows with the
  *  square of its size.
  *
- *  @sa include/stringzilla/subdocuments.h
+ *  @sa c/stringzilla/subdocuments.h
  */
 #ifndef STRINGZILLA_SUBDOCUMENTS_RVV_H_
 #define STRINGZILLA_SUBDOCUMENTS_RVV_H_

@@ -1,5 +1,5 @@
 /**
- *  @file c/dispatch/intersect.c
+ *  @file src/dispatch/intersect.c
  *  @author Ash Vardanian
  *  @date March 7, 2025
  *  @brief The unordered string-set intersection capability list, dispatch point and finder.

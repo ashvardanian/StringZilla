@@ -4,7 +4,7 @@
  *  @date June 7, 2026
  *  @brief WebAssembly SIMD128 backend for compare.
  *
- *  @sa include/stringzilla/compare.h
+ *  @sa c/stringzilla/compare.h
  */
 #ifndef STRINGZILLA_COMPARE_V128_H_
 #define STRINGZILLA_COMPARE_V128_H_

@@ -12,7 +12,7 @@
  *  candidates instead of the start pass, 16 positions per step. The lookaround table's one-byte
  *  lookarounds fill by four-register table lookups, 16 positions per step.
  *
- *  @sa include/stringzilla/regex.h
+ *  @sa c/stringzilla/regex.h
  */
 #ifndef STRINGZILLA_REGEX_NEON_H_
 #define STRINGZILLA_REGEX_NEON_H_

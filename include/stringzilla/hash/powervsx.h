@@ -4,7 +4,7 @@
  *  @date June 7, 2026
  *  @brief IBM Power VSX backend for hash.
  *
- *  @sa include/stringzilla/hash.h
+ *  @sa c/stringzilla/hash.h
  */
 #ifndef STRINGZILLA_HASH_POWERVSX_H_
 #define STRINGZILLA_HASH_POWERVSX_H_

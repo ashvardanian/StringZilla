@@ -1,5 +1,5 @@
 /**
- *  @file c/dispatch.h
+ *  @file src/dispatch.h
  *  @author Ash Vardanian
  *  @date January 16, 2024
  *  @brief The capability lists' shape and the kernel selection every dispatch unit shares.

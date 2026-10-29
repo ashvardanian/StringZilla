@@ -18,7 +18,7 @@
  *  keeps the dominant inert case off the LUT entirely, and any strip that survives the gate is
  *  handed to the shared scalar verify.
  *
- *  @sa include/stringzilla/utf8_norm.h
+ *  @sa c/stringzilla/utf8_norm.h
  */
 #ifndef STRINGZILLA_UTF8_NORM_RVV_H_
 #define STRINGZILLA_UTF8_NORM_RVV_H_

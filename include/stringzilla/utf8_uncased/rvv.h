@@ -4,7 +4,7 @@
  *  @date June 14, 2026
  *  @brief RISC-V Vector (RVV 1.0) uncased UTF-8 search, comparison & invariance backend.
  *
- *  @sa include/stringzilla/utf8_uncased.h
+ *  @sa c/stringzilla/utf8_uncased.h
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_RVV_H_
 #define STRINGZILLA_UTF8_UNCASED_RVV_H_

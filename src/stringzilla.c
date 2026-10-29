@@ -1,13 +1,14 @@
 /**
- *  @file c/stringzilla.c
+ *  @file src/stringzilla.c
  *  @author Ash Vardanian
  *  @date January 16, 2024
  *  @brief The library's cross-family exports: versions, statuses, capability queries, the kernel
  *      finder, and the device queries of the GPU vendors it lacks.
  *
- *  Each family's dispatch points live in its own unit under <tt>c/dispatch/</tt>, each capability's
- *  kernels in its own unit under <tt>c/target/</tt>, and each GPU vendor's kernels and device exports in
- *  <tt>c/target/cuda.cu</tt>, <tt>c/target/rocm.hip</tt> and <tt>c/target/metal.c</tt>.
+ *  Each family's dispatch points live in its own unit under <tt>src/dispatch/</tt>, each capability's
+ *  kernels in its own unit under <tt>src/capabilities/</tt>, and each GPU vendor's kernels and device
+ *  exports in <tt>src/capabilities/cuda.cu</tt>, <tt>src/capabilities/rocm.hip</tt> and
+ *  <tt>src/capabilities/metal.c</tt>.
  */
 
 /** glibc feature selection must precede the libc headers pulled in by <stdatomic.h>. */
@@ -173,7 +174,7 @@ STRINGZILLA_API sz_size_t sz_capabilities_name(sz_capability_t capabilities, cha
 
 /*  Only the producers are stubbed: every consumer is a @c _best dispatch point, which answers
  *  @c sz_missing_gpu_k for a vendor the library lacks. A library with CUDA kernels counts, probes
- *  and opens streams on its devices in `c/target/cuda.cu`. */
+ *  and opens streams on its devices in `src/capabilities/cuda.cu`. */
 #if !STRINGZILLA_ARCH_CUDA_
 
 STRINGZILLA_API sz_status_t sz_device_count_cuda(sz_size_t *count) {
@@ -212,7 +213,7 @@ STRINGZILLA_API sz_status_t sz_capabilities_enabled_cuda(sz_size_t ordinal, sz_c
 }
 
 /*  A library with ROCm kernels counts, probes and opens streams on its devices in
- *  `c/target/rocm.hip`. */
+ *  `src/capabilities/rocm.hip`. */
 #if !STRINGZILLA_ARCH_ROCM_
 
 STRINGZILLA_API sz_status_t sz_device_count_rocm(sz_size_t *count) {
@@ -250,8 +251,8 @@ STRINGZILLA_API sz_status_t sz_capabilities_enabled_rocm(sz_size_t ordinal, sz_c
     return status;
 }
 
-/*  With Metal kernels in the library, `c/target/metal.c` counts, probes and opens streams on the
- *  devices instead. */
+/*  With Metal kernels in the library, `src/capabilities/metal.c` counts, probes and opens streams
+ *  on the devices instead. */
 #if !STRINGZILLA_ARCH_METAL_
 
 STRINGZILLA_API sz_status_t sz_device_count_metal(sz_size_t *count) {

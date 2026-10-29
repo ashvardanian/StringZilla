@@ -1,5 +1,5 @@
 /**
- *  @file c/target/skylake.c
+ *  @file src/capabilities/skylake.c
  *  @author Ash Vardanian
  *  @date September 29, 2026
  *  @brief Every family's @c skylake kernels, defined once for the StringZilla library.

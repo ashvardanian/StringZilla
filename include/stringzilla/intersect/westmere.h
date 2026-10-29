@@ -4,7 +4,7 @@
  *  @date September 29, 2026
  *  @brief Westmere (SSE4.2+AES-NI) backend for set intersection.
  *
- *  @sa include/stringzilla/intersect.h
+ *  @sa c/stringzilla/intersect.h
  */
 #ifndef STRINGZILLA_INTERSECT_WESTMERE_H_
 #define STRINGZILLA_INTERSECT_WESTMERE_H_

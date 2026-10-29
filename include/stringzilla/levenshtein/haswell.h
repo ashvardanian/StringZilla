@@ -5,7 +5,7 @@
  *  @brief Haswell (AVX2) backend for Levenshtein edit distances: four candidates per YMM, one
  *      64-bit Myers word per candidate, every candidate reading the same query's match masks.
  *
- *  @sa include/stringzilla/levenshtein.h
+ *  @sa c/stringzilla/levenshtein.h
  */
 #ifndef STRINGZILLA_LEVENSHTEIN_HASWELL_H_
 #define STRINGZILLA_LEVENSHTEIN_HASWELL_H_

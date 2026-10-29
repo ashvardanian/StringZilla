@@ -19,7 +19,7 @@ permissions:
 jobs:
   build_swift_artifacts:
     name: Build Swift Artifacts
-    uses: ./.github/workflows/_swift.yml
+    uses: ./.github/workflows/build-swift.yml
     with:
       release: true
 
@@ -74,11 +74,11 @@ jobs:
             StringZilla.csproj:<Version>(\d+\.\d+\.\d+(?:-rc\.\d+)?)</Version>
             pom.xml:<artifactId>stringzilla</artifactId>\n  <version>(\d+\.\d+\.\d+(?:-rc\.\d+)?)</version>
           update-major-version-in: |
-            include/stringzilla/types.h:^#define STRINGZILLA_VERSION_MAJOR (\d+)
+            c/stringzilla/types.h:^#define STRINGZILLA_VERSION_MAJOR (\d+)
           update-minor-version-in: |
-            include/stringzilla/types.h:^#define STRINGZILLA_VERSION_MINOR (\d+)
+            c/stringzilla/types.h:^#define STRINGZILLA_VERSION_MINOR (\d+)
           update-patch-version-in: |
-            include/stringzilla/types.h:^#define STRINGZILLA_VERSION_PATCH (\d+)
+            c/stringzilla/types.h:^#define STRINGZILLA_VERSION_PATCH (\d+)
           dry-run: "false"
           push: "true"
           create-release: "true"
@@ -559,7 +559,7 @@ jobs:
         run: |
           cmake --preset release_shared
           cmake --build --preset release_shared
-          zip -r stringzilla_shared_macos_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.zip build_release_shared/libstringzilla_shared.dylib include/stringzilla/stringzilla.h
+          zip -r stringzilla_shared_macos_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.zip build_release_shared/libstringzilla_shared.dylib c/stringzilla/stringzilla.h
 
       - name: Upload archive
         uses: xresloader/upload-to-github-release@v1

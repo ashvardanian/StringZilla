@@ -1,5 +1,5 @@
 /**
- *  @file c/target/neonsha.c
+ *  @file src/capabilities/neonsha.c
  *  @author Ash Vardanian
  *  @date September 29, 2026
  *  @brief Every family's @c neonsha kernels, defined once for the StringZilla library.

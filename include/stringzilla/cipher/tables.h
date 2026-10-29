@@ -8,7 +8,7 @@
  *  cipher's software round function, and the software emulation of @c AESENC that @c sz_hash falls
  *  back to where no round instruction exists.
  *
- *  @sa include/stringzilla/cipher.h
+ *  @sa c/stringzilla/cipher.h
  */
 #ifndef STRINGZILLA_CIPHER_TABLES_H_
 #define STRINGZILLA_CIPHER_TABLES_H_

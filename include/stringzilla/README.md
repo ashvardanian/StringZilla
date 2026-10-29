@@ -18,8 +18,9 @@ A GPU engine's init uses its stream for its own work alone and sizes a round's d
 Overlap and Levenshtein engines keep no per-round state on a CUDA device, so several streams may score one engine at once, while the rounds of one substrings engine share its arena and its report, so the caller orders them.
 
 The headers compile as freestanding C 99 — set `STRINGZILLA_WITH_LIBC=0` to drop the libc dependency — and as C++20 or newer for the `sz::` layer.
-Per-family hubs `find.h`, `hash.h`, `sort.h`, `compare.h`, `intersect.h`, `strings.h`, `small_string.h`, `levenshtein.h`, `overlap.h`, and `substrings.h` declare the family's dispatch points and its kernels, each capability's under its `STRINGZILLA_TARGET_*` macro.
-The kernels are defined under the matching subdirectories — `find/haswell.h`, `hash/icelake.h`, `strings/neon.h`, and so on — which the library compiles once, one capability per unit in `c/target/`, and header-only builds include into every translation unit.
+Per-family hubs `find.h`, `hash.h`, `sort.h`, `compare.h`, `intersect.h`, `strings.h`, `small_string.h`, `levenshtein.h`, `overlap.h`, and `substrings.h` declare the family's dispatch points and its kernels, each capability's under its `STRINGZILLA_TARGET_*` macro, from the `c/` header root.
+The kernels are defined under the matching subdirectories of the `include/` root — `find/haswell.h`, `hash/icelake.h`, `strings/neon.h`, and so on — and the C++ headers live in the `cpp/` root; a build passes all three as include paths.
+The library compiles the kernels once, one capability per unit in `src/capabilities/`, and header-only builds include them into every translation unit.
 
 ## Installation
 

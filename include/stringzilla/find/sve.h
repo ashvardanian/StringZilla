@@ -4,7 +4,7 @@
  *  @date October 3, 2024
  *  @brief SVE backend for substring & byte-set search.
  *
- *  @sa include/stringzilla/find.h
+ *  @sa c/stringzilla/find.h
  */
 #ifndef STRINGZILLA_FIND_SVE_H_
 #define STRINGZILLA_FIND_SVE_H_

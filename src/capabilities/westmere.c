@@ -1,5 +1,5 @@
 /**
- *  @file c/target/westmere.c
+ *  @file src/capabilities/westmere.c
  *  @author Ash Vardanian
  *  @date September 29, 2026
  *  @brief Every family's @c westmere kernels, defined once for the StringZilla library.

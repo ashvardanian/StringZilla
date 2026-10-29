@@ -24,7 +24,7 @@
  *  composition step is partner-indexed, so the compose key is a dense small-range search instead of
  *  a 42-bit <tt>(starter<<21)|combiner</tt> probe.
  *
- *  @sa include/stringzilla/utf8_norm.h
+ *  @sa c/stringzilla/utf8_norm.h
  */
 #ifndef STRINGZILLA_UTF8_NORM_SERIAL_H_
 #define STRINGZILLA_UTF8_NORM_SERIAL_H_

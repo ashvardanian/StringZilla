@@ -11,7 +11,7 @@
  *  search that skips the bytes needing no escaping, and a lookup-table kernel. Normalization takes
  *  the tier's own normalizer from <tt>utf8_norm/</tt> instead.
  *
- *  @sa include/stringzilla/strings.h
+ *  @sa c/stringzilla/strings.h
  */
 /*  Above the guard: entered first, this body must finish before the hub includes the tiers. */
 #include "stringzilla/strings.h"

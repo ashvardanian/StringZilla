@@ -1,5 +1,5 @@
 /**
- *  @file include/stringzilla/utf8_norm.h
+ *  @file c/stringzilla/utf8_norm.h
  *  @author Ash Vardanian
  *  @date June 14, 2026
  *  @brief Hardware-accelerated single-pass Unicode normalization, from NFD to NFKC_Casefold.
@@ -262,8 +262,8 @@ STRINGZILLA_API sz_status_t sz_utf8_norm_metal(                                 
 
 #pragma region Backends
 
-#include "stringzilla/utf8_norm/serial.h"
 #if STRINGZILLA_HEADER_ONLY
+#include "stringzilla/utf8_norm/serial.h"
 #include "stringzilla/utf8_norm/haswell.h"
 #include "stringzilla/utf8_norm/skylake.h"
 #include "stringzilla/utf8_norm/icelake.h" // includes skylake.h; the guard makes the double-include safe

@@ -9,7 +9,7 @@
  *  predicate becomes its bits of the block mask by one carry-free multiply per 64-bit lane, and
  *  each mask by one OR reduction once the block's vectors are done, at any vector length.
  *
- *  @sa include/stringzilla/subdocuments.h
+ *  @sa c/stringzilla/subdocuments.h
  */
 #ifndef STRINGZILLA_SUBDOCUMENTS_SVE2_H_
 #define STRINGZILLA_SUBDOCUMENTS_SVE2_H_

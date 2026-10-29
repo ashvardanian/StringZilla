@@ -1086,8 +1086,8 @@ check_include_groups() {
                     else if (touched) { search | getline found; close(search) }
                     if (touched && found == "")
                         printf "line %d: \"%s\" is not in this repository - write <%s>\n", FNR, header, header
-                    if (index(found, "include/" project "/") == 1)
-                        printf "line %d: \"%s\" is a public header - write \"%s\"\n", FNR, header, substr(found, 9)
+                    if (match(found, "^(c|cpp|include)/" project "/"))
+                        printf "line %d: \"%s\" is a public header - write \"%s\"\n", FNR, header, substr(found, RLENGTH - length(project))
                     rank = 6
                 }
                 if (touched && quoted && rank != 6)
@@ -2745,7 +2745,7 @@ run_shared_checks() {
     *.hpp | *.cpp | *.cc) check_memcpy_qualified ;;
     esac
     case "$staged_path" in
-    include/* | c/* | python/* | javascript/* | swift/* | golang/* | java/* | csharp/*)
+    c/* | cpp/* | include/* | src/* | python/* | javascript/* | swift/* | golang/* | java/* | csharp/*)
         case "$staged_path" in
         *.c | *.h | *.cpp | *.hpp | *.cu | *.cuh | *.hip | *.cc | *.cxx | *.mm)
             check_filesystem_in_harnesses_only
@@ -2890,11 +2890,11 @@ check_call_result_not_indexed() {
         "$staged_path indexes through a call or a cast; index the owning container, or bind a named local:"
 }
 
-# Rejects a LibC string call in include/stringzilla, because the headers must also compile without LibC, under
+# Rejects a LibC string call in the library headers, because the headers must also compile without LibC, under
 # `STRINGZILLA_WITH_LIBC=0`. Only `memcpy`, `memmove` and `memset` pass: every freestanding GCC and Clang target
 # provides them, and types.h declares them when LibC is absent.
 check_libc_absent_from_library() {
-    [ "$staged_path" != include/stringzilla/types.h ] || return 0
+    [ "$staged_path" != c/stringzilla/types.h ] || return 0
     local calls
     calls=$(added_code_text |
         grep -wE 'memcmp|strlen|strcpy|strncpy|strcat|strcmp|strncmp|strchr|strrchr|strstr|strcasecmp|strncasecmp' |
@@ -3009,7 +3009,7 @@ check_cuda_headers_stay_c() {
         "            write C, and launch with cudaLaunchKernel and an explicit dim3 instead of <<< >>>:"
 }
 
-# Rejects a `<<< >>>` launch in a c/ unit, because it drops the launch status that every library launch reports.
+# Rejects a `<<< >>>` launch in a src/ unit, because it drops the launch status that every library launch reports.
 check_launches_report_status() {
     local launches
     launches=$(added_code_text | grep -F '<<<' || true)
@@ -3071,7 +3071,7 @@ check_generations_split_into_tiers() {
             ($1 + 0) in added' || true)
     [ -z "$tests" ] || reject_with_reason "$tests" \
         "$staged_path tests the compute capability in a GPU header; move the instruction into its tier's header" \
-        "            and unit, like levenshtein/blackwell.cuh and c/target/blackwell.cu:"
+        "            and unit, like levenshtein/blackwell.cuh and src/capabilities/blackwell.cu:"
 }
 
 # Rejects a GPU capability's kernel declared or defined under its vendor's `STRINGZILLA_ARCH_` alone, because every
@@ -3307,10 +3307,10 @@ check_cpython_format_shortcuts_absent() {
         "            build tuples with PyTuple_Pack and PyLong_From*, and call with PyObject_CallOneArg:"
 }
 
-# Every CPU capability include/stringzilla/types.h detects, as `<capability> <ARCH> [<closure>]` lines: its
+# Every CPU capability c/stringzilla/types.h detects, as `<capability> <ARCH> [<closure>]` lines: its
 # force-off clause names the architecture, and a `STRINGZILLA_ARCH_<ARCH>_<CAPABILITY>_` closure marks a base
 # capability. Read from the staged copy, else the one beside this hook, as fixtures have none.
-capability_architectures=$({ { [ $# -eq 0 ] && git show :include/stringzilla/types.h 2> /dev/null; } || cat "$(dirname "$0")/../include/stringzilla/types.h"; } |
+capability_architectures=$({ { [ $# -eq 0 ] && git show :c/stringzilla/types.h 2> /dev/null; } || cat "$(dirname "$0")/../c/stringzilla/types.h"; } |
     awk '
         match($0, /STRINGZILLA_TARGET_[A-Z0-9]+ && !\(?STRINGZILLA_ARCH_[A-Z0-9]+_/) {
             split(substr($0, RSTART + 19, RLENGTH - 20), names, / && !\(?STRINGZILLA_ARCH_/)
@@ -3335,7 +3335,7 @@ check_capability_guards_shaped() {
     read -r architecture closure <<< "$(printf '%s\n' "$capability_architectures" |
         awk -v name="$capability" '$1 == name { print $2, $3 }')"
     if [ -z "$architecture" ]; then
-        reject_with_reason "$staged_path" "$staged_path is named after no capability include/stringzilla/types.h detects:"
+        reject_with_reason "$staged_path" "$staged_path is named after no capability c/stringzilla/types.h detects:"
         return
     fi
     if [ -n "$closure" ]; then
@@ -3436,7 +3436,8 @@ run_project_checks() {
     *.c | *.h | *.cpp | *.hpp | *.cc | *.cu | *.cuh | *.hip | *.metal) check_ceiling_divisions_use_helpers ;;
     esac
     case "$staged_path" in
-    include/stringzilla/*.h | include/stringzilla/*.cuh | include/stringzilla/*/*.h | include/stringzilla/*/*.cuh)
+    c/stringzilla/*.h | include/stringzilla/*.h | include/stringzilla/*.cuh | include/stringzilla/*/*.h | \
+        include/stringzilla/*/*.cuh)
         check_libc_absent_from_library
         ;;
     esac
@@ -3445,7 +3446,7 @@ run_project_checks() {
     esac
     case "$staged_path" in
     include/stringzilla/*/serial.h | include/stringzilla/*/tables.h) ;;
-    include/stringzilla/*/*.h | include/stringzilla/types.h)
+    include/stringzilla/*/*.h | c/stringzilla/types.h)
         check_register_names_carry_dtype_and_width
         check_bit_scans_per_isa
         ;;
@@ -3471,11 +3472,11 @@ run_project_checks() {
         check_generations_split_into_tiers
         check_kernels_bounded_by_named_widths
         ;;
-    c/*.cu | c/*.hip) check_kernels_bounded_by_named_widths ;;
+    src/*.cu | src/*.hip) check_kernels_bounded_by_named_widths ;;
     esac
     case "$staged_path" in
-    include/stringzilla/*.h | include/stringzilla/*.cuh | include/stringzilla/*/*.cuh | include/stringzilla/*/metal.h | \
-        c/*.c | c/dispatch/*.c)
+    c/stringzilla/*.h | include/stringzilla/*.h | include/stringzilla/*.cuh | include/stringzilla/*/*.cuh | \
+        include/stringzilla/*/metal.h | src/*.c | src/dispatch/*.c)
         check_gpu_services_under_architectures
         ;;
     esac
@@ -3483,16 +3484,17 @@ run_project_checks() {
     include/stringzilla/*/*.cuh | include/stringzilla/*/metal.h) check_gpu_headers_shaped ;;
     esac
     case "$staged_path" in
-    include/stringzilla/*.h | include/stringzilla/*.cuh | include/stringzilla/*/*.cuh | include/stringzilla/*/metal.h)
+    c/stringzilla/*.h | include/stringzilla/*.h | include/stringzilla/*.cuh | include/stringzilla/*/*.cuh | \
+        include/stringzilla/*/metal.h)
         check_gpu_kernels_under_targets
         ;;
-    c/*.cu | c/*.hip) check_launches_report_status ;;
+    src/*.cu | src/*.hip) check_launches_report_status ;;
     python/*.c | python/*/*.c | javascript/*.c) check_binding_exports_absent ;;
     esac
     case "$staged_path" in
-    include/stringzilla/types.h) ;;
-    include/stringzilla/*.h | include/stringzilla/*/*.h | include/stringzilla/*.cuh | \
-        include/stringzilla/*/*.cuh | c/*.c | c/*.h | c/*.cu | c/*.hip | \
+    c/stringzilla/types.h) ;;
+    c/stringzilla/*.h | include/stringzilla/*.h | include/stringzilla/*/*.h | include/stringzilla/*.cuh | \
+        include/stringzilla/*/*.cuh | src/*.c | src/*.h | src/*.cu | src/*.hip | \
         test/*.h | test/*.hpp | test/*.cpp | test/*.cu | test/*.cuh | test/*.hip | \
         bench/*.h | bench/*.hpp | bench/*.cpp | bench/*.cu | bench/*.cuh | bench/*.hip)
         check_vendor_tested_only_in_kernels

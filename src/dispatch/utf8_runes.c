@@ -1,5 +1,5 @@
 /**
- *  @file c/dispatch/utf8_runes.c
+ *  @file src/dispatch/utf8_runes.c
  *  @author Ash Vardanian
  *  @date November 19, 2025
  *  @brief The UTF-8 codepoint capability lists, dispatch points for counting, find-nth, and rune

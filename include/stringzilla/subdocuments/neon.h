@@ -10,7 +10,7 @@
  *  at once, where extracting a movemask per class would cost twice the instructions. XML documents
  *  need no classification, only the NEON byte search.
  *
- *  @sa include/stringzilla/subdocuments.h
+ *  @sa c/stringzilla/subdocuments.h
  */
 #ifndef STRINGZILLA_SUBDOCUMENTS_NEON_H_
 #define STRINGZILLA_SUBDOCUMENTS_NEON_H_

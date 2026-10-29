@@ -1,5 +1,5 @@
 /**
- *  @file include/stringzilla/utf8_tokens.h
+ *  @file c/stringzilla/utf8_tokens.h
  *  @author Ash Vardanian
  *  @date November 18, 2025
  *  @brief Hardware-accelerated UTF-8 newline, whitespace, and general delimiter scanning.
@@ -346,9 +346,9 @@ STRINGZILLA_API sz_status_t sz_utf8_delimiters_powervsx(                        
 #pragma endregion
 
 /*  Header-only builds define each kernel inline from its tier header, while the library defines
- *  every kernel once, in its capability's unit under `c/target/`. */
-#include "stringzilla/utf8_tokens/serial.h"
+ *  every kernel once, in its capability's unit under `src/capabilities/`. */
 #if STRINGZILLA_HEADER_ONLY
+#include "stringzilla/utf8_tokens/serial.h"
 #include "stringzilla/utf8_tokens/icelake.h"
 #include "stringzilla/utf8_tokens/haswell.h"
 #include "stringzilla/utf8_tokens/neon.h"

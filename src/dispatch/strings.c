@@ -1,5 +1,5 @@
 /**
- *  @file c/dispatch/strings.c
+ *  @file src/dispatch/strings.c
  *  @author Ash Vardanian
  *  @date January 16, 2024
  *  @brief Collection dispatch points, @c sz_strings_to_tape_best, @c sz_strings_to_rows_best,

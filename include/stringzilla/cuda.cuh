@@ -430,7 +430,8 @@ STRINGZILLA_DEVICE sz_u32_t sz_lanes_ballot_cuda_(int predicate) { return __ball
 
 #pragma endregion Device Primitives
 
-/*  The library defines these once, in `c/target/cuda.cu`; header-only builds define them here. */
+/*  The library defines these once, in `src/capabilities/cuda.cu`; header-only builds define them
+ *  here. */
 #if STRINGZILLA_HEADER_ONLY
 
 STRINGZILLA_API sz_status_t sz_device_count_cuda(sz_size_t *count) {

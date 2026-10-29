@@ -15,7 +15,7 @@
  *  verify, reading the unified <tt>utf8_norm/tables.h</tt> record set in place of the legacy
  *  denormalization tables.
  *
- *  @sa include/stringzilla/utf8_norm.h
+ *  @sa c/stringzilla/utf8_norm.h
  */
 #ifndef STRINGZILLA_UTF8_NORM_NEON_H_
 #define STRINGZILLA_UTF8_NORM_NEON_H_

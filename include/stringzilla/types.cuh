@@ -14,7 +14,7 @@
  *  steps as function parameters, which each vendor's or tier's kernel binds to its own helpers, so
  *  nothing here spells one vendor's or one generation's instructions.
  *
- *  @sa include/stringzilla/types.h
+ *  @sa c/stringzilla/types.h
  *  @sa include/stringzilla/cuda.cuh
  *  @sa include/stringzilla/rocm.cuh
  */

@@ -4,7 +4,7 @@
  *  @date June 7, 2026
  *  @brief IBM Power VSX backend for collections of strings.
  *
- *  @sa include/stringzilla/strings.h
+ *  @sa c/stringzilla/strings.h
  */
 #ifndef STRINGZILLA_STRINGS_POWERVSX_H_
 #define STRINGZILLA_STRINGS_POWERVSX_H_

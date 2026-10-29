@@ -4,7 +4,7 @@
  *  @date June 12, 2026
  *  @brief Haswell (AVX2) uncased UTF-8 search, comparison & invariance backend.
  *
- *  @sa include/stringzilla/utf8_uncased.h
+ *  @sa c/stringzilla/utf8_uncased.h
  *
  *  Ports the Ice Lake architecture to 32-byte YMM chunks: the needle classification, match
  *  verification, and danger-zone scanning stay ISA-independent in <tt>serial.h</tt>; per-script fold and

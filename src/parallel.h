@@ -1,5 +1,5 @@
 /**
- *  @file c/parallel.h
+ *  @file src/parallel.h
  *  @author Ash Vardanian
  *  @date September 30, 2026
  *  @brief Tile-parallel execution for StringZilla language bindings.

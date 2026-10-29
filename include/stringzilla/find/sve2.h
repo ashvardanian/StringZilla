@@ -4,7 +4,7 @@
  *  @date July 17, 2026
  *  @brief SVE2 backend for byte-set search.
  *
- *  @sa include/stringzilla/find.h
+ *  @sa c/stringzilla/find.h
  */
 #ifndef STRINGZILLA_FIND_SVE2_H_
 #define STRINGZILLA_FIND_SVE2_H_

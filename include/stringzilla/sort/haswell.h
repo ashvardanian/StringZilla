@@ -17,7 +17,7 @@
  *  biased by the sign bit, an XOR with <tt>0x8000...</tt>, before comparing, which maps unsigned order
  *  onto signed order.
  *
- *  @sa include/stringzilla/sort.h
+ *  @sa c/stringzilla/sort.h
  */
 #ifndef STRINGZILLA_SORT_HASWELL_H_
 #define STRINGZILLA_SORT_HASWELL_H_

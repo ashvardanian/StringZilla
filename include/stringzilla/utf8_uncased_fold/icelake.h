@@ -4,7 +4,7 @@
  *  @date November 28, 2025
  *  @brief Ice Lake (AVX-512) backend for UTF-8 case folding.
  *
- *  @sa include/stringzilla/utf8_uncased_fold.h
+ *  @sa c/stringzilla/utf8_uncased_fold.h
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_FOLD_ICELAKE_H_
 #define STRINGZILLA_UTF8_UNCASED_FOLD_ICELAKE_H_

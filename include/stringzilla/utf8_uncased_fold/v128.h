@@ -4,7 +4,7 @@
  *  @date June 7, 2026
  *  @brief WebAssembly SIMD128 backend for UTF-8 case folding.
  *
- *  @sa include/stringzilla/utf8_uncased_fold.h
+ *  @sa c/stringzilla/utf8_uncased_fold.h
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_FOLD_V128_H_
 #define STRINGZILLA_UTF8_UNCASED_FOLD_V128_H_

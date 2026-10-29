@@ -6,7 +6,7 @@
  *
  *  The round loop stays a loop, for the reason <tt>cipher/v128.h</tt> spells out.
  *
- *  @sa include/stringzilla/cipher.h
+ *  @sa c/stringzilla/cipher.h
  */
 #ifndef STRINGZILLA_CIPHER_V128RELAXED_H_
 #define STRINGZILLA_CIPHER_V128RELAXED_H_

@@ -1,5 +1,5 @@
 /**
- *  @file include/stringzilla/hash.h
+ *  @file c/stringzilla/hash.h
  *  @author Ash Vardanian
  *  @date December 1, 2024
  *  @brief Hardware-accelerated non-cryptographic string hashing and checksums.

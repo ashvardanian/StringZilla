@@ -8,7 +8,7 @@
  *  runes, and holds the cross-product engine every backend scores through and the step primitives
  *  every SIMD backend mirrors.
  *
- *  @sa include/stringzilla/levenshtein.h
+ *  @sa c/stringzilla/levenshtein.h
  */
 #ifndef STRINGZILLA_LEVENSHTEIN_SERIAL_H_
 #define STRINGZILLA_LEVENSHTEIN_SERIAL_H_

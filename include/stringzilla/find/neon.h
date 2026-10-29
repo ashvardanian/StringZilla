@@ -4,7 +4,7 @@
  *  @date June 21, 2023
  *  @brief NEON backend for substring & byte-set search.
  *
- *  @sa include/stringzilla/find.h
+ *  @sa c/stringzilla/find.h
  */
 #ifndef STRINGZILLA_FIND_NEON_H_
 #define STRINGZILLA_FIND_NEON_H_

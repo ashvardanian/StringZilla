@@ -1,5 +1,5 @@
 /**
- *  @file include/stringzilla/subdocuments.h
+ *  @file c/stringzilla/subdocuments.h
  *  @author Ash Vardanian
  *  @date October 13, 2026
  *  @brief Path queries: one compiled engine pulling what many paths select out of many documents.

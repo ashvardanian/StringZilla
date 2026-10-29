@@ -4,7 +4,7 @@
  *  @date June 7, 2026
  *  @brief IBM Power VSX backend for compare.
  *
- *  @sa include/stringzilla/compare.h
+ *  @sa c/stringzilla/compare.h
  */
 #ifndef STRINGZILLA_COMPARE_POWERVSX_H_
 #define STRINGZILLA_COMPARE_POWERVSX_H_

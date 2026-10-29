@@ -8,7 +8,7 @@
  *  The fourteen rounds are written out rather than looped, and the block groups are named registers
  *  rather than an indexed array.
  *
- *  @sa include/stringzilla/cipher.h
+ *  @sa c/stringzilla/cipher.h
  */
 #ifndef STRINGZILLA_CIPHER_ICELAKE_H_
 #define STRINGZILLA_CIPHER_ICELAKE_H_

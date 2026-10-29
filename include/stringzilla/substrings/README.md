@@ -37,7 +37,7 @@ Over nucleotides every byte is live and the skip switches itself off, while a sp
 
 ## The Device
 
-The device backends are `cuda` and `rocm`, whose kernels share `simt.cuh`, each launched from its own host code in `cuda.cuh` and `rocm.cuh`, which `c/target/cuda.cu` and `c/target/rocm.hip` compile into the library, and `metal`, whose kernels live in `metal.h` with the `metal.metal` shaders, which `c/target/metal.c` compiles.
+The device backends are `cuda` and `rocm`, whose kernels share `simt.cuh`, each launched from its own host code in `cuda.cuh` and `rocm.cuh`, which `src/capabilities/cuda.cu` and `src/capabilities/rocm.hip` compile into the library, and `metal`, whose kernels live in `metal.h` with the `metal.metal` shaders, which `src/capabilities/metal.c` compiles.
 All three parallelize over haystack __chunks__ rather than over haystacks, so a corpus of one long document and a corpus of a million short ones fill the device the same way.
 A chunk reports every match ending inside it and primes itself from the bytes before its own start, clamped to its own haystack, so every match is found exactly once.
 A leftmost cover is settled after the walk instead, since inside it would cost every thread a ring wide enough for the longest match.

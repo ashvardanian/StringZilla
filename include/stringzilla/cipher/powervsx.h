@@ -7,7 +7,7 @@
  *  The fourteen rounds are written out rather than looped, for the same reason the eight lanes are
  *  and the one <tt>cipher/icelake.h</tt> spells out.
  *
- *  @sa include/stringzilla/cipher.h
+ *  @sa c/stringzilla/cipher.h
  */
 #ifndef STRINGZILLA_CIPHER_POWERVSX_H_
 #define STRINGZILLA_CIPHER_POWERVSX_H_

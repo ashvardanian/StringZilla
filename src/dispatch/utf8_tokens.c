@@ -1,5 +1,5 @@
 /**
- *  @file c/dispatch/utf8_tokens.c
+ *  @file src/dispatch/utf8_tokens.c
  *  @author Ash Vardanian
  *  @date November 18, 2025
  *  @brief UTF-8 newline, whitespace and delimiter capability lists, dispatch points and finder.

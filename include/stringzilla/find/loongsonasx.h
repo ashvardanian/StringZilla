@@ -4,7 +4,7 @@
  *  @date June 7, 2026
  *  @brief LoongArch LASX (256-bit) backend for find.
  *
- *  @sa include/stringzilla/find.h
+ *  @sa c/stringzilla/find.h
  */
 #ifndef STRINGZILLA_FIND_LOONGSONASX_H_
 #define STRINGZILLA_FIND_LOONGSONASX_H_

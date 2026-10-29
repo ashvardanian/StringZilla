@@ -1,5 +1,5 @@
 /**
- *  @file include/stringzilla/cipher.h
+ *  @file c/stringzilla/cipher.h
  *  @author Ash Vardanian
  *  @date August 4, 2026
  *  @brief Hardware-accelerated AES-256 encryption in counter and Galois/counter modes.

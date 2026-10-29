@@ -1,5 +1,5 @@
 /**
- *  @file c/target/neon.c
+ *  @file src/capabilities/neon.c
  *  @author Ash Vardanian
  *  @date September 29, 2026
  *  @brief Every family's @c neon kernels, defined once for the StringZilla library.

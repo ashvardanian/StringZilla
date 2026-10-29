@@ -32,7 +32,7 @@
  *  staged into device-reachable memory; the rune planes are built on the host, an init being
  *  allowed to join where a round is not.
  *
- *  @sa include/stringzilla/levenshtein.h
+ *  @sa c/stringzilla/levenshtein.h
  */
 #ifndef STRINGZILLA_LEVENSHTEIN_SIMT_CUH_
 #define STRINGZILLA_LEVENSHTEIN_SIMT_CUH_
