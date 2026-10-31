@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# StringZilla commit-msg hook - keeps commit messages free of tool attributions and session links.
+# StringZilla commit-msg hook - keeps commit messages free of tool attributions and session links, and makes
+# every `Release: vX.Y.Z` commit stamp each version site while no other commit touches VERSION.
 # Install once per clone with:  git config core.hooksPath .githooks
 # Bypass in a genuine emergency with:  git commit --no-verify
 
@@ -17,5 +18,48 @@ if [ -n "$attributions" ]; then
     echo "Remove the line(s), or bypass with --no-verify only if intentional." >&2
     exit 1
 fi
+
+subject=$(grep -v '^#' "$message_file" | grep -vE '^[[:space:]]*$' | head -1)
+case "$subject" in
+Merge* | "fixup!"* | "squash!"*) ;;
+# Releases are cut by hand, so this check is all that stands between a typo and a published package.
+Release:*)
+    version=$(printf '%s\n' "$subject" | sed -nE 's/^Release: v([0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?)$/\1/p')
+    if [ -z "$version" ]; then
+        echo "commit-msg: a release subject is exactly 'Release: vX.Y.Z' or 'Release: vX.Y.Z-rc.N', got: $subject" >&2
+        exit 1
+    fi
+    core=${version%%-*} stale=""
+    IFS=. read -r major minor patch <<< "$core"
+    [ "$(git show :VERSION 2>/dev/null)" = "$version" ] || stale="$stale VERSION"
+    git show :Cargo.toml 2>/dev/null | grep -qxF "version = \"$version\"" || stale="$stale Cargo.toml"
+    git show :Cargo.lock 2>/dev/null | grep -A1 -xF 'name = "stringzilla"' | grep -qxF "version = \"$version\"" || stale="$stale Cargo.lock"
+    git show :package.json 2>/dev/null | grep -qxF "  \"version\": \"$version\"," || stale="$stale package.json"
+    for platform in darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-arm64 win32-x64; do
+        git show :package.json 2>/dev/null | grep -qF "\"@stringzilla/$platform\": \"$version\"" || stale="$stale package.json:@stringzilla/$platform"
+        git show ":javascript/@stringzilla-$platform/package.json" 2>/dev/null | grep -qxF "  \"version\": \"$version\"," ||
+            stale="$stale javascript/@stringzilla-$platform/package.json"
+    done
+    git show :CITATION.cff 2>/dev/null | grep -qxF "version: $version" || stale="$stale CITATION.cff"
+    git show :StringZilla.csproj 2>/dev/null | grep -qxF "    <Version>$version</Version>" || stale="$stale StringZilla.csproj"
+    git show :pom.xml 2>/dev/null | grep -A1 -xF '  <artifactId>stringzilla</artifactId>' | grep -qxF "  <version>$version</version>" || stale="$stale pom.xml"
+    # CMake's `project(VERSION)` and the C macros take numbers only, so a candidate keeps its core there.
+    git show :CMakeLists.txt 2>/dev/null | grep -qE "^[[:space:]]+VERSION ${core//./\\.}$" || stale="$stale CMakeLists.txt"
+    for field in "MAJOR $major" "MINOR $minor" "PATCH $patch"; do
+        git show :include/stringzilla/stringzilla.h 2>/dev/null | grep -qxF "#define STRINGZILLA_H_VERSION_$field" ||
+            stale="$stale include/stringzilla/stringzilla.h:${field% *}"
+    done
+    if [ -n "$stale" ]; then
+        echo "commit-msg: these staged files don't carry $version:$stale" >&2
+        exit 1
+    fi
+    ;;
+*)
+    if git diff --cached --name-only | grep -qx VERSION; then
+        echo "commit-msg: VERSION only changes in a 'Release: vX.Y.Z' commit." >&2
+        exit 1
+    fi
+    ;;
+esac
 
 exit 0
