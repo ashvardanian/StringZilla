@@ -73,6 +73,7 @@
 #include <charconv>     // `std::from_chars`
 #include <chrono>       // `std::chrono::steady_clock` for per-test timing
 #include <exception>    // `std::exception`
+#include <memory>       // `std::unique_ptr`, which owns a backend's arena block
 #include <optional>     // `std::optional`
 #include <random>       // `std::random_device`
 #include <regex>        // `std::regex_search` for `STRINGZILLA_FILTER`
@@ -303,18 +304,68 @@ result_type_ kernel_result(kernel_type_ const &kernel, arguments_types_... argum
     return result;
 }
 
+/** A bump arena over one device block whose bookkeeping the host keeps, so carving a tape reads
+ *  nothing back from the device and a rewind returns every tape at once. */
+struct device_arena_t {
+    sz_ptr_t block = nullptr;
+    sz_size_t capacity = 0, consumed = 0;
+};
+
+/** Carves @p bytes from the arena at @p handle on a 256-byte boundary, or null once it is full. */
+inline void *device_arena_allocate_(sz_size_t bytes, void *handle, sz_stream_t) {
+    device_arena_t &arena = *static_cast<device_arena_t *>(handle);
+    sz_size_t const start = (arena.consumed + 255) & ~(sz_size_t)255;
+    if (start > arena.capacity || bytes > arena.capacity - start) return nullptr;
+    arena.consumed = start + bytes;
+    return arena.block + start;
+}
+
+/** Returns nothing, as an arena's tapes go back together when it rewinds. */
+inline void device_arena_free_(void *, sz_size_t, void *, sz_stream_t) {}
+
+/** The allocator carving from @p arena, which has no @c reallocate. */
+inline sz_allocator_t device_arena_policy_(device_arena_t &arena) {
+    sz_allocator_t policy {};
+    policy.allocate = &device_arena_allocate_;
+    policy.free = &device_arena_free_;
+    policy.handle = &arena;
+    return policy;
+}
+
 struct device_backend_t {
     sz::device_t selected = sz::device_t::cpu();
     sz_capability_t capabilities = 0;
     sz_stream_t stream = nullptr;
-    sz_allocator_t unified {};
+
+    /** Memory the host builds and reads, which the device addresses over the bus. */
+    sz_allocator_t pinned {};
+
+    /** Memory only the device touches, which holds the arena's block. */
+    sz_allocator_t device {};
+
+    /** The arena the device gathers its tapes into, owned by the vendor's driver function. */
+    device_arena_t *arena = nullptr;
+
     sz_status_t (*init)(sz_size_t, sz_stream_t *) = nullptr;
     sz_status_t (*free)(sz_stream_t) = nullptr;
 };
 
-using unified_strings_t = strings<unified_alloc<char>>;
+/** The adapter of a backend's pinned policy, riding its stream. */
 template <typename value_type_>
-using unified_vector = std::vector<value_type_, unified_alloc<value_type_>>;
+unified_alloc<value_type_> pinned_alloc_(device_backend_t const &runtime) {
+    return {runtime.pinned, runtime.stream};
+}
+
+/** Hands an arena's block back to the policy it came from, as a @c std::unique_ptr deleter. */
+struct device_block_release_t {
+    unified_alloc<char> allocator;
+    std::size_t bytes = 0;
+    void operator()(char *block) const noexcept { allocator.deallocate(block, bytes); }
+};
+
+using pinned_strings_t = strings<unified_alloc<char>>;
+template <typename value_type_>
+using pinned_vector = std::vector<value_type_, unified_alloc<value_type_>>;
 
 /** Owns one native stream, released after its dependent allocations and engines. */
 struct stream_t {

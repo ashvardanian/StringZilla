@@ -674,9 +674,10 @@ STRINGZILLA_DEVICE sz_size_t sz_substrings_walk_chunk_uncased_simt_(sz_substring
         if (image_index == image.length) {
             sz_size_t source_bytes;
             if (position >= length) break;
-            // An aligned word holding a haystack byte lies in a page the device may read whole.
             sz_u8_t const *const word = (sz_u8_t const *)((sz_size_t)(haystack_bytes + position) & ~(sz_size_t)3);
-            if (word != loaded_word) loaded_word = word, loaded_quad = sz_substrings_load_quad_simt_(word);
+            if (word != loaded_word)
+                loaded_word = word,
+                loaded_quad = sz_u32_load_bounded_simt_((sz_u32_t const *)word, haystack_bytes + length);
             sz_u8_t const lead = (sz_u8_t)(loaded_quad >> (((sz_size_t)(haystack_bytes + position) & 3u) * 8));
             if (lead < 0x80)
                 image.bytes = sz_ascii_fold_(lead), image.length = 1, image.rune_ends = 1, source_bytes = 1;

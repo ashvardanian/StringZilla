@@ -30,7 +30,16 @@ std::size_t test_cross_metal(environment_t const &env, std::size_t ordinal) {
     runtime.selected = selected.value;
     runtime.stream = stream.handle;
     verify(sz_capabilities_detected_metal(ordinal, &runtime.capabilities) == sz_success_k);
-    verify(sz_allocator_init_unified_metal(&runtime.unified) == sz_success_k);
+    verify(sz_allocator_init_unified_metal(&runtime.pinned) == sz_success_k);
+    runtime.device = runtime.pinned;
+    // Every device tape a case gathers is carved from one block, which the case rewinds when done.
+    std::size_t const arena_bytes = (std::size_t)512 << 20;
+    unified_alloc<char> const arena_allocator(runtime.device, runtime.stream);
+    std::unique_ptr<char, device_block_release_t> const arena_block(arena_allocator.allocate(arena_bytes),
+                                                                    {arena_allocator, arena_bytes});
+    verify(arena_block != nullptr);
+    device_arena_t arena {arena_block.get(), arena_bytes, 0};
+    runtime.arena = &arena;
     runtime.init = sz_stream_init_metal;
     runtime.free = sz_stream_free_metal;
     cross_section_t check(env);
@@ -39,11 +48,11 @@ std::size_t test_cross_metal(environment_t const &env, std::size_t ordinal) {
     check("test_allocator_metal", [&] {
         sz_allocator_t device {};
         verify(sz_allocator_init_device_best(&device, sz_cap_metal_k) == sz_success_k);
-        verify(device.allocate == runtime.unified.allocate && device.free == runtime.unified.free &&
-               device.handle == runtime.unified.handle);
+        verify(device.allocate == runtime.pinned.allocate && device.free == runtime.pinned.free &&
+               device.handle == runtime.pinned.handle);
         verify(sz_allocator_init_pinned_best(&device, sz_cap_metal_k) == sz_missing_kernel_k);
-        verify(device.allocate == runtime.unified.allocate && device.free == runtime.unified.free &&
-               device.handle == runtime.unified.handle);
+        verify(device.allocate == runtime.pinned.allocate && device.free == runtime.pinned.free &&
+               device.handle == runtime.pinned.handle);
     });
 #if STRINGZILLA_TARGET_METAL
     device_kernels const metal {

@@ -7,15 +7,17 @@
  *      kernels of <tt>regex/simt.cuh</tt>.
  *
  *  No compute verb allocates. The round block is taken once at init, sized from the device's
- *  resident threads, and a call reads the tape's offsets on the host to cut its corpus into
- *  segments the block holds, leaving everything else to the device: lookaround passes sweep the
- *  segments first, priming runs right to left over them, then marking, walking and the chain left
- *  to right, each segment's carry handing the next where its straddling haystack resumes. The
- *  lookaround table is a ring of two segments, each sweep filling each segment once.
+ *  resident threads, and a call copies back the tape's first and last offsets to cut its corpus
+ *  into segments the block holds, leaving everything else to the device, which alone may read the
+ *  tape: lookaround passes sweep the segments first, priming runs right to left over them, then
+ *  marking, walking and the chain left to right, each segment's carry handing the next where its
+ *  straddling haystack resumes. The lookaround table is a ring of two segments, each sweep filling
+ *  each segment once.
  *
- *  A verb joins its stream only where a vocabulary with lookarounds meets a haystack running past
- *  the ring's window: there it reads back whether end walks paused at the window's end, which it
- *  then slides on until they finish, or refused, which fails the call.
+ *  A verb joins its stream once for those offsets, and again only where a vocabulary with
+ *  lookarounds walks a segment before the last, whose haystacks may run past the ring's window:
+ *  there it reads back whether end walks paused at the window's end, which it then slides on until
+ *  they finish, or refused, which fails the call.
  *
  *  @sa include/stringzilla/regex/simt.cuh
  *  @sa include/stringzilla/regex/cuda.cuh, which this mirrors launch for launch
@@ -247,31 +249,27 @@ STRINGZILLA_INLINE sz_status_t sz_regex_scan_rocm_(sz_regex_round_simt_t *round,
     return sz_regex_launch_rocm_((void const *)sz_regex_scan_simt_kernel_, (unsigned)tiles, arguments, 0, stream);
 }
 
-/** The first slot of haystack @p index of a tape, one per byte and one per haystack before it, read
- *  on the host; past the last haystack, the slots the tape spans. */
-STRINGZILLA_INLINE sz_size_t sz_regex_first_slot_rocm_(sz_strings_view_t const *haystacks, sz_size_t index) {
-    if (haystacks->layout == sz_strings_u64_tape_k)
-        return (sz_size_t)(haystacks->data.u64_tape.offsets[index] - haystacks->data.u64_tape.offsets[0]) + index;
-    return (sz_size_t)(haystacks->data.u32_tape.offsets[index] - haystacks->data.u32_tape.offsets[0]) + index;
-}
-
-/** The slots a tape of haystacks spans: one per byte and one per haystack, read on the host. */
-STRINGZILLA_INLINE sz_size_t sz_regex_slots_count_rocm_(sz_strings_view_t const *haystacks) {
-    return sz_regex_first_slot_rocm_(haystacks, haystacks->count);
-}
-
-/** Whether the haystack holding the last slot of the segment @p round points at runs to the end of
- *  the lookaround table's window or past it, found by binary search over the tape's offsets on the
- *  host: only there can a walk pause or refuse. */
-STRINGZILLA_INLINE sz_bool_t sz_regex_runs_past_rocm_(sz_strings_view_t const *haystacks,
-                                                      sz_regex_round_simt_t const *round) {
-    sz_size_t low = 0, high = haystacks->count;
-    while (high - low > 1) {
-        sz_size_t const middle = low + (high - low) / 2;
-        if (sz_regex_first_slot_rocm_(haystacks, middle) < round->segment_end) low = middle;
-        else high = middle;
-    }
-    return (sz_bool_t)(sz_regex_first_slot_rocm_(haystacks, low + 1) - 1 >= round->looks.end);
+/** Reads into @p slots_count the slots a tape of haystacks spans, one per byte and one per
+ *  haystack, from its first and last offsets copied back on @p stream and joined: the tape may
+ *  live where only the device reads it. */
+STRINGZILLA_INLINE sz_status_t sz_regex_slots_count_rocm_(sz_strings_view_t const *haystacks, sz_size_t *slots_count,
+                                                          sz_stream_t stream) {
+    sz_bool_t const wide = (sz_bool_t)(haystacks->layout == sz_strings_u64_tape_k);
+    sz_size_t const width = wide ? sizeof(sz_u64_t) : sizeof(sz_u32_t);
+    sz_cptr_t const offsets = wide ? (sz_cptr_t)haystacks->data.u64_tape.offsets
+                                   : (sz_cptr_t)haystacks->data.u32_tape.offsets;
+    union {
+        sz_u64_t u64s[2];
+        sz_u32_t u32s[2];
+    } ends;
+    sz_status_t status;
+    ends.u64s[0] = 0, ends.u64s[1] = 0;
+    status = sz_copy_rocm_(&ends, offsets, width, stream);
+    if (status == sz_success_k)
+        status = sz_copy_rocm_((sz_ptr_t)&ends + width, offsets + haystacks->count * width, width, stream);
+    if (status == sz_success_k) status = sz_stream_synchronize_rocm_(stream);
+    *slots_count = (sz_size_t)(wide ? ends.u64s[1] - ends.u64s[0] : ends.u32s[1] - ends.u32s[0]) + haystacks->count;
+    return status;
 }
 
 /** Points @p round at segment @p segment of its corpus, cut into segments of @p slots slots. */
@@ -540,8 +538,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_rocm_(sz_regex_engine_t const *en
                                                      sz_stream_t stream) {
     sz_regex_arena_rocm_t const arena = sz_regex_arena_of_rocm_(engine);
     sz_ptr_t const block = (sz_ptr_t)engine->scratch;
-    sz_size_t const slots_count = sz_regex_slots_count_rocm_(haystacks), slots = arena.segment_slots;
-    sz_size_t const segments = sz_size_divide_round_up(slots_count, slots);
+    sz_size_t const slots = arena.segment_slots;
     sz_bool_t const folded = (sz_bool_t)(engine->case_sensitivity != sz_cased_k);
     sz_u32_t const levels = sz_regex_levels_simt_(engine);
     sz_size_t const walks_bytes = arena.total - arena.walks;
@@ -552,10 +549,13 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_rocm_(sz_regex_engine_t const *en
     sz_size_t const groups_capacity = (slots / sz_regex_checkpoint_slots_simt_k + 1) / 2;
     sz_regex_engine_t launched_engine = *engine;
     sz_strings_view_t launched_haystacks = *haystacks;
-    sz_size_t segment, step, shared_bytes, *chunk_offsets, *chunk_kept, *chunk_sums, *chunk_covers;
+    sz_size_t slots_count, segments, segment, step, shared_bytes;
+    sz_size_t *chunk_offsets, *chunk_kept, *chunk_sums, *chunk_covers;
     void *round_arguments[1], *walk_arguments[3], *chain_arguments[2];
     sz_u32_t level, lookaround, negated, counters[sz_regex_refused_counter_simt_k + 1];
-    sz_status_t status = sz_success_k;
+    sz_status_t status = sz_regex_slots_count_rocm_(haystacks, &slots_count, stream);
+    if (status != sz_success_k) return status;
+    segments = sz_size_divide_round_up(slots_count, slots);
     if (segments > arena.chunks) return sz_unexpected_dimensions_k;
 
     round->reverse_images = (sz_u32_t const *)block;
@@ -660,7 +660,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_rocm_(sz_regex_engine_t const *en
                                           stream);
         sz_regex_segment_rocm_(round, segment, slots);
         grid = sz_regex_grid_rocm_(round->chunks_count);
-        past = (sz_bool_t)(levels && sz_regex_runs_past_rocm_(haystacks, round));
+        past = (sz_bool_t)(levels && segment + 1 != segments);
         if (status == sz_success_k && segment == 0)
             status = sz_fill_rocm_(round->carry, sizeof(sz_regex_carry_simt_t), 0, stream);
         if (status == sz_success_k && !engine->prefixes)
@@ -705,8 +705,8 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_rocm_(sz_regex_engine_t const *en
                                                       : (void const *)sz_regex_continue_rocm_kernel_,
                                                grid, walk_arguments, shared_bytes, stream);
         }
-        // Only a haystack running past the table can leave walks paused or refused there,
-        // so only then is one read.
+        // Only a haystack running past the table can leave walks paused or refused there, and
+        // only a segment before the last can hold one, so only then is one read.
         if (status == sz_success_k && past)
             status = sz_regex_slides_rocm_(engine, haystacks, round, &arena, levels, stream);
         for (step = 0; status == sz_success_k && engine->forward_rows && step != round->rounds; ++step) {

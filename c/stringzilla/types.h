@@ -2052,8 +2052,8 @@ STRINGZILLA_CONSTEXPR sz_u64_t sz_u64_blend(sz_u64_t a, sz_u64_t b, sz_u64_t mas
  *  @see Branchless min and max: https://stackoverflow.com/questions/514435/templatized-branchless-int-max-min-function
  *  @see Bit Twiddling Hacks: https://graphics.stanford.edu/~seander/bithacks.html#IntegerMinOrMax
  */
-#define sz_min_of_two(x, y) (x < y ? x : y)
-#define sz_max_of_two(x, y) (x < y ? y : x)
+#define sz_min_of_two(x, y) ((x) < (y) ? (x) : (y))
+#define sz_max_of_two(x, y) ((x) < (y) ? (y) : (x))
 #define sz_min_of_three(x, y, z) sz_min_of_two(x, sz_min_of_two(y, z))
 #define sz_max_of_three(x, y, z) sz_max_of_two(x, sz_max_of_two(y, z))
 

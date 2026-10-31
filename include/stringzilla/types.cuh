@@ -68,6 +68,17 @@ STRINGZILLA_DEVICE sz_size_t sz_block_scan_simt_(sz_size_t value, sz_size_t *sha
     return inclusive - value;
 }
 
+/** The aligned word at @p word, its bytes from @p end on read as zeros, as the word holding a
+ *  string's last byte may run past its tape. */
+STRINGZILLA_DEVICE sz_u32_t sz_u32_load_bounded_simt_(sz_u32_t const *word, sz_u8_t const *end) {
+    sz_u8_t const *const bytes = (sz_u8_t const *)word;
+    sz_u32_t partial = 0;
+    unsigned index;
+    if (bytes + 4 <= end) return __ldg(word);
+    for (index = 0; bytes + index < end; ++index) partial |= (sz_u32_t)bytes[index] << (8 * index);
+    return partial;
+}
+
 /** Stores the @p ballot of the 32 lanes marking items from @p first on, as the little-endian bytes
  *  of @p bits they fall in among the @c ceil(count/8) a bitmap of @p count items holds. */
 STRINGZILLA_DEVICE void sz_u1x8_store_simt_(sz_u1x8_t *bits, sz_size_t count, sz_size_t first, sz_u32_t ballot) {

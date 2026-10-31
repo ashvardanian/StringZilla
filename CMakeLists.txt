@@ -467,14 +467,23 @@ if (STRINGZILLA_CUDA_ARCH)
     stringzilla_select_gpu_codes(
         stringzilla_cuda_unit_codes_ "${stringzilla_cuda_resolved_architectures_}" "${stringzilla_cuda_codes_}"
     )
+    # The runtime CMake's own `CMAKE_CUDA_RUNTIME_LIBRARY` names, so a consumer keeping the runtime inside its shared
+    # library sets it to Static before adding this directory and inherits the static archive.
+    set(stringzilla_cuda_runtime_ CUDA::cudart)
+    if (CMAKE_CUDA_RUNTIME_LIBRARY STREQUAL "Static")
+        set(stringzilla_cuda_runtime_ CUDA::cudart_static)
+    endif ()
     stringzilla_add_gpu_unit(
-        src/capabilities/cuda.cu "${stringzilla_cuda_unit_codes_}" "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart
+        src/capabilities/cuda.cu "${stringzilla_cuda_unit_codes_}" "STRINGZILLA_ARCH_CUDA_=1"
+        ${stringzilla_cuda_runtime_}
     )
     stringzilla_add_gpu_unit(
-        src/capabilities/hopper.cu "${stringzilla_hopper_unit_codes_}" "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart
+        src/capabilities/hopper.cu "${stringzilla_hopper_unit_codes_}" "STRINGZILLA_ARCH_CUDA_=1"
+        ${stringzilla_cuda_runtime_}
     )
     stringzilla_add_gpu_unit(
-        src/capabilities/blackwell.cu "${stringzilla_blackwell_unit_codes_}" "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart
+        src/capabilities/blackwell.cu "${stringzilla_blackwell_unit_codes_}" "STRINGZILLA_ARCH_CUDA_=1"
+        ${stringzilla_cuda_runtime_}
     )
 endif ()
 if (STRINGZILLA_ROCM_ARCH)

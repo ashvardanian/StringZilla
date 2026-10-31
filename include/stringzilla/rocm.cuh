@@ -51,14 +51,15 @@ STRINGZILLA_INLINE sz_status_t sz_device_enter_rocm_(sz_stream_t stream, int *ca
 /** Makes @p caller current again, closing the scope @c sz_device_enter_rocm_ opened. */
 STRINGZILLA_INLINE void sz_device_leave_rocm_(int caller) { sz_unused_(hipSetDevice(caller)); }
 
-/** Accepts managed memory or the current device's own allocation.
- *  Host mappings require a device address and are unsupported by this check. */
+/** Accepts memory the current device addresses: managed memory, its own allocation, or registered
+ *  host memory it reads over the bus, whose device address the driver reports. */
 STRINGZILLA_INLINE sz_bool_t sz_memory_accessible_rocm_(void const *pointer) {
     int device = 0;
     hipPointerAttribute_t attributes;
     if (hipPointerGetAttributes(&attributes, pointer) != hipSuccess || hipGetDevice(&device) != hipSuccess)
         return sz_false_k;
     if (attributes.type == hipMemoryTypeManaged) return sz_true_k;
+    if (attributes.type == hipMemoryTypeHost) return (sz_bool_t)(attributes.devicePointer != STRINGZILLA_NULL);
     return attributes.type == hipMemoryTypeDevice && attributes.device == device ? sz_true_k : sz_false_k;
 }
 

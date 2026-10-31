@@ -30,7 +30,16 @@ std::size_t test_cross_rocm(environment_t const &env, std::size_t ordinal) {
     runtime.selected = selected.value;
     runtime.stream = stream.handle;
     verify(sz_capabilities_detected_rocm(ordinal, &runtime.capabilities) == sz_success_k);
-    verify(sz_allocator_init_unified_rocm(&runtime.unified) == sz_success_k);
+    verify(sz_allocator_init_pinned_rocm(&runtime.pinned) == sz_success_k);
+    verify(sz_allocator_init_device_rocm(&runtime.device) == sz_success_k);
+    // Every device tape a case gathers is carved from one block, which the case rewinds when done.
+    std::size_t const arena_bytes = (std::size_t)512 << 20;
+    unified_alloc<char> const arena_allocator(runtime.device, runtime.stream);
+    std::unique_ptr<char, device_block_release_t> const arena_block(arena_allocator.allocate(arena_bytes),
+                                                                    {arena_allocator, arena_bytes});
+    verify(arena_block != nullptr);
+    device_arena_t arena {arena_block.get(), arena_bytes, 0};
+    runtime.arena = &arena;
     runtime.init = sz_stream_init_rocm;
     runtime.free = sz_stream_free_rocm;
     cross_section_t check(env);

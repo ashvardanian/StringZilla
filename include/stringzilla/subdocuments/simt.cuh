@@ -332,13 +332,14 @@ STRINGZILLA_DEVICE sz_subdocuments_classes_simt_t sz_subdocuments_classify_simt_
     unsigned const misalignment = (unsigned)((sz_size_t)bytes & 3);
     sz_u32_t const *const aligned = (sz_u32_t const *)(bytes - misalignment);
     sz_subdocuments_classes_simt_t classes;
-    // An aligned word holding one of the bytes lies in a page the device may read whole.
-    sz_u32_t previous = available ? __ldg(aligned) : 0;
+    sz_u32_t previous = available ? sz_u32_load_bounded_simt_(aligned, text + length) : 0;
     classes.quotes = 0, classes.backslashes = 0, classes.opens = 0, classes.closes = 0, classes.separators = 0;
     classes.blanks = 0, classes.slashes = 0;
 #pragma unroll
     for (unsigned index = 0; index != 8; ++index) {
-        sz_u32_t const next = 4 * index + 4 < misalignment + available ? __ldg(aligned + index + 1) : 0;
+        sz_u32_t const next = 4 * index + 4 < misalignment + available
+                                  ? sz_u32_load_bounded_simt_(aligned + index + 1, text + length)
+                                  : 0;
         sz_u32_t const padding = 4 * index + 4 <= available ? 0u
                                  : 4 * index >= available   ? 0xFFFFFFFFu
                                                             : 0xFFFFFFFFu << (8 * (available - 4 * index));
@@ -554,12 +555,13 @@ STRINGZILLA_DEVICE sz_size_t sz_subdocuments_scalar_length_simt_(sz_u8_t const *
     sz_u32_t const *const aligned = (sz_u32_t const *)(scalar - misalignment);
     sz_size_t const available = length - position;
     sz_size_t run = 0, cursor = 0, digits, chunk;
-    // An aligned word holding a byte of the document lies in a page the device may read whole.
-    sz_u32_t previous = __ldg(aligned), first = 0, others = 0;
+    sz_u32_t previous = sz_u32_load_bounded_simt_(aligned, text + length), first = 0, others = 0;
     // The run ends at the first blank, separator, quote or bracket, four bytes at a time, noting
     // whether any byte of it is not a digit.
     for (chunk = 0;; ++chunk) {
-        sz_u32_t const next = 4 * chunk + 4 - misalignment < available ? __ldg(aligned + chunk + 1) : 0;
+        sz_u32_t const next = 4 * chunk + 4 - misalignment < available
+                                  ? sz_u32_load_bounded_simt_(aligned + chunk + 1, text + length)
+                                  : 0;
         sz_u32_t const word = __funnelshift_r(previous, next, misalignment * 8), folded = word | 0x20202020u;
         sz_size_t const left = available - 4 * chunk;
         sz_u32_t const outside = left >= 4 ? 0u : 0x80808080u << (8 * left);
@@ -702,21 +704,23 @@ STRINGZILLA_DEVICE sz_size_t sz_subdocuments_name_simt_(sz_subdocuments_engine_t
 /**
  *  @brief The name the @p length bytes of a document at @p key spell, as
  *      @ref sz_subdocuments_name_simt_ finds it for a key of at most @p key_bytes bytes,
- *      reading them as aligned words up to the closing quote that follows them.
+ *      reading them as aligned words up to the closing quote that follows them, none past the
+ *      document's @p end.
  *  @return The name, @c sz_subdocuments_no_name_k, or @c STRINGZILLA_SIZE_MAX for a key holding a
  *      backslash, which only its unescaped bytes name.
  */
 STRINGZILLA_DEVICE sz_size_t sz_subdocuments_key_name_simt_(sz_subdocuments_engine_t const *engine, sz_u8_t const *key,
-                                                            sz_size_t length, sz_size_t key_bytes) {
+                                                            sz_size_t length, sz_size_t key_bytes, sz_u8_t const *end) {
     unsigned const misalignment = (unsigned)((sz_size_t)key & 3);
     sz_u32_t const *const aligned = (sz_u32_t const *)(key - misalignment);
     sz_size_t const mask = engine->names_slots_count - 1;
     sz_u64_t hash = length * 0x9E3779B97F4A7C15ull, word = 0;
-    sz_u32_t previous = __ldg(aligned), backslashes = 0;
+    sz_u32_t previous = sz_u32_load_bounded_simt_(aligned, end), backslashes = 0;
     sz_size_t chunk, slot, index, tail_bytes = length & 7;
     for (chunk = 0; 4 * chunk < length; ++chunk) {
-        // An aligned word holding a byte up to the closing quote lies in the document.
-        sz_u32_t const next = 4 * chunk + 4 - misalignment <= length ? __ldg(aligned + chunk + 1) : 0;
+        sz_u32_t const next = 4 * chunk + 4 - misalignment <= length
+                                  ? sz_u32_load_bounded_simt_(aligned + chunk + 1, end)
+                                  : 0;
         sz_u32_t const left = (sz_u32_t)sz_min_of_two(length - 4 * chunk, (sz_size_t)4);
         sz_u32_t const kept = left == 4 ? 0xFFFFFFFFu : (1u << (8 * left)) - 1u;
         sz_u32_t const bytes = __funnelshift_r(previous, next, misalignment * 8) & kept;
@@ -1342,7 +1346,7 @@ STRINGZILLA_DEVICE sz_status_t sz_subdocuments_batch_simt_(
             sz_u8_t const *const name_bytes = text + position + 1;
             sz_size_t const name_length = window + closing - position - 1;
             if (engine->names_slots_count && ((owner_live & ~final_steps) << 1 & ~engine->wildcard_steps[0]) != 0) {
-                name = sz_subdocuments_key_name_simt_(engine, name_bytes, name_length, key_bytes);
+                name = sz_subdocuments_key_name_simt_(engine, name_bytes, name_length, key_bytes, text + length);
                 if (name == STRINGZILLA_SIZE_MAX) unescape = sz_true_k, name = sz_subdocuments_no_name_k;
             }
             live = sz_subdocuments_child_word_simt_(engine, &owner_live, (sz_u64_t const *)STRINGZILLA_NULL, 0, &carry,
@@ -1646,7 +1650,7 @@ STRINGZILLA_DEVICE sz_status_t sz_subdocuments_walk_simt_(sz_subdocuments_engine
             name_length = closing - position - 1;
             if (engine->names_slots_count &&
                 sz_subdocuments_needs_name_simt_(engine, parent_live, (sz_u64_t const *)STRINGZILLA_NULL) &&
-                (name = sz_subdocuments_key_name_simt_(engine, name_bytes, name_length, key_bytes)) ==
+                (name = sz_subdocuments_key_name_simt_(engine, name_bytes, name_length, key_bytes, text + length)) ==
                     STRINGZILLA_SIZE_MAX) {
                 name_length = sz_subdocuments_unescape_simt_(name_bytes, name_length, key, key_bytes);
                 if (name_length == STRINGZILLA_SIZE_MAX) return sz_invalid_syntax_k;
@@ -1727,8 +1731,8 @@ STRINGZILLA_DEVICE sz_size_t sz_subdocuments_markup_find_simt_(sz_u8_t const *te
     do {
         sz_u8_t const *const at = text + from;
         unsigned const misalignment = (unsigned)((sz_size_t)at & 3);
-        // An aligned word holding a byte of the text lies in a page the device may read whole.
-        sz_u32_t const word = __ldg((sz_u32_t const *)(at - misalignment)) >> (8 * misalignment);
+        sz_u32_t const word = sz_u32_load_bounded_simt_((sz_u32_t const *)(at - misalignment), text + length) >>
+                              (8 * misalignment);
         sz_u32_t const found = sz_subdocuments_bytes_equal_simt_(word, repeated) & (0x80808080u >> (8 * misalignment));
         if (found) return sz_min_of_two(from + (sz_size_t)((__ffs((int)found) - 1) >> 3), length);
         from += 4 - misalignment;
