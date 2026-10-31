@@ -12,7 +12,6 @@ env:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   hooks:
@@ -646,6 +645,9 @@ jobs:
     environment:
       name: pypi-stringzilla
       url: https://pypi.org/p/stringzilla
+    permissions:
+      contents: read
+      id-token: write
     steps:
       # Only for `build_backend.py check-wheels` below - the wheels themselves arrive as artifacts.
       - name: Checkout
@@ -674,8 +676,6 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          user: __token__
-          password: ${{ secrets.PYPI_API_TOKEN }}
           packages-dir: dist
           verbose: true
           print-hash: true
@@ -700,7 +700,9 @@ jobs:
     environment:
       name: pypi-stringzillas-cpus
       url: https://pypi.org/p/stringzillas-cpus
-    permissions: {}
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       # Only for `build_backend.py check-wheels` below - the wheels themselves arrive as artifacts.
@@ -730,8 +732,6 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          user: __token__
-          password: ${{ secrets.PYPI_API_TOKEN }}
           packages-dir: dist
           verbose: true
           print-hash: true
@@ -753,6 +753,9 @@ jobs:
     environment:
       name: pypi-stringzillas-cuda
       url: https://pypi.org/p/stringzillas-cuda
+    permissions:
+      contents: read
+      id-token: write
     steps:
       # Only for `build_backend.py check-wheels` below - the wheels themselves arrive as artifacts.
       - name: Checkout
@@ -783,8 +786,6 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          user: __token__
-          password: ${{ secrets.PYPI_API_TOKEN }}
           packages-dir: dist
           verbose: true
           print-hash: true
