@@ -284,6 +284,16 @@ assert sz.translate(b"cabbage", table, out=out) is out
 assert out == b"CABBAge"
 ```
 
+### Type checking
+
+The base wheel bundles a partial `stringzilla-stubs` package. It types `translate` and
+version/capability metadata; other native APIs remain untyped. Translation returns `bytes`
+for binary inputs, `str` for Unicode inputs, and `None` for `inplace=True`.
+
+To check installed-wheel discovery with mypy and Pyrefly, install both checkers and run
+`python -m pytest test/typing.py` after installing a non-editable wheel. These checks run
+consumers outside the repository and verify that invalid calls are rejected.
+
 ### Decoding
 
 `decode(encoding='utf-8', errors='strict')` decodes the bytes to a Python `str`, mirroring `bytes.decode`.
