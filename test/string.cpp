@@ -1400,6 +1400,16 @@ void test_extensions_ranges_unit() {
     verify(sz::string_view_t(sz::ascii_printables(), sizeof(sz::ascii_printables())).find_first_of("~") !=
            sz::string_view_t::npos);
 
+    // Forward searches starting past the end find nothing, even for an empty needle
+    verify("abc"_sv.find("", 3) == 3);
+    verify("abc"_sv.find("", 4) == sz::string_view_t::npos);
+    verify("abc"_sv.find("b", 4) == sz::string_view_t::npos);
+    verify("abc"_sv.find('b', 4) == sz::string_view_t::npos);
+    verify("abc"_sv.find_first_of("b", 4) == sz::string_view_t::npos);
+    verify("abc"_sv.find_first_not_of("b", 4) == sz::string_view_t::npos);
+    verify("abc"_sv.find('b', sz::string_view_t::npos) == sz::string_view_t::npos); // Largest position
+    verify(sz::string_view_t().find("", 1) == sz::string_view_t::npos);             // Default view has no data
+
     verify("aabaa"_sv.remove_prefix("a") == "abaa");
     verify("aabaa"_sv.remove_suffix("a") == "aaba");
     verify("aabaa"_sv.lstrip("a"_bs) == "baa");

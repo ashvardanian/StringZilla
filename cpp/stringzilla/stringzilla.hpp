@@ -2416,9 +2416,10 @@ class string_slice {
      *  @brief Find the first occurrence of a substring, skipping the first @p skip characters.
      *  @return The offset of the first character of the match, or @c npos if not found.
      *  @return For an @b empty @p other, @p skip.
-     *  @warning The behavior is @b undefined if <tt>skip > size()</tt>.
+     *  @return @c npos if <tt>skip > size()</tt>.
      */
     size_type find(string_view_t other, size_type skip = 0) const noexcept {
+        if (skip > length_) return npos;
         auto ptr = best_result_<sz_find_best, sz_find_serial, sz_cptr_t>(start_ + skip, length_ - skip, other.data(),
                                                                          other.size());
         return ptr ? ptr - start_ : npos;
@@ -2427,9 +2428,10 @@ class string_slice {
     /**
      *  @brief Find the first occurrence of a character, skipping the first @p skip characters.
      *  @return The offset of the match, or @c npos if not found.
-     *  @warning The behavior is @b undefined if <tt>skip > size()</tt>.
+     *  @return @c npos if <tt>skip > size()</tt>.
      */
     size_type find(value_type character, size_type skip = 0) const noexcept {
+        if (skip > length_) return npos;
         auto ptr = best_result_<sz_find_byte_best, sz_find_byte_serial, sz_cptr_t>(start_ + skip, length_ - skip,
                                                                                    &character);
         return ptr ? ptr - start_ : npos;
@@ -2439,7 +2441,7 @@ class string_slice {
      *  @brief Find the first occurrence of a substring, skipping the first @c skip characters.
      *  @return The offset of the first character of the match, or @c npos if not found.
      *  @return For an @b empty @p other, @p pos; delegates to the @c string_view_t overload.
-     *  @warning The behavior is @b undefined if <tt>skip > size()</tt>.
+     *  @return @c npos if <tt>pos > size()</tt>.
      */
     size_type find(const_pointer other, size_type pos, size_type count) const noexcept {
         return find(string_view_t(other, count), pos);
@@ -2552,9 +2554,10 @@ class string_slice {
      *  @brief Find the first occurrence of a character from a @p set.
      *  @param[in] set The characters to match.
      *  @param[in] skip Number of characters to skip before the search.
-     *  @warning The behavior is @b undefined if <tt>skip > size()</tt>.
+     *  @return @c npos if <tt>skip > size()</tt>.
      */
     size_type find_first_of(byteset_t set, size_type skip = 0) const noexcept {
+        if (skip > length_) return npos;
         auto ptr = best_result_<sz_find_byteset_best, sz_find_byteset_serial, sz_cptr_t>(start_ + skip, length_ - skip,
                                                                                          &set.raw());
         return ptr ? ptr - start_ : npos;
@@ -2564,7 +2567,7 @@ class string_slice {
      *  @brief Find the first occurrence of a character outside a @p set.
      *  @param[in] set The characters to avoid.
      *  @param[in] skip The number of first characters to be skipped.
-     *  @warning The behavior is @b undefined if <tt>skip > size()</tt>.
+     *  @return @c npos if <tt>skip > size()</tt>.
      */
     size_type find_first_not_of(byteset_t set, size_type skip = 0) const noexcept {
         return find_first_of(set.inverted(), skip);
@@ -2826,7 +2829,7 @@ class string_slice {
      *  @param[in] other The characters to match.
      *  @param[in] skip The number of first characters to be skipped.
      *  @param[in] count Number of characters at @p other.
-     *  @warning The behavior is @b undefined if <tt>skip > size()</tt>.
+     *  @return @c npos if <tt>skip > size()</tt>.
      */
     size_type find_first_of(const_pointer other, size_type skip, size_type count) const noexcept {
         return find_first_of(string_view_t(other, count), skip);
@@ -2837,7 +2840,7 @@ class string_slice {
      *  @param[in] other The characters to avoid.
      *  @param[in] skip The number of first characters to be skipped.
      *  @param[in] count Number of characters at @p other.
-     *  @warning The behavior is @b undefined if <tt>skip > size()</tt>.
+     *  @return @c npos if <tt>skip > size()</tt>.
      */
     size_type find_first_not_of(const_pointer other, size_type skip, size_type count) const noexcept {
         return find_first_not_of(string_view_t(other, count), skip);
@@ -3529,24 +3532,23 @@ class string {
     /**
      *  @brief Find the first occurrence of a substring, skipping the first @p skip characters.
      *  @return The offset of the first character of the match, or @c npos if not found.
-     *  @return For an @b empty @p other, <tt>min(skip, size())</tt>, matching @c std::string_view::find.
-     *  @warning The behavior is @b undefined if <tt>skip > size()</tt> and @p other is non-empty.
+     *  @return For an @b empty @p other, @p skip.
+     *  @return @c npos if <tt>skip > size()</tt>.
      */
     size_type find(string_view_t other, size_type skip = 0) const noexcept { return view().find(other, skip); }
 
     /**
      *  @brief Find the first occurrence of a character, skipping the first @p skip characters.
      *  @return The offset of the match, or @c npos if not found.
-     *  @warning The behavior is @b undefined if <tt>skip > size()</tt>.
+     *  @return @c npos if <tt>skip > size()</tt>.
      */
     size_type find(value_type character, size_type skip = 0) const noexcept { return view().find(character, skip); }
 
     /**
      *  @brief Find the first occurrence of a substring, skipping the first @c skip characters.
      *  @return The offset of the first character of the match, or @c npos if not found.
-     *  @return For an @b empty @p other (i.e. <tt>count == 0</tt>), <tt>min(skip, size())</tt>; consistent with
-     *      the @c string_view_t overload above.
-     *  @warning The behavior is @b undefined if <tt>skip > size()</tt> and @p other is non-empty.
+     *  @return For an @b empty @p other, @p pos; delegates to the @c string_view_t overload.
+     *  @return @c npos if <tt>pos > size()</tt>.
      */
     size_type find(const_pointer other, size_type pos, size_type count) const noexcept {
         return view().find(other, pos, count);
@@ -3616,7 +3618,7 @@ class string {
      *  @brief Find the first occurrence of a character from a @p set.
      *  @param[in] set The characters to match.
      *  @param[in] skip Number of characters to skip before the search.
-     *  @warning The behavior is @b undefined if <tt>skip > size()</tt>.
+     *  @return @c npos if <tt>skip > size()</tt>.
      */
     size_type find_first_of(byteset_t set, size_type skip = 0) const noexcept {
         return view().find_first_of(set, skip);
@@ -3626,7 +3628,7 @@ class string {
      *  @brief Find the first occurrence of a character outside a @p set.
      *  @param[in] set The characters to avoid.
      *  @param[in] skip The number of first characters to be skipped.
-     *  @warning The behavior is @b undefined if <tt>skip > size()</tt>.
+     *  @return @c npos if <tt>skip > size()</tt>.
      */
     size_type find_first_not_of(byteset_t set, size_type skip = 0) const noexcept {
         return view().find_first_not_of(set, skip);
@@ -3701,7 +3703,7 @@ class string {
      *  @param[in] other The characters to match.
      *  @param[in] skip The number of first characters to be skipped.
      *  @param[in] count Number of characters at @p other.
-     *  @warning The behavior is @b undefined if <tt>skip > size()</tt>.
+     *  @return @c npos if <tt>skip > size()</tt>.
      */
     size_type find_first_of(const_pointer other, size_type skip, size_type count) const noexcept {
         return view().find_first_of(other, skip, count);
@@ -3712,7 +3714,7 @@ class string {
      *  @param[in] other The characters to avoid.
      *  @param[in] skip The number of first characters to be skipped.
      *  @param[in] count Number of characters at @p other.
-     *  @warning The behavior is @b undefined if <tt>skip > size()</tt>.
+     *  @return @c npos if <tt>skip > size()</tt>.
      */
     size_type find_first_not_of(const_pointer other, size_type skip, size_type count) const noexcept {
         return view().find_first_not_of(other, skip, count);
