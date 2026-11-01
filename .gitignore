@@ -1,77 +1,80 @@
-# Primary root-level build folders
+# Build trees and CMake
 /build*/
-/target*/
+CMakeFiles
+CMakeCache.txt
+cmake_install.cmake
+Makefile
 
 # Per-developer preset overrides: toolchain paths that are true of one machine, not of the project
 CMakeUserPresets.json
 
-# Yes, everyone loves keeping this file in the history.
-# But with a very minimalistic binding and just a couple of dependencies
-# it brings 7000 lines of text polluting the entire repo.
-package-lock.json
-uv.lock
-
-# Temporary files
-.DS_Store
-.swiftpm/
-.build/
-tmp/
-/target/
-__pycache__
-.pytest_cache
-.conda
-Makefile
-CMakeCache.txt
-cmake_install.cmake
-CMakeFiles
+# C and C++
 *.so
 *.a
 *.dll
 *.dylib
+*.tar.gz
+
+# Profilers
 *.profraw
 *.profdata
+
+# Python
+__pycache__
 *.egg-info
 *.whl
 *.pyd
 .venv/*
-node_modules/
-prebuilds/
+.pytest_cache
+.ruff_cache/
+.mypy_cache/
+# A minimal binding with few dependencies would carry thousands of lockfile lines
+uv.lock
 
+# Rust
+/target*/
+
+# JavaScript
+node_modules/
+package-lock.json
+prebuilds/
 # Per-platform npm prebuilts are filled in CI, never committed
 javascript/@stringzilla-*/*.node
 
-# .NET / C# build output
+# Swift
+.build/
+.swiftpm/
+
+# Java
+.gradle/
+
+# C#
 bin/
 obj/
 TestResults/
 *.dmp
-
-# Native binaries are CI/pack-time artifacts — never commit them
+# Native binaries are pack-time artifacts, never committed
 /csharp/runtimes/
-/java/src/main/resources/native/
-.vs/
-*.tar.gz
-.tmp/
 
-# Recommended datasets
+# Editors, assistants, language servers and tool caches
+/compile_commands.json
+/.cache/
+.claude/
+CLAUDE.local.md
+.vs/
+
+# macOS
+.DS_Store
+
+# Local scratch
+tmp/
+.tmp/
+/failed_sz_*
+/SPLIT.md
+
+# Datasets
 /utf8.txt
 /enwik9.txt
 /xlsum.csv
 /acgt*.txt
 /leipzig*.txt
-
-# StringZilla-specific log files
-/failed_sz_*
-/.cache/
-
-# Claude Code per-project settings (locally tracked in ~/.claude, not in repo)
-.claude/
-
-# Local refactor planning notes
-/SPLIT.md
-CLAUDE.local.md
-
-# Editors, assistants, language servers and tool caches
-/compile_commands.json
-.ruff_cache/
-.mypy_cache/

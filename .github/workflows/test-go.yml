@@ -1,0 +1,75 @@
+name: Test Go
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test_go:
+    name: Test Go on ${{ matrix.os }} with ${{ matrix.cc }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # The GCC rows skip the SHA tests.
+        include:
+          - { os: ubuntu-24.04, cc: gcc-13, cxx: g++-13, tags: no_sha256 }
+          - { os: ubuntu-24.04-arm, cc: gcc-13, cxx: g++-13, tags: no_sha256 }
+          - { os: ubuntu-24.04, cc: clang-18, cxx: clang++-18, tags: "" }
+          - { os: ubuntu-24.04-arm, cc: clang-18, cxx: clang++-18, tags: "" }
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Install Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential ninja-build ${{ matrix.cc }} ${{ matrix.cxx }}
+      - name: Build the Library
+        run: |
+          cmake --preset release_shared -D CMAKE_C_COMPILER="$CC" -D CMAKE_CXX_COMPILER="$CXX"
+          cmake --build --preset release_shared --target stringzilla_static
+          cp build_release_shared/libstringzilla_static.a golang/
+      - name: Set Up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: ">=1.24"
+          cache: false
+      - name: Test Go Bindings
+        working-directory: golang
+        run: go test -v -tags "${{ matrix.tags }}"
+
+  # cGo links no sanitizer runtime, so the Go binding takes a Debug archive built without them.
+  test_go_debug:
+    name: Test Go Debug Build on Ubuntu
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    env:
+      CC: gcc-13
+      CXX: g++-13
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Install Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential gcc-13 g++-13
+      - name: Build the Debug Library
+        run: |
+          cmake --preset debug -B build_golang -D STRINGZILLA_BUILD_SANITIZERS=off -D CMAKE_C_COMPILER="$CC" -D CMAKE_CXX_COMPILER="$CXX"
+          cmake --build build_golang --target stringzilla_static
+      - name: Set Up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: ">=1.24"
+          cache: false
+      - name: Test Go Bindings against the Debug Library
+        working-directory: golang
+        env:
+          CGO_LDFLAGS: -L${{ github.workspace }}/build_golang
+        run: go test -v -tags no_sha256

@@ -1,0 +1,143 @@
+name: Release JavaScript
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  hooks:
+    name: Check Release Commit
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Check the Release Commit
+        run: .github/scripts/check-release.sh "$GITHUB_REF_NAME"
+
+  build_native:
+    name: Build Native Package for ${{ matrix.platform }}
+    needs: hooks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            os: ubuntu-26.04
+            script: prebuild
+          - platform: linux-arm64
+            os: ubuntu-26.04-arm
+            script: prebuild
+          - platform: darwin-arm64
+            os: macos-26
+            script: prebuild
+          - platform: darwin-x64
+            os: macos-26
+            script: prebuild-x64
+          - platform: win32-x64
+            os: windows-2025
+            script: prebuild
+          - platform: win32-arm64
+            os: windows-2025
+            script: prebuild-arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Set Up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Set Up MSVC ARM64 Cross-Compiler
+        if: matrix.platform == 'win32-arm64'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -property installationPath
+          $vcvars = "$vsPath\VC\Auxiliary\Build\vcvarsall.bat"
+          cmd /c "`"$vcvars`" amd64_arm64 >NUL 2>&1 && set" | ForEach-Object {
+            if ($_ -match '^([^=]+)=(.*)$') {
+              $name = $matches[1]; $value = $matches[2]
+              if ([System.Environment]::GetEnvironmentVariable($name) -ne $value) {
+                "$name=$value" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
+              }
+            }
+          }
+      - name: Install Dependencies
+        run: npm install --ignore-scripts
+      # Stages the addon into its `javascript/@stringzilla-<platform>` package.
+      - name: Build Native Module
+        run: npm run ${{ matrix.script }}
+      - name: Upload Platform Package
+        uses: actions/upload-artifact@v7
+        with:
+          name: stringzilla-js-${{ matrix.platform }}
+          path: javascript/@stringzilla-${{ matrix.platform }}/
+          retention-days: 1
+
+  publish_javascript_platform:
+    name: Publish JavaScript Platform Package for ${{ matrix.platform }} to npm
+    needs: build_native
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/@stringzilla/${{ matrix.platform }}
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux-x64, linux-arm64, darwin-x64, darwin-arm64, win32-x64, win32-arm64]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Set Up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - name: Download Platform Artifact
+        id: download
+        uses: actions/download-artifact@v8
+        with:
+          name: stringzilla-js-${{ matrix.platform }}
+          path: javascript/@stringzilla-${{ matrix.platform }}/
+        continue-on-error: true
+      - name: Publish @stringzilla/${{ matrix.platform }}
+        if: steps.download.outcome == 'success'
+        working-directory: javascript/@stringzilla-${{ matrix.platform }}
+        run: npm publish --provenance --access public --tag ${{ github.event.release.prerelease && 'next' || 'latest' }}
+
+  publish_javascript:
+    name: Publish JavaScript to npm
+    needs: publish_javascript_platform
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/stringzilla
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Set Up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - name: Install Dependencies
+        run: npm install
+      - name: Test
+        run: npm test
+      - name: Publish to npm
+        run: npm publish --provenance --access public --tag ${{ github.event.release.prerelease && 'next' || 'latest' }}

@@ -91,9 +91,6 @@ test-parallel = ["pytest-run-parallel>=0.7"]
 test-oracles = ["pycryptodome", "pyahocorasick", "pyarrow"]
 test-cuda = ["cupy-cuda13x"]
 
-[tool.black]
-line-length = 120
-
 [tool.cibuildwheel]
 build-verbosity = 0
 test-command = "python -X faulthandler -m pytest -x {project}/test"

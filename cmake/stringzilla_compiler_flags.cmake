@@ -219,8 +219,12 @@ function (stringzilla_set_compiler_flags target_ cpp_standard_)
     target_compile_definitions(${target_} PRIVATE "$<IF:$<CONFIG:Debug>,STRINGZILLA_DEBUG=1,STRINGZILLA_DEBUG=0>")
     if (STRINGZILLA_BUILD_SANITIZERS STREQUAL "address" AND NOT target_type_ STREQUAL "SHARED_LIBRARY")
         target_compile_options(
-            ${target_} PRIVATE "$<${stringzilla_msvc_}:/fsanitize=address;/fsanitize=leak>"
-                               "$<${stringzilla_gcc_style_}:-fsanitize=address;-fsanitize=undefined>"
+            ${target_}
+            PRIVATE
+                "$<${stringzilla_msvc_}:/fsanitize=address;/fsanitize=leak>"
+                "$<${stringzilla_gcc_style_}:-fsanitize=address;-fsanitize=undefined>"
+                # GCC misplaces the ASan frame of functions taking an SVE local's address
+                "$<$<AND:$<C_COMPILER_ID:GNU>,$<STREQUAL:${CMAKE_SYSTEM_PROCESSOR},aarch64>>:-fno-stack-protector;-fno-sanitize-address-use-after-scope>"
         )
         target_link_options(
             ${target_} PRIVATE "$<${stringzilla_msvc_link_}:/fsanitize=address;/fsanitize=leak>"

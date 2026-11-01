@@ -2,7 +2,6 @@ python/
 scripts/
 .github/
 .vscode/
-.releaserc
 pyproject.toml
 stringzilla.jpeg
 .clang-format

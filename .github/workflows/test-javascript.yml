@@ -1,0 +1,27 @@
+name: Test JavaScript
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test_nodejs:
+    name: Test Node.js on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-26.04, ubuntu-26.04-arm]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Set Up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      # Without `--omit=optional`, the published `@stringzilla/*` addon satisfies the install and shadows this tree's.
+      - name: Build and Test
+        run: npm install --ignore-scripts --omit=optional && npm run prebuild && npm test

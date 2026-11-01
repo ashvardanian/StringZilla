@@ -1,0 +1,182 @@
+name: Test Rust
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUTF8: 1
+  PYTHONFAULTHANDLER: 1
+  WASI_SDK_VERSION: "34"
+  # Pinned so the wasm rows run a reproducible engine that speaks exnref exception handling.
+  WASMTIME_VERSION: v50.0.1
+
+# Rust stays on nightly until 1.100 reaches stable, as `rust-version` rejects any older compiler.
+jobs:
+  # Only the GPU features change the C library, so both test runs link one CMake build of it.
+  test_rust:
+    name: Test Rust on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-26.04, ubuntu-26.04-arm, macos-26]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@nightly
+      - name: Build C Library
+        run: |
+          cmake --preset release_shared
+          cmake --build --preset release_shared --target stringzilla_static
+      - name: Test Default Build
+        env:
+          STRINGZILLA_LIBRARY_DIR: ${{ github.workspace }}/build_release_shared
+        run: cargo test --release
+      - name: Test No-Std Build
+        env:
+          STRINGZILLA_LIBRARY_DIR: ${{ github.workspace }}/build_release_shared
+        run: cargo test --release --no-default-features
+      # Otherwise `cargo publish` is the first thing that ever reads the `include` list, so this builds through CMake.
+      - name: Package the Crate
+        if: runner.os == 'Linux'
+        run: cargo package --locked
+
+  test_rust_windows:
+    name: Test Rust on ${{ matrix.os }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-2025-vs2026, arch: x64 }
+          - { os: windows-11-arm, arch: arm64 }
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Set Up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@nightly
+      - name: Test Default Build
+        run: cargo test --release
+      - name: Build No-Std Library
+        run: cargo build --release --no-default-features
+
+  test_rust_alpine:
+    name: Test Rust on Alpine Linux
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    container:
+      image: alpine:latest
+    steps:
+      # bash and curl are required by dtolnay/rust-toolchain
+      - name: Install Git for Checkout
+        run: apk add --no-cache git ca-certificates bash curl
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Install Dependencies
+        run: apk add cmake samurai g++ gcc
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@nightly
+      - name: Test Default Build
+        run: cargo test --release
+      - name: Test No-Std Build
+        run: cargo test --release --no-default-features
+
+  test_rust_metal:
+    name: Test Rust with Metal
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@nightly
+      - name: Test with Metal
+        run: cargo test --release --features metal
+
+  # `build.rs` builds the C library through the WASI toolchain file, which finds the SDK from `WASI_SDK_PATH`,
+  # with the SIMD kit `RUSTFLAGS` declares. Tests run single-threaded under Wasmtime, which refuses relaxed SIMD
+  # in the strict rows.
+  test_rust_wasm:
+    name: Test Rust on WebAssembly wasm32-wasip1 ${{ matrix.tier }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tier: v128relaxed
+            target_features: "+simd128,+relaxed-simd"
+            relaxed_simd: "y"
+          - tier: v128
+            target_features: "+simd128"
+            relaxed_simd: "n"
+          - tier: serial
+            target_features: "-simd128"
+            relaxed_simd: "n"
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Install WASI SDK
+        run: |
+          curl -sSL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/wasi-sdk-${WASI_SDK_VERSION}.0-x86_64-linux.tar.gz" \
+            | tar xz -C "$HOME"
+          echo "WASI_SDK_PATH=$HOME/wasi-sdk-${WASI_SDK_VERSION}.0-x86_64-linux" >> "$GITHUB_ENV"
+      - name: Install Wasmtime
+        run: |
+          curl https://wasmtime.dev/install.sh -sSf | bash -s -- --version "$WASMTIME_VERSION"
+          "$HOME/.wasmtime/bin/wasmtime" --version
+          echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: wasm32-wasip1
+      - name: Test under Wasmtime
+        env:
+          RUSTFLAGS: -C target-feature=${{ matrix.target_features }}
+          CARGO_TARGET_WASM32_WASIP1_RUNNER: wasmtime -W relaxed-simd=${{ matrix.relaxed_simd }} -S inherit-env=y --dir .
+        run: |
+          cargo build --target wasm32-wasip1
+          cargo test --release --target wasm32-wasip1 -- --test-threads=1
+
+  # No hosted runner has an Nvidia or AMD GPU, so the `cuda` and `rocm` features, which build through CMake, are link checks.
+  build_rust_cuda:
+    name: Build Rust with CUDA
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    container: nvidia/cuda:13.4.3-devel-ubuntu26.04
+    steps:
+      - name: Install Dependencies
+        run: |
+          apt-get update && apt-get install -y build-essential git curl python3-pip
+          pip install --break-system-packages "cmake>=3.31"
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@nightly
+      - name: Link Tests with CUDA
+        run: cargo test --features cuda --no-run
+
+  build_rust_rocm:
+    name: Build Rust with ROCm
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    container: rocm/dev-ubuntu-26.04:10.0.0-full
+    steps:
+      - name: Install Dependencies
+        run: apt-get update && apt-get install -y cmake make git curl
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@nightly
+      - name: Link Tests with ROCm
+        run: cargo test --features rocm --no-run

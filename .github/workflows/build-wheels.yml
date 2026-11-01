@@ -1,0 +1,110 @@
+name: Build Python Wheels
+
+on:
+  workflow_call:
+    inputs:
+      smoke:
+        description: "Build one GIL and one free-threaded interpreter per platform, and skip the emulated platforms"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUTF8: 1
+  PYTHONFAULTHANDLER: 1
+
+jobs:
+  build_wheels_native:
+    name: Build Python Wheels for ${{ matrix.platform }} cp${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJSON(inputs.smoke && '["312", "315t"]' || '["312", "313", "314", "314t", "315", "315t"]') }}
+        platform: [Linux x86, Linux ARM, macOS, Windows x86, Windows ARM]
+        include:
+          - { platform: Linux x86, os: ubuntu-26.04, archs: x86_64, slug: linux-x86_64 }
+          - { platform: Linux ARM, os: ubuntu-26.04-arm, archs: aarch64, slug: linux-aarch64 }
+          - { platform: macOS, os: macos-26, archs: auto, slug: macos }
+          # Native AMD64 and 32-bit x86 on an Intel runner.
+          - { platform: Windows x86, os: windows-2025, archs: AMD64 x86, slug: windows-x86 }
+          - { platform: Windows ARM, os: windows-11-arm, archs: ARM64, slug: windows-arm64 }
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Set Up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: 3.x
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==4.3.5
+      - name: Build Wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: cp${{ matrix.python-version }}-*
+          CIBW_ARCHS: ${{ matrix.archs }}
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+      - name: Upload Wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: cibw-wheels-${{ matrix.slug }}-cp${{ matrix.python-version }}
+          path: wheelhouse/*.whl
+          overwrite: true
+
+  # One architecture per runner so no runner pulls every image, all Pythons per architecture, fuzz depth thinned
+  # under QEMU to match `test_cross_qemu`.
+  build_wheels_emulated:
+    name: Build Python Wheels for Linux ${{ matrix.arch }}
+    if: ${{ !inputs.smoke }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [ppc64le, s390x, i686, armv7l, riscv64]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Set Up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: 3.x
+      - name: Set Up QEMU
+        uses: docker/setup-qemu-action@v4
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==4.3.5
+      - name: Build Wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: "cp312-* cp313-* cp314-* cp315-*"
+          CIBW_ARCHS_LINUX: ${{ matrix.arch }}
+          CIBW_ENVIRONMENT_LINUX: STRINGZILLA_IN_QEMU=1 STRINGZILLA_SCALE=0.05 CMAKE_BUILD_PARALLEL_LEVEL=2
+      - name: Upload Wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: cibw-wheels-linux-${{ matrix.arch }}
+          path: wheelhouse/*.whl
+          overwrite: true
+
+  build_sdist:
+    name: Build Python Source Distribution
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Set Up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: 3.x
+      - name: Build Source Distribution
+        run: pip install build && python -m build --sdist
+      - name: Upload Source Distribution
+        uses: actions/upload-artifact@v7
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+          retention-days: 1

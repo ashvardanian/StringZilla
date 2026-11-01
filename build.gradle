@@ -1,0 +1,99 @@
+plugins {
+    id 'java-library'
+    id 'com.diffplug.spotless' version '7.2.1'
+}
+
+group = "com.github.ashvardanian"
+version = file("VERSION").text.trim()
+
+repositories {
+    mavenCentral()
+}
+
+// The Foreign Function & Memory API is final from JDK 22, the floor callers need.
+tasks.withType(JavaCompile).configureEach {
+    options.release = 22
+    options.encoding = 'UTF-8'
+}
+
+// The binding reaches the C interface through the FFM API, so there is no boundary of its own to compile: it loads
+// `libstringzilla_shared`, which CMake builds into `stringzillaLibraryPath`; point it elsewhere for a different tree.
+ext.stringzillaLibraryPath = (findProperty("stringzillaLibraryPath") ?: "$rootDir/build_release_shared").toString()
+
+// `NativeLoader` extracts `/native/<os>-<arch>/<library>` from the classpath, so the engine is staged under that name.
+ext.nativeResources = layout.buildDirectory.dir("native-resources").get().asFile
+ext.nativePlatform = {
+    def os = System.getProperty("os.name").toLowerCase()
+    def arch = System.getProperty("os.arch").toLowerCase()
+    def system = os.contains("win") ? "windows" : (os.contains("mac") || os.contains("darwin")) ? "darwin" : "linux"
+    def machine = (arch in ["amd64", "x86_64"]) ? "x86_64" : (arch in ["aarch64", "arm64"]) ? "aarch64" : arch
+    def library = [windows: "stringzilla.dll", darwin: "libstringzilla.dylib", linux: "libstringzilla.so"][system]
+    [directory: "native/$system-$machine", library: library]
+}()
+
+sourceSets {
+    main {
+        java {
+            srcDirs = ["java/src/main/java"]
+        }
+        resources {
+            srcDirs = [project.ext.nativeResources]
+        }
+    }
+    test {
+        java {
+            srcDirs = ["java/src/test/java"]
+        }
+        resources {
+            srcDirs = []
+        }
+    }
+}
+
+tasks.register("stageNativeLibrary", Copy) {
+    def platform = project.ext.nativePlatform
+    from(project.ext.stringzillaLibraryPath) {
+        include "libstringzilla_shared.so", "libstringzilla_shared.dylib", "**/stringzilla_shared.dll"
+    }
+    eachFile { it.relativePath = new RelativePath(true, platform.directory, platform.library) }
+    includeEmptyDirs = false
+    into project.ext.nativeResources
+}
+
+tasks.named("processResources") {
+    dependsOn "stageNativeLibrary"
+}
+
+dependencies {
+    testImplementation('org.junit.jupiter:junit-jupiter:6.1.1')
+    testRuntimeOnly('org.junit.platform:junit-platform-launcher')
+    // Proves the zero-copy adapters against the real consumer types.
+    testImplementation('org.apache.lucene:lucene-core:10.5.0')
+}
+
+spotless {
+    format 'gradle', {
+        target '*.gradle'
+        trimTrailingWhitespace()
+        leadingTabsToSpaces(4)
+        endWithNewline()
+    }
+
+    // Palantir's fork of google-java-format indents four spaces and wraps at 120 columns, as `.clang-format` does.
+    // It reads javac internals, so it runs on a JDK no newer than 23.
+    java {
+        target 'java/src/**/*.java'
+        palantirJavaFormat('2.50.0')
+        removeUnusedImports()
+    }
+}
+
+test {
+    useJUnitPlatform()
+    // FFM downcalls need native access for the unnamed module.
+    jvmArgs "--enable-native-access=ALL-UNNAMED"
+    testLogging {
+        exceptionFormat = 'full'
+        events "passed", "skipped", "failed"
+    }
+}

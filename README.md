@@ -11,13 +11,6 @@ StringZilla reaches for those [SIMD][faq-simd] and [SWAR][faq-swar] instructions
 [![StringZilla Rust installs](https://img.shields.io/crates/d/stringzilla?logo=rust&label=Rust%20installs)](https://crates.io/crates/stringzilla)
 ![StringZilla code size](https://img.shields.io/github/languages/code-size/ashvardanian/stringzilla)
 
-<!-- Those badges often stay in stale state - greyed out.
-Consider enabling them later.
-[![Ubuntu status](https://img.shields.io/github/checks-status/ashvardanian/StringZilla/main?checkName=Linux%20CI&label=Ubuntu)](https://github.com/ashvardanian/StringZilla/actions/workflows/release.yml)
-[![Windows status](https://img.shields.io/github/checks-status/ashvardanian/StringZilla/main?checkName=Windows%20CI&label=Windows)](https://github.com/ashvardanian/StringZilla/actions/workflows/release.yml)
-[![macOS status](https://img.shields.io/github/checks-status/ashvardanian/StringZilla/main?checkName=macOS%20CI&label=macOS)](https://github.com/ashvardanian/StringZilla/actions/workflows/release.yml)
--->
-
 StringZilla is the GodZilla of string libraries, accelerating exact and fuzzy matching, hashing, edit distances, sorting, segmentation, and even random-string generation, with allocation-free lazily-evaluated iterators throughout.
 
 - It can be __3x faster than LibC__ doing substring search on Arm servers, and __9x on Apple Silicon__, where the system `strstr` is weaker.
@@ -284,7 +277,7 @@ Exposes search, hashing, SHA-256, UTF-8 segmentation, case-folding, normalizatio
 
 ### Java
 
-Build from source with `mvn` &centerdot; guide: [`java/README.md`](java/README.md) &centerdot; __not yet on Maven Central__
+Build from source with `gradle` &centerdot; guide: [`java/README.md`](java/README.md) &centerdot; __not yet on Maven Central__
 
 ```java
 import com.stringzilla.StringZilla;
@@ -586,6 +579,7 @@ Per-backend numbers are in [`include/stringzilla/cipher/README.md`](include/stri
 
 [faq-fips197]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf
 [faq-gcm]: https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf
+
 ### Random Generation
 
 StringZilla implements a fast [Pseudorandom Number Generator][faq-prng] inspired by the "AES-CTR-128" algorithm, reusing the same AES primitives as the hash function.
@@ -770,7 +764,7 @@ If StringZilla helps your research or product, please cite it:
 @software{Vardanian_StringZilla,
   author = {Vardanian, Ash},
   title = {{StringZilla: Fast SIMD, SWAR, and GPGPU String Processing}},
-  doi = {10.5281/zenodo.21472333},
+  doi = {10.5281/zenodo.21472332},
   url = {https://github.com/ashvardanian/StringZilla},
   license = {Apache-2.0}
 }

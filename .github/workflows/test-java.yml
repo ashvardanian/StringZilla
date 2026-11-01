@@ -1,0 +1,33 @@
+name: Test Java
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test_java:
+    name: Test Java on Linux
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Build Shared Library
+        run: |
+          cmake --preset release_shared
+          cmake --build --preset release_shared
+      # JDK 23: the final Foreign Function & Memory API, and the newest JDK Palantir Java Format runs on.
+      - name: Set Up JDK
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "23"
+      - name: Set Up Gradle
+        uses: gradle/actions/setup-gradle@v6
+      - name: Check Formatting
+        run: gradle spotlessCheck
+      # `build` stages the shared library where `NativeLoader` looks for it, then runs the tests.
+      - name: Test Java
+        run: gradle build

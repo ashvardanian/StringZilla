@@ -6,9 +6,15 @@ name: Build Swift Artifacts
 on:
   workflow_call:
     inputs:
-      release:
-        type: boolean
-        default: false
+      version:
+        type: string
+        default: ""
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version the release commit will carry"
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -17,25 +23,20 @@ jobs:
   # The files the release commit bumps that land in the artifacts: the headers' version macros and the bundle's.
   bump_version:
     name: Bump Swift Artifacts Version
-    if: inputs.release
-    runs-on: ubuntu-24.04
+    if: inputs.version != ''
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          persist-credentials: false
       - name: Bump Version
-        uses: ashvardanian/tinysemver@v3
-        with:
-          version-file: "VERSION"
-          update-major-version-in: |
-            c/stringzilla/types.h:^#define STRINGZILLA_VERSION_MAJOR (\d+)
-          update-minor-version-in: |
-            c/stringzilla/types.h:^#define STRINGZILLA_VERSION_MINOR (\d+)
-          update-patch-version-in: |
-            c/stringzilla/types.h:^#define STRINGZILLA_VERSION_PATCH (\d+)
-          dry-run: "false"
+        env:
+          version: ${{ inputs.version }}
+        run: |
+          IFS=. read -r major minor patch <<< "${version%%-*}"
+          export major minor patch
+          echo "$version" > VERSION
+          perl -pi -e 's/^(#define STRINGZILLA_VERSION_MAJOR )[0-9]+$/$1$ENV{major}/; s/^(#define STRINGZILLA_VERSION_MINOR )[0-9]+$/$1$ENV{minor}/; s/^(#define STRINGZILLA_VERSION_PATCH )[0-9]+$/$1$ENV{patch}/' c/stringzilla/types.h
       - name: Upload Bumped Files
         uses: actions/upload-artifact@v7
         with:
@@ -52,11 +53,12 @@ jobs:
     needs: bump_version
     if: ${{ !failure() && !cancelled() }}
     runs-on: xcode-27
+    timeout-minutes: 50
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v7
       - name: Take the Release Version
-        if: inputs.release
+        if: inputs.version != ''
         uses: actions/download-artifact@v8
         with:
           name: swift-version
@@ -107,19 +109,20 @@ jobs:
     name: Build Swift Artifact Bundle for Linux ${{ matrix.arch }}
     needs: bump_version
     if: ${{ !failure() && !cancelled() }}
-    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-26.04-arm' || 'ubuntu-26.04' }}
+    timeout-minutes: 10
     container: swift:6.4
     strategy:
       fail-fast: false
       matrix:
         arch: [x86_64, aarch64]
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v7
       - name: Install CMake
         run: apt-get update && apt-get install -y cmake ninja-build
       - name: Take the Release Version
-        if: inputs.release
+        if: inputs.version != ''
         uses: actions/download-artifact@v8
         with:
           name: swift-version
@@ -146,15 +149,16 @@ jobs:
     needs: bump_version
     if: ${{ !failure() && !cancelled() }}
     runs-on: ${{ matrix.arch == 'aarch64' && 'windows-11-arm' || 'windows-2025' }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         arch: [x86_64, aarch64]
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v7
       - name: Take the Release Version
-        if: inputs.release
+        if: inputs.version != ''
         uses: actions/download-artifact@v8
         with:
           name: swift-version
@@ -180,12 +184,13 @@ jobs:
     name: Build Swift Artifact Bundle for Android
     needs: bump_version
     if: ${{ !failure() && !cancelled() }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v7
       - name: Take the Release Version
-        if: inputs.release
+        if: inputs.version != ''
         uses: actions/download-artifact@v8
         with:
           name: swift-version
@@ -221,14 +226,15 @@ jobs:
     name: Build Swift Artifact Bundle for WebAssembly WASI
     needs: bump_version
     if: ${{ !failure() && !cancelled() }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
     env:
       WASI_SDK_VERSION: "34"
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v7
       - name: Take the Release Version
-        if: inputs.release
+        if: inputs.version != ''
         uses: actions/download-artifact@v8
         with:
           name: swift-version
@@ -256,9 +262,10 @@ jobs:
   merge_artifact_bundle:
     name: Merge Swift Artifact Bundle
     needs: [build_linux, build_windows, build_android, build_wasi]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v7
       - name: Download Artifact Bundle Parts
         uses: actions/download-artifact@v8

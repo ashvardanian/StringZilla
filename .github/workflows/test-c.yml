@@ -1,0 +1,596 @@
+name: Test C
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUTF8: 1
+  PYTHONFAULTHANDLER: 1
+  WASI_SDK_VERSION: "34"
+  # Pinned so the wasm rows run a reproducible engine that speaks exnref exception handling.
+  WASMTIME_VERSION: v50.0.1
+
+jobs:
+  test_ubuntu_gcc:
+    name: Test on ${{ matrix.os }} with GCC 13
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # GCC 13 is the floor, the default on Ubuntu 24.04
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    env:
+      CC: gcc-13
+      CXX: g++-13
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Print Machine Specs
+        run: lscpu
+      - name: Install Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential gcc-13 g++-13
+      - name: Build
+        run: |
+          cmake --preset release -D CMAKE_C_COMPILER="$CC" -D CMAKE_CXX_COMPILER="$CXX"
+          cmake --build --preset release
+      - name: Test
+        run: ctest --preset release
+
+  test_ubuntu_clang:
+    name: Test on ${{ matrix.os }} with Clang 18
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # Clang 18 is the floor, the default on Ubuntu 24.04
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    env:
+      CC: clang-18
+      CXX: clang++-18
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Print Machine Specs
+        run: lscpu
+      - name: Install Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential ninja-build libjemalloc-dev clang-18
+      - name: Build
+        run: |
+          cmake --preset release -D CMAKE_C_COMPILER="$CC" -D CMAKE_CXX_COMPILER="$CXX"
+          cmake --build --preset release
+      - name: Test
+        run: ctest --preset release
+
+  # Debug sanitizes the executables and builds the shared library alongside, all with `STRINGZILLA_DEBUG` asserts live.
+  test_ubuntu_debug:
+    name: Test Debug Build on Ubuntu
+    runs-on: ubuntu-26.04
+    timeout-minutes: 90
+    env:
+      CC: gcc-13
+      CXX: g++-13
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Install Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential gcc-13 g++-13
+      - name: Build
+        run: |
+          cmake --preset debug -D CMAKE_C_COMPILER="$CC" -D CMAKE_CXX_COMPILER="$CXX"
+          cmake --build --preset debug
+      - name: Test
+        env:
+          STRINGZILLA_SCALE: "0.1"
+        run: ctest --preset debug
+
+  test_macos:
+    name: Test on macOS
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Print Machine Specs
+        run: |
+          sysctl machdep.cpu
+          system_profiler SPHardwareDataType
+      - name: Build
+        run: |
+          cmake --preset release
+          cmake --build --preset release
+      - name: Test
+        run: ctest --preset release
+
+  test_windows:
+    name: Test on ${{ matrix.os }} ${{ matrix.arch }} with ${{ matrix.preset }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-2025-vs2026, arch: x64, preset: msvc2026_x64 }
+          - { os: windows-11-arm, arch: arm64, preset: msvc2022_arm64 }
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Set Up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+      - name: Print Machine Specs
+        shell: powershell
+        run: |
+          Get-CimInstance -ClassName Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors, MaxClockSpeed | Format-List
+      - name: Build
+        shell: cmd
+        run: |
+          cmake --preset ${{ matrix.preset }}
+          cmake --build --preset ${{ matrix.preset }}
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }}
+
+  test_alpine:
+    name: Test on Alpine Linux
+    runs-on: ubuntu-26.04
+    timeout-minutes: 90
+    container:
+      image: alpine:latest
+      options: --privileged
+    steps:
+      - name: Install Git for Checkout
+        run: apk add --no-cache git openssh ca-certificates bash curl
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Print Machine Specs
+        run: |
+          cat /etc/alpine-release
+          uname -a
+          nproc
+      - name: Build
+        run: |
+          apk add --update cmake samurai g++ gcc
+          cmake --preset release -D CMAKE_C_COMPILER=gcc -D CMAKE_CXX_COMPILER=g++
+          cmake --build --preset release
+      - name: Test
+        run: ctest --preset release
+
+  # Cross-compile the static test executables once per target architecture and publish them as artifacts. The
+  # actual execution under QEMU happens in `test_cross_qemu`, which fans the vector-length-agnostic RISC-V
+  # binary across several VLENs WITHOUT recompiling it.
+  build_cross_linux:
+    name: Build for Linux ${{ matrix.target_arch }} on ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-26.04
+            arch: x86-64
+            target_arch: aarch64
+            target: aarch64-linux-gnu
+            target_processor: arm64
+            cross_package: crossbuild-essential-arm64
+            file_id: aarch64 # substring `file` prints for this ELF
+          - os: ubuntu-26.04-arm
+            arch: aarch64
+            target_arch: x86-64
+            target: x86_64-linux-gnu
+            target_processor: amd64
+            cross_package: crossbuild-essential-amd64
+            file_id: x86-64
+          - os: ubuntu-26.04
+            arch: x86-64
+            target_arch: riscv64
+            target: riscv64-linux-gnu
+            target_processor: riscv64
+            cross_package: crossbuild-essential-riscv64
+            file_id: RISC-V # `file` prints "UCB RISC-V", not "riscv64"
+          - os: ubuntu-26.04
+            arch: x86-64
+            target_arch: loongarch64
+            target: loongarch64-linux-gnu
+            target_processor: loong64
+            cross_package: g++-15-loongarch64-linux-gnu
+            cc: loongarch64-linux-gnu-gcc-15
+            cxx: loongarch64-linux-gnu-g++-15
+            file_id: LoongArch
+          - os: ubuntu-26.04
+            arch: x86-64
+            target_arch: ppc64le
+            target: powerpc64le-linux-gnu
+            target_processor: ppc64el
+            cross_package: g++-15-powerpc64le-linux-gnu
+            cc: powerpc64le-linux-gnu-gcc-15
+            cxx: powerpc64le-linux-gnu-g++-15
+            file_id: PowerPC
+
+    # LASX and POWER9 scope per function only from GCC 15 on, so those two legs cross-compile with GCC.
+    env:
+      CC: ${{ matrix.cc || 'clang-21' }}
+      CXX: ${{ matrix.cxx || 'clang++-21' }}
+      AR: llvm-ar-21
+      NM: llvm-nm-21
+      RANLIB: llvm-ranlib-21
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Install Cross-Compilation Toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang-21 lld-21 llvm-21 ${{ matrix.cross_package }}
+
+      - name: Build for ${{ matrix.target_arch }}
+        run: |
+          # Static-link the test/benchmark executables so QEMU user-mode can run them without juggling the
+          # cross dynamic loader + sysroot library paths. `clang` drives the GNU linker directly and does not
+          # add `-lstdc++` on its own, so we point it at the cross libstdc++ and pull it in explicitly.
+          gcc_libdir=$(dirname "$(find /usr/lib/gcc-cross/${{ matrix.target }} -name 'libstdc++.a' | head -1)")
+          cmake --preset release -D CMAKE_C_COMPILER="$CC" -D CMAKE_CXX_COMPILER="$CXX" \
+            -D CMAKE_C_COMPILER_TARGET=${{ matrix.target }} \
+            -D CMAKE_CXX_COMPILER_TARGET=${{ matrix.target }} \
+            -D CMAKE_SYSTEM_NAME=Linux \
+            -D CMAKE_SYSTEM_PROCESSOR=${{ matrix.target_processor }} \
+            -D CMAKE_EXE_LINKER_FLAGS="-static -L${gcc_libdir} -lstdc++ -lm"
+
+          cmake --build --preset release
+
+      - name: Verify ${{ matrix.target_arch }} Binaries
+        run: |
+          test -e build_release/libstringzilla_shared.so
+          test -e build_release/stringzilla_test
+          file build_release/stringzilla_test | grep -q "${{ matrix.file_id }}"
+
+      - name: Upload ${{ matrix.target_arch }} Test Binaries
+        uses: actions/upload-artifact@v7
+        with:
+          name: cross-tests-${{ matrix.target_arch }}
+          path: build_release/stringzilla_cpu*_test
+          if-no-files-found: error
+          retention-days: 1
+
+  # Run the cross-compiled (static) test binaries under QEMU user-mode. Build-and-verify alone never exercised
+  # the SIMD kernels. Each row is its own pass/fail status; RVV/SVE are vector-length-agnostic, so the RISC-V
+  # binary built once above is swept across VLEN 128/256/512 here with no rebuild — a single width under-tests VLA
+  # code. Ubuntu's static riscv64 libc needs RVA23, so the rows run `rva23s64`; the 256 row runs `max`, so `rvvcrypto`
+  # dispatches too.
+  test_qemu:
+    name: Test on Linux ${{ matrix.target_arch }}${{ matrix.variant }} under QEMU
+    needs: build_cross_linux
+    runs-on: ubuntu-26.04
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ARM is vector-length-agnostic under SVE just like RISC-V, so the one binary is run NEON-only
+          # (`sve=off`, else dynamic dispatch always prefers SVE2 and NEON is never exercised) plus SVE at
+          # 128/256/512-bit (`sve-max-vq` = VL/128).
+          - target_arch: aarch64
+            qemu: qemu-aarch64
+            qemu_cpu: "max,sve=off"
+            variant: " NEON"
+          - target_arch: aarch64
+            qemu: qemu-aarch64
+            qemu_cpu: "max,sve-max-vq=1"
+            variant: " SVE 128"
+          - target_arch: aarch64
+            qemu: qemu-aarch64
+            qemu_cpu: "max,sve-max-vq=2"
+            variant: " SVE 256"
+          - target_arch: aarch64
+            qemu: qemu-aarch64
+            qemu_cpu: "max,sve-max-vq=4"
+            variant: " SVE 512"
+          - target_arch: x86-64
+            qemu: qemu-x86_64
+            qemu_cpu: max
+            variant: ""
+          - target_arch: riscv64
+            qemu: qemu-riscv64
+            qemu_cpu: "rva23s64,vlen=128"
+            variant: " VLEN 128"
+          - target_arch: riscv64
+            qemu: qemu-riscv64
+            qemu_cpu: "max,vlen=256"
+            variant: " VLEN 256"
+          - target_arch: riscv64
+            qemu: qemu-riscv64
+            qemu_cpu: "rva23s64,vlen=512"
+            variant: " VLEN 512"
+          - target_arch: loongarch64
+            qemu: qemu-loongarch64
+            qemu_cpu: la464
+            variant: ""
+          - target_arch: ppc64le
+            qemu: qemu-ppc64le
+            qemu_cpu: power9
+            variant: ""
+
+    steps:
+      - name: Install QEMU User-Mode
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user
+
+      - name: Download ${{ matrix.target_arch }} Test Binaries
+        uses: actions/download-artifact@v8
+        with:
+          name: cross-tests-${{ matrix.target_arch }}
+          path: tests
+
+      - name: Test under QEMU
+        timeout-minutes: 150
+        env:
+          # User-mode emulation runs the fuzz loops 20-40x slower than native hardware; the full
+          # iteration budget needs over six hours per variant and the jobs die at the runner
+          # timeout without ever reaching the later test families. A scaled-down budget still
+          # sweeps every backend and vector length within the job limits.
+          STRINGZILLA_SCALE: "0.05"
+        run: |
+          set -euo pipefail
+          chmod +x tests/*
+          for test_binary in $(find tests -type f -name 'stringzilla_cpu*_test' | sort); do
+            echo "▶ ${{ matrix.qemu }} -cpu ${{ matrix.qemu_cpu }} ${test_binary}"
+            ${{ matrix.qemu }} -cpu "${{ matrix.qemu_cpu }}" "${test_binary}"
+          done
+
+  # The C++ suite every native platform runs; the strict rows' modules run with relaxed SIMD refused.
+  # The `utf8` filter stays until `test_hash_unit` stops asserting on wasm.
+  test_wasm:
+    name: Test on WebAssembly wasm32-wasip1 ${{ matrix.tier }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tier: v128relaxed
+            relaxed_simd: "y"
+          - tier: v128
+            relaxed_simd: "n"
+          - tier: serial
+            relaxed_simd: "n"
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Install WASI SDK
+        run: |
+          curl -sSL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/wasi-sdk-${WASI_SDK_VERSION}.0-x86_64-linux.tar.gz" \
+            | tar xz -C "$HOME"
+          echo "WASI_SDK_PATH=$HOME/wasi-sdk-${WASI_SDK_VERSION}.0-x86_64-linux" >> "$GITHUB_ENV"
+      - name: Install Wasmtime
+        run: |
+          curl https://wasmtime.dev/install.sh -sSf | bash -s -- --version "$WASMTIME_VERSION"
+          "$HOME/.wasmtime/bin/wasmtime" --version
+          echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
+      - name: Build
+        run: |
+          cmake --preset wasm32_wasi -D WASI_SDK_PREFIX="${WASI_SDK_PATH}" -D STRINGZILLA_MARCH=${{ matrix.tier }}
+          cmake --build --preset wasm32_wasi
+      - name: Test UTF-8 Suites under Wasmtime
+        env:
+          STRINGZILLA_FILTER: utf8
+          STRINGZILLA_SCALE: "0.05"
+        run: |
+          wasmtime -W relaxed-simd=${{ matrix.relaxed_simd }} -W exceptions=y \
+            -S inherit-env=y --dir . \
+            build_wasm32_wasi/stringzilla_test
+
+  # Packaging surface - what a downstream distributor sees, not what our own build tree sees. The consumers
+  # check spellings by linking them: an undefined name fails at generate time.
+  test_packaging:
+    name: Test CMake Packaging
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    env:
+      HEADER_PREFIX: ${{ github.workspace }}/prefix_header
+      FULL_PREFIX: ${{ github.workspace }}/prefix_full
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Install Build Tools
+        run: |
+          sudo apt update
+          sudo apt install -y cmake build-essential
+
+      - name: Write the Consumer Sources
+        run: |
+          mkdir -p consumer
+          cat > consumer/main.c <<'EOF'
+          #include <stdio.h>
+          #include <stringzilla/stringzilla.h>
+          int main(void) {
+              char const *haystack = "hello world";
+              sz_cptr_t match = NULL;
+          #if STRINGZILLA_HEADER_ONLY
+              sz_find_serial(haystack, 11, "world", 5, &match, NULL);
+          #else
+              sz_capability_t capabilities = 0;
+              sz_capabilities_enabled_cpu(&capabilities);
+              sz_find_best(haystack, 11, "world", 5, &match, capabilities, NULL);
+          #endif
+              printf("%d\n", (int)(match - haystack));
+              return match ? 0 : 1;
+          }
+          EOF
+
+        # Every registry recipe depends on the smallest prefix, the headers and the archive, installing cleanly.
+      - name: Install the Header-Only Package
+        run: |
+          cmake -B build_header -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_INSTALL=ON -DSTRINGZILLA_BUILD_SHARED=OFF \
+            -DCMAKE_INSTALL_PREFIX="$HEADER_PREFIX"
+          cmake --build build_header --parallel
+          cmake --install build_header
+
+      - name: Consume the Header-Only Package
+        run: |
+          cat > consumer/CMakeLists.txt <<'EOF'
+          cmake_minimum_required(VERSION 3.21)
+          project(consumer C)
+          find_package(stringzilla REQUIRED)
+          add_executable(consumer main.c)
+          target_link_libraries(consumer PRIVATE stringzilla::header)
+          EOF
+          cmake -S consumer -B consumer/build -DCMAKE_PREFIX_PATH="$HEADER_PREFIX"
+          cmake --build consumer/build
+          ./consumer/build/consumer
+
+      - name: Install the Compiled Libraries
+        run: |
+          cmake -B build_full -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_INSTALL=ON -DSTRINGZILLA_BUILD_SHARED=ON \
+            -DCMAKE_INSTALL_PREFIX="$FULL_PREFIX"
+          cmake --build build_full --parallel
+          cmake --install build_full
+
+        # The installed prefix must resolve the libraries' own exported targets.
+      - name: Consume the Compiled Package
+        run: |
+          cat > consumer/CMakeLists.txt <<'EOF'
+          cmake_minimum_required(VERSION 3.21)
+          project(consumer C)
+          find_package(stringzilla REQUIRED)
+          add_executable(consumer_shared main.c)
+          target_link_libraries(consumer_shared PRIVATE stringzilla::shared)
+          add_executable(consumer_static main.c)
+          target_link_libraries(consumer_static PRIVATE stringzilla::static)
+          EOF
+          rm -rf consumer/build
+          cmake -S consumer -B consumer/build -DCMAKE_PREFIX_PATH="$FULL_PREFIX"
+          cmake --build consumer/build
+          LD_LIBRARY_PATH="$FULL_PREFIX/lib" ./consumer/build/consumer_shared
+          ./consumer/build/consumer_static
+
+        # The `.pc` exists for build systems CMake never reaches, so it is checked without CMake.
+      - name: Consume via pkg-config
+        run: |
+          export PKG_CONFIG_PATH="$FULL_PREFIX/lib/pkgconfig"
+          test "$(pkg-config --modversion stringzilla)" = "$(cat VERSION)"
+          cc consumer/main.c $(pkg-config --cflags --libs stringzilla) -o consumer/pc_consumer
+          LD_LIBRARY_PATH="$FULL_PREFIX/lib" ./consumer/pc_consumer
+
+        # The in-tree aliases are a separate code path from the installed package's exported targets.
+      - name: Consume via add_subdirectory
+        run: |
+          cat > consumer/CMakeLists.txt <<EOF
+          cmake_minimum_required(VERSION 3.21)
+          project(consumer C CXX)
+          set(STRINGZILLA_BUILD_SHARED ON CACHE BOOL "" FORCE)
+          add_subdirectory($GITHUB_WORKSPACE stringzilla_build)
+          add_executable(consumer main.c)
+          target_link_libraries(consumer PRIVATE stringzilla::header stringzilla::shared)
+          EOF
+          rm -rf consumer/build
+          cmake -S consumer -B consumer/build
+          cmake --build consumer/build --target consumer --parallel
+          ./consumer/build/consumer
+
+  # No hosted runner has a GPU, so the CUDA and ROCm backends are compile checks; the Metal suite also runs on the
+  # paravirtual GPU. The family codes like `100f` need CMake 3.31, and Ubuntu 24.04 ships 3.28.
+  build_cuda:
+    name: Build CUDA Backend
+    runs-on: ubuntu-26.04
+    timeout-minutes: 40
+    container: nvidia/cuda:13.4.3-devel-ubuntu26.04
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Install Dependencies
+        run: |
+          apt-get update
+          apt-get install -y ninja-build build-essential git python3-pip curl gnupg
+          pip install --break-system-packages "cmake>=3.31"
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor -o /usr/share/keyrings/llvm.gpg
+          echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/resolute/ llvm-toolchain-resolute-22 main" \
+            > /etc/apt/sources.list.d/llvm.list
+          apt-get update && apt-get install -y clang-22
+      - name: Build
+        run: |
+          # Release rather than RelWithDebInfo: optimized debugging is unsupported in CUDA and fails in PTXAS
+          cmake --preset cuda \
+            -D CMAKE_C_COMPILER=clang-22 -D CMAKE_CXX_COMPILER=clang++-22 -D CMAKE_CUDA_HOST_COMPILER=clang++-22
+          cmake --build --preset cuda
+      - name: Test
+        run: ctest --preset cuda -R '^stringzilla_test$'
+
+  # Each machine profile builds the libraries for one CPU and one GPU code; the Arm ones build natively on Arm runners,
+  # where the CUDA image also exists. Clang 22 compiles the C units and hosts NVCC, as Ubuntu 24.04's GCC predates Olympus.
+  # Venice builds in AMD's image instead, as its preset compiles `gfx1250`.
+  build_machine_profile:
+    name: Build Machine Profile ${{ matrix.preset }}
+    runs-on: ${{ contains(fromJSON('["grace_hopper", "vera_rubin"]'), matrix.preset) && 'ubuntu-26.04-arm' || 'ubuntu-26.04' }}
+    timeout-minutes: 30
+    container: ${{ matrix.preset == 'venice_mi450' && 'rocm/dev-ubuntu-26.04:10.0.0-full' || 'nvidia/cuda:13.4.3-devel-ubuntu26.04' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [xeon4_hopper, xeon6_blackwell, venice_mi450, grace_hopper, vera_rubin]
+    env:
+      CC: clang-22
+      CXX: clang++-22
+    steps:
+      - name: Install Dependencies
+        run: |
+          apt-get update && apt-get install -y ninja-build g++ git python3-pip curl gnupg
+          pip install --break-system-packages "cmake>=3.31"
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor -o /usr/share/keyrings/llvm.gpg
+          echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/resolute/ llvm-toolchain-resolute-22 main" \
+            > /etc/apt/sources.list.d/llvm.list
+          apt-get update && apt-get install -y clang-22
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Build
+        run: |
+          cmake --preset ${{ matrix.preset }} \
+            -D CMAKE_C_COMPILER="$CC" -D CMAKE_CXX_COMPILER="$CXX" -D CMAKE_CUDA_HOST_COMPILER="$CXX"
+          cmake --build --preset ${{ matrix.preset }}
+
+  build_rocm:
+    name: Build ROCm Backend
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    container: rocm/dev-ubuntu-26.04:10.0.0-full
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Install Dependencies
+        run: |
+          apt-get update
+          apt-get install -y cmake ninja-build git
+          # The image leaves the HIP runtime off the loader path, so the tests could link but not start
+          dirname "$(find /opt/rocm/ -name libamdhip64.so.7 | head -1)" > /etc/ld.so.conf.d/rocm.conf && ldconfig
+      - name: Build
+        run: |
+          cmake --preset rocm
+          cmake --build --preset rocm
+      - name: Test
+        run: ctest --preset rocm
+
+  test_metal:
+    name: Test Metal Backend
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Build
+        run: |
+          cmake --preset metal
+          cmake --build --preset metal
+      - name: Test
+        run: ctest --preset metal

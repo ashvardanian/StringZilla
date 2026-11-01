@@ -567,7 +567,6 @@ int main() {
 The C side ships ready-made table initializers — `sz_strings_lookup_init_lower`, `sz_strings_lookup_init_upper`, and `sz_strings_lookup_init_ascii`.
 To select an ASCII-only fast path, scan for the complement of `sz_byteset_init_ascii` with `sz_find_byteset_best`, which reaches the SIMD byteset kernels instead of a scalar loop.
 
-
 ## Hashing and Checksums
 
 ### C
@@ -1067,10 +1066,10 @@ Similar to GCC, StringZilla is 32 bytes in size, and similar to Clang it can fit
 Our layout might be preferential, if you want to avoid branches.
 If you use a different compiler, you may want to check its SSO buffer size with a [simple Gist](https://gist.github.com/ashvardanian/c197f15732d9855c4e070797adf17b21).
 
-|                 | `libstdc++` in  GCC 13 | `libc++` in Clang 17 | StringZilla |
-| :-------------- | ---------------------: | -------------------: | ----------: |
-| String `sizeof` |                     32 |                   24 |          32 |
-| Inner Capacity  |                     15 |               __22__ |      __22__ |
+|                 | `libstdc++` in GCC 13 | `libc++` in Clang 17 | StringZilla |
+| :-------------- | --------------------: | -------------------: | ----------: |
+| String `sizeof` |                    32 |                   24 |          32 |
+| Inner Capacity  |                    15 |               __22__ |      __22__ |
 
 This design has been since ported to many high-level programming languages.
 Swift, for example, [can store 15 bytes](https://developer.apple.com/documentation/swift/substring/withutf8(_:)#discussion) in the `String` instance itself.
@@ -1113,8 +1112,8 @@ StringZilla [partially addresses those issues](#unicode-segmentation).
 
 | C++ Code                             | Evaluation Result | Invoked Signature              |
 | :----------------------------------- | :---------------- | :----------------------------- |
-| `"Loose"s.replace(2, 2, "vath"s, 1)` | `"Loathe"` 🤢      | `(pos1, count1, str2, pos2)`   |
-| `"Loose"s.replace(2, 2, "vath", 1)`  | `"Love"` 🥰        | `(pos1, count1, str2, count2)` |
+| `"Loose"s.replace(2, 2, "vath"s, 1)` | `"Loathe"` 🤢     | `(pos1, count1, str2, pos2)`   |
+| `"Loose"s.replace(2, 2, "vath", 1)`  | `"Love"` 🥰       | `(pos1, count1, str2, count2)` |
 
 StringZilla is designed to be a drop-in replacement for the C++ Standard Templates Library.
 That said, some of the design decisions of STL strings are highly controversial, error-prone, and expensive.

@@ -23,6 +23,8 @@ failed_count=0
 fixture_ordinal=0
 project_namespace=$(sed -n 's/^project_namespace="\(.*\)"$/\1/p' "$hooks_directory/pre-commit")
 project_directory=$(sed -n 's/^project_name="\(.*\)"$/\1/p' "$hooks_directory/pre-commit" | tr '[:upper:]' '[:lower:]')
+first_sibling_directory=$(sed -n "s/^sibling_projects='\([a-z]*\).*/\1/p" "$hooks_directory/pre-commit")
+first_sibling=$(printf '%s' "$first_sibling_directory" | tr '[:lower:]' '[:upper:]')
 
 # region Fixture Helpers
 
@@ -37,8 +39,11 @@ create_fixture_repository() {
     git -C "$fixture_directory" commit --quiet --allow-empty -m "Chore: Seed the fixture"
 }
 
-# Stages stdin at the path, behind the file header every C-family source carries. A Haswell header opening
-# no guard of its own gets its shape's, so only the guard fixtures test the guards.
+# The guards a project wraps a fixture's content in, outermost first; a project's fixtures region redefines it.
+fixture_guards() { :; } # fixture_guards <relative-path> <<< content
+
+# Stages stdin at the path, behind the file header every C-family source carries. A capability
+# header opening no guard of its own gets its shape's, so only the guard fixtures test the guards.
 stage_fixture_with_header() { # stage_fixture_with_header <relative-path> <<< content
     create_fixture_repository
     local fixture_path="$fixture_directory/$1" content guards=""
@@ -46,12 +51,7 @@ stage_fixture_with_header() { # stage_fixture_with_header <relative-path> <<< co
     case "$1" in
     *.h | *.hpp | *.c | *.cpp | *.cu | *.cuh | *.hip | *.metal)
         content=$(cat)
-        case "$1" in
-        include/stringzilla/*/haswell.h)
-            printf '%s\n' "$content" | grep -qE '^#if STRINGZILLA_(ARCH|TARGET)_' ||
-                guards=$'STRINGZILLA_ARCH_X8664_\nSTRINGZILLA_ARCH_X8664_HASWELL_'
-            ;;
-        esac
+        guards=$(fixture_guards "$1" <<< "$content")
         {
             printf '/**\n *  @file %s\n *  @author Selftest\n *  @date January 1, 2026\n' "$1"
             printf ' *  @brief One staged fixture for one rule.\n *\n *  The case under test follows.\n */\n'
@@ -80,7 +80,7 @@ stage_fixture_with_header() { # stage_fixture_with_header <relative-path> <<< co
             cat
         } > "$fixture_path"
         ;;
-    *.ts | *.mts | *.js | *.mjs | *.cjs)
+    *.ts | *.mts | *.js | *.mjs | *.cjs | *.swift)
         {
             printf '/**\n *  @file %s\n *  @author Selftest\n *  @date January 1, 2026\n *  @brief One staged fixture for one rule.\n */\n\n' "$1"
             cat
@@ -118,6 +118,18 @@ stage_edited_fixture() { # stage_edited_fixture <relative-path> <sed-expression>
     git -C "$fixture_directory" commit --quiet -m "Chore: Seed the fixture"
     sed "$2" "$fixture_path" > "$fixture_path.edited" && mv "$fixture_path.edited" "$fixture_path"
     git -C "$fixture_directory" add -- "$1"
+}
+
+# Commits a file, renames it and applies a sed edit, so a renamed file is judged on its changed lines.
+stage_renamed_fixture() { # stage_renamed_fixture <relative-path> <renamed-path> <sed-expression>
+    create_fixture_repository
+    mkdir -p "$(dirname "$fixture_directory/$1")" "$(dirname "$fixture_directory/$2")"
+    printf 'echo settled\n' > "$fixture_directory/$1"
+    git -C "$fixture_directory" add -- "$1"
+    git -C "$fixture_directory" commit --quiet -m "Chore: Seed the fixture"
+    git -C "$fixture_directory" mv -- "$1" "$2"
+    sed "$3" "$fixture_directory/$2" > "$fixture_directory/$2.edited" && mv "$fixture_directory/$2.edited" "$fixture_directory/$2"
+    git -C "$fixture_directory" add -- "$2"
 }
 
 # Stages stdin at the path exactly as given, for the rules about the file header itself.
@@ -187,13 +199,17 @@ assert_verbatim_accepts() { # assert_verbatim_accepts <label> <relative-path> <<
     expect_acceptance "$1"
 }
 
+# Judges the message against a fixture's index: an empty one, or the one `stage_release_fixture` staged.
 run_commit_msg() { # run_commit_msg <<< message
-    fixture_ordinal=$((fixture_ordinal + 1))
-    local message_path="$scratch_root/message-$fixture_ordinal"
+    [ "$release_fixture_staged" -eq 1 ] || create_fixture_repository
+    release_fixture_staged=0
+    local message_path="$fixture_directory.message"
     cat > "$message_path"
-    hook_output=$("$hooks_directory/commit-msg" "$message_path" 2>&1)
+    hook_output=$(cd "$fixture_directory" && "$hooks_directory/commit-msg" "$message_path" 2>&1)
     hook_status=$?
 }
+
+release_fixture_staged=0
 
 assert_message_rejects() { # assert_message_rejects <label> <phrase> <<< message
     run_commit_msg
@@ -219,11 +235,11 @@ assert_message_accepts() { # assert_message_accepts <label> <<< message
 
 # region Doxygen Block Fixtures
 
-assert_accepts "the header preamble alone" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "the header preamble alone" include/$project_directory/probe.h <<'FIXTURE'
 int probe(void);
 FIXTURE
 
-assert_rejects "param without direction" "has a @param without" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "param without direction" "has a @param without" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Probes a value.
  *  @param value The value.
@@ -231,7 +247,7 @@ assert_rejects "param without direction" "has a @param without" include/numkong/
 int probe(int value);
 FIXTURE
 
-assert_rejects "param spelled inout" "has a @param without" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "param spelled inout" "has a @param without" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Probes a value.
  *  @param[inout] value The value.
@@ -239,7 +255,7 @@ assert_rejects "param spelled inout" "has a @param without" include/numkong/prob
 int probe(int *value);
 FIXTURE
 
-assert_accepts "param with direction" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "param with direction" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Probes a value.
  *  @param[in] value The value.
@@ -248,22 +264,22 @@ assert_accepts "param with direction" include/numkong/probe.h <<'FIXTURE'
 int probe(int value, int *state);
 FIXTURE
 
-assert_rejects "Markdown emphasis" "uses Markdown emphasis" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "Markdown emphasis" "uses Markdown emphasis" include/$project_directory/probe.h <<'FIXTURE'
 /** Reads the **whole** buffer. */
 int probe(void);
 FIXTURE
 
-assert_accepts "C keyword spellings" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "C keyword spellings" include/$project_directory/probe.h <<'FIXTURE'
 /** Reads through a __restrict__ pointer and a __half2float(__x) call. */
 int probe(void);
 FIXTURE
 
-assert_rejects "backtick span in a docblock" "puts a backtick span in a docblock" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "backtick span in a docblock" "puts a backtick span in a docblock" include/$project_directory/probe.h <<'FIXTURE'
 /** Reads @p `value` once. */
 int probe(int value);
 FIXTURE
 
-assert_accepts "backtick span in a line comment" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "backtick span in a line comment" include/$project_directory/probe.h <<'FIXTURE'
 /** Probes a value. */
 static inline int probe(void) {
     // Reads `value` once.
@@ -271,27 +287,27 @@ static inline int probe(void) {
 }
 FIXTURE
 
-assert_accepts "markup command alone" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "markup command alone" include/$project_directory/probe.h <<'FIXTURE'
 /** Reads @p value once, never a backticked token. */
 int probe(int value);
 FIXTURE
 
-assert_rejects "glued Doxygen command" "glues a Doxygen command" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "glued Doxygen command" "glues a Doxygen command" include/$project_directory/probe.h <<'FIXTURE'
 /** Reads the value (@p value) once. */
 int probe(int value);
 FIXTURE
 
-assert_accepts "free-standing Doxygen command" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "free-standing Doxygen command" include/$project_directory/probe.h <<'FIXTURE'
 /** Reads @p value once, as ash@example.invalid would. */
 int probe(int value);
 FIXTURE
 
-assert_rejects "C library and C++ headers in one group" "misgroups its includes" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "C library and C++ headers in one group" "misgroups its includes" include/$project_directory/probe.h <<'FIXTURE'
 #include <cstdint>
 #include <span>
 FIXTURE
 
-assert_accepts "include groups in order, a blank line apart" include/numkong/probe.h <<FIXTURE
+assert_accepts "include groups in order, a blank line apart" include/$project_directory/probe.h <<FIXTURE
 #include <cstdint>
 
 #include <sys/types.h>
@@ -300,20 +316,20 @@ assert_accepts "include groups in order, a blank line apart" include/numkong/pro
 
 #include <fmt/core.h>
 
-#include <usearch/index.hpp>
+#include <$first_sibling_directory/index.hpp>
 
 #include "$project_directory/probe_internal.h"
 FIXTURE
 
-assert_rejects "own header in angle brackets" "is an own header" include/numkong/probe.h <<FIXTURE
+assert_rejects "own header in angle brackets" "is an own header" include/$project_directory/probe.h <<FIXTURE
 #include <$project_directory/probe_internal.h>
 FIXTURE
 
-assert_rejects "sibling header in quotes" "is a sibling header" include/numkong/probe.h <<'FIXTURE'
-#include "usearch/index.hpp"
+assert_rejects "sibling header in quotes" "is a sibling header" include/$project_directory/probe.h <<FIXTURE
+#include "$first_sibling_directory/index.hpp"
 FIXTURE
 
-assert_rejects "quoted header that is not in the repository" "is not in this repository" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "quoted header that is not in the repository" "is not in this repository" include/$project_directory/probe.h <<'FIXTURE'
 #include "probe_internal.h"
 FIXTURE
 
@@ -328,6 +344,17 @@ FIXTURE
 run_precommit
 expect_acceptance "quoted header beside the including file"
 
+stage_fixture_with_header bench/nested/probe.cpp <<'FIXTURE'
+#include <vector>
+
+#include "../harness.h"
+FIXTURE
+stage_sibling_with_header bench/harness.h <<'FIXTURE'
+int harness(void);
+FIXTURE
+run_precommit
+expect_acceptance "quoted header one directory above the including file"
+
 stage_fixture_with_header c/$project_directory/probe.h <<'FIXTURE'
 #include "probe_internal.h"
 FIXTURE
@@ -337,14 +364,14 @@ FIXTURE
 run_precommit
 expect_rejection "public header quoted without the prefix" "is a public header"
 
-assert_accepts "misordered includes under an #if" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "misordered includes under an #if" include/$project_directory/probe.h <<'FIXTURE'
 #include <span>
 #if defined(PROBE_EXTRAS)
 #include <cstdint>
 #endif
 FIXTURE
 
-assert_rejects "misordered includes after an #endif" "misgroups its includes" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "misordered includes after an #endif" "misgroups its includes" include/$project_directory/probe.h <<'FIXTURE'
 #if defined(PROBE_EXTRAS)
 #include <windows.h>
 #endif
@@ -352,7 +379,7 @@ assert_rejects "misordered includes after an #endif" "misgroups its includes" in
 #include <cstdint>
 FIXTURE
 
-assert_rejects "misordered includes inside an include guard" "misgroups its includes" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "misordered includes inside an include guard" "misgroups its includes" include/$project_directory/probe.h <<'FIXTURE'
 #ifndef PROBE_H_
 #define PROBE_H_
 #include <span>
@@ -360,29 +387,56 @@ assert_rejects "misordered includes inside an include guard" "misgroups its incl
 #endif
 FIXTURE
 
-assert_rejects "@see naming an identifier" "mixes the cross-reference tags" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "double-spaced Doxygen command" "aligns Doxygen text into columns" include/$project_directory/probe.h <<'FIXTURE'
 /**
- *  @brief Probes a value.
- *  @see nk_probe_serial
+ *  @brief  Reads the value once.
+ *
+ *  Never twice, as the value is volatile.
  */
 int probe(void);
 FIXTURE
 
-assert_rejects "inline cross-reference" "writes @sa or @see mid-line" include/numkong/probe.h <<'FIXTURE'
-/** Agrees to polynomial precision, as in @sa nk_probe_serial. */
+assert_rejects "parameter descriptions aligned into a column" "aligns Doxygen text into columns" include/$project_directory/probe.h <<'FIXTURE'
+/**
+ *  @brief Probes two values.
+ *  @param[in] a     The first value.
+ *  @param[in] count The second value.
+ */
+int probe(int a, int count);
+FIXTURE
+
+assert_accepts "single-spaced Doxygen text" include/$project_directory/probe.h <<'FIXTURE'
+/**
+ *  @brief Probes two values.
+ *  @param[in] a The first value.
+ *  @param[in] count The second value.
+ */
+int probe(int a, int count);
+FIXTURE
+
+assert_rejects "@see naming an identifier" "mixes the cross-reference tags" include/$project_directory/probe.h <<'FIXTURE'
+/**
+ *  @brief Probes a value.
+ *  @see probe_serial
+ */
 int probe(void);
 FIXTURE
 
-assert_accepts "@sa for identifiers, @see for URLs" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "inline cross-reference" "writes @sa or @see mid-line" include/$project_directory/probe.h <<'FIXTURE'
+/** Agrees to polynomial precision, as in @sa probe_serial. */
+int probe(void);
+FIXTURE
+
+assert_accepts "@sa for identifiers, @see for URLs" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Probes a value.
- *  @sa nk_probe_serial
+ *  @sa probe_serial
  *  @see Probe reference: https://example.invalid/probe
  */
 int probe(void);
 FIXTURE
 
-assert_rejects "section without anchor" "without a domain_topic anchor" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "section without anchor" "without a domain_topic anchor" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @section Finalize Output Types
  *
@@ -391,7 +445,7 @@ assert_rejects "section without anchor" "without a domain_topic anchor" include/
 int probe(void);
 FIXTURE
 
-assert_rejects "section anchor without a domain" "without a domain_topic anchor" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "section anchor without a domain" "without a domain_topic anchor" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @section references References
  *
@@ -400,7 +454,7 @@ assert_rejects "section anchor without a domain" "without a domain_topic anchor"
 int probe(void);
 FIXTURE
 
-stage_fixture_with_header include/numkong/first.h <<'FIXTURE'
+stage_fixture_with_header include/$project_directory/first.h <<'FIXTURE'
 /**
  *  @section probe_shared Shared Topic
  *
@@ -408,7 +462,7 @@ stage_fixture_with_header include/numkong/first.h <<'FIXTURE'
  */
 int first(void);
 FIXTURE
-stage_sibling_with_header include/numkong/second.h <<'FIXTURE'
+stage_sibling_with_header include/$project_directory/second.h <<'FIXTURE'
 /**
  *  @section probe_shared Shared Topic
  *
@@ -423,7 +477,7 @@ else
     report_failure "duplicated section anchor" "expected the anchor-uniqueness rule to reject it"
 fi
 
-assert_accepts "section with anchor" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "section with anchor" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @section probe_finalize Finalize Output Types
  *
@@ -432,13 +486,13 @@ assert_accepts "section with anchor" include/numkong/probe.h <<'FIXTURE'
 int probe(void);
 FIXTURE
 
-assert_rejects "trailing member doc" "with a trailing marker" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "trailing member doc" "with a trailing marker" include/$project_directory/probe.h <<'FIXTURE'
 struct probe_t {
-    int value; ///< The value.
+    int value; /// The value.
 };
 FIXTURE
 
-assert_accepts "member doc above the member" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "member doc above the member" include/$project_directory/probe.h <<'FIXTURE'
 struct probe_t {
 
     /** The value, never a trailing ///< column. */
@@ -446,46 +500,46 @@ struct probe_t {
 };
 FIXTURE
 
-assert_rejects "bare trailing doc marker" "with a trailing marker" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "bare trailing doc marker" "with a trailing marker" include/$project_directory/probe.h <<'FIXTURE'
 static int probe_value; //< The value.
 FIXTURE
 
-assert_rejects "trailing field comment" "on its own line's tail" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "trailing field comment" "on its own line's tail" include/$project_directory/probe.h <<'FIXTURE'
 typedef struct {
     int value; // The value.
 } probe_t;
 FIXTURE
 
-assert_rejects "trailing enumerator comment" "on its own line's tail" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "trailing enumerator comment" "on its own line's tail" include/$project_directory/probe.h <<'FIXTURE'
 enum {
     probe_one_k = 1, /* One. */
 };
 FIXTURE
 
-assert_accepts "why comment trailing a statement" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "why comment trailing a statement" include/$project_directory/probe.h <<'FIXTURE'
 static int probe(int value) {
     return value + 1; // Rounds up.
 }
 FIXTURE
 
-assert_rejects "shape with x" "spells a shape" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "shape with x" "spells a shape" include/$project_directory/probe.h <<'FIXTURE'
 /** Returns a matrix of shape [rows x columns]. */
 int probe(void);
 FIXTURE
 
-assert_accepts "shape in bold brackets" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "shape in bold brackets" include/$project_directory/probe.h <<'FIXTURE'
 /** Returns a matrix of shape @b [rows,columns], packed as 8 × 16-bit lanes, read at [max_lane]. */
 int probe(void);
 FIXTURE
 
-assert_accepts "pointer dereference statements are code" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "pointer dereference statements are code" include/$project_directory/probe.h <<'FIXTURE'
 static inline void probe(int *max_value_output, int *max_index_output, int const *lanes, int max_lane) {
     *max_value_output = lanes[max_lane],
     *max_index_output = lanes[max_lane * 16];
 }
 FIXTURE
 
-assert_rejects "formula in backticks" "puts a formula in backticks" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "formula in backticks" "puts a formula in backticks" include/$project_directory/probe.h <<'FIXTURE'
 /** Probes a value. */
 static inline int probe(void) {
     // Computes `1/√x` quickly.
@@ -493,23 +547,23 @@ static inline int probe(void) {
 }
 FIXTURE
 
-assert_rejects "formula in TeX dollars" "puts a formula in backticks" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "formula in TeX dollars" "puts a formula in backticks" include/$project_directory/probe.h <<'FIXTURE'
 /** Accumulates $A*B$ over the whole stream. */
 int probe(void);
 FIXTURE
 
-assert_accepts "formula in Unicode prose" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "formula in Unicode prose" include/$project_directory/probe.h <<'FIXTURE'
 /** Computes 1/√x quickly, as Σᵢ xᵢ² over @c values. */
 int probe(void);
 FIXTURE
 
-assert_rejects "docblock against the line above" "opens a docblock against" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "docblock against the line above" "opens a docblock against" include/$project_directory/probe.h <<'FIXTURE'
 int first(void);
 /** Second. */
 int second(void);
 FIXTURE
 
-assert_accepts "stacked copydoc lines" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "stacked copydoc lines" include/$project_directory/probe.h <<'FIXTURE'
 /** First. */
 int first(void);
 /** @copydoc first */
@@ -518,7 +572,7 @@ int second(void);
 int third(void);
 FIXTURE
 
-assert_rejects "orphan docblock" "documents no single declaration" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "orphan docblock" "documents no single declaration" include/$project_directory/probe.h <<'FIXTURE'
 struct probe_t {
     int value;
 
@@ -548,9 +602,9 @@ template struct probe<int>;
 template struct probe<long>;
 FIXTURE
 
-assert_verbatim_accepts "file header above a blank line and the pragma" include/numkong/probe.h <<'FIXTURE'
+assert_verbatim_accepts "file header above a blank line and the pragma" include/$project_directory/probe.h <<FIXTURE
 /**
- *  @file include/numkong/probe.h
+ *  @file include/$project_directory/probe.h
  *  @author Selftest
  *  @date January 1, 2026
  *  @brief One staged fixture for one rule.
@@ -561,10 +615,10 @@ assert_verbatim_accepts "file header above a blank line and the pragma" include/
 int probe(void);
 FIXTURE
 
-assert_verbatim_rejects "misordered file header" "misorders its file header" include/numkong/probe.h <<'FIXTURE'
+assert_verbatim_rejects "misordered file header" "misorders its file header" include/$project_directory/probe.h <<FIXTURE
 /**
  *  @brief One staged fixture for one rule.
- *  @file include/numkong/probe.h
+ *  @file include/$project_directory/probe.h
  *  @author Selftest
  *  @date January 1, 2026
  */
@@ -573,9 +627,9 @@ assert_verbatim_rejects "misordered file header" "misorders its file header" inc
 int probe(void);
 FIXTURE
 
-assert_verbatim_rejects "file header naming another path" "misorders its file header" include/numkong/probe.h <<'FIXTURE'
+assert_verbatim_rejects "file header naming another path" "misorders its file header" include/$project_directory/probe.h <<FIXTURE
 /**
- *  @file include/numkong/other.h
+ *  @file include/$project_directory/other.h
  *  @author Selftest
  *  @date January 1, 2026
  *  @brief One staged fixture for one rule.
@@ -585,9 +639,9 @@ assert_verbatim_rejects "file header naming another path" "misorders its file he
 int probe(void);
 FIXTURE
 
-assert_verbatim_accepts "header brief hanging over two lines" include/numkong/probe.h <<'FIXTURE'
+assert_verbatim_accepts "header brief hanging over two lines" include/$project_directory/probe.h <<FIXTURE
 /**
- *  @file include/numkong/probe.h
+ *  @file include/$project_directory/probe.h
  *  @author Selftest
  *  @date January 1, 2026
  *  @brief One staged fixture for one rule, with a summary long enough that it has to hang over a
@@ -598,12 +652,12 @@ assert_verbatim_accepts "header brief hanging over two lines" include/numkong/pr
 int probe(void);
 FIXTURE
 
-assert_rejects "brief on a lone paragraph" "tags a one-paragraph docblock" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "brief on a lone paragraph" "tags a one-paragraph docblock" include/$project_directory/probe.h <<'FIXTURE'
 /** @brief Lonely. */
 int probe(void);
 FIXTURE
 
-assert_rejects "summary above a section without brief" "whose summary sits above a section" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "summary above a section without brief" "whose summary sits above a section" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  Summary without the tag.
  *
@@ -612,7 +666,7 @@ assert_rejects "summary above a section without brief" "whose summary sits above
 int probe(int value);
 FIXTURE
 
-assert_rejects "brief past three lines" "lets a tag entry run past three lines" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "brief past three lines" "lets a tag entry run past three lines" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Probes a value whose summary is long enough to wrap, spelling out every constraint it
  *      keeps across the call, and then some more, so that it has to hang over a second line, and
@@ -623,7 +677,7 @@ assert_rejects "brief past three lines" "lets a tag entry run past three lines" 
 int probe(int value);
 FIXTURE
 
-assert_accepts "parameter names inside a bold shape" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "parameter names inside a bold shape" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Probes the rows.
  *  @param[in] rows_count How many rows @p values holds.
@@ -633,7 +687,7 @@ assert_accepts "parameter names inside a bold shape" include/numkong/probe.h <<'
 int probe(int rows_count, float const *values, int depth_count);
 FIXTURE
 
-assert_rejects "orphan last line" "leaves an orphan of one or two words" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "orphan last line" "leaves an orphan of one or two words" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief The standing instruction the store consults, plus the tally of calls that reached the
  *      store.
@@ -642,27 +696,27 @@ assert_rejects "orphan last line" "leaves an orphan of one or two words" include
 int probe(void);
 FIXTURE
 
-assert_rejects "ALL-CAPS emphasis in a comment" "uses ALL-CAPS emphasis in a comment" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "ALL-CAPS emphasis in a comment" "uses ALL-CAPS emphasis in a comment" include/$project_directory/probe.h <<'FIXTURE'
 /** The comparator MUST be transparent. */
 int probe(void);
 FIXTURE
 
-assert_rejects "bare qualified name" "writes a qualified name bare in doc prose" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "bare qualified name" "writes a qualified name bare in doc prose" include/$project_directory/probe.h <<'FIXTURE'
 /** Lookups are heterogeneous, just like std::map and std::set. */
 int probe(void);
 FIXTURE
 
-assert_rejects "inline code block" "has a malformed code block" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "inline code block" "has a malformed code block" include/$project_directory/probe.h <<'FIXTURE'
 /** The comparator defines @code{.cpp} using is_transparent = void; @endcode to enable this. */
 int probe(void);
 FIXTURE
 
-assert_accepts "marked qualified names" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "marked qualified names" include/$project_directory/probe.h <<'FIXTURE'
 /** Lookups are heterogeneous, just like @c std::map and @c std::set<int>. */
 int probe(void);
 FIXTURE
 
-assert_accepts "member named in a one-line body, and a concept" include/numkong/probe.hpp <<'FIXTURE'
+assert_accepts "member named in a one-line body, and a concept" include/$project_directory/probe.hpp <<'FIXTURE'
 struct probe_t {
 
     /** Grows the storage, keeping the identifier space from @c id_space in step. */
@@ -677,17 +731,32 @@ template <typename type_>
 concept aligned_type = requires(type_ value) { alignof(type_) <= alignof(max_align_t); };
 FIXTURE
 
-assert_rejects "tag right below a body paragraph" "starts a tag section right below a body paragraph" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "suffixed variable template" "suffixes a variable template" test/probe.cpp <<'FIXTURE'
+/** Half-precision types, judged against an error bound. */
+template <typename scalar_type_>
+constexpr bool bounded_k = sizeof(scalar_type_) == 2;
+FIXTURE
+
+assert_accepts "bare variable template and a suffixed constant" test/probe.cpp <<'FIXTURE'
+/** Half-precision types, judged against an error bound. */
+template <typename scalar_type_>
+constexpr bool bounded = sizeof(scalar_type_) == 2;
+
+/** The tolerance every bounded type shares. */
+constexpr double tolerance_k = 1e-3;
+FIXTURE
+
+assert_rejects "tag right below a body paragraph" "starts a tag section right below a body paragraph" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Steals work from a neighbour.
  *
  *  Probing the neighbours in a coprime order keeps two drained threads apart.
- *  @sa nk_probe_serial
+ *  @sa probe_serial
  */
 int probe(void);
 FIXTURE
 
-assert_rejects "note past three lines" "lets a tag entry run past three lines" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "note past three lines" "lets a tag entry run past three lines" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Do several threads see one address space, so atomics and parks mean anything?
  *  @note Always true where a kernel schedules the threads. On WebAssembly it is a build-time
@@ -698,7 +767,7 @@ assert_rejects "note past three lines" "lets a tag entry run past three lines" i
 int probe(void);
 FIXTURE
 
-assert_rejects "continuation aligned under the tag text" "misaligns a continuation line" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "continuation aligned under the tag text" "misaligns a continuation line" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Probes a value whose summary is long enough to wrap, spelling out every constraint it
  *         keeps across the call.
@@ -707,7 +776,7 @@ assert_rejects "continuation aligned under the tag text" "misaligns a continuati
 int probe(int value);
 FIXTURE
 
-assert_rejects "bullet continuation hanging past its text" "misaligns a continuation line" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "bullet continuation hanging past its text" "misaligns a continuation line" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Probes a value.
  *
@@ -717,7 +786,7 @@ assert_rejects "bullet continuation hanging past its text" "misaligns a continua
 int probe(void);
 FIXTURE
 
-assert_rejects "bullet past three lines" "writes a list item past three lines" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "bullet past three lines" "writes a list item past three lines" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Lists the rejected experiments.
  *
@@ -729,7 +798,7 @@ assert_rejects "bullet past three lines" "writes a list item past three lines" i
 int probe(void);
 FIXTURE
 
-assert_accepts "hanging tag and bullet continuations" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "hanging tag and bullet continuations" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Probes a value whose summary is long enough to wrap, spelling out every constraint it
  *      keeps across the call.
@@ -744,33 +813,33 @@ assert_accepts "hanging tag and bullet continuations" include/numkong/probe.h <<
 int probe(int value);
 FIXTURE
 
-assert_rejects "untagged block on bare lines" "mismatches a comment's brackets" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "untagged block on bare lines" "mismatches a comment's brackets" include/$project_directory/probe.h <<'FIXTURE'
 /** Prose that runs long enough to wrap onto a second line, spelling out every constraint it keeps
  *  across the call.
  */
 int probe(void);
 FIXTURE
 
-assert_rejects "tagged block squeezed onto the opener" "mismatches a comment's brackets" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "tagged block squeezed onto the opener" "mismatches a comment's brackets" include/$project_directory/probe.h <<'FIXTURE'
 /** @brief Probes a value.
  *  @param[in] value The value. */
 int probe(int value);
 FIXTURE
 
-assert_accepts "untagged prose closing on its last line" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "untagged prose closing on its last line" include/$project_directory/probe.h <<'FIXTURE'
 /** Prose that runs long enough to wrap onto a second line, spelling out every constraint it keeps
  *  across the call. */
 int probe(void);
 FIXTURE
 
-assert_rejects "plain comment opening on text, closing bare" "mismatches a comment's brackets" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "plain comment opening on text, closing bare" "mismatches a comment's brackets" include/$project_directory/probe.h <<'FIXTURE'
 /*  Backends from Ampere on, with every call asynchronous on its stream and every pointer reachable
  *  from the device.
  */
 int probe(void);
 FIXTURE
 
-assert_accepts "plain comments with symmetric brackets" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "plain comments with symmetric brackets" include/$project_directory/probe.h <<'FIXTURE'
 /*  Backends from Ampere on, with every call asynchronous on its stream and every pointer reachable
  *  from the device. */
 int first(void);
@@ -782,7 +851,7 @@ int first(void);
 int second(void);
 FIXTURE
 
-assert_rejects "note inside a preprocessor section" "opens a section with a note inside it" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "note inside a preprocessor section" "opens a section with a note inside it" include/$project_directory/probe.h <<'FIXTURE'
 #if PROBE_TARGET_WFET
 
 /*  WFET has no MSVC intrinsic, so the timed waiter is inline-assembly only. */
@@ -791,7 +860,7 @@ int probe(void);
 #endif // PROBE_TARGET_WFET
 FIXTURE
 
-assert_rejects "note past a section's target pragmas" "opens a section with a note inside it" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "note past a section's target pragmas" "opens a section with a note inside it" include/$project_directory/probe.h <<'FIXTURE'
 #if PROBE_TARGET_RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
@@ -803,9 +872,9 @@ int probe(void);
 #endif // PROBE_TARGET_RELAXED
 FIXTURE
 
-assert_verbatim_accepts "note opening a file inside its include guard" include/numkong/probe.h <<'FIXTURE'
+assert_verbatim_accepts "note opening a file inside its include guard" include/$project_directory/probe.h <<FIXTURE
 /**
- *  @file include/numkong/probe.h
+ *  @file include/$project_directory/probe.h
  *  @author Selftest
  *  @date January 1, 2026
  *  @brief One staged fixture for one rule.
@@ -819,10 +888,7 @@ int probe(void);
 #endif // PROBE_H_
 FIXTURE
 
-assert_accepts "note on a nested directive, a group label, and a guard spelled with defined" include/numkong/probe.h <<'FIXTURE'
-#if !defined(PROBE_TYPES_H_)
-#define PROBE_TYPES_H_
-
+assert_accepts "note on a nested directive, a group label, and a guard spelled with defined" include/$project_directory/probe.h <<'FIXTURE'
 /*  Debugging and testing. */
 #if !defined(PROBE_DEBUG)
 #define PROBE_DEBUG 0
@@ -841,10 +907,9 @@ assert_accepts "note on a nested directive, a group label, and a guard spelled w
 
 int probe(void);
 #endif // PROBE_TARGET_EMSCRIPTEN
-#endif // PROBE_TYPES_H_
 FIXTURE
 
-assert_accepts "note above a preprocessor section, and a branch note inside a body" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "note above a preprocessor section, and a branch note inside a body" include/$project_directory/probe.h <<'FIXTURE'
 /*  WFET has no MSVC intrinsic, so the timed waiter is inline-assembly only. */
 #if PROBE_TARGET_WFET
 int probe(void) {
@@ -857,34 +922,92 @@ int probe(void) {
 #endif // PROBE_TARGET_WFET
 FIXTURE
 
-assert_rejects "note inside a region" "opens a section with a note inside it" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "note inside a region" "opens a section with a note inside it" include/$project_directory/probe.h <<'FIXTURE'
 #pragma region Platform Capabilities
 
 /*  Layer 2 is capabilities, each answering exactly one question. */
-int probe(void);
+int probe_first(void);
+int probe_second(void);
+int probe_third(void);
+int probe_fourth(void);
+int probe_fifth(void);
+int probe_sixth(void);
+int probe_seventh(void);
+int probe_eighth(void);
+int probe_ninth(void);
+int probe_tenth(void);
+int probe_eleventh(void);
+int probe_twelfth(void);
+int probe_thirteenth(void);
+int probe_fourteenth(void);
+int probe_fifteenth(void);
+int probe_sixteenth(void);
+int probe_seventeenth(void);
+int probe_eighteenth(void);
+int probe_nineteenth(void);
+int probe_twentieth(void);
+int probe_twenty_first(void);
+int probe_twenty_second(void);
+int probe_twenty_third(void);
+int probe_twenty_fourth(void);
+int probe_twenty_fifth(void);
+int probe_twenty_sixth(void);
+int probe_twenty_seventh(void);
+int probe_twenty_eighth(void);
+int probe_twenty_ninth(void);
+int probe_thirtieth(void);
 
 #pragma endregion Platform Capabilities
 FIXTURE
 
-assert_accepts "note above its region" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "note above its region" include/$project_directory/probe.h <<'FIXTURE'
 /*  Layer 2 is capabilities, each answering exactly one question.
  *
  *  Every one derives from Layer 1. */
 #pragma region Platform Capabilities
 
-#define PROBE_ 1
+int probe_first(void);
+int probe_second(void);
+int probe_third(void);
+int probe_fourth(void);
+int probe_fifth(void);
+int probe_sixth(void);
+int probe_seventh(void);
+int probe_eighth(void);
+int probe_ninth(void);
+int probe_tenth(void);
+int probe_eleventh(void);
+int probe_twelfth(void);
+int probe_thirteenth(void);
+int probe_fourteenth(void);
+int probe_fifteenth(void);
+int probe_sixteenth(void);
+int probe_seventeenth(void);
+int probe_eighteenth(void);
+int probe_nineteenth(void);
+int probe_twentieth(void);
+int probe_twenty_first(void);
+int probe_twenty_second(void);
+int probe_twenty_third(void);
+int probe_twenty_fourth(void);
+int probe_twenty_fifth(void);
+int probe_twenty_sixth(void);
+int probe_twenty_seventh(void);
+int probe_twenty_eighth(void);
+int probe_twenty_ninth(void);
+int probe_thirtieth(void);
 
 #pragma endregion Platform Capabilities
 FIXTURE
 
-assert_rejects "plain comment on bare lines" "mismatches a comment's brackets" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "plain comment on bare lines" "mismatches a comment's brackets" include/$project_directory/probe.h <<'FIXTURE'
 /*
  *  Layer 2 is capabilities, each answering exactly one question.
  */
 int probe(void);
 FIXTURE
 
-assert_rejects "verbatim block squeezed onto its brackets" "mismatches a comment's brackets" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "verbatim block squeezed onto its brackets" "mismatches a comment's brackets" include/$project_directory/probe.h <<'FIXTURE'
 /** Tri-state glyphs:
  *  @verbatim
  *  ● compiled and usable
@@ -893,7 +1016,7 @@ assert_rejects "verbatim block squeezed onto its brackets" "mismatches a comment
 int probe(void);
 FIXTURE
 
-assert_rejects "section without air" "crams an @section" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "section without air" "crams an @section" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Probes a value first.
  *  @section probe_topic Topic
@@ -903,16 +1026,16 @@ assert_rejects "section without air" "crams an @section" include/numkong/probe.h
 int probe(void);
 FIXTURE
 
-assert_rejects "statuses without air" "crams a @par" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "statuses without air" "crams a @par" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Probes a value.
  *  @par Statuses:
- *  - @c sz_success_k
+ *  - @c probe_success_k
  */
-sz_status_t probe(void);
+probe_status_t probe(void);
 FIXTURE
 
-assert_rejects "code block without language" "has a malformed code block" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "code block without language" "has a malformed code block" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Shows usage.
  *
@@ -923,7 +1046,7 @@ assert_rejects "code block without language" "has a malformed code block" includ
 int probe(void);
 FIXTURE
 
-assert_rejects "code block never closed" "has a malformed code block" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "code block never closed" "has a malformed code block" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Shows usage.
  *
@@ -933,7 +1056,7 @@ assert_rejects "code block never closed" "has a malformed code block" include/nu
 int probe(void);
 FIXTURE
 
-assert_accepts "code block with language, wide inside" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "code block with language, wide inside" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Shows usage.
  *
@@ -944,25 +1067,25 @@ assert_accepts "code block with language, wide inside" include/numkong/probe.h <
 int probe(void);
 FIXTURE
 
-assert_accepts "comment in a macro padded to its backslash" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "comment in a macro padded to its backslash" include/$project_directory/probe.h <<'FIXTURE'
 #define probe_(name)                                                                                   \
     /* Short note inside a macro body. */                                                             \
     int name(void)
 FIXTURE
 
-assert_accepts "argument-name comments opening a code line" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "argument-name comments opening a code line" include/$project_directory/probe.h <<'FIXTURE'
 static inline int probe(int first, int second, int third) {
-    return nk_probe_call(first, second, third,
+    return probe_call(first, second, third,
                          /*output_scale=*/1.0f, /*accumulate=*/0, /*stream=*/0, /*reserved=*/0, /*flags=*/0);
 }
 FIXTURE
 
-assert_rejects "prose past 100 columns" "writes prose past 100 columns" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "prose past 100 columns" "writes prose past 100 columns" include/$project_directory/probe.h <<'FIXTURE'
 /** A sentence that keeps going well past the prose limit of one hundred columns, and then some more. */
 int probe(void);
 FIXTURE
 
-assert_accepts "Unicode prose at 100 characters" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "Unicode prose at 100 characters" include/$project_directory/probe.h <<'FIXTURE'
 /** A formula Σᵢ √xᵢ × yᵢ counts characters rather than bytes, so this line fits the limit here. */
 int probe(void);
 FIXTURE
@@ -972,7 +1095,7 @@ assert_rejects "prose past 100 columns in a HIP source" "writes prose past 100 c
 int probe(void);
 FIXTURE
 
-assert_rejects "pipe table" "draws a pipe table" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "pipe table" "draws a pipe table" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Lists the instructions.
  *
@@ -987,7 +1110,7 @@ assert_rejects "pipe table in a Python comment" "draws a pipe table" python/prob
 # | dots | Inner products |
 FIXTURE
 
-assert_accepts "aligned plain table" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "aligned plain table" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Lists the instructions.
  *
@@ -1000,7 +1123,7 @@ assert_accepts "aligned plain table" include/numkong/probe.h <<'FIXTURE'
 int probe(void);
 FIXTURE
 
-assert_accepts "indented code sample inside a line comment" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "indented code sample inside a line comment" include/$project_directory/probe.h <<'FIXTURE'
 static inline int probe(int count) {
     // The loop below replaces a vector compare that is only available for narrower integers:
     //
@@ -1012,7 +1135,7 @@ static inline int probe(int count) {
 }
 FIXTURE
 
-assert_accepts "marked notes filled across lines, and a greeting in a code sample" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "marked notes filled across lines, and a greeting in a code sample" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Probes a value.
  *
@@ -1028,7 +1151,7 @@ static inline int probe(int count) {
 }
 FIXTURE
 
-assert_accepts "labelled field lines in a docblock" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "labelled field lines in a docblock" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  Tests: Baseline probing, growth and tombstone reuse on the cheapest possible key.
  *  Lookup: exact key only.
@@ -1037,7 +1160,7 @@ assert_accepts "labelled field lines in a docblock" include/numkong/probe.h <<'F
 int probe(void);
 FIXTURE
 
-assert_accepts "labelled lines start fresh" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "labelled lines start fresh" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Packs two nibbles per byte.
  *
@@ -1047,7 +1170,7 @@ assert_accepts "labelled lines start fresh" include/numkong/probe.h <<'FIXTURE'
 int probe(void);
 FIXTURE
 
-assert_accepts "one sentence per line" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "one sentence per line" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Packs two nibbles per byte.
  *
@@ -1057,12 +1180,12 @@ assert_accepts "one sentence per line" include/numkong/probe.h <<'FIXTURE'
 int probe(void);
 FIXTURE
 
-assert_rejects "glued Unicode arrow" "glues a Unicode arrow" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "glued Unicode arrow" "glues a Unicode arrow" include/$project_directory/probe.h <<'FIXTURE'
 /** Converts FP8→FP16 in one instruction. */
 int probe(void);
 FIXTURE
 
-assert_accepts "spaced Unicode arrow, glued one in code" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "spaced Unicode arrow, glued one in code" include/$project_directory/probe.h <<'FIXTURE'
 /** Converts FP8 → FP16 in one instruction. */
 static inline int probe(void) {
     // Spelled `a→b` in code.
@@ -1070,12 +1193,12 @@ static inline int probe(void) {
 }
 FIXTURE
 
-assert_accepts "single name with @c, a longer span in tt" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "single name with @c, a longer span in tt" include/$project_directory/probe.h <<'FIXTURE'
 /** Marks helpers with @c __arm_locally_streaming and calls <tt>probe(values, count)</tt> once. */
 int probe(void);
 FIXTURE
 
-assert_rejects "table outside verbatim" "lays out a table outside @verbatim" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "table outside verbatim" "lays out a table outside @verbatim" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Compares the types.
  *
@@ -1085,7 +1208,7 @@ assert_rejects "table outside verbatim" "lays out a table outside @verbatim" inc
 int probe(void);
 FIXTURE
 
-assert_rejects "markup inside verbatim" "lays out a table outside @verbatim" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "markup inside verbatim" "lays out a table outside @verbatim" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Compares the types.
  *
@@ -1097,7 +1220,7 @@ assert_rejects "markup inside verbatim" "lays out a table outside @verbatim" inc
 int probe(void);
 FIXTURE
 
-assert_rejects "table split into adjacent verbatim blocks" "lays out a table outside @verbatim" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "table split into adjacent verbatim blocks" "lays out a table outside @verbatim" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Lists the variables.
  *
@@ -1112,26 +1235,40 @@ assert_rejects "table split into adjacent verbatim blocks" "lays out a table out
 int probe(void);
 FIXTURE
 
-assert_rejects "piped fields" "separates fields with pipes" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "piped fields" "separates fields with pipes" include/$project_directory/probe.h <<'FIXTURE'
 /** Lookup: heterogeneous | Copy: Trivial | Memory: Stack */
 int probe(void);
 FIXTURE
 
-assert_rejects "underfilled paragraph" "leaves a prose line underfilled" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "underfilled paragraph" "leaves a prose line underfilled" include/$project_directory/probe.h <<'FIXTURE'
 /** Quantization keeps i16 from saturating, as the worst pair sum stays below the limit, and then
  *  XOR-0x80 turns signed queries
  *  unsigned before the u8 dot product. */
 int probe(void);
 FIXTURE
 
-assert_accepts "paragraph wrapped narrow throughout" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "underfilled line before an inline tag" "leaves a prose line underfilled" include/$project_directory/probe.h <<'FIXTURE'
+/** The executor owns every queue it spawns and the scratch arenas each worker claims, so it can
+ *  spawn into a
+ *  @c kernel_table the process keeps for its whole lifetime, without asking the caller again. */
+int probe(void);
+FIXTURE
+
+assert_accepts "inline tag and its name too long for the line above" include/$project_directory/probe.h <<'FIXTURE'
+/** The executor owns every queue it spawns and the scratch arenas each worker claims, so it can
+ *  spawn into the arena tables the process keeps for its whole lifetime, reading through
+ *  @c kernel_table_of_the_process_cache before it asks the caller again. */
+int probe(void);
+FIXTURE
+
+assert_accepts "paragraph wrapped narrow throughout" include/$project_directory/probe.h <<'FIXTURE'
 /** Quantization keeps i16 from saturating, as the worst pair
  *  sum stays below the limit, and then XOR-0x80 turns signed
  *  queries unsigned before the u8 dot product runs. */
 int probe(void);
 FIXTURE
 
-assert_accepts "filled paragraph and a line ending in a colon" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "filled paragraph and a line ending in a colon" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Quantization keeps i16 from saturating, as the worst pair sum stays below the limit, and
  *      XOR-0x80 turns signed queries unsigned.
@@ -1143,49 +1280,67 @@ assert_accepts "filled paragraph and a line ending in a colon" include/numkong/p
 int probe(void);
 FIXTURE
 
-assert_rejects "abbreviated register role" "abbreviates a word this project spells out" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "abbreviated register role" "abbreviates a word this project spells out" include/$project_directory/probe.h <<'FIXTURE'
 static inline int probe(int sum_hi) { return sum_hi; }
 FIXTURE
 
-assert_accepts "register roles spelled out" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "register roles spelled out" include/$project_directory/probe.h <<'FIXTURE'
 /** Splits the word into its high and low halves, never into a hint or a lookup. */
 static inline int probe(int sum_high) { return sum_high; }
 FIXTURE
 
-assert_rejects "abbreviation in prose" "abbreviates a word this project spells out" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "a foreign macro keeps its abbreviation" include/$project_directory/probe.hpp <<'FIXTURE'
+#include <asm/hwprobe.h>
+inline bool zabha(unsigned long extensions) { return extensions & RISCV_HWPROBE_EXT_ZABHA; }
+FIXTURE
+
+assert_rejects "a macro the file defines spells words out" "abbreviates a word this project spells out" include/$project_directory/probe.hpp <<'FIXTURE'
+#define PROBE_TMP_WORDS 4
+FIXTURE
+
+assert_rejects "abbreviation in prose" "abbreviates a word this project spells out" include/$project_directory/probe.h <<'FIXTURE'
 /** Copies the tmp value into place. */
 static inline int probe(int value) { return value; }
 FIXTURE
 
-assert_accepts "prose naming a parameter, a mnemonic and a code span" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "abbreviations inside string literals, raw strings included" include/$project_directory/probe.hpp <<'FIXTURE'
+inline char const *probe_key() noexcept { return "obj"; }
+inline char const *probe_cases() noexcept {
+    return R"json([
+{"comment": "an obj property"}
+])json";
+}
+FIXTURE
+
+assert_accepts "prose naming a parameter, a mnemonic and a code span" include/$project_directory/probe.h <<'FIXTURE'
 /** Reads @p buffer with CNT, as <tt>buffer[0]</tt> does, and widens the value. */
 static inline int probe(int const *buffer) { return buffer[0]; }
 FIXTURE
 
-stage_fixture_with_header include/numkong/probe.h <<'FIXTURE'
+stage_fixture_with_header include/$project_directory/probe.h <<'FIXTURE'
 typedef int const *probe_buf_t;
 FIXTURE
 git -C "$fixture_directory" commit --quiet -m "Chore: Seed the fixture"
-stage_sibling_with_header include/numkong/probe/serial.h <<'FIXTURE'
+stage_sibling_with_header include/$project_directory/probe/serial.h <<'FIXTURE'
 /** Reads the first value. */
 static inline int probe_serial(probe_buf_t values) { return values[0]; }
 FIXTURE
 run_precommit
 expect_acceptance "new header reusing a name from HEAD's headers"
 
-assert_rejects "line comment above a preprocessor block" "writes a // comment outside a function body" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "line comment above a preprocessor block" "writes a // comment outside a function body" include/$project_directory/probe.h <<'FIXTURE'
 // EM_JS expands to an empty-parameter-list declaration, tripping -Wstrict-prototypes.
 #if defined(__clang__)
 #pragma clang diagnostic push
 #endif
 FIXTURE
 
-assert_rejects "line comment above a file-scope declaration" "writes a // comment outside a function body" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "line comment above a file-scope declaration" "writes a // comment outside a function body" include/$project_directory/probe.h <<'FIXTURE'
 // Probes a value.
 int probe(void);
 FIXTURE
 
-assert_rejects "line comment inside extern C" "writes a // comment outside a function body" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "line comment inside extern C" "writes a // comment outside a function body" include/$project_directory/probe.h <<'FIXTURE'
 extern "C" {
 
 // Probes a value.
@@ -1193,24 +1348,24 @@ int probe(void);
 }
 FIXTURE
 
-assert_accepts "block comments at file scope, line comments in bodies" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "block comments at file scope, line comments in bodies" include/$project_directory/probe.h <<FIXTURE
 /*  EM_JS expands to an empty-parameter-list declaration, which trips -Wstrict-prototypes under
  *  Clang. */
 #if defined(__clang__)
 #pragma clang diagnostic push
 #endif
 
-namespace ashvardanian::numkong {
+namespace ${project_namespace} {
 
 static inline int probe(void) {
     // A note inside a body stays a line comment.
     return 0;
 }
 
-} // namespace ashvardanian::numkong
+} // namespace ${project_namespace}
 FIXTURE
 
-assert_rejects "plain comment above a single-macro conditional" "explains a macro in a plain" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "plain comment above a single-macro conditional" "explains a macro in a plain" include/$project_directory/probe.h <<'FIXTURE'
 /* True when the compiler supports multi-argument subscripts. */
 #if defined(__cpp_multidimensional_subscript)
 #define PROBE_SUBSCRIPT_ 1
@@ -1219,7 +1374,7 @@ assert_rejects "plain comment above a single-macro conditional" "explains a macr
 #endif
 FIXTURE
 
-assert_accepts "docblock above a single-macro conditional, plain comment above a mixed block" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "docblock above a single-macro conditional, plain comment above a mixed block" include/$project_directory/probe.h <<'FIXTURE'
 /** True when the compiler supports multi-argument subscripts. */
 #if defined(__cpp_multidimensional_subscript)
 #define PROBE_SUBSCRIPT_ 1
@@ -1234,14 +1389,14 @@ assert_accepts "docblock above a single-macro conditional, plain comment above a
 #endif
 FIXTURE
 
-assert_rejects "line comment documenting a member" "documents a declaration with a bare" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "line comment documenting a member" "documents a declaration with a bare" include/$project_directory/probe.h <<'FIXTURE'
 struct probe_t {
     // The value.
     int value;
 };
 FIXTURE
 
-assert_accepts "line comment inside a function body" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "line comment inside a function body" include/$project_directory/probe.h <<'FIXTURE'
 static inline int probe(void) {
     // A local, where `//` is an implementation note.
     int value = 0;
@@ -1374,125 +1529,42 @@ assert_accepts "equation in plain prose, and a lone marked name" include/probe.h
 int probe(int value);
 FIXTURE
 
+assert_accepts "suffixed constants inside a function template's body" test/probe.cpp <<'FIXTURE'
+template <typename indexes_type_>
+std::size_t probe(u64_t seed) {
+    using key_t = typename indexes_type_::key_t;
+    constexpr std::size_t samples_k = 32;
+    constexpr std::size_t wanted_k = 10;
+    return samples_k + wanted_k + seed;
+}
+FIXTURE
+
 # endregion Doxygen Block Fixtures
 
 # region C and C++ Idiom Fixtures
 
-assert_rejects "unpinned string split" "splits a string literal" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "unpinned string split" "splits a string literal" include/$project_directory/probe.h <<'FIXTURE'
 static char const *probe_text = "first half "
                                 "second half";
 FIXTURE
 
-assert_accepts "pinned string split" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "pinned string split" include/$project_directory/probe.h <<'FIXTURE'
 static char const *probe_text = "first half " //
                                 "second half";
 FIXTURE
 
-stage_edited_fixture include/numkong/probe.h 's/^#pragma once$/#pragma once\n#define PROBE_FIRST "first"/; s/^int settled(void);$/"second";/'
+stage_edited_fixture include/$project_directory/probe.h 's/^#pragma once$/#pragma once\n#define PROBE_FIRST "first"/; s/^int settled(void);$/"second";/'
 run_precommit
 expect_acceptance "string lines apart in the file, split only by an unchanged line"
 
-assert_rejects "unnamed namespace at file scope" "opens an unnamed namespace" include/probe.cpp <<'FIXTURE'
-namespace {
-int probe();
-}
-FIXTURE
-
-assert_rejects "unnamed namespace nested in the harness" "opens an unnamed namespace" bench/probe.hpp <<FIXTURE
-namespace ${project_namespace}::bench {
-namespace {
-int probe();
-}
-}
-FIXTURE
-
-assert_accepts "namespace spelling in a string and a comment" include/probe.cpp <<'FIXTURE'
-/* An unnamed namespace { has no owner. */
-char const *const text = "namespace {";
-FIXTURE
-
-assert_rejects "class template suffix on the template line" "suffixes a class template" include/probe.hpp <<'FIXTURE'
-template <typename type_> struct probe_t;
-FIXTURE
-
-assert_rejects "class template suffix after a multiline header" "suffixes a class template" include/probe.hpp <<'FIXTURE'
-template <
-    typename first_type_,
-    typename second_type_>
-struct probe2_t;
-FIXTURE
-
-assert_accepts "function template with ordinary local type on the same line" include/probe.hpp <<'FIXTURE'
-template <typename value_type_> value_type_ probe() { struct local_t {}; return {}; }
-FIXTURE
-
-assert_accepts "bare class template and materialized alias" include/probe.hpp <<'FIXTURE'
-template <typename type_> struct probe;
-using probe_t = probe<int>;
-FIXTURE
-
-assert_rejects "materialized struct without its suffix" "names a type without '_t'" include/probe.hpp <<'FIXTURE'
-struct probe {
-    int value;
-};
-FIXTURE
-
-assert_rejects "enumerator without its suffix" "names a type without '_t'" include/probe.h <<'FIXTURE'
-enum { probe_threads_per_block = 256 };
-FIXTURE
-
-assert_rejects "enumerator of a multiline enum without its suffix" "names a type without '_t'" include/probe.h <<'FIXTURE'
-enum {
-    probe_first_k = 1,
-    probe_second = 2,
-};
-FIXTURE
-
-assert_accepts "suffixed struct, class template and enumerators" include/probe.hpp <<'FIXTURE'
-struct probe_t {
-    int value;
-};
-template <typename type_>
-struct probe_tape {
-    type_ value;
-};
-enum { probe_threads_per_block_k = 256 };
-enum class probe_order_t : int { shuffled_k, sorted_k };
-enum {
-    probe_mask_k = (probe_first_bit_k | probe_second_bit_k) &
-                   probe_profile_bits_k
-};
-FIXTURE
-
-stage_fixture_with_header include/probe.hpp <<'FIXTURE'
-template <typename type_>
-struct probe;
-FIXTURE
-git -C "$fixture_directory" commit --quiet -m "Chore: Seed the fixture"
-sed 's/struct probe;/struct probe_t;/' "$fixture_directory/include/probe.hpp" > "$fixture_directory/edited"
-mv "$fixture_directory/edited" "$fixture_directory/include/probe.hpp"
-git -C "$fixture_directory" add -- include/probe.hpp
-run_precommit
-expect_rejection "changed class name with unchanged template header" "suffixes a class template"
-
-stage_fixture_with_header include/probe.hpp <<'FIXTURE'
-template <typename type_>
-struct probe_t;
-FIXTURE
-git -C "$fixture_directory" commit --quiet -m "Chore: Seed the fixture"
-sed 's/typename type_/typename value_type_/' "$fixture_directory/include/probe.hpp" > "$fixture_directory/edited"
-mv "$fixture_directory/edited" "$fixture_directory/include/probe.hpp"
-git -C "$fixture_directory" add -- include/probe.hpp
-run_precommit
-expect_rejection "changed template header with unchanged class name" "suffixes a class template"
-
 assert_rejects "harness namespace missing" "does not open" bench/probe.hpp <<FIXTURE
-namespace other {}
+namespace ${project_namespace%%::*} {}
 FIXTURE
 
 assert_rejects "harness opens a second namespace" "opens a file-scope namespace other" bench/probe.hpp <<FIXTURE
-namespace ${project_namespace}::bench {}
-namespace other {}
+namespace ${project_namespace}::bench {
+} // namespace ${project_namespace}::bench
+namespace ${first_sibling_directory} {}
 FIXTURE
 
 assert_accepts "harness namespace matching its directory" bench/probe.hpp <<FIXTURE
@@ -1518,6 +1590,36 @@ FIXTURE
 
 assert_rejects "punctuated region name" "punctuates a '#pragma region' name" include/probe.hpp <<'FIXTURE'
 #pragma region Probes: Hash
+inline int first() { return 1; }
+inline int second() { return 2; }
+inline int third() { return 3; }
+inline int fourth() { return 4; }
+inline int fifth() { return 5; }
+inline int sixth() { return 6; }
+inline int seventh() { return 7; }
+inline int eighth() { return 8; }
+inline int ninth() { return 9; }
+inline int tenth() { return 10; }
+inline int eleventh() { return 11; }
+inline int twelfth() { return 12; }
+inline int thirteenth() { return 13; }
+inline int fourteenth() { return 14; }
+inline int fifteenth() { return 15; }
+inline int sixteenth() { return 16; }
+inline int seventeenth() { return 17; }
+inline int eighteenth() { return 18; }
+inline int nineteenth() { return 19; }
+inline int twentieth() { return 20; }
+inline int twenty_first() { return 21; }
+inline int twenty_second() { return 22; }
+inline int twenty_third() { return 23; }
+inline int twenty_fourth() { return 24; }
+inline int twenty_fifth() { return 25; }
+inline int twenty_sixth() { return 26; }
+inline int twenty_seventh() { return 27; }
+inline int twenty_eighth() { return 28; }
+inline int twenty_ninth() { return 29; }
+inline int thirtieth() { return 30; }
 #pragma endregion Probes: Hash
 FIXTURE
 
@@ -1527,6 +1629,18 @@ FIXTURE
 
 assert_rejects "two literal fragments on one line" "two string-literal fragments on one line" include/probe.hpp <<'FIXTURE'
 inline char const *probe() { return "first" "second"; }
+FIXTURE
+
+assert_accepts "a raw string holding a quoted space key" include/probe.hpp <<'FIXTURE'
+inline char const *probe() {
+    return R"json([
+{"doc": {"": 0, " ": 7}}
+])json";
+}
+FIXTURE
+
+assert_accepts "string literals listed with commas" include/probe.hpp <<'FIXTURE'
+static char const *const probe_names[] = {"first", "second",   "third"};
 FIXTURE
 
 assert_rejects "unqualified memcpy" "unqualified memcpy" include/probe.hpp <<'FIXTURE'
@@ -1542,13 +1656,51 @@ inline void *memcpy(void *to, void const *from) noexcept;
 inline void *memcpy(void *to, void const *from) noexcept { return std::memcpy(to, from, 8); }
 FIXTURE
 
-assert_accepts "qualified memcpy, plain region, and prose naming the bare forms" include/probe.hpp <<'FIXTURE'
-#pragma region Probes
+assert_rejects "class template suffix on the template line" "suffixes a class template" include/probe.hpp <<'FIXTURE'
+template <typename type_> struct probe_t;
+FIXTURE
 
+assert_rejects "class template suffix after a multiline header" "suffixes a class template" include/probe.hpp <<'FIXTURE'
+template <
+    typename first_type_,
+    typename second_type_>
+struct probe2_t;
+FIXTURE
+
+assert_accepts "function template with ordinary local type on the same line" include/probe.hpp <<'FIXTURE'
+template <typename value_type_> value_type_ probe() { struct local_t {}; return {}; }
+FIXTURE
+
+assert_accepts "bare class template and materialized alias" include/probe.hpp <<'FIXTURE'
+template <typename type_> struct probe;
+using probe_t = probe<int>;
+FIXTURE
+
+stage_fixture_with_header include/probe.hpp <<'FIXTURE'
+template <typename type_>
+struct probe;
+FIXTURE
+git -C "$fixture_directory" commit --quiet -m "Chore: Seed the fixture"
+sed 's/struct probe;/struct probe_t;/' "$fixture_directory/include/probe.hpp" > "$fixture_directory/edited"
+mv "$fixture_directory/edited" "$fixture_directory/include/probe.hpp"
+git -C "$fixture_directory" add -- include/probe.hpp
+run_precommit
+expect_rejection "changed class name with unchanged template header" "suffixes a class template"
+
+stage_fixture_with_header include/probe.hpp <<'FIXTURE'
+template <typename type_>
+struct probe_t;
+FIXTURE
+git -C "$fixture_directory" commit --quiet -m "Chore: Seed the fixture"
+sed 's/typename type_/typename value_type_/' "$fixture_directory/include/probe.hpp" > "$fixture_directory/edited"
+mv "$fixture_directory/edited" "$fixture_directory/include/probe.hpp"
+git -C "$fixture_directory" add -- include/probe.hpp
+run_precommit
+expect_rejection "changed template header with unchanged class name" "suffixes a class template"
+
+assert_accepts "qualified memcpy, and prose naming the bare forms" include/probe.hpp <<'FIXTURE'
 /** Copies eight bytes with @c std::memcpy, never an unqualified memcpy or a pragma mark. */
 inline void probe(char *to, char const *from) { std::memcpy(to, from, 8); }
-
-#pragma endregion Probes
 FIXTURE
 
 # endregion C and C++ Idiom Fixtures
@@ -1620,9 +1772,9 @@ assert_verbatim_rejects "CMake uppercase internal" "sets an uppercase name" cmak
 set(PROBE_SOURCES probe.c)
 FIXTURE
 
-assert_verbatim_accepts "CMake variable of CMake's own and a sibling option" cmake/probe.cmake <<'FIXTURE'
+assert_verbatim_accepts "CMake variable of CMake's own and a sibling option" cmake/probe.cmake <<FIXTURE
 set(CMAKE_CXX_STANDARD 17)
-set(USEARCH_BUILD_TEST OFF)
+set(${first_sibling}_BUILD_TEST OFF)
 FIXTURE
 
 assert_verbatim_rejects "CMake forced cache entry" "forces a cache entry" cmake/probe.cmake <<'FIXTURE'
@@ -1699,6 +1851,24 @@ git -C "$fixture_directory" add -- python/probe.py
 run_precommit
 expect_rejection "ruff finding on an added line beside that debt" "has ruff lint findings on its added lines"
 
+assert_rejects "Python arguments aligned into a column" "aligns docstring arguments into a column" python/probe.py <<'FIXTURE'
+"""Probes a value.
+
+Args:
+    value:   The value.
+    count:   How many times.
+"""
+FIXTURE
+
+assert_accepts "Python arguments single-spaced" python/probe.py <<'FIXTURE'
+"""Probes a value.
+
+Args:
+    value: The value.
+    count: How many times.
+"""
+FIXTURE
+
 assert_rejects "TSDoc type braces" "uses JSDoc tag syntax" javascript/probe.ts <<'FIXTURE'
 /**
  *  Probes a value.
@@ -1738,6 +1908,10 @@ FIXTURE
 
 # region All File Fixtures
 
+stage_renamed_fixture scripts/probe.sh scripts/moved.sh 's/^echo settled$/# ----\necho settled/'
+run_precommit
+expect_rejection "banner ruler in a renamed file" "adds a banner ruler"
+
 assert_rejects "banner ruler" "adds a banner ruler" scripts/probe.sh <<'FIXTURE'
 # ----
 echo probe
@@ -1769,6 +1943,36 @@ assert_accepts "region marker and arrows beside rulers" include/probe.hpp <<'FIX
 /** Maps a key → its slot. */
 inline int probe(int key) noexcept { return key; }
 
+/** Maps a key → its second slot. */
+inline int second(int key) noexcept { return key; }
+
+/** Maps a key → its third slot. */
+inline int third(int key) noexcept { return key; }
+
+/** Maps a key → its fourth slot. */
+inline int fourth(int key) noexcept { return key; }
+
+/** Maps a key → its fifth slot. */
+inline int fifth(int key) noexcept { return key; }
+
+/** Maps a key → its sixth slot. */
+inline int sixth(int key) noexcept { return key; }
+
+/** Maps a key → its seventh slot. */
+inline int seventh(int key) noexcept { return key; }
+
+/** Maps a key → its eighth slot. */
+inline int eighth(int key) noexcept { return key; }
+
+/** Maps a key → its ninth slot. */
+inline int ninth(int key) noexcept { return key; }
+
+/** Maps a key → its tenth slot. */
+inline int tenth(int key) noexcept { return key; }
+
+/** Maps a key → its last slot. */
+inline int last(int key) noexcept { return key; }
+
 #pragma endregion Probes
 FIXTURE
 
@@ -1777,7 +1981,7 @@ assert_accepts "ruler in Markdown" docs/probe.md <<'FIXTURE'
 | ------ |
 FIXTURE
 
-assert_rejects "formatter toggle" "disables a formatter in-band" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "formatter toggle" "disables a formatter in-band" include/$project_directory/probe.h <<'FIXTURE'
 // clang-format off
 int probe(void);
 FIXTURE
@@ -1790,11 +1994,20 @@ assert_accepts "single space between sentences" docs/probe.txt <<'FIXTURE'
 One sentence. Two sentences.
 FIXTURE
 
+assert_accepts "double space inside string literals" include/probe.hpp <<'FIXTURE'
+inline char const *probe_reply() { return "Done.  Next"; }
+inline char const *probe_cases() {
+    return R"json([
+{"comment": "rearrangements OK?  How about one level down"}
+])json";
+}
+FIXTURE
+
 # endregion All File Fixtures
 
 # region Imported Rule Fixtures
 
-assert_rejects "tuple of names in backticks" "spells a tuple of names apart from a shape" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "tuple of names in backticks" "spells a tuple of names apart from a shape" include/$project_directory/probe.h <<'FIXTURE'
 /** Probes a value. */
 static inline int probe(void) {
     // Reads the `(start, stop, limit)` a windowed call takes.
@@ -1802,47 +2015,47 @@ static inline int probe(void) {
 }
 FIXTURE
 
-assert_rejects "tuple of names bolded with spaces" "spells a tuple of names apart from a shape" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "tuple of names bolded with spaces" "spells a tuple of names apart from a shape" include/$project_directory/probe.h <<'FIXTURE'
 /** Reads the @b (start, stop, limit) a windowed call takes. */
 int probe(void);
 FIXTURE
 
-assert_rejects "one-name tuple in backticks" "spells a tuple of names apart from a shape" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "one-name tuple in backticks" "spells a tuple of names apart from a shape" include/$project_directory/probe.h <<'FIXTURE'
 /** Probes a value. */
 static inline int probe(void) {
-    // Edge queries take @b (initiator,target), and medium queries `(target)` alone.
+    // Edge queries take two names, and medium queries `(target)` alone.
     return 0;
 }
 FIXTURE
 
-assert_accepts "tuple of names bolded as one token, beside an acronym and a call" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "tuple of names bolded as one token, beside an acronym and a call" include/$project_directory/probe.h <<'FIXTURE'
 /** Reads the @b (start,stop,limit) a windowed call takes, avoiding @b (CAS) loops, and calls
  *  <tt>hints(address, level)</tt> once per window. */
 int probe(void);
 FIXTURE
 
-assert_rejects "call with arguments after @c" "marks a call with arguments" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "call with arguments after @c" "marks a call with arguments" include/$project_directory/probe.h <<'FIXTURE'
 /** Balances the range from @c insert(first, last) in linear time. */
 int probe(void);
 FIXTURE
 
-assert_accepts "call with arguments in tt, and a bare call after @c" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "call with arguments in tt, and a bare call after @c" include/$project_directory/probe.h <<'FIXTURE'
 /** Balances the range from <tt>insert(first, last)</tt> in linear time, like @c reserve(). */
 int probe(void);
 FIXTURE
 
-assert_rejects "math operator glued to a name" "glues a math operator" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "math operator glued to a name" "glues a math operator" include/$project_directory/probe.h <<'FIXTURE'
 /** True if balanced: weight(left) ≤ Δ×weight(right). */
 int probe(void);
 FIXTURE
 
-assert_accepts "spaced operators, a dimension, a factor, and a shape" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "spaced operators, a dimension, a factor, and a shape" include/$project_directory/probe.h <<'FIXTURE'
 /** True if weight(left) ≤ Δ × weight(right) on a 16×16 tile, 4× faster over @b [rows,2×ffn].
  *  The P × V and Q × Kᵀ products cost O(n · d) each, ≈128× less than before, skipping '×'. */
 int probe(void);
 FIXTURE
 
-assert_rejects "single-letter algebra glued" "glues a math operator" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "single-letter algebra glued" "glues a math operator" include/$project_directory/probe.h <<'FIXTURE'
 /** Scores accumulate P×V after the softmax. */
 int probe(void);
 FIXTURE
@@ -1853,7 +2066,7 @@ int probe(int value) {
 }
 FIXTURE
 
-assert_rejects "drifting comments in a code sample" "lets the trailing comments of a @code sample drift" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "drifting comments in a code sample" "lets the trailing comments of a @code sample drift" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Lays out one table.
  *
@@ -1865,7 +2078,7 @@ assert_rejects "drifting comments in a code sample" "lets the trailing comments 
 int probe(void);
 FIXTURE
 
-assert_accepts "aligned comments in a code sample" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "aligned comments in a code sample" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Lays out one table.
  *
@@ -1877,12 +2090,12 @@ assert_accepts "aligned comments in a code sample" include/numkong/probe.h <<'FI
 int probe(void);
 FIXTURE
 
-assert_accepts "a vector of products in brackets" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "a vector of products in brackets" include/$project_directory/probe.h <<'FIXTURE'
 /** Accumulates [c_real × b_real, c_imag × b_imag, ...] with the sign flip deferred. */
 int probe(void);
 FIXTURE
 
-assert_rejects "titled paragraph" "titles a paragraph with @par" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "titled paragraph" "titles a paragraph with @par" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Rebalances one node.
  *
@@ -1891,36 +2104,36 @@ assert_rejects "titled paragraph" "titles a paragraph with @par" include/numkong
 int probe(void);
 FIXTURE
 
-assert_accepts "statuses list" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "statuses list" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Probes a value.
  *
  *  @par Statuses:
- *  - @c sz_success_k
- *  - @c sz_missing_kernel_k No capability has it.
+ *  - @c probe_success_k
+ *  - @c probe_missing_k No capability has it.
  */
-sz_status_t probe(void);
+probe_status_t probe(void);
 FIXTURE
 
-assert_rejects "capitalized emphasis beyond the modal verbs" "uses ALL-CAPS emphasis in a comment" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "capitalized emphasis beyond the modal verbs" "uses ALL-CAPS emphasis in a comment" include/$project_directory/probe.h <<'FIXTURE'
 /** The kernel reads BOTH halves of the row. */
 int probe(void);
 FIXTURE
 
-assert_rejects "ASCII arrow in a comment" "writes an arrow as" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "ASCII arrow in a comment" "writes an arrow as" include/$project_directory/probe.h <<'FIXTURE'
 /** Maps a key -> a value. */
 int probe(void);
 FIXTURE
 
-stage_fixture_with_header include/numkong/probe.h <<'FIXTURE'
+stage_fixture_with_header include/$project_directory/probe.h <<'FIXTURE'
 /** Maps a key -> a value. */
 int probe(void);
 FIXTURE
 git -C "$fixture_directory" commit --quiet -m "Chore: Seed the fixture"
-run_precommit --all-lines include/numkong/probe.h
+run_precommit --all-lines include/$project_directory/probe.h
 expect_rejection "whole-file mode reads committed lines" "writes an arrow as"
 
-stage_fixture_with_header include/numkong/probe.h <<'FIXTURE'
+stage_fixture_with_header include/$project_directory/probe.h <<'FIXTURE'
 #if defined(PROBE_A) || \
     defined(PROBE_B)
 #endif
@@ -1931,10 +2144,10 @@ int probe(void);
 }
 FIXTURE
 git -C "$fixture_directory" commit --quiet -m "Chore: Seed the fixture"
-run_precommit --all-lines include/numkong/probe.h
+run_precommit --all-lines include/$project_directory/probe.h
 expect_rejection "whole-file mode reads past a continued directive" "writes an arrow as"
 
-assert_accepts "URL inside a code sample" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "URL inside a code sample" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Tabulates the probe.
  *
@@ -1949,7 +2162,7 @@ assert_accepts "glued arrows inside an HTML code span" README.md <<'FIXTURE'
 <code>→ ↘</code> = movement direction
 FIXTURE
 
-assert_rejects "URL in code after a code block closing with its docblock" "mismatches a comment's brackets" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "URL in code after a code block closing with its docblock" "mismatches a comment's brackets" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Prints the site.
  *
@@ -1961,7 +2174,7 @@ int probe(void);
 static char const *site = "https://example.com/probe";
 FIXTURE
 
-stage_fixture_with_header include/numkong/probe.hpp <<'FIXTURE'
+stage_fixture_with_header include/$project_directory/probe.hpp <<'FIXTURE'
 struct alignas(64) probe_t {
 
     /** Maps a key -> a value. */
@@ -1969,8 +2182,20 @@ struct alignas(64) probe_t {
 };
 FIXTURE
 git -C "$fixture_directory" commit --quiet -m "Chore: Seed the fixture"
-run_precommit --all-lines include/numkong/probe.hpp
+run_precommit --all-lines include/$project_directory/probe.hpp
 expect_rejection "whole-file mode reads members of an aligned struct" "writes an arrow as"
+
+assert_rejects "TeX command inside a Markdown code span" "TeX inside a Markdown code span" README.md <<'FIXTURE'
+Rows count `4 \cdot h \cdot n_q` operations.
+FIXTURE
+
+assert_rejects "TeX subscript inside a Markdown code span" "TeX inside a Markdown code span" README.md <<'FIXTURE'
+Each head reads `n_{kv}` keys.
+FIXTURE
+
+assert_accepts "TeX between dollar signs and escapes in code spans" README.md <<'FIXTURE'
+Rows count $4 \cdot h \cdot n_{kv}$ operations, and `printf("\n")`, `"\x41"` or `probe_{operation}_{type}` stay code.
+FIXTURE
 
 assert_accepts "arrows inside HTML code spans holding a less-than" README.md <<'FIXTURE'
 * The binding reads <code>x <- y</code> and <code>a < b->c</code> as code.
@@ -1982,11 +2207,11 @@ def probe(marker: str = "#") -> int:
     return len(marker)
 FIXTURE
 
-assert_rejects "ASCII arrow closing a comment" "writes an arrow as" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "ASCII arrow closing a comment" "writes an arrow as" include/$project_directory/probe.h <<'FIXTURE'
 int probe(void); // takes the value <-
 FIXTURE
 
-assert_accepts "sentence ending inside a bracket" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "sentence ending inside a bracket" include/$project_directory/probe.h <<'FIXTURE'
 /** Pads each row to a whole cache line, as the stride says [bytes].
  *  Reads never cross into the next row, and writes never touch the padding at all. */
 int probe(void);
@@ -2003,7 +2228,7 @@ assert_accepts "arrow inside a fenced Rust sample" rust/probe.rs <<'FIXTURE'
 pub fn probe() {}
 FIXTURE
 
-assert_accepts "member access in a doc code sample" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "member access in a doc code sample" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Loads two lanes.
  *
@@ -2014,7 +2239,7 @@ assert_accepts "member access in a doc code sample" include/numkong/probe.h <<'F
 int probe(void);
 FIXTURE
 
-assert_accepts "a name as an exponent stays code" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "a name as an exponent stays code" include/$project_directory/probe.h <<'FIXTURE'
 /** Probes a value. */
 static inline int probe(void) {
     // Allocates `2^scale` vertices per community.
@@ -2022,7 +2247,7 @@ static inline int probe(void) {
 }
 FIXTURE
 
-assert_rejects "usage pseudo-heading" "labels a code block with a pseudo-heading" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "usage pseudo-heading" "labels a code block with a pseudo-heading" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Probes the build.
  *
@@ -2069,7 +2294,7 @@ assert_accepts "ASCII arrow inside a code span" rust/probe.rs <<'FIXTURE'
 pub fn probe() {}
 FIXTURE
 
-assert_rejects "two empty comment lines in a row" "leaves two empty comment lines in a row" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "two empty comment lines in a row" "leaves two empty comment lines in a row" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Probes the build.
  *
@@ -2081,21 +2306,26 @@ assert_rejects "two empty comment lines in a row" "leaves two empty comment line
 int probe(void);
 FIXTURE
 
-assert_accepts "ASCII arrow after a dereference in a macro" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "ASCII arrow in Mojo parameter syntax" mojo/probe.mojo <<'FIXTURE'
+def erase[Scratch: AnyType, //](context: Context) -> Context:
+    return context
+FIXTURE
+
+assert_accepts "ASCII arrow after a dereference in a macro" include/$project_directory/probe.h <<'FIXTURE'
 #define probe_read_(header, width) \
     *width = header->column_count;
 FIXTURE
 
-assert_accepts "ASCII arrow in a C macro body" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "ASCII arrow in a C macro body" include/$project_directory/probe.h <<'FIXTURE'
 #define probe_field_(pointer) ((pointer)->field)
 FIXTURE
 
-assert_rejects "glued bidirectional ASCII arrow" "writes an arrow as" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "glued bidirectional ASCII arrow" "writes an arrow as" include/$project_directory/probe.h <<'FIXTURE'
 /** Converts F16<->F32 in hardware. */
 int probe(void);
 FIXTURE
 
-assert_rejects "backward-looking comment" "backward-looking comment" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "backward-looking comment" "backward-looking comment" include/$project_directory/probe.h <<'FIXTURE'
 /** This member used to be a pointer. */
 int probe(void);
 FIXTURE
@@ -2107,39 +2337,48 @@ package probe
 func (p Matrix) Dtype() string { return p.kind }
 FIXTURE
 
-assert_rejects "miscased vendor in a comment" "miscases a name" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "miscased vendor in a comment" "miscases a name" include/$project_directory/probe.h <<'FIXTURE'
 /** Runs on Nvidia Grace and on numpy arrays. */
 int probe(void);
 FIXTURE
 
-assert_accepts "proper names cased, code spans and paths untouched" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "proper names cased, code spans and paths untouched" include/$project_directory/probe.h <<'FIXTURE'
 /** Runs on NVIDIA Grace, takes NumPy arrays through @c numpy.asarray, and reports a DType. */
 int probe(void);
 FIXTURE
 
-assert_rejects "design justified by a sibling" "justifies a decision by another repo" include/numkong/probe.h <<'FIXTURE'
-/** Mirrors the convention USearch uses for its tables. */
+assert_rejects "design justified by a sibling" "justifies a decision by another repo" include/$project_directory/probe.h <<FIXTURE
+/** Mirrors the convention $first_sibling_directory uses for its tables. */
 int probe(void);
 FIXTURE
 
-assert_accepts "sibling named as a dependency" include/numkong/probe.h <<'FIXTURE'
-/** StringZilla computes the reference hashes this kernel is checked against. */
+assert_accepts "sibling named as a dependency" include/$project_directory/probe.h <<FIXTURE
+/** The $first_sibling_directory library computes the reference hashes this kernel is checked against. */
 int probe(void);
 FIXTURE
 
-assert_rejects "bool parameter selecting behaviour" "takes a bool parameter that selects behaviour" include/numkong/probe.h <<'FIXTURE'
+assert_accepts "include listing the sibling symbols it uses" include/$project_directory/probe.hpp <<FIXTURE
+#include <$first_sibling_directory/$first_sibling_directory.hpp> // \`split\`, \`string_view\`
+inline auto probe(string_view text) noexcept { return split(text); }
+FIXTURE
+
+assert_rejects "bool parameter selecting behaviour" "takes a bool parameter that selects behaviour" include/$project_directory/probe.h <<'FIXTURE'
 int probe(int key, bool reverse);
 FIXTURE
 
-assert_rejects "discarding through a void cast" "casts a result to void" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "discarding through a void cast" "casts a result to void" include/$project_directory/probe.h <<'FIXTURE'
 static inline void probe(void) { (void)compute(); }
 FIXTURE
 
-assert_rejects "thread_local state" "declares a thread_local" include/numkong/probe.hpp <<'FIXTURE'
+assert_accepts "void parameter list before a streaming attribute" include/$project_directory/probe.h <<'FIXTURE'
+static inline int probe(void) PROBE_STREAMABLE_ { return 0; }
+FIXTURE
+
+assert_rejects "thread_local state" "declares a thread_local" include/$project_directory/probe.hpp <<'FIXTURE'
 static thread_local int probe_counter = 0;
 FIXTURE
 
-assert_rejects "filesystem include in the library" "uses std::filesystem in library code" cpp/stringzilla/probe.hpp <<'FIXTURE'
+assert_rejects "filesystem include in the library" "uses std::filesystem in library code" include/$project_directory/probe.hpp <<'FIXTURE'
 #include <filesystem>
 FIXTURE
 
@@ -2147,7 +2386,7 @@ assert_accepts "filesystem include in a test harness" test/probe.cpp <<'FIXTURE'
 #include <filesystem>
 FIXTURE
 
-assert_rejects "vector in the library" "uses a standard container, std::pair or std::tuple" cpp/stringzilla/probe.hpp <<'FIXTURE'
+assert_rejects "vector in the library" "uses a standard container, std::pair or std::tuple" include/$project_directory/probe.hpp <<'FIXTURE'
 #include <vector>
 FIXTURE
 
@@ -2160,12 +2399,12 @@ assert_accepts "containers in a test harness" test/probe.cpp <<'FIXTURE'
 std::vector<std::pair<int, int>> probe_pairs;
 FIXTURE
 
-assert_accepts "move and tuple traits in the library" cpp/stringzilla/probe.hpp <<'FIXTURE'
+assert_accepts "move and tuple traits in the library" include/$project_directory/probe.hpp <<'FIXTURE'
 #include <utility>
 using probe_first_t = std::tuple_element_t<0, probe_types_t>;
 FIXTURE
 
-assert_rejects "retval tag" "uses @retval" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "retval tag" "uses @retval" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Probes a value.
  *  @retval zero on success.
@@ -2173,7 +2412,7 @@ assert_rejects "retval tag" "uses @retval" include/numkong/probe.h <<'FIXTURE'
 int probe(void);
 FIXTURE
 
-assert_rejects "deprecation" "adds a deprecation" include/numkong/probe.h <<'FIXTURE'
+assert_rejects "deprecation" "adds a deprecation" include/$project_directory/probe.h <<'FIXTURE'
 /**
  *  @brief Probes a value.
  *  @param[in] value The value.
@@ -2182,15 +2421,15 @@ assert_rejects "deprecation" "adds a deprecation" include/numkong/probe.h <<'FIX
 int probe(int value);
 FIXTURE
 
-stage_edited_fixture include/numkong/probe.h 's/@date January 1, 2026/@date February 2, 2026/'
+stage_edited_fixture include/$project_directory/probe.h 's/@date January 1, 2026/@date February 2, 2026/'
 run_precommit
 expect_rejection "rewritten header date" "rewrites the @date in its header"
 
-stage_edited_fixture include/numkong/probe.h '/@date/d; s/^\( \*  @brief One staged fixture for one rule\.\)$/\1\n *  @date January 1, 2026/'
+stage_edited_fixture include/$project_directory/probe.h '/@date/d; s/^\( \*  @brief One staged fixture for one rule\.\)$/\1\n *  @date January 1, 2026/'
 run_precommit
 expect_rejection "header date moved, value kept, only the order fires" "misorders its file header"
 
-assert_rejects "generated artifact" "is generated output" python/numkong/__pycache__/probe.pyc <<'FIXTURE'
+assert_rejects "generated artifact" "is generated output" python/$project_directory/__pycache__/probe.pyc <<'FIXTURE'
 compiled
 FIXTURE
 
@@ -2203,6 +2442,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: echo probe
+FIXTURE
+
+assert_rejects "C++ template value parameter without private suffix" "exposes a template parameter name" include/$project_directory/probe.hpp <<'FIXTURE'
+template <typename value_type_,
+          unsigned width>
+struct probe {};
+FIXTURE
+
+assert_accepts "Metal private template parameters and local aliases" include/$project_directory/probe.metal <<'FIXTURE'
+template <typename stage_type_, uint dtype_>
+struct probe {
+    using stage_t = stage_type_;
+    static constexpr uint dtype = dtype_;
+};
+FIXTURE
+
+assert_rejects "Metal template parameter without private suffix" "exposes a template parameter name" include/$project_directory/probe.metal <<'FIXTURE'
+template <typename stage_t, uint dtype>
+struct probe {};
+FIXTURE
+
+assert_accepts "prose naming thread_local" include/$project_directory/probe.hpp <<'FIXTURE'
+/** Keeps no thread_local counter; the executor owns per-thread state. */
+inline int probe() { return 0; }
+FIXTURE
+
+assert_accepts "void parameter list" include/$project_directory/probe.h <<'FIXTURE'
+static inline int probe(void) { return 0; }
 FIXTURE
 
 # endregion Imported Rule Fixtures
@@ -2260,21 +2527,21 @@ pub fn probe() {}
 FIXTURE
 
 assert_rejects "binding parenthetical aside" "puts a parenthetical aside in doc prose" golang/probe.go <<'FIXTURE'
-package numkong
+package bindings
 
 // Probe returns the great-circle distance (in meters).
 func Probe() {}
 FIXTURE
 
 assert_rejects "binding aside holding an em-dash" "puts a parenthetical aside in doc prose" golang/probe.go <<'FIXTURE'
-package numkong
+package bindings
 
 // Probe returns the distance (great-circle — never Euclidean) between the two points.
 func Probe() {}
 FIXTURE
 
 assert_accepts "binding parentheses around math and code" golang/probe.go <<'FIXTURE'
-package numkong
+package bindings
 
 // Probe returns 1 - (a / b) and calls [Matrix.Depth] once, like `probe(a, b)` does.
 func Probe() {}
@@ -2295,17 +2562,18 @@ assert_rejects "binding shape as a product" "spells a shape as a product or a tu
 pub fn probe() {}
 FIXTURE
 
-assert_verbatim_rejects "Swift header in the wrong order" "opens without its header" swift/Probe.swift <<'FIXTURE'
-/**
- *  @brief One staged fixture for one rule.
- *  @file swift/Probe.swift
- *  @author Selftest
- *  @date January 1, 2026
- */
+assert_verbatim_rejects "Swift callout header" "opens without its header" swift/Probe.swift <<'FIXTURE'
+//
+//  swift/Probe.swift
+//  One staged fixture for one rule.
+//
+//  - Author: Selftest
+//  - Date: January 1, 2026
+//
 public struct Probe {}
 FIXTURE
 
-assert_verbatim_accepts "Swift docblock header with its tags in order" swift/Probe.swift <<'FIXTURE'
+assert_verbatim_accepts "Swift docblock header" swift/Probe.swift <<'FIXTURE'
 /**
  *  @file swift/Probe.swift
  *  @author Selftest
@@ -2316,12 +2584,6 @@ public struct Probe {}
 FIXTURE
 
 assert_accepts "Swift - Warning: continuation aligned under the text like a bullet" swift/Probe.swift <<'FIXTURE'
-/**
- *  @file swift/Probe.swift
- *  @author Selftest
- *  @date January 1, 2026
- *  @brief One staged fixture for one rule.
- */
 public struct Probe {
     /// - Warning: This may move storage, which invalidates every `view()`, `span()` and `row()`
     ///   pointer obtained before the call.
@@ -2330,12 +2592,6 @@ public struct Probe {
 FIXTURE
 
 assert_rejects "Swift - Warning: continuation hanging 4 like a C tag" "misaligns a doc continuation" swift/Probe.swift <<'FIXTURE'
-/**
- *  @file swift/Probe.swift
- *  @author Selftest
- *  @date January 1, 2026
- *  @brief One staged fixture for one rule.
- */
 public struct Probe {
     /// - Warning: This may move storage, which invalidates every `view()`, `span()` and `row()`
     ///     pointer obtained before the call.
@@ -2343,23 +2599,17 @@ public struct Probe {
 }
 FIXTURE
 
-assert_rejects "Swift file without its header" "opens without its header" swift/Probe.swift <<'FIXTURE'
+assert_verbatim_rejects "Swift file without its header" "opens without its header" swift/Probe.swift <<'FIXTURE'
 import Foundation
 FIXTURE
 
 assert_rejects "binding ALL-CAPS emphasis" "uses ALL-CAPS emphasis in a doc" swift/Probe.swift <<'FIXTURE'
-/**
- *  @file swift/Probe.swift
- *  @author Selftest
- *  @date January 1, 2026
- *  @brief One staged fixture for one rule.
- */
 /// Reserving storage is NEVER free.
 public func reserve() {}
 FIXTURE
 
 assert_rejects "Go method referenced as a call" "references a Go method as a call" golang/probe.go <<'FIXTURE'
-package numkong
+package bindings
 
 // Probe reads b.Depth() dimensions per row.
 func Probe() {}
@@ -2380,26 +2630,26 @@ char const doc_probe[] =                                              //
 FIXTURE
 
 assert_verbatim_rejects "Go package comment outside its file" "documents the package outside the file named after it" golang/probe.go <<'FIXTURE'
-// Package numkong wraps the NumKong kernels.
+// Package bindings wraps the library.
 //
 // File: golang/probe.go
 // Author: Selftest
 // Date: January 1, 2026
-package numkong
+package bindings
 FIXTURE
 
-assert_verbatim_accepts "Go package comment in the file named after it, closing with its fields" golang/numkong.go <<'FIXTURE'
-// Package numkong wraps the NumKong kernels for Go, one batch call per kernel family.
+assert_verbatim_accepts "Go package comment in the file named after it, closing with its fields" golang/bindings.go <<'FIXTURE'
+// Package bindings wraps the library for Go, one batch call per kernel family.
 //
-// File: golang/numkong.go
+// File: golang/bindings.go
 // Author: Selftest
 // Date: January 1, 2026
-package numkong
+package bindings
 FIXTURE
 
-assert_verbatim_rejects "Go package comment without its fields" "opens without its file header" golang/numkong.go <<'FIXTURE'
-// Package numkong wraps the NumKong kernels for Go, one batch call per kernel family.
-package numkong
+assert_verbatim_rejects "Go package comment without its fields" "opens without its file header" golang/bindings.go <<'FIXTURE'
+// Package bindings wraps the library for Go, one batch call per kernel family.
+package bindings
 FIXTURE
 
 assert_verbatim_rejects "Rust module doc without its fields" "opens without the module fields; end its //! doc" rust/probe.rs <<'FIXTURE'
@@ -2514,9 +2764,28 @@ settings = {
 # endregion Helpers
 FIXTURE
 
+assert_accepts "Go method called inside a tab-indented example" golang/probe.go <<'FIXTURE'
+package bindings
+
+// Probe reads every entry; for example:
+//
+//	probe := bindings.NewProbe()
+//	defer probe.Close()
+func Probe() {}
+FIXTURE
+
 # endregion Binding Doc Fixtures
 
 # region StringZilla Fixtures
+
+# A Haswell header opening no guard of its own gets its shape's, so only the guard fixtures test the guards.
+fixture_guards() { # fixture_guards <relative-path> <<< content
+    case "$1" in
+    include/stringzilla/*/haswell.h)
+        grep -qE '^#if STRINGZILLA_(ARCH|TARGET)_' || printf '%s\n' STRINGZILLA_ARCH_X8664_ STRINGZILLA_ARCH_X8664_HASWELL_
+        ;;
+    esac
+}
 
 assert_rejects "iterator address laundered" "takes &* of an iterator" include/stringzilla/probe.hpp <<'FIXTURE'
 inline char const *probe(std::string const &text) { return &*text.begin(); }
@@ -3000,9 +3269,157 @@ STRINGZILLA_PUBLIC int sz_probe_haswell(int value) { return value; }
 #endif // STRINGZILLA_ARCH_X8664_
 FIXTURE
 
+assert_rejects "unnamed namespace at file scope" "opens an unnamed namespace" include/probe.cpp <<'FIXTURE'
+namespace {
+int probe();
+}
+FIXTURE
+
+assert_rejects "unnamed namespace nested in the harness" "opens an unnamed namespace" bench/probe.hpp <<FIXTURE
+namespace ${project_namespace}::bench {
+namespace {
+int probe();
+}
+}
+FIXTURE
+
+assert_accepts "namespace spelling in a string and a comment" include/probe.cpp <<'FIXTURE'
+/* An unnamed namespace { has no owner. */
+char const *const text = "namespace {";
+FIXTURE
+
+assert_rejects "class template suffix on the template line" "suffixes a class template" include/probe.hpp <<'FIXTURE'
+template <typename type_> struct probe_t;
+FIXTURE
+
+assert_rejects "class template suffix after a multiline header" "suffixes a class template" include/probe.hpp <<'FIXTURE'
+template <
+    typename first_type_,
+    typename second_type_>
+struct probe2_t;
+FIXTURE
+
+assert_accepts "function template with ordinary local type on the same line" include/probe.hpp <<'FIXTURE'
+template <typename value_type_> value_type_ probe() { struct local_t {}; return {}; }
+FIXTURE
+
+assert_accepts "bare class template and materialized alias" include/probe.hpp <<'FIXTURE'
+template <typename type_> struct probe;
+using probe_t = probe<int>;
+FIXTURE
+
+assert_rejects "materialized struct without its suffix" "names a type without '_t'" include/probe.hpp <<'FIXTURE'
+struct probe {
+    int value;
+};
+FIXTURE
+
+assert_rejects "enumerator without its suffix" "names a type without '_t'" include/probe.h <<'FIXTURE'
+enum { probe_threads_per_block = 256 };
+FIXTURE
+
+assert_rejects "enumerator of a multiline enum without its suffix" "names a type without '_t'" include/probe.h <<'FIXTURE'
+enum {
+    probe_first_k = 1,
+    probe_second = 2,
+};
+FIXTURE
+
+assert_accepts "suffixed struct, class template and enumerators" include/probe.hpp <<'FIXTURE'
+struct probe_t {
+    int value;
+};
+template <typename type_>
+struct probe_tape {
+    type_ value;
+};
+enum { probe_threads_per_block_k = 256 };
+enum class probe_order_t : int { shuffled_k, sorted_k };
+enum {
+    probe_mask_k = (probe_first_bit_k | probe_second_bit_k) &
+                   probe_profile_bits_k
+};
+FIXTURE
+
+stage_fixture_with_header include/probe.hpp <<'FIXTURE'
+template <typename type_>
+struct probe;
+FIXTURE
+git -C "$fixture_directory" commit --quiet -m "Chore: Seed the fixture"
+sed 's/struct probe;/struct probe_t;/' "$fixture_directory/include/probe.hpp" > "$fixture_directory/edited"
+mv "$fixture_directory/edited" "$fixture_directory/include/probe.hpp"
+git -C "$fixture_directory" add -- include/probe.hpp
+run_precommit
+expect_rejection "changed class name with unchanged template header" "suffixes a class template"
+
+stage_fixture_with_header include/probe.hpp <<'FIXTURE'
+template <typename type_>
+struct probe_t;
+FIXTURE
+git -C "$fixture_directory" commit --quiet -m "Chore: Seed the fixture"
+sed 's/typename type_/typename value_type_/' "$fixture_directory/include/probe.hpp" > "$fixture_directory/edited"
+mv "$fixture_directory/edited" "$fixture_directory/include/probe.hpp"
+git -C "$fixture_directory" add -- include/probe.hpp
+run_precommit
+expect_rejection "changed template header with unchanged class name" "suffixes a class template"
+
+assert_verbatim_rejects "Swift header in the wrong order" "opens without its header" swift/Probe.swift <<'FIXTURE'
+/**
+ *  @brief One staged fixture for one rule.
+ *  @file swift/Probe.swift
+ *  @author Selftest
+ *  @date January 1, 2026
+ */
+public struct Probe {}
+FIXTURE
+
+assert_verbatim_accepts "Swift docblock header with its tags in order" swift/Probe.swift <<'FIXTURE'
+/**
+ *  @file swift/Probe.swift
+ *  @author Selftest
+ *  @date January 1, 2026
+ *  @brief One staged fixture for one rule.
+ */
+public struct Probe {}
+FIXTURE
+
 # endregion StringZilla Fixtures
 
 # region Commit Message Fixtures
+
+# Stages every version site a release stamps at one version, then applies a sed edit to one of them.
+stage_release_fixture() { # stage_release_fixture <version> [<relative-path> <sed-expression>]
+    create_fixture_repository
+    local version=$1 core=${1%%-*} major minor patch platform checksum
+    IFS=. read -r major minor patch <<< "$core"
+    checksum=$(printf '%064d' 0 | tr 0 a)
+    (
+        cd "$fixture_directory" || exit 1
+        mkdir -p c/stringzilla
+        printf '%s\n' "$version" > VERSION
+        printf '[package]\nname = "stringzilla"\nversion = "%s"\n' "$version" > Cargo.toml
+        printf '[[package]]\nname = "stringzilla"\nversion = "%s"\n' "$version" > Cargo.lock
+        {
+            printf '{\n  "name": "stringzilla",\n  "version": "%s",\n  "optionalDependencies": {\n' "$version"
+            for platform in darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-arm64 win32-x64; do
+                printf '    "@stringzilla/%s": "%s",\n' "$platform" "$version"
+                mkdir -p "javascript/@stringzilla-$platform"
+                printf '{\n  "name": "@stringzilla/%s",\n  "version": "%s",\n}\n' "$platform" "$version" \
+                    > "javascript/@stringzilla-$platform/package.json"
+            done
+            printf '  }\n}\n'
+        } > package.json
+        printf 'cff-version: 1.2.0\nversion: %s\n' "$version" > CITATION.cff
+        printf '<Project>\n  <PropertyGroup>\n    <Version>%s</Version>\n  </PropertyGroup>\n</Project>\n' "$version" > StringZilla.csproj
+        printf '#define STRINGZILLA_VERSION_MAJOR %s\n#define STRINGZILLA_VERSION_MINOR %s\n#define STRINGZILLA_VERSION_PATCH %s\n' \
+            "$major" "$minor" "$patch" > c/stringzilla/types.h
+        printf 'let release = "https://github.com/ashvardanian/StringZilla/releases/download/v%s"\n' "$version" > Package.swift
+        printf 'let appleChecksum = "%s"\nlet portableChecksum = "%s"\n' "$checksum" "$checksum" >> Package.swift
+        [ $# -lt 3 ] || { sed "$3" "$2" > "$2.edited" && mv "$2.edited" "$2"; }
+        git add -A
+    ) || exit 1
+    release_fixture_staged=1
+}
 
 assert_message_rejects "unknown verb" "approved verb" <<'FIXTURE'
 Refactor: Split the dispatch table
@@ -3016,6 +3433,10 @@ assert_message_accepts "approved verb" <<'FIXTURE'
 Improve: Split the dispatch table
 FIXTURE
 
+assert_message_rejects "dropped Build verb" "approved verb" <<'FIXTURE'
+Build: Split the dispatch table
+FIXTURE
+
 assert_message_rejects "assistant trailer" "AI-assistant attribution" <<'FIXTURE'
 Fix: Split the dispatch table
 
@@ -3026,6 +3447,40 @@ assert_message_accepts "prose mentioning generation" <<'FIXTURE'
 Improve: Split the dispatch table
 
 Each generation of the table keeps its own entries.
+FIXTURE
+
+stage_release_fixture 6.1.0-rc.9
+assert_message_accepts "release with every version site bumped" <<'FIXTURE'
+Release: v6.1.0-rc.9
+FIXTURE
+
+stage_release_fixture 6.1.0-rc.9 javascript/@stringzilla-win32-x64/package.json 's/6.1.0-rc.9/6.1.0-rc.8/'
+assert_message_rejects "release with a stale version site" "javascript/@stringzilla-win32-x64/package.json" <<'FIXTURE'
+Release: v6.1.0-rc.9
+FIXTURE
+
+stage_release_fixture 6.1.0 Cargo.lock 's/6.1.0/6.0.0/'
+assert_message_rejects "release missing the lockfile" "Cargo.lock" <<'FIXTURE'
+Release: v6.1.0
+FIXTURE
+
+stage_release_fixture 6.1.0 c/stringzilla/types.h 's/MINOR 1/MINOR 0/'
+assert_message_rejects "release missing a version macro" "c/stringzilla/types.h:MINOR" <<'FIXTURE'
+Release: v6.1.0
+FIXTURE
+
+stage_release_fixture 6.1.0 Package.swift 's/"a\{64\}"/"0000000000000000000000000000000000000000000000000000000000000000"/'
+assert_message_rejects "release without Swift checksums" "Package.swift:checksums" <<'FIXTURE'
+Release: v6.1.0
+FIXTURE
+
+assert_message_rejects "release subject without its tag" "Got: Release: 6.1.0" <<'FIXTURE'
+Release: 6.1.0
+FIXTURE
+
+stage_release_fixture 6.1.0
+assert_message_rejects "version bump outside a release" "VERSION only changes" <<'FIXTURE'
+Make: Bump the version
 FIXTURE
 
 # endregion Commit Message Fixtures

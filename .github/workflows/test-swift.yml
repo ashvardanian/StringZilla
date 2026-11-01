@@ -1,0 +1,159 @@
+name: Test Swift
+
+on:
+  workflow_call:
+
+# `actions: read` lets the Android job, which runs in another repository's workflow, download this run's artifacts.
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  # Every job links the zipped XCFramework or artifact bundle a release would ship, built by CMake from this commit.
+  build_swift_artifacts:
+    name: Build Swift Artifacts
+    uses: ./.github/workflows/build-swift.yml
+
+  test_swift_linux:
+    name: Test Swift on Linux ${{ matrix.arch }}
+    needs: build_swift_artifacts
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-26.04-arm' || 'ubuntu-26.04' }}
+    timeout-minutes: 15
+    container: swift:6.4
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, arm64]
+    env:
+      STRINGZILLA_SWIFT_ARTIFACT: StringZillaC.artifactbundle.zip
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Download Artifact Bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: swift-artifactbundle
+
+      - name: Print Machine Specs
+        run: lscpu
+
+      - name: Test Swift
+        run: swift test
+
+  test_swift_macos:
+    name: Test Swift on macOS ${{ matrix.arch }}
+    needs: build_swift_artifacts
+    runs-on: xcode-27
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x86_64]
+    env:
+      STRINGZILLA_SWIFT_ARTIFACT: StringZillaC.xcframework.zip
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Download XCFramework
+        uses: actions/download-artifact@v8
+        with:
+          name: swift-xcframework
+      # The `x86_64` destination runs the Intel build under Rosetta, as no Intel image ships Xcode 27
+      - name: Test Swift
+        run: xcodebuild test -scheme StringZilla -destination 'platform=macOS,arch=${{ matrix.arch }}'
+
+  test_swift_simulators:
+    name: Test Swift on ${{ matrix.platform }} Simulator
+    needs: build_swift_artifacts
+    runs-on: xcode-27
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [iOS, tvOS, watchOS, visionOS]
+    env:
+      STRINGZILLA_SWIFT_ARTIFACT: StringZillaC.xcframework.zip
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Download XCFramework
+        uses: actions/download-artifact@v8
+        with:
+          name: swift-xcframework
+      - name: Build for Simulator
+        run: xcodebuild build -scheme StringZilla -destination 'generic/platform=${{ matrix.platform }} Simulator' CODE_SIGNING_ALLOWED=NO
+      - name: Test on iPhone Simulator
+        if: matrix.platform == 'iOS'
+        run: xcodebuild test -scheme StringZilla -destination 'platform=iOS Simulator,OS=latest,name=iPhone 17' CODE_SIGNING_ALLOWED=NO
+
+  test_swift_windows:
+    name: Test Swift on Windows ${{ matrix.arch }}
+    needs: build_swift_artifacts
+    runs-on: ${{ matrix.arch == 'arm64' && 'windows-11-arm' || 'windows-2025' }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    env:
+      STRINGZILLA_SWIFT_ARTIFACT: StringZillaC.artifactbundle.zip
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Download Artifact Bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: swift-artifactbundle
+      - name: Set Up Swift
+        uses: compnerd/gha-setup-swift@v0.5.0
+        with:
+          swift-version: swift-6.4.0-release
+          swift-build: 6.4.0-RELEASE
+          build_arch: ${{ matrix.arch }}
+      - name: Test Swift
+        run: swift test
+
+  # The reusable workflow runs in another repository, so it fetches the artifact bundle through `gh`, with the token
+  # and the `actions: read` permission this workflow grants.
+  test_swift_android:
+    name: Test Swift on Android
+    needs: build_swift_artifacts
+    uses: swiftlang/github-workflows/.github/workflows/swift_package_test.yml@fa1e46cf0f07ffde2de131e9ed5bd66a488c289c # main
+    with:
+      enable_linux_checks: false
+      enable_windows_checks: false
+      enable_android_sdk_build: true
+      enable_android_sdk_checks: true
+      needs_token: true
+      linux_env_vars: STRINGZILLA_SWIFT_ARTIFACT=StringZillaC.artifactbundle.zip
+      android_sdk_pre_build_command: gh run download ${{ github.run_id }} --repo ${{ github.repository }} --name swift-artifactbundle
+      android_sdk_versions: '["6.4"]'
+
+  test_swift_wasi:
+    name: Test Swift on WebAssembly WASI
+    needs: build_swift_artifacts
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    container: swift:6.4
+    env:
+      STRINGZILLA_SWIFT_ARTIFACT: StringZillaC.artifactbundle.zip
+      WASMTIME_VERSION: v50.0.1
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Download Artifact Bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: swift-artifactbundle
+      - name: Install Swift SDK for WebAssembly
+        run: swift sdk install https://download.swift.org/swift-6.4.0-release/wasm-sdk/swift-6.4.0-RELEASE/swift-6.4.0-RELEASE_wasm.artifactbundle.tar.gz --checksum f07b7be3c586d92d7a07051fc6d303b87ebea67eadc40640ba59d5a8b79aa86d
+      - name: Install Wasmtime
+        run: |
+          apt-get update && apt-get install -y curl xz-utils
+          curl https://wasmtime.dev/install.sh -sSf | bash -s -- --version "$WASMTIME_VERSION"
+          "$HOME/.wasmtime/bin/wasmtime" --version
+          echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
+      - name: Build Library and Tests
+        run: swift build --build-tests --swift-sdk swift-6.4.0-RELEASE_wasm
+      - name: Test under Wasmtime
+        run: ~/.wasmtime/bin/wasmtime run -S inherit-env=y --dir / .build/debug/StringZillaTests-test-runner.wasm --testing-library swift-testing

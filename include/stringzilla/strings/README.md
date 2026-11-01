@@ -58,21 +58,21 @@ A `↑` cell reuses the tier above, and a `…` cell is not measured yet.
 
 ## Normalization
 
-| Backend                  |       NFC |      NFKC | NFKC_Casefold |
-| :----------------------- | --------: | --------: | ------------: |
-| Loop @ 1× Apple M5 Pro   |  1.7 GB/s |         … |     0.62 GB/s |
-| Serial @ 1× Apple M5 Pro |  0.8 GB/s |  0.7 GB/s |     0.34 GB/s |
-| NEON @ 1× Apple M5 Pro   |  1.7 GB/s |  1.6 GB/s |     0.61 GB/s |
+| Backend                  |      NFC |     NFKC | NFKC_Casefold |
+| :----------------------- | -------: | -------: | ------------: |
+| Loop @ 1× Apple M5 Pro   | 1.7 GB/s |        … |     0.62 GB/s |
+| Serial @ 1× Apple M5 Pro | 0.8 GB/s | 0.7 GB/s |     0.34 GB/s |
+| NEON @ 1× Apple M5 Pro   | 1.7 GB/s | 1.6 GB/s |     0.61 GB/s |
 
 ## Splitting and Joining
 
-| Backend                   | `split` at `' '` | `split_lines` |     `join` |
-| :------------------------ | ---------------: | ------------: | ---------: |
-| Loop @ 1× Apple M5 Pro    |        0.44 GB/s |      1.4 GB/s |   6.8 GB/s |
-| Serial @ 1× Apple M5 Pro  |        0.58 GB/s |      1.6 GB/s |   6.9 GB/s |
-| NEON @ 1× Apple M5 Pro    |         2.7 GB/s |      3.9 GB/s |   8.8 GB/s |
-| Haswell @ 1× Intel Xeon6  |                ↑ |             ↑ |          ↑ |
-| Ice Lake @ 1× Intel Xeon6 |                … |             … |          … |
+| Backend                   | `split` at `' '` | `split_lines` |   `join` |
+| :------------------------ | ---------------: | ------------: | -------: |
+| Loop @ 1× Apple M5 Pro    |        0.44 GB/s |      1.4 GB/s | 6.8 GB/s |
+| Serial @ 1× Apple M5 Pro  |        0.58 GB/s |      1.6 GB/s | 6.9 GB/s |
+| NEON @ 1× Apple M5 Pro    |         2.7 GB/s |      3.9 GB/s | 8.8 GB/s |
+| Haswell @ 1× Intel Xeon6  |                ↑ |             ↑ |        ↑ |
+| Ice Lake @ 1× Intel Xeon6 |                … |             … |        … |
 
 The vector kernels classify each 64-byte block into the bytes they remove and the ones that end parts, then set the offset of every end from the bytes kept before it.
 NEON slides each kept segment down with overlapping 16-byte stores, and Ice Lake packs the whole block with one `vpcompressb`.

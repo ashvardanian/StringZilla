@@ -1,0 +1,47 @@
+name: Release Swift
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+# The release commit names the Swift artifacts the release carries by checksum, and `mint-release.sh` attaches them
+# as it publishes. This resolves the package as a consumer does, downloading and checking them.
+jobs:
+  hooks:
+    name: Check Release Commit
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Check the Release Commit
+        run: .github/scripts/check-release.sh "$GITHUB_REF_NAME"
+
+  validate_swift_macos:
+    name: Validate Swift Package on macOS
+    needs: hooks
+    runs-on: xcode-27
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Test
+        run: swift test
+
+  validate_swift_linux:
+    name: Validate Swift Package on Linux ${{ matrix.arch }}
+    needs: hooks
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-26.04-arm' || 'ubuntu-26.04' }}
+    timeout-minutes: 10
+    container: swift:6.4
+    strategy:
+      matrix:
+        arch: [x86_64, arm64]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Test
+        run: swift test

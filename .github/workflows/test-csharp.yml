@@ -1,0 +1,41 @@
+name: Test C#
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test_csharp:
+    name: Test C# on Linux
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Build shared library
+        run: |
+          cmake --preset release_shared
+          cmake --build --preset release_shared
+
+        # The runtime resolver probes runtimes/{rid}/native first; the shared target emits
+        # libstringzilla_shared.so, so copy it under the name the binding looks up.
+      - name: Stage native library
+        run: |
+          mkdir -p csharp/runtimes/linux-x64/native
+          cp -L build_release_shared/libstringzilla_shared.so csharp/runtimes/linux-x64/native/libstringzilla.so
+
+      - name: Set Up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Check formatting
+        run: |
+          dotnet format StringZilla.csproj --verify-no-changes
+          dotnet format csharp/StringZillaTests.csproj --verify-no-changes
+
+      - name: Test C#
+        run: dotnet test csharp/StringZillaTests.csproj -c Release --nologo

@@ -51,7 +51,6 @@ They have the broadest coverage of the library, and are the most important to ke
 - `bench/cross_<arch>.cpp` - every capability's kernels against the serial ones, through the adapters in `bench/cross.hpp`.
 - `bench/cross_cuda.cu`, `bench/cross_rocm.hip`, and `bench/cross_metal.cpp` - each GPU vendor's engines against the dispatched CPU entry.
 
-
 ## Benchmarking Datasets
 
 It's not always easy to find good datasets for benchmarking strings workloads.
@@ -83,11 +82,11 @@ The project was originally developed in VS Code, and contains a set of configura
 - `tasks.json` - build tasks for CMake.
 - `launch.json` - debugger launchers for CMake.
 - `extensions.json` - recommended extensions for VS Code, including:
-    - `ms-vscode.cpptools-themes` - C++ language support.
-    - `ms-vscode.cmake-tools`, `cheshirekow.cmake-format` - CMake integration.
-    - `ms-python.python`, `ms-python.black-formatter` - Python language support.
-    - `yzhang.markdown-all-in-one` - formatting Markdown.
-    - `aaron-bond.better-comments` - color-coded comments.
+  - `ms-vscode.cpptools-themes` - C++ language support.
+  - `ms-vscode.cmake-tools`, `cheshirekow.cmake-format` - CMake integration.
+  - `ms-python.python`, `ms-python.black-formatter` - Python language support.
+  - `yzhang.markdown-all-in-one` - formatting Markdown.
+  - `aaron-bond.better-comments` - color-coded comments.
 
 ## Code Styling
 
@@ -146,20 +145,20 @@ A null stream is the default stream of the default device: the calling thread's 
 On the CPU the stream must be null.
 Each of these words has one meaning across the library:
 
-| Word                                   | Meaning                                                                          | Appears as                                                                      |
-| :------------------------------------- | :------------------------------------------------------------------------------- | :------------------------------------------------------------------------------ |
-| `cpu`, `cuda`, `rocm`, `metal`         | A capability group and its baseline bit                                          | Device-query, twin and kernel suffix, `src/capabilities/<group>.*`                           |
-| `simt`                                 | The single C source CUDA and HIP both compile                                    | `<family>/simt.cuh`, the suffixes `_simt_`, `_simt_t`, `_simt_k`                |
-| `metal`, as a layer                    | What every Metal tier shares                                                     | `<family>/metal.h`, `<family>/metal.metal`, the suffix `_metal_`                |
-| `gpu`                                  | Adjective for every GPU group                                                    | `sz_cap_gpus_k`, `sz_missing_gpu_k`, `sz_levenshtein_gpu_warp_lanes_k`          |
+| Word                                   | Meaning                                                                          | Appears as                                                                     |
+| :------------------------------------- | :------------------------------------------------------------------------------- | :----------------------------------------------------------------------------- |
+| `cpu`, `cuda`, `rocm`, `metal`         | A capability group and its baseline bit                                          | Device-query, twin and kernel suffix, `src/capabilities/<group>.*`             |
+| `simt`                                 | The single C source CUDA and HIP both compile                                    | `<family>/simt.cuh`, the suffixes `_simt_`, `_simt_t`, `_simt_k`               |
+| `metal`, as a layer                    | What every Metal tier shares                                                     | `<family>/metal.h`, `<family>/metal.metal`, the suffix `_metal_`               |
+| `gpu`                                  | Adjective for every GPU group                                                    | `sz_cap_gpus_k`, `sz_missing_gpu_k`, `sz_levenshtein_gpu_warp_lanes_k`         |
 | `device`                               | A processor kernels run on, which a stream belongs to                            | `sz_device_count_cuda`, `sz_device_memory_mismatch_k`, `sz_device_enter_simt_` |
-| `ordinal`                              | A device's index within its group, as its runtime numbers it                     | Producer parameters only                                                        |
-| `stream`                               | A `cudaStream_t`, `hipStream_t` or `id<MTLCommandQueue>`, which names its device | The trailing `void *stream` of every consumer                                   |
-| `queue`                                | A tile work queue, never a stream                                                | `sz_tile_queue_t`                                                               |
-| `unified`                              | Memory both the host and the stream's device address                            | `sz_allocator_init_unified_best`                                                |
-| `tape`                                 | Strings' bytes back to back, and the `count + 1` offsets into them              | What `sz_strings_to_tape_best` writes                                           |
-| A capability, like `haswell` or `cuda` | One bit of a mask                                                                | The last token before the role suffix                                           |
-| `kernel`                               | A GPU entry point                                                                | `_kernel_`, right after the capability                                          |
+| `ordinal`                              | A device's index within its group, as its runtime numbers it                     | Producer parameters only                                                       |
+| `stream`                               | A `cudaStream_t`, `hipStream_t` or `id<MTLCommandQueue>`, which names its device | The trailing `void *stream` of every consumer                                  |
+| `queue`                                | A tile work queue, never a stream                                                | `sz_tile_queue_t`                                                              |
+| `unified`                              | Memory both the host and the stream's device address                             | `sz_allocator_init_unified_best`                                               |
+| `tape`                                 | Strings' bytes back to back, and the `count + 1` offsets into them               | What `sz_strings_to_tape_best` writes                                          |
+| A capability, like `haswell` or `cuda` | One bit of a mask                                                                | The last token before the role suffix                                          |
+| `kernel`                               | A GPU entry point                                                                | `_kernel_`, right after the capability                                         |
 
 For C++ code:
 
@@ -937,6 +936,38 @@ go test
 go run bench/stringzilla.go
 ```
 
+## Java
+
+The binding loads `libstringzilla_shared` through the Foreign Function & Memory API, so it needs JDK 22 or newer, while Palantir Java Format runs on JDK 23 at most.
+`gradle build` stages the shared library from `build_release_shared/`, or from `-PstringzillaLibraryPath=<directory>`, where `NativeLoader` finds it, then runs the tests:
+
+```sh
+cmake --preset release_shared && cmake --build --preset release_shared
+gradle spotlessCheck build
+```
+
+## Commits
+
+`.githooks/commit-msg` checks every message:
+
+- The title reads `<Verb>: <Summary>`, where the verb is one of `Add`, `Break`, `Chore`, `Docs`, `Fix`, `Improve` or `Make`.
+- The summary opens with a capital letter, unless it opens with a code identifier, which keeps its own case.
+- The title runs to at most 80 characters, and a body line to at most 100 columns, unless it holds a URL or is indented code.
+- The message carries no AI-assistant attribution, since authorship is the human who committed.
+
+Git's merge, `fixup!` and `squash!` titles are exempt from the title rules.
+A `Release: vX.Y.Z` title is exempt too, but its commit must stamp every version site, and no other commit may change `VERSION`.
+`.githooks/pre-commit` formats and judges the staged lines, and `.githooks/selftest` runs both hooks against their fixtures.
+On a pull request, `.github/scripts/check-commits.sh` replays `commit-msg` over every commit and runs `pre-commit` over the whole range.
+
+## Releases
+
+`.github/scripts/mint-release.sh X.Y.Z` cuts a release from a clean checkout of the branch it ships.
+It builds the Swift binaries for that version, stamps every version site and the binaries' checksums, and commits `Release: vX.Y.Z`.
+`.github/scripts/check-release.sh` then checks that commit, even in a clone where `core.hooksPath` is unset, before the script tags it and pushes both.
+Then it publishes the GitHub release with the binaries attached, marking `X.Y.Z-rc.N` candidates as prereleases.
+Publishing starts every `release-<binding>.yml` at once, and each runs `check-release.sh` before it builds anything, so each registry trusts only its own binding's file.
+
 ## General Recommendations
 
 ### Operations Not Worth Optimizing
@@ -981,7 +1012,7 @@ That may not be noticeable on a micro-benchmark, but it would be noticeable on r
 ### Working on Alternative Hardware Backends
 
 It's important to keep compiler support in mind when extending to new instruction sets.
-Check the most recent CI pipeline configurations in `prerelease.yml` and `release.yml` to see which compilers are used.
+Check the most recent CI pipeline configuration in `.github/workflows/test-c.yml` to see which compilers are used.
 When extending capability detection, avoid compiler intrinsics and OS-specific APIs, as they may not be available on all platforms.
 Instead, use inline assembly to read the feature flags, and report them through `sz_capabilities_detected_cpu`.
 A new capability's kernels then go into a unit of their own, `src/capabilities/<capability>.c`, and into the lists in `src/dispatch/<family>.c` of every family that has them.

@@ -556,11 +556,11 @@ Three engines prepare one set of queries once and score it against as many colle
 Preparation fixes the alphabet or the vocabulary, resolves the SIMD tier, and takes the memory the rounds reuse; every later call only streams candidates past what is already there.
 Each engine writes into a writable buffer the caller supplies as `out`, so nothing is allocated per round and a round can fill one slice of a larger matrix.
 
-| Engine                     | Constructed from                                  | Scores with                                                     |
-| :------------------------- | :------------------------------------------------ | :--------------------------------------------------------------- |
-| `LevenshteinEngine`        | a batch of query strings and a symbol alphabet    | `distances(candidates, out, bound=None)`                         |
-| `OverlapEngine`            | a batch of query strings and window widths        | `scores(candidates, out, radius=None)`                           |
-| `SubstringsEngine`         | a vocabulary of needles and an overlap policy     | `counts`, `find`, `replace`, and `bm25_scores` over haystacks    |
+| Engine              | Constructed from                               | Scores with                                                   |
+| :------------------ | :--------------------------------------------- | :------------------------------------------------------------ |
+| `LevenshteinEngine` | a batch of query strings and a symbol alphabet | `distances(candidates, out, bound=None)`                      |
+| `OverlapEngine`     | a batch of query strings and window widths     | `scores(candidates, out, radius=None)`                        |
+| `SubstringsEngine`  | a vocabulary of needles and an overlap policy  | `counts`, `find`, `replace`, and `bm25_scores` over haystacks |
 
 Queries, candidates, and haystacks all arrive as `sz.Strings`, and every `out` buffer is any writable object supporting the buffer protocol — a NumPy array, an `array.array`, or a plain `memoryview`.
 Engine calls release the GIL, and calls into one engine take turns on its lock, so build one engine per thread to score in parallel.
@@ -614,23 +614,23 @@ assert all(0.0 <= out[0, c, w] <= 1.0 for c in range(2) for w in range(2))
 
 `SubstringsEngine(needles, case_sensitivity='cased', overlap_policy='overlapping', hot_states=None, matches_budget=0)` compiles a whole vocabulary into one Aho-Corasick automaton, so every haystack answers every needle in a single pass whatever the vocabulary size.
 
-| Argument           | Default           | Meaning                                                                        |
-| :----------------- | :---------------- | :------------------------------------------------------------------------------ |
-| `needles`          | required          | `sz.Strings` vocabulary; an empty needle is refused, valid UTF-8 needed when folding. |
-| `case_sensitivity` | `'cased'`         | `'cased'` matches bytes, `'uncased'` folds both sides under full Unicode folding. |
-| `overlap_policy`   | `'overlapping'`   | `'overlapping'`, `'leftmost-longest'`, or `'leftmost-first'`.                    |
-| `hot_states`       | `None`            | States kept in the dense hot rows; `None` sizes them to a fixed byte budget.     |
-| `matches_budget`   | `0`               | Matches one round may emit, read by a device tier only; `0` takes its default.   |
+| Argument           | Default         | Meaning                                                                               |
+| :----------------- | :-------------- | :------------------------------------------------------------------------------------ |
+| `needles`          | required        | `sz.Strings` vocabulary; an empty needle is refused, valid UTF-8 needed when folding. |
+| `case_sensitivity` | `'cased'`       | `'cased'` matches bytes, `'uncased'` folds both sides under full Unicode folding.     |
+| `overlap_policy`   | `'overlapping'` | `'overlapping'`, `'leftmost-longest'`, or `'leftmost-first'`.                         |
+| `hot_states`       | `None`          | States kept in the dense hot rows; `None` sizes them to a fixed byte budget.          |
+| `matches_budget`   | `0`             | Matches one round may emit, read by a device tier only; `0` takes its default.        |
 
 The policy belongs to the engine rather than to a call, because the round's arena is sized for one cover and holds no other.
 Four verbs share the compiled automaton:
 
-| Call                                                  | Writes                                                                               |
-| :---------------------------------------------------- | :------------------------------------------------------------------------------------ |
-| `counts(haystacks, out)`                              | One pointer-width count per haystack.                                                 |
-| `find(haystacks, matches, offsets)`                   | One `(haystack, needle, offset, length)` row per match, plus one boundary per haystack. |
-| `replace(haystacks, replacements, target, offsets)`   | The rewritten haystacks into one target buffer, plus one boundary per haystack.        |
-| `bm25_scores(haystacks, needle_weights, out, ...)`    | One 32-bit score per haystack, the vocabulary being the query.                          |
+| Call                                                | Writes                                                                                  |
+| :-------------------------------------------------- | :-------------------------------------------------------------------------------------- |
+| `counts(haystacks, out)`                            | One pointer-width count per haystack.                                                   |
+| `find(haystacks, matches, offsets)`                 | One `(haystack, needle, offset, length)` row per match, plus one boundary per haystack. |
+| `replace(haystacks, replacements, target, offsets)` | The rewritten haystacks into one target buffer, plus one boundary per haystack.         |
+| `bm25_scores(haystacks, needle_weights, out, ...)`  | One 32-bit score per haystack, the vocabulary being the query.                          |
 
 A capacity too small is not an error for `find` or `replace`: the boundaries and the `report` are filled either way, which is what sizes the next call.
 Passing `None` for `matches` or `target` makes the call a pure size query.

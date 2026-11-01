@@ -3,7 +3,7 @@ description: Something doesn't work as expected?
 title: "Bug: "
 labels: ["bug"]
 assignees:
-  - octocat
+  - ashvardanian
 body:
   - type: markdown
     attributes:

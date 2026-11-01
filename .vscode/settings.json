@@ -400,5 +400,35 @@
     "xtr1common": "cpp",
     "xtree": "cpp",
     "xutility": "cpp"
+  },
+  "files.watcherExclude": {
+    "**/.venv/**": true,
+    "**/__pycache__/**": true,
+    "**/build*/**": true,
+    "**/dist*/**": true,
+    "**/node_modules/**": true,
+    "**/target/**": true,
+    "data/**": true,
+    "datasets/**": true
+  },
+  "python.analysis.exclude": [
+    "**/.venv/**",
+    "**/__pycache__/**",
+    "**/build*/**",
+    "**/dist*/**",
+    "**/node_modules/**",
+    "**/target/**",
+    "data/**",
+    "datasets/**"
+  ],
+  "search.exclude": {
+    "**/.venv/**": true,
+    "**/__pycache__/**": true,
+    "**/build*/**": true,
+    "**/dist*/**": true,
+    "**/node_modules/**": true,
+    "**/target/**": true,
+    "data/**": true,
+    "datasets/**": true
   }
 }
