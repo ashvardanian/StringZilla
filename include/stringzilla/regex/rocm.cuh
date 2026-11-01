@@ -26,7 +26,7 @@
 #define STRINGZILLA_REGEX_ROCM_CUH_
 
 #include "stringzilla/rocm.cuh"
-#include "stringzilla/regex/simt.cuh"
+#include "stringzilla/regex/kernels.cuh"
 
 #if STRINGZILLA_ARCH_ROCM_
 
@@ -69,15 +69,6 @@ typedef struct sz_regex_arena_rocm_t {
 /** Rounds up to a multiple of 16 bytes, which every array of the round block starts at. */
 STRINGZILLA_INLINE sz_size_t sz_regex_aligned_rocm_(sz_size_t bytes) { return (bytes + 15) / 16 * 16; }
 
-/** Bytes of one automaton's column images, a count per column of its rows and then a priming
- *  set per column, none without either DFA; both sit at the head of the round block, which
- *  every call keeps. */
-STRINGZILLA_INLINE sz_size_t sz_regex_images_bytes_rocm_(sz_regex_engine_t const *engine) {
-    if (!engine->forward_rows && !engine->reverse_rows) return 0;
-    return sz_regex_aligned_rocm_(sz_regex_stride_(engine->classes_count, engine->lookarounds_count) *
-                                  (1 + sz_regex_priming_states_simt_k) * sizeof(sz_u32_t));
-}
-
 /** Rounds of pointer doubling a chain across @p chunks chunks takes, an even count, which leaves
  *  the compositions in their first buffer. */
 STRINGZILLA_INLINE sz_size_t sz_regex_rounds_count_rocm_(sz_size_t chunks) {
@@ -110,7 +101,7 @@ STRINGZILLA_INLINE sz_regex_arena_rocm_t sz_regex_arena_rocm_(sz_regex_engine_t 
     sets = set_words ? chunks : 0;
     flows = 1 + 2 * (sz_size_t)sz_regex_levels_simt_(engine) + (sz_size_t)sz_u32_popcount(dfas);
     arena.chunks = chunks, arena.segment_slots = slots, arena.set_words = set_words;
-    arena.images_bytes = sz_regex_images_bytes_rocm_(engine);
+    arena.images_bytes = sz_regex_images_bytes_simt_(engine);
     arena.pike_slots = 2 * sz_regex_groups_most_(engine) + 2;
     arena.pike_bytes = sz_regex_pike_bytes_simt_(engine, arena.pike_slots);
     arena.positions_bytes = sz_regex_aligned_rocm_(2 * (sz_size_t)engine->positions_words * sizeof(sz_u64_t));
@@ -168,27 +159,13 @@ STRINGZILLA_INLINE sz_regex_arena_rocm_t sz_regex_arena_of_rocm_(sz_regex_engine
     return sz_regex_arena_rocm_(engine, chunks);
 }
 
-/** Writes each column's image into @p images: the distinct live states any state of @p rows steps
- *  to on it, or one more than a priming set holds when they do not fit, every block's columns
- *  alike, as @c sz_regex_images_metal_ does. */
+/** Writes each column's image of @p rows into @p images, as @c sz_regex_images_metal_ does. */
 STRINGZILLA_INLINE void sz_regex_images_rocm_(sz_regex_engine_t const *engine, sz_u32_t const *rows,
                                               sz_size_t states_count, sz_u32_t *images) {
     sz_size_t const stride = sz_regex_stride_(engine->classes_count, engine->lookarounds_count);
-    sz_size_t column, state;
-    for (column = 0; column != stride; ++column) {
-        sz_u32_t *const states = images + stride + column * sz_regex_priming_states_simt_k;
-        sz_u32_t count = 0;
-        if (column % (engine->classes_count + 1) != engine->classes_count)
-            for (state = 1; state != states_count && count <= sz_regex_priming_states_simt_k; ++state) {
-                sz_u32_t const next = rows[state * stride + column];
-                sz_u32_t index = 0;
-                while (index != count && states[index] != next) ++index;
-                if (!next || index != count) continue;
-                if (count < sz_regex_priming_states_simt_k) states[count] = next;
-                ++count;
-            }
-        images[column] = count;
-    }
+    sz_size_t column;
+    for (column = 0; column != stride; ++column)
+        sz_regex_column_image_simt_(engine, rows, states_count, column, images);
 }
 
 /** Takes the one round block every call of @p engine runs out of, a segment's chunks being
@@ -299,8 +276,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_flow_rocm_(sz_regex_engine_t const *engi
     sz_bool_t const dfa = (sz_bool_t)(body != sz_regex_none_simt_k);
     sz_u32_t const dfas = sz_regex_body_dfas_simt_(engine);
     // A body's DFA steps rows staged as the automata's are.
-    sz_size_t const shared_bytes =
-        dfa ? sz_regex_staged_bytes_simt_k + (sz_size_t)round->staged_cells * sizeof(sz_u32_t) : 0;
+    sz_size_t const shared_bytes = dfa ? sz_regex_staged_bytes_simt_(engine, round->staged_cells) : 0;
     sz_size_t set = positions ? 0 : 2 * level - (flow == sz_regex_flow_behind_simt_k);
     sz_regex_engine_t launched_engine = *engine;
     sz_strings_view_t launched_haystacks = *haystacks;
@@ -416,7 +392,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_prime_segment_rocm_(sz_regex_engine_t co
                                                             sz_regex_arena_rocm_t const *arena, sz_stream_t stream) {
     sz_regex_engine_t launched_engine = *engine;
     sz_strings_view_t launched_haystacks = *haystacks;
-    sz_size_t const shared_bytes = sz_regex_staged_bytes_simt_k + (sz_size_t)round->staged_cells * sizeof(sz_u32_t);
+    sz_size_t const shared_bytes = sz_regex_staged_bytes_simt_(engine, round->staged_cells);
     unsigned const grid = sz_regex_grid_rocm_(round->chunks_count);
     void *walk_arguments[3], *round_arguments[1];
     sz_status_t status;
@@ -469,7 +445,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_slides_rocm_(sz_regex_engine_t const *en
     sz_regex_engine_t launched_engine = *engine;
     sz_strings_view_t launched_haystacks = *haystacks;
     sz_size_t const segment = round->segment, slots = arena->segment_slots, rounds = round->rounds;
-    sz_size_t const shared_bytes = sz_regex_staged_bytes_simt_k + (sz_size_t)round->staged_cells * sizeof(sz_u32_t);
+    sz_size_t const shared_bytes = sz_regex_staged_bytes_simt_(engine, round->staged_cells);
     sz_bool_t const folded = (sz_bool_t)(engine->case_sensitivity != sz_cased_k);
     unsigned const grid = sz_regex_grid_rocm_(slots);
     void *walk_arguments[3], *group_arguments[2], *round_arguments[1];
@@ -610,7 +586,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_rocm_(sz_regex_engine_t const *en
             round->staged_cells,
             sz_regex_body_reach_simt_(engine, lookaround, STRINGZILLA_NULL) * (engine->classes_count + 1));
     round->staged_cells = sz_min_of_two(round->staged_cells, (sz_u32_t)sz_regex_staged_cells_simt_k);
-    shared_bytes = sz_regex_staged_bytes_simt_k + (sz_size_t)round->staged_cells * sizeof(sz_u32_t);
+    shared_bytes = sz_regex_staged_bytes_simt_(engine, round->staged_cells);
     chunk_offsets = round->chunk_offsets, chunk_kept = round->chunk_kept;
     chunk_sums = round->chunk_sums, chunk_covers = round->chunk_covers;
     walk_arguments[0] = &launched_engine, walk_arguments[1] = &launched_haystacks, walk_arguments[2] = round;

@@ -21,7 +21,7 @@
 #define STRINGZILLA_SUBDOCUMENTS_ROCM_CUH_
 
 #include "stringzilla/rocm.cuh"
-#include "stringzilla/subdocuments/simt.cuh"
+#include "stringzilla/subdocuments/kernels.cuh"
 
 #if STRINGZILLA_ARCH_ROCM_
 
@@ -36,8 +36,16 @@ static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_
     sz_subdocuments_warp_walk_rocm_kernel_(sz_subdocuments_engine_t engine, sz_strings_view_t documents,
                                            sz_subdocuments_round_simt_t round) {
     sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    sz_subdocuments_warp_simt_t const warp = {sz_lanes_ballot_rocm_, sz_shuffle_index_rocm_, sz_shuffle_up_rocm_};
-    sz_subdocuments_walk_documents_simt_(&engine, &documents, &round, thread / 32, thread & 31, 32, &warp);
+    sz_simt_group_t const group = {32,
+                                   (unsigned)(thread & 31),
+                                   sz_lanes_any_rocm_,
+                                   sz_lanes_ballot_rocm_,
+                                   sz_lanes_first_rocm_,
+                                   sz_lanes_below_rocm_,
+                                   sz_shuffle_index_rocm_,
+                                   sz_shuffle_up_rocm_,
+                                   sz_group_sync_rocm_};
+    sz_subdocuments_walk_documents_simt_(&engine, &documents, &round, thread / 32, thread & 31, 32, &group);
 }
 
 /** One lane per document marks whether its counting walk found a match, with HIP's ballot. */

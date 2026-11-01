@@ -10,6 +10,7 @@
 
 #include <cmath>   // `std::fabs`, `std::exp`, `std::log`
 #include <cstddef> // `std::size_t`
+#include <cstring> // `std::memset`
 
 #include <algorithm>   // `std::sort`, `std::copy`, `std::min`
 #include <array>       // `std::array`
@@ -24,6 +25,17 @@
 
 #include "harness.hpp" // `cross_section_t`, `pinned_vector`, `verify`
 #include "cross.hpp"   // `check_uncased_fold_equivalence_`, `for_each_adversarial_utf8_input_`
+
+#if STRINGZILLA_ARCH_CUDA_
+#include "stringzilla/cuda.cuh" // `sz_lanes_any_cuda_`, `sz_shuffle_index_cuda_`, `sz_group_sync_cuda_`
+#elif STRINGZILLA_ARCH_ROCM_
+#include "stringzilla/rocm.cuh" // `sz_lanes_any_rocm_`, `sz_shuffle_index_rocm_`, `sz_group_sync_rocm_`
+#endif
+#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
+#include "stringzilla/regex/simt.cuh"        // `sz_regex_first_thread_simt_`, `sz_regex_stage_table_simt_`
+#include "stringzilla/subdocuments/simt.cuh" // `sz_subdocuments_first_chunk_simt_`, `sz_subdocuments_walk_simt_`
+#include "stringzilla/substrings/simt.cuh"   // `sz_substrings_first_thread_simt_`, `sz_substrings_stage_simt_`
+#endif
 
 namespace ashvardanian::stringzilla::test {
 
@@ -2682,6 +2694,341 @@ inline void check_sha256_multistate_device_safety_(auto const &backend) {
     verify(backend.sha256_multistate_digest(states.data(), states.size(), digests.data(), stream) ==
            sz_device_memory_mismatch_k);
 }
+
+#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
+#pragma region Walks
+
+/*  The walks a product calls from kernels of its own, each launched here by a kernel of the suite's
+ *  own over one engine compiled by @c _init_serial into unified memory, the compile promise every
+ *  walk documents, then over that engine rebased onto a device copy of its block with the host
+ *  block scrambled, and checked against the serial verbs over the same engine. One block of 32
+ *  threads walks each value: lane zero alone, then the 32 lanes as a group, then over chunks narrow
+ *  enough that a match crosses a chunk's edge. */
+
+#if STRINGZILLA_ARCH_CUDA_
+using walk_stream_t = cudaStream_t;
+#else
+using walk_stream_t = hipStream_t;
+#endif
+
+/** Lanes of the block walking one value, one group of the vendor's lane steps. */
+inline constexpr unsigned walk_lanes_k = 32;
+
+/** The group of 32 lanes this thread walks with: a CUDA warp, or half of a ROCm wavefront. */
+__device__ inline sz_simt_group_t walk_group_() {
+#if STRINGZILLA_ARCH_CUDA_
+    return {walk_lanes_k,           threadIdx.x % walk_lanes_k, sz_lanes_any_cuda_,
+            sz_lanes_ballot_cuda_,  sz_lanes_first_cuda_,       sz_lanes_below_cuda_,
+            sz_shuffle_index_cuda_, sz_shuffle_up_cuda_,        sz_group_sync_cuda_};
+#else
+    return {walk_lanes_k,           threadIdx.x % walk_lanes_k, sz_lanes_any_rocm_,
+            sz_lanes_ballot_rocm_,  sz_lanes_first_rocm_,       sz_lanes_below_rocm_,
+            sz_shuffle_index_rocm_, sz_shuffle_up_rocm_,        sz_group_sync_rocm_};
+#endif
+}
+
+/** Which granularity of a walk answered, as the rows of a walk kernel's answers. */
+enum class walk_granularity_t : std::size_t { thread_k = 0, group_k = 1, chunk_k = 2 };
+
+/** Whether value @p index is set in the bitmap a serial @c contains wrote. */
+inline bool walk_contained_(std::vector<sz_u1x8_t> const &contained, std::size_t index) {
+    return (contained[index / 8] >> (index % 8)) & 1;
+}
+
+/** Walks haystack @c blockIdx.x with every substrings walk, staging the class map alone, and writes
+ *  each answer into its granularity's row of @p answers, @p chunk_bytes at a time for the chunks.
+ *  */
+__global__ void walk_substrings_kernel_(sz_substrings_engine_t engine, sz_strings_view_t haystacks,
+                                        sz_size_t chunk_bytes, sz_u8_t *answers) {
+    __shared__ sz_u8_t classes[STRINGZILLA_U8_MAX + 1];
+    sz_substrings_stage_simt_(&engine, classes, nullptr, 0);
+    sz_substrings_staged_simt_t const staged {classes, nullptr, 0, engine.accepts_words};
+    sz_size_t const haystack = blockIdx.x, count = haystacks.count;
+    sz_cptr_t const text = sz_strings_start_simt_(haystacks, haystack);
+    sz_size_t const length = sz_strings_length_simt_(haystacks, haystack);
+    sz_simt_group_t const group = walk_group_();
+    sz_bool_t const grouped = sz_substrings_first_group_simt_(&engine, &staged, text, length, &group);
+    sz_u32_t carried = engine.root;
+    sz_bool_t chunked = sz_false_k;
+    if (group.lane) return;
+    for (sz_size_t begin = 0; begin < length && !chunked; begin += chunk_bytes)
+        chunked = sz_substrings_first_chunk_simt_(&engine, &staged, text, length, begin, begin + chunk_bytes, &carried);
+    answers[haystack] = sz_substrings_first_thread_simt_(&engine, &staged, text, length);
+    answers[count + haystack] = grouped;
+    answers[2 * count + haystack] = chunked;
+}
+
+/** Fills the column images of @p engine 's start-finding automaton into @p images, a column a
+ *  thread, as a product's kernel may instead of the host. */
+__global__ void walk_regex_images_kernel_(sz_regex_engine_t engine, sz_u32_t *images) {
+    sz_size_t const columns = sz_regex_stride_(engine.classes_count, engine.lookarounds_count);
+    for (sz_size_t column = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; column < columns;
+         column += (sz_size_t)gridDim.x * blockDim.x)
+        sz_regex_column_image_simt_(&engine, engine.reverse_rows, engine.reverse_states_count, column, images);
+}
+
+/** Walks haystack @c blockIdx.x with every regex walk over the start-finding automaton staged with
+ *  its @p images, its chunks from the haystack's end towards its start. */
+__global__ void walk_regex_kernel_(sz_regex_engine_t engine, sz_u32_t const *images, sz_strings_view_t haystacks,
+                                   sz_size_t chunk_bytes, sz_u8_t *answers) {
+    sz_regex_table_simt_t const table = sz_regex_stage_table_simt_(&engine, engine.reverse_rows, images, 0);
+    sz_size_t const haystack = blockIdx.x, count = haystacks.count;
+    sz_cptr_t const text = sz_strings_start_simt_(haystacks, haystack);
+    sz_size_t const length = sz_strings_length_simt_(haystacks, haystack);
+    sz_simt_group_t const group = walk_group_();
+    sz_bool_t const grouped = sz_regex_first_group_simt_(&engine, &table, text, length, &group);
+    sz_u32_t carried = engine.reverse_starts[0];
+    sz_bool_t chunked = sz_false_k;
+    if (group.lane) return;
+    for (sz_size_t end = length;;) {
+        sz_size_t const begin = end > chunk_bytes ? end - chunk_bytes : 0;
+        chunked = sz_regex_first_chunk_simt_(&engine, &table, text, length, begin, end, &carried);
+        if (chunked || !begin) break;
+        end = begin;
+    }
+    answers[haystack] = sz_regex_first_thread_simt_(&engine, &table, text, length);
+    answers[count + haystack] = grouped;
+    answers[2 * count + haystack] = chunked;
+}
+
+/** Walks document @c blockIdx.x with the group walk and with the chunk walk @p chunk_bytes at a
+ *  time, in its own @p frames frames of @p stacks and @p key_bytes of @p keys, writing each walk's
+ *  matches counted, with no room to write them, and its status into its row. */
+__global__ void walk_subdocuments_kernel_(sz_subdocuments_engine_t engine, sz_strings_view_t documents,
+                                          sz_u64_t *stacks, sz_size_t frames, sz_size_t frame_words, sz_u8_t *keys,
+                                          sz_size_t key_bytes, sz_size_t chunk_bytes, sz_size_t *counts,
+                                          sz_status_t *statuses) {
+    sz_size_t const document = blockIdx.x, count = documents.count;
+    sz_u8_t const *const text = (sz_u8_t const *)sz_strings_start_simt_(documents, document);
+    sz_size_t const length = sz_strings_length_simt_(documents, document);
+    sz_u64_t *const stack = stacks + document * frames * frame_words;
+    sz_u8_t *const key = keys + document * key_bytes;
+    sz_simt_group_t const group = walk_group_();
+    sz_subdocuments_progress_simt_t carried;
+    sz_size_t grouped = 0, chunked = 0, end = 0;
+    sz_status_t const walked = sz_subdocuments_walk_simt_(&engine, text, length, document, stack, frames, frame_words,
+                                                          key, key_bytes, nullptr, 0, &grouped, &group);
+    sz_status_t status;
+    sz_subdocuments_prime_simt_(&engine, text, length, stack, &carried);
+    do {
+        end = sz_min_of_two(end + chunk_bytes, length);
+        status = sz_subdocuments_first_chunk_simt_(&engine, text, length, document, stack, frames, frame_words, key,
+                                                   key_bytes, nullptr, 0, &chunked, end, &group, &carried);
+    } while (status == sz_success_k && end < length);
+    if (group.lane) return;
+    counts[count + document] = grouped, statuses[count + document] = walked;
+    counts[2 * count + document] = chunked, statuses[2 * count + document] = status;
+}
+
+/** A substrings, regex or subdocuments engine compiled by @c _init_serial into unified memory,
+ *  freed with this owner. */
+template <typename engine_type_, auto free_>
+struct walk_engine {
+    engine_type_ engine {};
+    explicit walk_engine(auto &&init) { verify(init(&engine) == sz_success_k); }
+    walk_engine(walk_engine const &) = delete;
+    walk_engine &operator=(walk_engine const &) = delete;
+    ~walk_engine() noexcept { free_(&engine, nullptr); }
+};
+
+/** The vendor's unified memory, which the walks' engines are compiled into. */
+inline sz_allocator_t walk_unified_() {
+    sz_allocator_t unified {};
+#if STRINGZILLA_ARCH_CUDA_
+    verify(sz_allocator_init_unified_cuda(&unified) == sz_success_k);
+#else
+    verify(sz_allocator_init_unified_rocm(&unified) == sz_success_k);
+#endif
+    return unified;
+}
+
+/** Copies @p bytes from @p from to @p to, as a product uploads an engine's block. */
+__global__ void walk_copy_kernel_(sz_u8_t const *from, sz_u8_t *to, sz_size_t bytes) {
+    for (sz_size_t index = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; index < bytes;
+         index += (sz_size_t)gridDim.x * blockDim.x)
+        to[index] = from[index];
+}
+
+/** A copy of the @p bytes at @p memory in @p runtime 's device arena, which an engine rebased onto
+ *  it reads its tables from until the case rewinds the arena. */
+inline void *walk_uploaded_(device_backend_t const &runtime, void const *memory, sz_size_t bytes) {
+    sz_allocator_t policy = device_arena_policy_(*runtime.arena);
+    void *const block = policy.allocate(bytes, policy.handle, runtime.stream);
+    verify(block != nullptr);
+    walk_copy_kernel_<<<64, 256, 0, (walk_stream_t)runtime.stream>>>((sz_u8_t const *)memory, (sz_u8_t *)block, bytes);
+    join_(runtime, runtime.stream);
+    return block;
+}
+
+/** Launches @p kernel over one block of 32 lanes per value and joins the stream. */
+template <typename kernel_type_, typename... argument_types_>
+void walk_launch_(device_backend_t const &runtime, kernel_type_ kernel, std::size_t count, std::size_t shared_bytes,
+                  argument_types_... arguments) {
+    if (!count) return;
+    kernel<<<(unsigned)count, walk_lanes_k, shared_bytes, (walk_stream_t)runtime.stream>>>(arguments...);
+    join_(runtime, runtime.stream);
+}
+
+/** Every substrings walk over @p haystacks against @c sz_substrings_contains_serial at
+ *  @p granularity, chunks of @p chunk_bytes. */
+inline void check_substrings_walk_(device_backend_t const &runtime, walk_granularity_t granularity,
+                                   std::vector<std::string> const &haystacks, std::vector<std::string> const &needles,
+                                   sz_size_t chunk_bytes) {
+    pinned_strings_t const vocabulary = staged_(runtime, needles);
+    sz_strings_view_t const needles_view = vocabulary.view().raw;
+    sz_allocator_t unified = walk_unified_();
+    walk_engine<sz_substrings_engine_t, sz_substrings_engine_free> engine([&](sz_substrings_engine_t *built) {
+        return sz_substrings_engine_init_serial(built, &needles_view, sz_cased_k, sz_substrings_overlapping_k,
+                                                STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0, &unified, nullptr);
+    });
+    device_corpus_t corpus(runtime, haystacks);
+    sz_strings_view_t const host_view = corpus.pinned.view().raw;
+    std::vector<sz_u1x8_t> contained((haystacks.size() + 7) / 8);
+    verify(sz_substrings_contains_serial(&engine.engine, &host_view, contained.data(), nullptr) == sz_success_k);
+    sz_substrings_engine_t const rebased = sz_substrings_engine_rebase_simt_(
+        &engine.engine, walk_uploaded_(runtime, engine.engine.memory, engine.engine.memory_bytes));
+    std::size_t const row = (std::size_t)granularity * haystacks.size();
+    auto const walk = [&](sz_substrings_engine_t const &walked) {
+        pinned_vector<sz_u8_t> answers(3 * haystacks.size(), 0xFF, pinned_alloc_<sz_u8_t>(runtime));
+        walk_launch_(runtime, walk_substrings_kernel_, haystacks.size(), 0, walked, corpus.device, chunk_bytes,
+                     answers.data());
+        for (std::size_t index = 0; index != haystacks.size(); ++index)
+            verify(answers[row + index] == walk_contained_(contained, index) &&
+                   "A substrings walk disagreed with serial");
+    };
+    walk(engine.engine);
+    // A table the rebase forgot reads these bytes and disagrees.
+    std::memset(engine.engine.memory, 0xFF, engine.engine.memory_bytes);
+    walk(rebased);
+}
+
+/** Every regex walk over @p haystacks against @c sz_regex_contains_serial at @p granularity, its
+ *  images filled on the device, chunks of @p chunk_bytes. */
+inline void check_regex_walk_(device_backend_t const &runtime, walk_granularity_t granularity,
+                              std::vector<std::string> const &haystacks, std::vector<std::string> const &patterns,
+                              sz_size_t chunk_bytes) {
+    pinned_strings_t const vocabulary = staged_(runtime, patterns);
+    sz_strings_view_t const patterns_view = vocabulary.view().raw;
+    sz_allocator_t unified = walk_unified_();
+    walk_engine<sz_regex_engine_t, sz_regex_engine_free> engine([&](sz_regex_engine_t *built) {
+        return sz_regex_engine_init_serial(built, &patterns_view, sz_cased_k, nullptr, &unified, nullptr);
+    });
+    // The walks take an engine with a start-finding automaton and no lookarounds.
+    verify(engine.engine.reverse_rows != nullptr && engine.engine.lookarounds_count == 0);
+    device_corpus_t corpus(runtime, haystacks);
+    sz_strings_view_t const host_view = corpus.pinned.view().raw;
+    std::vector<sz_u1x8_t> contained((haystacks.size() + 7) / 8);
+    verify(sz_regex_contains_serial(&engine.engine, &host_view, contained.data(), nullptr) == sz_success_k);
+    pinned_vector<sz_u32_t> images(sz_regex_images_bytes_simt_(&engine.engine) / sizeof(sz_u32_t), 0,
+                                   pinned_alloc_<sz_u32_t>(runtime));
+    walk_regex_images_kernel_<<<1, 256, 0, (walk_stream_t)runtime.stream>>>(engine.engine, images.data());
+    join_(runtime, runtime.stream);
+    sz_regex_engine_t const rebased = sz_regex_engine_rebase_simt_(
+        &engine.engine, walk_uploaded_(runtime, engine.engine.memory, engine.engine.memory_bytes));
+    std::size_t const row = (std::size_t)granularity * haystacks.size();
+    auto const walk = [&](sz_regex_engine_t const &walked) {
+        pinned_vector<sz_u8_t> answers(3 * haystacks.size(), 0xFF, pinned_alloc_<sz_u8_t>(runtime));
+        walk_launch_(runtime, walk_regex_kernel_, haystacks.size(), sz_regex_staged_bytes_simt_(&walked, 0), walked,
+                     (sz_u32_t const *)images.data(), corpus.device, chunk_bytes, answers.data());
+        for (std::size_t index = 0; index != haystacks.size(); ++index)
+            verify(answers[row + index] == walk_contained_(contained, index) && "A regex walk disagreed with serial");
+    };
+    walk(engine.engine);
+    // A table the rebase forgot reads these bytes and disagrees.
+    std::memset(engine.engine.memory, 0xFF, engine.engine.memory_bytes);
+    walk(rebased);
+}
+
+/** The subdocuments group walk, or @c prime and the chunk walk, over well-formed @p documents
+ *  against @c sz_subdocuments_counts_serial at @p granularity, chunks of @p chunk_bytes. */
+inline void check_subdocuments_walk_(device_backend_t const &runtime, walk_granularity_t granularity,
+                                     std::vector<std::string> const &documents, std::vector<std::string> const &paths,
+                                     sz_size_t chunk_bytes) {
+    pinned_strings_t const vocabulary = staged_(runtime, paths);
+    sz_strings_view_t const paths_view = vocabulary.view().raw;
+    sz_allocator_t unified = walk_unified_();
+    walk_engine<sz_subdocuments_engine_t, sz_subdocuments_engine_free> engine([&](sz_subdocuments_engine_t *built) {
+        return sz_subdocuments_engine_init_serial(built, &paths_view, sz_subdocuments_json_k,
+                                                  sz_subdocuments_options_none_k, nullptr, &unified, nullptr);
+    });
+    // The filters' patterns compile into a nested regex engine, whose forward DFA the walks read.
+    verify(engine.engine.patterns_count != 0 && engine.engine.regex.forward_rows != nullptr);
+    device_corpus_t corpus(runtime, documents);
+    sz_strings_view_t const host_view = corpus.pinned.view().raw;
+    std::vector<sz_size_t> expected(documents.size());
+    verify(sz_subdocuments_counts_serial(&engine.engine, &host_view, expected.data(), 1, nullptr, nullptr) ==
+           sz_success_k);
+    // Frames past the nesting of every document here, and one key buffer per walking group.
+    sz_size_t const frames = 64, frame_words = sz_subdocuments_frame_words_simt_(&engine.engine);
+    sz_size_t const key_bytes = sz_max_of_two(sz_subdocuments_key_bytes_(&engine.engine), (sz_size_t)1);
+    pinned_vector<sz_u64_t> stacks(documents.size() * frames * frame_words, 0, pinned_alloc_<sz_u64_t>(runtime));
+    pinned_vector<sz_u8_t> keys(documents.size() * key_bytes, 0, pinned_alloc_<sz_u8_t>(runtime));
+    sz_regex_engine_t const &regex = engine.engine.regex;
+    sz_subdocuments_engine_t const rebased = sz_subdocuments_engine_rebase_simt_(
+        &engine.engine, walk_uploaded_(runtime, engine.engine.memory, engine.engine.memory_bytes),
+        walk_uploaded_(runtime, regex.memory, regex.memory_bytes));
+    std::size_t const row = (std::size_t)granularity * documents.size();
+    auto const walk = [&](sz_subdocuments_engine_t const &walked) {
+        pinned_vector<sz_size_t> counts(3 * documents.size(), 0, pinned_alloc_<sz_size_t>(runtime));
+        pinned_vector<sz_status_t> statuses(3 * documents.size(), sz_success_k, pinned_alloc_<sz_status_t>(runtime));
+        walk_launch_(runtime, walk_subdocuments_kernel_, documents.size(), 0, walked, corpus.device, stacks.data(),
+                     frames, frame_words, keys.data(), key_bytes, chunk_bytes, counts.data(), statuses.data());
+        for (std::size_t index = 0; index != documents.size(); ++index) {
+            verify(statuses[row + index] == sz_success_k && "A subdocuments walk refused a well-formed document");
+            verify(counts[row + index] == expected[index] && "A subdocuments walk counted other matches than serial");
+        }
+    };
+    walk(engine.engine);
+    // A table the rebase forgot, its own or the nested engine's, reads these bytes and disagrees.
+    std::memset(engine.engine.memory, 0xFF, engine.engine.memory_bytes);
+    std::memset(regex.memory, 0xFF, regex.memory_bytes);
+    walk(rebased);
+}
+
+/** A corpus where a match crosses the edge of five-byte chunks, ends a value, starts it, or is
+ *  missing, and an empty value. */
+inline std::vector<std::string> walk_haystacks_() {
+    return {"", "abc", "xx ab", "xxxxabbbcx", "zzzzz 12345x", "no match here", "ab", std::string(97, 'q') + "zz"};
+}
+
+/** The subdocuments corpus: matches inside nested objects and arrays past one chunk, keys and
+ *  strings crossing chunk edges, an escaped key, and documents holding none. */
+inline std::vector<std::string> walk_documents_() {
+    return {R"({"store": {"book": [{"author": "R", "price": 9}, {"author": "W"}], "bike": 1}})",
+            R"({"author": "x", "list": [1, 2, {"author": [3, {"author": "deep"}]}]})",
+            R"({"auth\u006fr": "escaped", "authorx": 1})",
+            "[]",
+            "{}",
+            "7",
+            R"({"padding": ")" + std::string(70, 'p') + R"(", "author": "after"})"};
+}
+
+/** Registers one kernel-backed check of every walk in @p check, suffixed with @p suffix. */
+inline void check_device_walks_(cross_section_t &check, device_backend_t const &runtime, std::string const &suffix) {
+    std::vector<std::string> const needles {"ab", "bbc", "345", "zz"};
+    std::vector<std::string> const patterns {"ab+c", "[0-9]+x", "zz"};
+    std::vector<std::string> const paths {"$..author", "$.store.book[1]", "$.list[2].author[1]",
+                                          "$..book[?match(@.author, 'R')].price"};
+    for (walk_granularity_t const granularity :
+         {walk_granularity_t::thread_k, walk_granularity_t::group_k, walk_granularity_t::chunk_k}) {
+        std::string const name = granularity == walk_granularity_t::thread_k  ? "thread_"
+                                 : granularity == walk_granularity_t::group_k ? "group_"
+                                                                              : "chunk_";
+        check("test_substrings_first_" + name + suffix, rewound_(runtime, [&runtime, granularity, &needles] {
+                  check_substrings_walk_(runtime, granularity, walk_haystacks_(), needles, 5);
+              }));
+        check("test_regex_first_" + name + suffix, rewound_(runtime, [&runtime, granularity, &patterns] {
+                  check_regex_walk_(runtime, granularity, walk_haystacks_(), patterns, 5);
+              }));
+        if (granularity != walk_granularity_t::thread_k)
+            check("test_subdocuments_walk_" + name + suffix, rewound_(runtime, [&runtime, granularity, &paths] {
+                      check_subdocuments_walk_(runtime, granularity, walk_documents_(), paths, 16);
+                  }));
+    }
+}
+
+#pragma endregion Walks
+#endif // STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
 
 /** Registers every check of one vendor's kernels, or of the dispatch points, in @p check. */
 inline void check_device_kernels_(cross_section_t &check, auto const &backend) {

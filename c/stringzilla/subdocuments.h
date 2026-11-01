@@ -27,7 +27,9 @@
  *  - @ref sz_subdocuments_find_kernel → the kernel any of them would run, for a caller to keep.
  *
  *  Each verb runs the kernel of the capability its engine was compiled for. The engine lives in
- *  <tt>subdocuments/serial.h</tt>.
+ *  <tt>subdocuments/serial.h</tt>. An engine compiled by @c sz_subdocuments_engine_init_serial into a
+ *  device-readable allocator is a valid argument to every @c _simt_ walk, by value or rebased onto
+ *  a device block, while its filters' patterns fit the regex forward DFA's state budget.
  */
 #ifndef STRINGZILLA_SUBDOCUMENTS_H_
 #define STRINGZILLA_SUBDOCUMENTS_H_

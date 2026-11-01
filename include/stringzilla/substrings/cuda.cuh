@@ -25,7 +25,7 @@
 #define STRINGZILLA_SUBSTRINGS_CUDA_CUH_
 
 #include "stringzilla/cuda.cuh"
-#include "stringzilla/substrings/simt.cuh"
+#include "stringzilla/substrings/kernels.cuh"
 
 #if STRINGZILLA_ARCH_CUDA_
 

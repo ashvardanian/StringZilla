@@ -22,7 +22,7 @@
 #define STRINGZILLA_SUBSTRINGS_ROCM_CUH_
 
 #include "stringzilla/rocm.cuh"
-#include "stringzilla/substrings/simt.cuh"
+#include "stringzilla/substrings/kernels.cuh"
 
 #if STRINGZILLA_ARCH_ROCM_
 

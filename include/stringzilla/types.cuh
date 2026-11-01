@@ -88,6 +88,45 @@ STRINGZILLA_DEVICE void sz_u1x8_store_simt_(sz_u1x8_t *bits, sz_size_t count, sz
         bits[byte] = (sz_u1x8_t)(ballot >> (byte - first / 8) * 8);
 }
 
+/**
+ *  @brief A vendor's steps over the lanes of one group walking one value together, which a shared
+ *      walk calls without naming its vendor.
+ *
+ *  A kernel builds the record where it starts, from its vendor's steps, so after inlining every
+ *  member folds to its instruction and @c lanes to an immediate. Lane sets never leave the record:
+ *  @c first and @c below answer over the group's own lanes, so a 32-lane vendor keeps 32-bit
+ *  ballots whatever another vendor's width.
+ */
+typedef struct sz_simt_group_t {
+
+    /** Lanes in the group, which every walk derives its windows and scan bounds from. */
+    unsigned lanes;
+
+    /** This thread's lane within the group, from zero. */
+    unsigned lane;
+
+    /** Whether a predicate holds on any lane of the group. */
+    int (*any)(int);
+
+    /** A bit per lane of the group where a predicate holds, for groups of at most 32 lanes. */
+    sz_u32_t (*ballot)(int);
+
+    /** The lowest lane a predicate holds on, or @c lanes where it holds on none. */
+    unsigned (*first)(int);
+
+    /** How many lanes below this one a predicate holds on. */
+    unsigned (*below)(int);
+
+    /** A value from the lane named by the second argument. */
+    sz_u32_t (*shuffle)(sz_u32_t, unsigned);
+
+    /** The value of the lane the second argument below this one, a low lane keeping its own. */
+    sz_u32_t (*shuffle_up)(sz_u32_t, unsigned);
+
+    /** Orders the group's lanes and their memory at this point, and no lane outside the group. */
+    void (*sync)(void);
+} sz_simt_group_t;
+
 #pragma endregion Lanes
 
 /*  A block's queue of the grid's tiles. Here every block runs its own tile; Blackwell's tier, in
@@ -285,6 +324,19 @@ STRINGZILLA_DEVICE sz_size_t sz_strings_length_simt_(sz_strings_view_t strings, 
 #pragma endregion Device Tapes
 
 #endif // STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
+
+#pragma region Moved Blocks
+
+/** Where @p pointer lands once the @p bytes at @p from are copied to @p to; null, and a pointer
+ *  outside those bytes, stay where they are. */
+STRINGZILLA_INLINE void const *sz_pointer_rebased_(void const *pointer, void const *from, sz_size_t bytes,
+                                                   void const *to) {
+    sz_cptr_t const at = (sz_cptr_t)pointer, begin = (sz_cptr_t)from;
+    if (!pointer || at < begin || at > begin + bytes) return pointer;
+    return (sz_cptr_t)to + (at - begin);
+}
+
+#pragma endregion Moved Blocks
 
 #ifdef __cplusplus
 }

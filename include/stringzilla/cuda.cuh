@@ -429,6 +429,22 @@ STRINGZILLA_DEVICE int sz_lanes_any_cuda_(int predicate) { return __any_sync(0xF
 /** A bit per lane of the warp, set where @p predicate holds, with @c vote.sync.ballot . */
 STRINGZILLA_DEVICE sz_u32_t sz_lanes_ballot_cuda_(int predicate) { return __ballot_sync(0xFFFFFFFFu, predicate); }
 
+/** The lowest lane of the warp where @p predicate holds, or 32 where it holds on none, with
+ *  @c vote.sync.ballot . */
+STRINGZILLA_DEVICE unsigned sz_lanes_first_cuda_(int predicate) {
+    sz_u32_t const ballot = __ballot_sync(0xFFFFFFFFu, predicate);
+    return ballot ? (unsigned)__ffs((int)ballot) - 1u : 32u;
+}
+
+/** How many lanes of the warp below this one @p predicate holds on, with @c vote.sync.ballot and
+ *  @c popc . */
+STRINGZILLA_DEVICE unsigned sz_lanes_below_cuda_(int predicate) {
+    return (unsigned)__popc(__ballot_sync(0xFFFFFFFFu, predicate) & ((1u << (threadIdx.x & 31u)) - 1u));
+}
+
+/** Orders the warp's lanes and their memory at this point, with @c bar.warp.sync . */
+STRINGZILLA_DEVICE void sz_group_sync_cuda_(void) { __syncwarp(0xFFFFFFFFu); }
+
 #pragma endregion Device Primitives
 
 /*  The library defines these once, in `src/capabilities/cuda.cu`; header-only builds define them

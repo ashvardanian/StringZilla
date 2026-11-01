@@ -78,6 +78,7 @@ std::size_t test_cross_rocm(environment_t const &env, std::size_t ordinal) {
                                           sz_strings_lookup_rocm,
                                           sz_strings_normalize_rocm};
     check_device_strings_(check, runtime, strings_rocm);
+    check_device_walks_(check, runtime, "rocm");
 #endif
     auto const failures = capability_failures + check.failures +
                           test_cross_dispatch_device(env, runtime,

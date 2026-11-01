@@ -60,6 +60,9 @@
  *  codepoints, as none holds inside the folds of one. A match starting or ending inside the folds
  *  of one codepoint snaps outward to the whole codepoint, the search resuming past it, and an
  *  empty match is never reported there.
+ *
+ *  An engine compiled by @c sz_regex_engine_init_serial into a device-readable allocator is a valid
+ *  argument to every @c _simt_ walk, by value or rebased onto a device block.
  */
 #ifndef STRINGZILLA_REGEX_H_
 #define STRINGZILLA_REGEX_H_

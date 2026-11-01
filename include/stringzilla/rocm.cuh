@@ -363,6 +363,26 @@ STRINGZILLA_DEVICE sz_u32_t sz_lanes_ballot_rocm_(int predicate) {
     return (sz_u32_t)(__ballot(predicate) >> (__lane_id() & 32u));
 }
 
+/** The lowest of this thread's 32 lanes where @p predicate holds, or 32 where it holds on none,
+ *  from its half of the ballot. */
+STRINGZILLA_DEVICE unsigned sz_lanes_first_rocm_(int predicate) {
+    sz_u32_t const half = sz_lanes_ballot_rocm_(predicate);
+    return half ? (unsigned)__ffs((int)half) - 1u : 32u;
+}
+
+/** How many of this thread's 32 lanes below it @p predicate holds on, from its ballot half. */
+STRINGZILLA_DEVICE unsigned sz_lanes_below_rocm_(int predicate) {
+    return (unsigned)__popc(sz_lanes_ballot_rocm_(predicate) & ((1u << (__lane_id() & 31u)) - 1u));
+}
+
+/** Orders this thread's lanes and their memory at this point: a wavefront runs in lockstep, so only
+ *  the wavefront-scoped fences and the compiler's scheduling barrier between them are needed. */
+STRINGZILLA_DEVICE void sz_group_sync_rocm_(void) {
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
+    __builtin_amdgcn_wave_barrier();
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
+}
+
 #pragma endregion Device Primitives
 
 /*  The library defines these once, in `src/capabilities/rocm.hip`; header-only builds define them

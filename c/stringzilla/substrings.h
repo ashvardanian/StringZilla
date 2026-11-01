@@ -29,7 +29,9 @@
  *
  *  The engine is a plain struct of flat arrays over two owned blocks, so a caller driving its own
  *  loops binds @ref sz_substrings_step and walks it directly, and a device backend passes it to a
- *  kernel by value.
+ *  kernel by value. An engine compiled by @c sz_substrings_engine_init_serial into a
+ *  device-readable allocator is a valid argument to every @c _simt_ walk, by value or rebased onto
+ *  a device block.
  */
 #ifndef STRINGZILLA_SUBSTRINGS_H_
 #define STRINGZILLA_SUBSTRINGS_H_

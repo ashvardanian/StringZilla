@@ -86,6 +86,7 @@ std::size_t test_cross_cuda(environment_t const &env, std::size_t ordinal) {
                                           sz_strings_lookup_cuda,
                                           sz_strings_normalize_cuda};
     check_device_strings_(check, cuda_runtime, strings_cuda);
+    check_device_walks_(check, cuda_runtime, "cuda");
 #endif
 #if STRINGZILLA_TARGET_HOPPER
     device_backend_t hopper_runtime = runtime;
