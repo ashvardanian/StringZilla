@@ -110,7 +110,7 @@ STRINGZILLA_INLINE void sz_hash_state_short_update_neon_(sz_hash_state_aligned_f
 STRINGZILLA_INLINE void sz_hash_state_init_neonaes_(sz_hash_state_t *state, sz_u64_t seed) {
     // The key is made from the seed and half of it will be mixed with the length in the end
     uint64x2_t seed_u64x2 = vdupq_n_u64(seed);
-    vst1q_u64((sz_u64_t *)state->key, seed_u64x2);
+    vst1q_u8(state->key, vreinterpretq_u8_u64(seed_u64x2));
 
     // XOR the user-supplied keys with the two "pi" constants
     sz_u64_t const *pi = sz_hash_pi_constants_();

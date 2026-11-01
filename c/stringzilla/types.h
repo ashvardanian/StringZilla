@@ -118,14 +118,16 @@
 
 /** Infer the target architecture, unless it's overridden by the build system. */
 #if !defined(STRINGZILLA_ARCH_X8664_)
-#if defined(__x86_64__) || defined(_M_X64)
+#if (defined(__x86_64__) || defined(_M_X64)) && !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__) && \
+    !defined(__METAL_VERSION__)
 #define STRINGZILLA_ARCH_X8664_ (1)
 #else
 #define STRINGZILLA_ARCH_X8664_ (0)
 #endif
 #endif
 #if !defined(STRINGZILLA_ARCH_ARM64_)
-#if defined(__aarch64__) || defined(__arm64__) || defined(__arm64) || defined(_M_ARM64)
+#if (defined(__aarch64__) || defined(__arm64__) || defined(__arm64) || defined(_M_ARM64)) && \
+    !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__) && !defined(__METAL_VERSION__)
 #define STRINGZILLA_ARCH_ARM64_ (1)
 #else
 #define STRINGZILLA_ARCH_ARM64_ (0)

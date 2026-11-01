@@ -154,16 +154,20 @@ STRINGZILLA_INLINE sz_u64_t sz_hash_state_short_finalize_powervsx_(sz_hash_state
 #pragma region Full state for long inputs
 
 STRINGZILLA_INLINE void sz_hash_state_init_powervsx_(sz_hash_state_t *state, sz_u64_t seed) {
-    sz_u64_t *key_u64s = (sz_u64_t *)state->key;
-    key_u64s[0] = seed;
-    key_u64s[1] = seed;
+    __vector unsigned long long const seed_u64x2 = vec_splats((unsigned long long)seed);
+    vec_xst((__vector unsigned char)seed_u64x2, 0, (unsigned char *)state->key);
 
     sz_u64_t const *pi_constants = sz_hash_pi_constants_();
-    sz_u64_t *aes_u64s = (sz_u64_t *)state->aes;
-    sz_u64_t *sum_u64s = (sz_u64_t *)state->sum;
-    for (sz_size_t lane_index = 0; lane_index < 8; ++lane_index) aes_u64s[lane_index] = seed ^ pi_constants[lane_index];
-    for (sz_size_t lane_index = 0; lane_index < 8; ++lane_index)
-        sum_u64s[lane_index] = seed ^ pi_constants[lane_index + 8];
+    for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
+        __vector unsigned long long const aes_pi_u64x2 = vec_xl(
+            0, (unsigned long long const *)&pi_constants[lane_index * 2]);
+        __vector unsigned long long const sum_pi_u64x2 = vec_xl(
+            0, (unsigned long long const *)&pi_constants[lane_index * 2 + 8]);
+        vec_xst((__vector unsigned char)vec_xor(seed_u64x2, aes_pi_u64x2), 0,
+                (unsigned char *)(state->aes + lane_index * 16));
+        vec_xst((__vector unsigned char)vec_xor(seed_u64x2, sum_pi_u64x2), 0,
+                (unsigned char *)(state->sum + lane_index * 16));
+    }
 
     for (sz_size_t byte_index = 0; byte_index < 64; ++byte_index) state->ins[byte_index] = 0;
     state->ins_length = 0;

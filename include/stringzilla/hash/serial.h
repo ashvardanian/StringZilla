@@ -423,16 +423,15 @@ STRINGZILLA_CONSTEXPR void sz_hash_shift_in_register_serial_(sz_u128_vec_t *vec,
 STRINGZILLA_INLINE void sz_hash_state_init_serial_(sz_hash_state_t *state, sz_u64_t seed) {
 
     // The key is made from the seed and half of it will be mixed with the length in the end
-    sz_u64_t *key_u64s = (sz_u64_t *)state->key;
-    key_u64s[0] = seed;
-    key_u64s[1] = seed;
+    sz_u64_store((sz_ptr_t)state->key, seed);
+    sz_u64_store((sz_ptr_t)(state->key + 8), seed);
 
     // XOR the user-supplied keys with the two "pi" constants
     sz_u64_t const *pi = sz_hash_pi_constants_();
-    sz_u64_t *aes_u64s = (sz_u64_t *)state->aes;
-    sz_u64_t *sum_u64s = (sz_u64_t *)state->sum;
-    for (int lane_index = 0; lane_index < 8; ++lane_index) aes_u64s[lane_index] = seed ^ pi[lane_index];
-    for (int lane_index = 0; lane_index < 8; ++lane_index) sum_u64s[lane_index] = seed ^ pi[lane_index + 8];
+    for (int lane_index = 0; lane_index < 8; ++lane_index)
+        sz_u64_store((sz_ptr_t)(state->aes + lane_index * 8), seed ^ pi[lane_index]);
+    for (int lane_index = 0; lane_index < 8; ++lane_index)
+        sz_u64_store((sz_ptr_t)(state->sum + lane_index * 8), seed ^ pi[lane_index + 8]);
 
     // The inputs are zeroed out at the beginning
     for (int byte_index = 0; byte_index < 64; ++byte_index) state->ins[byte_index] = 0;
