@@ -132,6 +132,11 @@
       "toolchainFile": "${sourceDir}/cmake/toolchain-riscv64-llvm.cmake"
     },
     {
+      "name": "linux_x86_64",
+      "inherits": "cross",
+      "toolchainFile": "${sourceDir}/cmake/toolchain-x86_64-llvm.cmake"
+    },
+    {
       "name": "linux_loongarch64",
       "inherits": "cross",
       "toolchainFile": "${sourceDir}/cmake/toolchain-loongarch64-gnu.cmake"
@@ -312,6 +317,7 @@
     { "name": "metal", "configurePreset": "metal", "targets": ["stringzilla_test", "stringzilla_shared"] },
     { "name": "linux_arm64", "configurePreset": "linux_arm64" },
     { "name": "linux_riscv64", "configurePreset": "linux_riscv64" },
+    { "name": "linux_x86_64", "configurePreset": "linux_x86_64" },
     { "name": "linux_loongarch64", "configurePreset": "linux_loongarch64" },
     { "name": "linux_ppc64le", "configurePreset": "linux_ppc64le" },
     { "name": "wasm32_wasi", "configurePreset": "wasm32_wasi", "targets": ["stringzilla_test"] },
@@ -359,6 +365,7 @@
     },
     { "name": "linux_arm64", "inherits": "emulated", "configurePreset": "linux_arm64" },
     { "name": "linux_riscv64", "inherits": "emulated", "configurePreset": "linux_riscv64" },
+    { "name": "linux_x86_64", "inherits": "emulated", "configurePreset": "linux_x86_64" },
     { "name": "linux_loongarch64", "inherits": "emulated", "configurePreset": "linux_loongarch64" },
     { "name": "linux_ppc64le", "inherits": "emulated", "configurePreset": "linux_ppc64le" },
     {

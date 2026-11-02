@@ -2,7 +2,7 @@
 
 StringZilla for Python wraps SIMD- and SWAR-accelerated native kernels behind `str`- and `bytes`-shaped types that avoid copies wherever possible.
 The `stringzilla` module covers single-string search, slicing, splitting, trimming, translation, hashing, checksums, sorting, sampling, random generation, UTF-8 segmentation, Unicode case-folding, Unicode normalization, escaping, and dumping JSON and CSV.
-The same module also carries the batch engines, each preparing one set of queries once and scoring it against many collections of candidates, on the host or on a CUDA or ROCm device.
+The same module also carries the batch engines, each preparing one set of queries once and scoring it against many collections of candidates, on the host or on a CUDA, ROCm or Metal device.
 
 Every call runs the best kernel of the capabilities it is given, by default every CPU capability, which the library clamps to `sz.cpu_capabilities_enabled()`, and the batch engines release the GIL around native work.
 The module is also marked safe for free-threaded `Py_GIL_DISABLED` CPython builds.

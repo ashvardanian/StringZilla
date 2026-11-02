@@ -143,6 +143,12 @@ A function that touches a device is either a producer or a consumer:
 
 A null stream is the default stream of the default device: the calling thread's current device on CUDA and ROCm, and the system default device on Metal.
 On the CPU the stream must be null.
+
+No verb allocates.
+A GPU verb takes any memory its device reaches, and the runtime checks that per call.
+Unified memory comes only from an explicit `copy`, or from `UnifiedAllocator` in Rust.
+A GPU verb runs the capabilities the caller names.
+
 Each of these words has one meaning across the library:
 
 | Word                                   | Meaning                                                                          | Appears as                                                                     |
@@ -169,6 +175,7 @@ For C++ code:
 - Avoid C-style casts in favor of `static_cast`, `reinterpret_cast`, and `const_cast`, except for places where a C function is called.
 - Use lower-case names for everything, except settings/conditions macros.
   Function-like macros, that take arguments, should be lowercase as well.
+- Macros expand expressions and never define functions.
 - In templates prefer `typename` over `class`.
 
 For Python code:

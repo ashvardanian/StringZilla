@@ -13,6 +13,7 @@
  *  STRINGZILLA_SEED    42       Seed for every random generator, or "random" to draw one, which a run prints
  *  STRINGZILLA_SCALE   1        Multiplier for every baseline iteration count, like 0.1 or 10
  *  STRINGZILLA_FILTER  none     ECMAScript regex over test names, or a substring when it does not compile
+ *  STRINGZILLA_DEVICES none     Comma-separated devices to run on, such as cuda:0,rocm:1
  *  @endverbatim
  *
  *  @section test_driver_tiers Driver Tiers

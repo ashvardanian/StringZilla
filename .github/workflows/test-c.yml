@@ -167,7 +167,7 @@ jobs:
         run: ctest --preset release
 
   # Cross-compile the static test executables once per target architecture and publish them as artifacts. The
-  # actual execution under QEMU happens in `test_cross_qemu`, which fans the vector-length-agnostic RISC-V
+  # actual execution under QEMU happens in `test_qemu`, which fans the vector-length-agnostic RISC-V
   # binary across several VLENs WITHOUT recompiling it.
   build_cross_linux:
     name: Build for Linux ${{ matrix.target_arch }} on ${{ matrix.arch }}
@@ -259,7 +259,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: cross-tests-${{ matrix.target_arch }}
-          path: build_release/stringzilla_cpu*_test
+          path: build_release/stringzilla_*test
           if-no-files-found: error
           retention-days: 1
 
@@ -344,10 +344,12 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x tests/*
-          for test_binary in $(find tests -type f -name 'stringzilla_cpu*_test' | sort); do
+          for test_binary in $(find tests -type f -name 'stringzilla_*test' | sort); do
             echo "▶ ${{ matrix.qemu }} -cpu ${{ matrix.qemu_cpu }} ${test_binary}"
-            ${{ matrix.qemu }} -cpu "${{ matrix.qemu_cpu }}" "${test_binary}"
+            ${{ matrix.qemu }} -cpu "${{ matrix.qemu_cpu }}" "${test_binary}" | tee -a qemu.log
           done
+          # A section whose capability this CPU model lacks prints `skipped` and still exits 0
+          grep ': skipped, ' qemu.log | sort -u >> "$GITHUB_STEP_SUMMARY" || true
 
   # The C++ suite every native platform runs; the strict rows' modules run with relaxed SIMD refused.
   # The `utf8` filter stays until `test_hash_unit` stops asserting on wasm.
