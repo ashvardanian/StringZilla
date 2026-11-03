@@ -214,7 +214,7 @@ The library covers search, hashing, sorting, comparison, set intersection, colle
 `cargo add stringzilla` &centerdot; guide: [`rust/README.md`](rust/README.md)
 
 ```rust
-use stringzilla::sz;
+use stringzilla as sz;
 
 assert_eq!(sz::find("the quick brown fox", "brown"), Some(10));
 let digest = sz::hash("hello"); // fast 64-bit hash

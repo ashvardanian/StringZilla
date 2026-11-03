@@ -28,7 +28,7 @@ use super::*;
 /// # Examples
 ///
 /// ```rust
-/// use stringzilla::sz::{Capabilities, OverlapEngine, Stream, StringsView};
+/// use stringzilla::{Capabilities, OverlapEngine, Stream, StringsView};
 ///
 /// let cpu = Stream::default(Capabilities::cpu_enabled());
 /// let mut engine = OverlapEngine::new(&["the quick brown fox"], &[4, 8], 0, &cpu).unwrap();

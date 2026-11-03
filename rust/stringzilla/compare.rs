@@ -17,7 +17,7 @@ use super::*;
 ///
 /// ```
 /// use std::cmp::Ordering;
-/// use stringzilla::stringzilla as sz;
+/// use stringzilla as sz;
 ///
 /// assert_eq!(sz::order("apple", "banana"), Ordering::Less);
 /// assert_eq!(sz::order("abc", "abc"), Ordering::Equal);
@@ -54,7 +54,7 @@ where
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla as sz;
+/// use stringzilla as sz;
 ///
 /// assert!(sz::equal("abc", "abc"));
 /// assert!(!sz::equal("abc", "abd"));
@@ -90,7 +90,7 @@ mod tests {
     extern crate alloc;
     use core::cmp::Ordering;
 
-    use crate::sz;
+    use crate as sz;
 
     #[test]
     fn equal_matches_bytes() {

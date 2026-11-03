@@ -40,7 +40,7 @@ pub type Sha256Digest = [u8; SHA256_DIGEST_LENGTH];
 /// One-shot hashing:
 ///
 /// ```
-/// use stringzilla::stringzilla::Sha256;
+/// use stringzilla::Sha256;
 /// let digest = Sha256::hash(b"Hello, world!");
 /// assert_eq!(digest.len(), 32); // 256 bits = 32 bytes
 /// ```
@@ -48,7 +48,7 @@ pub type Sha256Digest = [u8; SHA256_DIGEST_LENGTH];
 /// Incremental hashing:
 ///
 /// ```
-/// use stringzilla::stringzilla::Sha256;
+/// use stringzilla::Sha256;
 /// let mut hasher = Sha256::new();
 /// hasher.update(b"Hello, ");
 /// hasher.update(b"world!");
@@ -212,7 +212,7 @@ impl Default for Sha256 {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla as sz;
+/// use stringzilla as sz;
 ///
 /// let mut states = vec![sz::Sha256::new(); 2];
 /// let heads: Vec<String> = vec!["Hello, ".into(), "Goodbye, ".into()];
@@ -241,7 +241,7 @@ pub fn sha256_multistate_update<Element: AsRef<[u8]>>(states: &mut [Sha256], chu
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla as sz;
+/// use stringzilla as sz;
 ///
 /// struct Record { payload: &'static str }
 /// let records = [Record { payload: "alpha" }, Record { payload: "beta" }];
@@ -317,7 +317,7 @@ pub fn sha256_multistate_digest(states: &[Sha256], digests: &mut [Sha256Digest])
 /// # Example
 ///
 /// ```
-/// use stringzilla::stringzilla::hmac_sha256;
+/// use stringzilla::hmac_sha256;
 /// let key = b"secret_key";
 /// let message = b"important message";
 /// let mac = hmac_sha256(key, message);
@@ -393,7 +393,7 @@ fn _hmac_sha256_wrap(inner: &Sha256, outer: &Sha256) -> Sha256Digest {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla as sz;
+/// use stringzilla as sz;
 ///
 /// let messages: Vec<String> = vec!["alpha".into(), "beta".into()];
 /// let mut states = vec![sz::Sha256::new(); messages.len()];
@@ -661,7 +661,7 @@ mod tests {
     #[cfg(feature = "std")]
     use std::collections::{HashMap, HashSet};
 
-    use crate::sz;
+    use crate as sz;
 
     #[test]
     fn bytesum() {

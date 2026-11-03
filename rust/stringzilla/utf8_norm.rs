@@ -34,7 +34,7 @@ use super::*;
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla as sz;
+/// use stringzilla as sz;
 /// use sz::NormalForm;
 /// let source = "caf\u{00E9}"; // "café" NFC (precomposed é)
 /// let mut dest = vec![0u8; source.len() * 18];
@@ -89,7 +89,7 @@ where
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla as sz;
+/// use stringzilla as sz;
 /// use sz::NormalForm;
 /// // NFD string (decomposed): base 'e' + combining acute U+0301
 /// let nfd = "cafe\u{0301}";
@@ -127,7 +127,7 @@ mod tests {
     use alloc::vec;
 
     use super::*;
-    use crate::sz;
+    use crate as sz;
 
     // "cafe": precomposed e-acute U+00E9 in NFC vs. base 'e' + combining acute U+0301 in NFD - the
     // shared NFC/NFD fixture pair for the UTF-8 normalization tests.

@@ -300,7 +300,7 @@ impl<'a, Kernel: TokenizerKernel, Parts: SplitParts, Empty: EmptySegments, const
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::{Utf8SplitNewlines};
+/// use stringzilla::{Utf8SplitNewlines};
 ///
 /// let text = b"Hello\nWorld\r\nRust";
 /// let lines: Vec<&[u8]> = Utf8SplitNewlines::new(text).collect();
@@ -323,7 +323,7 @@ pub type Utf8Newlines<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> =
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::{Utf8SplitWhitespaces};
+/// use stringzilla::{Utf8SplitWhitespaces};
 ///
 /// // Default KEEP policy: empties around the words are preserved.
 /// let text = b"  hi  ";
@@ -351,7 +351,7 @@ pub type Utf8Whitespaces<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> =
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::{Utf8SplitDelimiters};
+/// use stringzilla::{Utf8SplitDelimiters};
 ///
 /// // "Hi, world—foo" splits on ',', ' ', and U+2014 EM DASH.
 /// let tokens: Vec<&[u8]> = Utf8SplitDelimiters::new("Hi, world\u{2014}foo".as_bytes()).skip_empty().collect();

@@ -143,7 +143,7 @@ impl Bm25Params {
 /// # Examples
 ///
 /// ```rust
-/// use stringzilla::sz::{
+/// use stringzilla::{
 ///     Capabilities, CaseSensitivity, Stream, StringsView, SubstringsEngine, SubstringsOverlapPolicy,
 ///     SUBSTRINGS_HOT_STATES_AUTO, SUBSTRINGS_MATCHES_BUDGET_AUTO,
 /// };

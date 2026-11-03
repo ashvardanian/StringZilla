@@ -35,7 +35,7 @@ use super::*;
 /// Basic usage with string slices:
 ///
 /// ```
-/// use stringzilla::stringzilla as sz;
+/// use stringzilla as sz;
 /// let haystack = "Hello WORLD";
 /// if let Some((offset, len)) = sz::utf8_uncased_search(haystack, "world") {
 ///     assert_eq!(offset, 6);
@@ -46,7 +46,7 @@ use super::*;
 /// With a prepared needle for repeated searches:
 ///
 /// ```
-/// use stringzilla::stringzilla::{utf8_uncased_search, Utf8UncasedNeedle};
+/// use stringzilla::{utf8_uncased_search, Utf8UncasedNeedle};
 ///
 /// let needle = Utf8UncasedNeedle::new(b"hello");
 ///
@@ -75,7 +75,7 @@ where
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::{utf8_uncased_search, Utf8UncasedNeedle};
+/// use stringzilla::{utf8_uncased_search, Utf8UncasedNeedle};
 ///
 /// let needle = Utf8UncasedNeedle::new(b"hello");
 /// assert_eq!(utf8_uncased_search(b"Hello World", &needle), Some((0, 5)));
@@ -195,7 +195,7 @@ impl Utf8UncasedNeedleArg for &Utf8UncasedNeedle<'_> {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla as sz;
+/// use stringzilla as sz;
 /// use std::cmp::Ordering;
 /// assert_eq!(sz::utf8_uncased_order("Hello", "HELLO"), Ordering::Equal);
 /// assert_eq!(sz::utf8_uncased_order("abc", "ABD"), Ordering::Less);
@@ -243,7 +243,7 @@ where
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::{Utf8UncasedMatches, IndexSpan};
+/// use stringzilla::{Utf8UncasedMatches, IndexSpan};
 ///
 /// let haystack = b"Hello WORLD, hello world";
 /// let matches: Vec<IndexSpan> = Utf8UncasedMatches::new(haystack, b"hello").collect();
@@ -255,7 +255,7 @@ where
 /// With overlapping matches:
 ///
 /// ```
-/// use stringzilla::stringzilla::{Utf8UncasedMatches, IndexSpan};
+/// use stringzilla::{Utf8UncasedMatches, IndexSpan};
 ///
 /// let haystack = b"aAaAa";
 /// let matches: Vec<IndexSpan> = Utf8UncasedMatches::new(haystack, b"aA").overlapping().collect();
@@ -330,7 +330,7 @@ mod tests {
     use alloc::vec::Vec;
 
     use super::*;
-    use crate::sz;
+    use crate as sz;
 
     /// Folds a single codepoint into a fixed-size buffer, returning the buffer and its
     /// used length. A single codepoint case-folds to at most a handful of bytes (the

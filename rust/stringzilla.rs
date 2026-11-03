@@ -901,7 +901,7 @@ unsafe extern "C" fn strings_get<Element, Key>(
 /// Basic usage on a byte slice:
 ///
 /// ```
-/// use stringzilla::sz::StringZillableUnary;
+/// use stringzilla::StringZillableUnary;
 ///
 /// let text = b"Hello";
 /// assert_eq!(text.sz_bytesum(), 500);
@@ -914,7 +914,7 @@ pub trait StringZillableUnary {
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::sz::StringZillableUnary;
+    /// use stringzilla::StringZillableUnary;
     ///
     /// let text = b"Hello";
     /// assert_eq!(text.sz_bytesum(), 500);
@@ -929,7 +929,7 @@ pub trait StringZillableUnary {
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::sz::StringZillableUnary;
+    /// use stringzilla::StringZillableUnary;
     ///
     /// let s1 = b"Hello";
     /// let s2 = b"World";
@@ -947,7 +947,7 @@ pub trait StringZillableUnary {
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::sz::StringZillableUnary;
+    /// use stringzilla::StringZillableUnary;
     ///
     /// let text = "Hello🌍";
     /// let view = text.sz_utf8_runes();
@@ -972,7 +972,7 @@ pub trait StringZillableUnary {
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::sz::StringZillableUnary;
+    /// use stringzilla::StringZillableUnary;
     ///
     /// let text = "Hello\nWorld\r\nRust";
     /// let lines: Vec<&str> = text.sz_utf8_split_newlines()
@@ -995,7 +995,7 @@ pub trait StringZillableUnary {
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::sz::StringZillableUnary;
+    /// use stringzilla::StringZillableUnary;
     ///
     /// // KEEP (default): the double space between "Hello" and "World" yields an empty segment.
     /// let text = "Hello  World\tRust";

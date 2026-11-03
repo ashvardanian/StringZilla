@@ -193,7 +193,7 @@ pub struct Byteset {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::IndexSpan;
+/// use stringzilla::IndexSpan;
 ///
 /// let text = "Hello\nWorld";
 /// let span = IndexSpan::new(5, 1);
@@ -222,7 +222,7 @@ impl IndexSpan {
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::stringzilla::IndexSpan;
+    /// use stringzilla::IndexSpan;
     ///
     /// let span = IndexSpan::new(5, 3);
     /// assert_eq!(span.range(), 5..8);
@@ -237,7 +237,7 @@ impl IndexSpan {
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::stringzilla::IndexSpan;
+    /// use stringzilla::IndexSpan;
     ///
     /// let text = b"Hello World";
     /// assert_eq!(IndexSpan::new(6, 5).extract(text), Some(&b"World"[..]));
@@ -253,7 +253,7 @@ impl IndexSpan {
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::stringzilla::IndexSpan;
+    /// use stringzilla::IndexSpan;
     ///
     /// let span = IndexSpan::new(5, 3);
     /// assert_eq!(span.end(), 8);
@@ -310,9 +310,9 @@ impl Byteset {
     /// Usable in a `const`, so a hot loop can name a set instead of rebuilding one per call:
     ///
     /// ```rust
-    /// use stringzilla::sz::Byteset;
+    /// use stringzilla::Byteset;
     /// const WHITESPACE: Byteset = Byteset::from_bytes(b" \t\r\n");
-    /// assert_eq!(stringzilla::sz::find_byteset("ab cd", WHITESPACE), Some(2));
+    /// assert_eq!(stringzilla::find_byteset("ab cd", WHITESPACE), Some(2));
     /// ```
     #[inline]
     pub const fn from_bytes(bytes: &[u8]) -> Self {
@@ -440,7 +440,7 @@ const CAPABILITIES: [Capability; 23] = [
 /// # Examples
 ///
 /// ```
-/// use stringzilla::sz::{Capabilities, Capability};
+/// use stringzilla::{Capabilities, Capability};
 ///
 /// let enabled = Capabilities::cpu_enabled();
 /// enabled.configure_thread()?;
@@ -453,7 +453,7 @@ const CAPABILITIES: [Capability; 23] = [
 /// for ordinal in 0..Capabilities::cuda_count_devices().unwrap_or(0) {
 ///     println!("CUDA device {ordinal} runs {}", Capabilities::cuda_enabled(ordinal)?);
 /// }
-/// # Ok::<(), stringzilla::sz::Status>(())
+/// # Ok::<(), stringzilla::Status>(())
 /// ```
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -653,7 +653,7 @@ impl Capabilities {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::sz::{Capabilities, Stream};
+/// use stringzilla::{Capabilities, Stream};
 ///
 /// let cpu = Stream::default(Capabilities::cpu_enabled());
 /// assert!(cpu.as_raw().is_null());
@@ -663,7 +663,7 @@ impl Capabilities {
 ///     let stream = Stream::new(Capabilities::cuda_enabled(ordinal)?, ordinal)?;
 ///     stream.synchronize()?;
 /// }
-/// # Ok::<(), stringzilla::sz::Status>(())
+/// # Ok::<(), stringzilla::Status>(())
 /// ```
 #[derive(Debug)]
 pub struct Stream {
@@ -738,7 +738,7 @@ impl Stream {
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::sz::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, StringsView};
+    /// use stringzilla::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, StringsView};
     ///
     /// let stream = Stream::default(Capabilities::cpu_enabled());
     /// let mut engine = LevenshteinEngine::new(&["kitten"], LevenshteinSymbol::Bytes, &stream)?;
@@ -746,7 +746,7 @@ impl Stream {
     /// let candidates = StringsView::from_slices(&["sitting"]);
     /// stream.scope(|scope| engine.distances(scope, candidates, None, &mut distances, 1))?;
     /// assert_eq!(distances[0], 3);
-    /// # Ok::<(), stringzilla::sz::Status>(())
+    /// # Ok::<(), stringzilla::Status>(())
     /// ```
     pub fn scope<'env, Output>(
         &'env self,
@@ -813,7 +813,7 @@ impl Scope<'_, '_> {
 /// # Examples
 ///
 /// ```no_run
-/// use stringzilla::sz::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, Strings, StringsView, UnifiedAllocator};
+/// use stringzilla::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, Strings, StringsView, UnifiedAllocator};
 ///
 /// let cpu = Stream::default(Capabilities::cpu_enabled());
 /// let stream = Stream::new(Capabilities::cuda_enabled(0)?, 0)?;
@@ -826,7 +826,7 @@ impl Scope<'_, '_> {
 /// let mut engine = LevenshteinEngine::new(&["kitten"], LevenshteinSymbol::Bytes, &stream)?;
 /// stream.scope(|scope| engine.distances(scope, candidates.view(), None, &mut distances, 2))?;
 /// assert_eq!(distances[..], [3, 0]);
-/// # Ok::<(), stringzilla::sz::Status>(())
+/// # Ok::<(), stringzilla::Status>(())
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct UnifiedAllocator<'stream> {
@@ -988,7 +988,7 @@ mod tests {
     use alloc::string::ToString;
 
     use super::*;
-    use crate::sz;
+    use crate as sz;
 
     #[test]
     fn metadata() {

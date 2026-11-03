@@ -25,7 +25,7 @@ impl SegmenterKernel for Sentences {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::Utf8Sentences;
+/// use stringzilla::Utf8Sentences;
 ///
 /// let sentences: Vec<&[u8]> = Utf8Sentences::new(b"Hi. Bye.").collect();
 /// assert_eq!(sentences, vec![&b"Hi. "[..], &b"Bye."[..]]);

@@ -593,7 +593,7 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
 
-    use crate::sz;
+    use crate as sz;
 
     /// Decodes a hexadecimal literal into `output`, returning how many bytes were written.
     fn bytes_from_hex(hex: &str, output: &mut [u8]) -> usize {

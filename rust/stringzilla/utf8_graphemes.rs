@@ -25,7 +25,7 @@ impl SegmenterKernel for Graphemes {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::Utf8Graphemes;
+/// use stringzilla::Utf8Graphemes;
 ///
 /// let graphemes: Vec<&[u8]> = Utf8Graphemes::new(b"Hi!").collect();
 /// assert_eq!(graphemes, vec![&b"H"[..], &b"i"[..], &b"!"[..]]);

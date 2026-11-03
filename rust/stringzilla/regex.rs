@@ -69,7 +69,7 @@ extern "C" {
 /// # Examples
 ///
 /// ```rust
-/// use stringzilla::sz::{Capabilities, CaseSensitivity, Match, RegexEngine, Stream, StringsView};
+/// use stringzilla::{Capabilities, CaseSensitivity, Match, RegexEngine, Stream, StringsView};
 ///
 /// let cpu = Stream::default(Capabilities::cpu_enabled());
 /// let mut engine = RegexEngine::new(&["[0-9]+", "[a-z]+"], CaseSensitivity::Cased, &cpu).unwrap();
@@ -256,7 +256,7 @@ impl RegexEngine {
     /// the next call; an empty `groups` makes the call a size query.
     ///
     /// ```rust
-    /// use stringzilla::sz::{Capabilities, CaseSensitivity, Match, RegexEngine, Stream, StringsView};
+    /// use stringzilla::{Capabilities, CaseSensitivity, Match, RegexEngine, Stream, StringsView};
     ///
     /// let cpu = Stream::default(Capabilities::cpu_enabled());
     /// let mut engine = RegexEngine::new(&["(\\d+)-(\\d+)"], CaseSensitivity::Cased, &cpu).unwrap();

@@ -12,7 +12,7 @@ use super::*;
 /// input order). Tweak the public fields directly or chain the builder methods:
 ///
 /// ```rust
-/// use stringzilla::stringzilla as sz;
+/// use stringzilla as sz;
 ///
 /// let descending = sz::ArgsortOptions::default().reversed();
 /// let top_10_folded = sz::ArgsortOptions { uncased: true, top: Some(10), ..Default::default() };
@@ -58,7 +58,7 @@ impl ArgsortOptions {
 /// # Example
 ///
 /// ```rust
-/// use stringzilla::stringzilla as sz;
+/// use stringzilla as sz;
 ///
 /// let fruits = ["banana", "apple", "cherry"];
 /// let mut order = [0; 3];
@@ -87,7 +87,7 @@ pub fn argsort<Element: AsRef<[u8]>>(
 /// # Example
 ///
 /// ```rust
-/// use stringzilla::stringzilla as sz;
+/// use stringzilla as sz;
 ///
 /// struct Person { name: &'static str, age: u32 }
 /// let people = [
@@ -136,7 +136,7 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
 
-    use crate::sz;
+    use crate as sz;
 
     #[test]
     fn argsort_default() {

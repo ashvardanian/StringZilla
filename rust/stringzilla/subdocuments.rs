@@ -74,7 +74,7 @@ pub enum SubdocumentsFormat {
 /// # Examples
 ///
 /// ```rust
-/// use stringzilla::sz::{Capabilities, Match, Stream, StringsView, SubdocumentsEngine, SubdocumentsFormat};
+/// use stringzilla::{Capabilities, Match, Stream, StringsView, SubdocumentsEngine, SubdocumentsFormat};
 ///
 /// let cpu = Stream::default(Capabilities::cpu_enabled());
 /// let paths = ["$.store.book[?@.price < 10].title"];

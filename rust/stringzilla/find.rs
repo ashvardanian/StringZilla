@@ -349,7 +349,7 @@ impl Matcher<'_> {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::{FindMatches, Matcher};
+/// use stringzilla::{FindMatches, Matcher};
 ///
 /// let matches: Vec<&[u8]> = FindMatches::new(b"abababa", Matcher::Substring(b"aba")).collect();
 /// assert_eq!(matches, vec![b"aba", b"aba"]);
@@ -407,7 +407,7 @@ impl<'a, Overlap: Overlaps> Iterator for FindMatches<'a, Overlap> {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::{Matcher, RFindMatches};
+/// use stringzilla::{Matcher, RFindMatches};
 ///
 /// let matches: Vec<&[u8]> = RFindMatches::new(b"abababa", Matcher::Substring(b"aba")).collect();
 /// assert_eq!(matches, vec![b"aba", b"aba"]);
@@ -468,7 +468,7 @@ impl<'a, Overlap: Overlaps> Iterator for RFindMatches<'a, Overlap> {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::{FindSplits, Matcher};
+/// use stringzilla::{FindSplits, Matcher};
 ///
 /// let splits: Vec<&[u8]> = FindSplits::new(b"a,b,c,d", Matcher::Substring(b",")).collect();
 /// assert_eq!(splits, vec![b"a", b"b", b"c", b"d"]);
@@ -533,7 +533,7 @@ impl<'a, Empty: EmptySegments> Iterator for FindSplits<'a, Empty> {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::{Matcher, RFindSplits};
+/// use stringzilla::{Matcher, RFindSplits};
 ///
 /// let splits: Vec<&[u8]> = RFindSplits::new(b"a,b,c,d", Matcher::Substring(b",")).collect();
 /// assert_eq!(splits, vec![b"d", b"c", b"b", b"a"]);
@@ -598,7 +598,7 @@ impl<'a, Empty: EmptySegments> Iterator for RFindSplits<'a, Empty> {
 /// Basic usage on a string slice:
 ///
 /// ```
-/// use stringzilla::sz::StringZillableBinary;
+/// use stringzilla::StringZillableBinary;
 ///
 /// let haystack = "Hello, world!";
 /// assert_eq!(haystack.sz_find("world".as_bytes()), Some(7));
@@ -612,7 +612,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::sz::StringZillableBinary;
+    /// use stringzilla::StringZillableBinary;
     ///
     /// let haystack = "Hello, world!";
     /// assert_eq!(haystack.sz_find("world".as_bytes()), Some(7));
@@ -624,7 +624,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::sz::StringZillableBinary;
+    /// use stringzilla::StringZillableBinary;
     ///
     /// let haystack = "Hello, world, world!";
     /// assert_eq!(haystack.sz_rfind("world".as_bytes()), Some(14));
@@ -636,7 +636,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::sz::StringZillableBinary;
+    /// use stringzilla::StringZillableBinary;
     ///
     /// let haystack = "Hello, world!";
     /// assert_eq!(haystack.sz_find_byte_from("aeiou".as_bytes()), Some(1));
@@ -648,7 +648,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::sz::StringZillableBinary;
+    /// use stringzilla::StringZillableBinary;
     ///
     /// let haystack = "Hello, world!";
     /// assert_eq!(haystack.sz_rfind_byte_from("aeiou".as_bytes()), Some(8));
@@ -660,7 +660,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::sz::StringZillableBinary;
+    /// use stringzilla::StringZillableBinary;
     ///
     /// let haystack = "Hello, world!";
     /// assert_eq!(haystack.sz_find_byte_not_from("aeiou".as_bytes()), Some(0));
@@ -672,7 +672,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::sz::StringZillableBinary;
+    /// use stringzilla::StringZillableBinary;
     ///
     /// let haystack = "Hello, world!";
     /// assert_eq!(haystack.sz_rfind_byte_not_from("aeiou".as_bytes()), Some(12));
@@ -688,7 +688,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::sz::StringZillableBinary;
+    /// use stringzilla::StringZillableBinary;
     ///
     /// let haystack = b"abababa";
     /// let needle = b"aba";
@@ -709,7 +709,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::sz::StringZillableBinary;
+    /// use stringzilla::StringZillableBinary;
     ///
     /// let haystack = b"abababa";
     /// let needle = b"aba";
@@ -729,7 +729,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::sz::StringZillableBinary;
+    /// use stringzilla::StringZillableBinary;
     ///
     /// let haystack = b"a,b,c,d";
     /// let needle = b",";
@@ -748,7 +748,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::sz::StringZillableBinary;
+    /// use stringzilla::StringZillableBinary;
     ///
     /// let haystack = b"a,b,c,d";
     /// let needle = b",";
@@ -767,7 +767,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::sz::StringZillableBinary;
+    /// use stringzilla::StringZillableBinary;
     ///
     /// let haystack = b"Hello, world!";
     /// let needles = b"aeiou";
@@ -786,7 +786,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::sz::StringZillableBinary;
+    /// use stringzilla::StringZillableBinary;
     ///
     /// let haystack = b"Hello, world!";
     /// let needles = b"aeiou";
@@ -805,7 +805,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::sz::StringZillableBinary;
+    /// use stringzilla::StringZillableBinary;
     ///
     /// let haystack = b"Hello, world!";
     /// let needles = b"aeiou";
@@ -824,7 +824,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::sz::StringZillableBinary;
+    /// use stringzilla::StringZillableBinary;
     ///
     /// let haystack = b"Hello, world!";
     /// let needles = b"aeiou";
@@ -905,7 +905,7 @@ mod tests {
     use alloc::vec::Vec;
 
     use super::*;
-    use crate::sz;
+    use crate as sz;
 
     #[test]
     fn search() {

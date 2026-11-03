@@ -25,7 +25,7 @@ impl SegmenterKernel for Wordbreaks {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::Utf8Wordbreaks;
+/// use stringzilla::Utf8Wordbreaks;
 ///
 /// let words: Vec<&[u8]> = Utf8Wordbreaks::new(b"Hi, world").collect();
 /// assert_eq!(words, vec![&b"Hi"[..], &b","[..], &b" "[..], &b"world"[..]]);

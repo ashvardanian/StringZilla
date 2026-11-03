@@ -33,7 +33,7 @@ use super::*;
 ///
 /// Processing pure ASCII text (most common case, single chunk):
 /// ```
-/// use stringzilla::stringzilla as sz;
+/// use stringzilla as sz;
 /// let text = "Hello World!";
 /// let mut runes = [0u32; 16];
 /// let (bytes, count) = sz::utf8_decode(text.as_bytes(), &mut runes);
@@ -46,7 +46,7 @@ use super::*;
 /// Each call fills the output buffer or drains the input; call repeatedly (resuming at
 /// `bytes_consumed`) to process a string longer than the buffer:
 /// ```
-/// use stringzilla::stringzilla as sz;
+/// use stringzilla as sz;
 /// let text = "Hi世界";  // 2 ASCII + 2 CJK
 /// let bytes = text.as_bytes();
 /// let mut runes = [0u32; 16];
@@ -95,7 +95,7 @@ pub fn utf8_decode(text: &[u8], runes: &mut [u32]) -> (usize, usize) {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla as sz;
+/// use stringzilla as sz;
 ///
 /// let text = "Hello";
 /// assert_eq!(sz::count_utf8(text), 5);
@@ -143,7 +143,7 @@ where
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla as sz;
+/// use stringzilla as sz;
 ///
 /// let text = "Hello";
 /// assert_eq!(sz::find_nth_utf8(text, 0), Some(0)); // 'H'
@@ -189,7 +189,7 @@ where
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla as sz;
+/// use stringzilla as sz;
 ///
 /// let text = "Hello🌍";
 /// let view = sz::Utf8View::new(text.as_bytes());
@@ -247,7 +247,7 @@ impl<'a> Utf8View<'a> {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla as sz;
+/// use stringzilla as sz;
 ///
 /// let text = "Hello🌍";
 /// let view = sz::Utf8View::new(text.as_bytes());
@@ -317,7 +317,7 @@ mod tests {
     use alloc::vec::Vec;
 
     use super::*;
-    use crate::sz;
+    use crate as sz;
 
     #[test]
     fn utf8_runes_match_std_chars() {

@@ -29,7 +29,7 @@ impl SegmenterKernel for Linebreaks {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::Utf8Linebreaks;
+/// use stringzilla::Utf8Linebreaks;
 ///
 /// let lines: Vec<&[u8]> = Utf8Linebreaks::new(b"Hi\nBye").collect();
 /// assert_eq!(lines, vec![&b"Hi\n"[..], &b"Bye"[..]]);

@@ -1,12 +1,12 @@
 # StringZilla for Rust
 
 `stringzilla` is a Rust crate for fast string processing with SWAR, SIMD, and GPGPU acceleration.
-It exposes one module, `stringzilla`, re-exported under the short alias `sz`, covering two kinds of work:
+It exposes its functions, traits, and engines directly at the crate root, covering two kinds of work:
 
 - __single-string operations__ — search, counting, splitting, hashing, sorting, UTF-8 segmentation, normalization, and case folding.
 - __batch engines__ — Levenshtein distances, window overlap, and multi-pattern substring search, each a stateful cross-product engine prepared once from a batch of queries and reused across every later round.
 
-The crate is `no_std`-friendly and SIMD-accelerated; most of the single-string surface is exposed both as free functions in `sz` and as ergonomic extension-trait methods on any `AsRef<[u8]>` — `&str`, `String`, `&[u8]`, `Vec<u8>`, `Cow<str>`, and more.
+The crate is `no_std`-friendly and SIMD-accelerated; most of the single-string surface is exposed both as free functions and as ergonomic extension-trait methods on any `AsRef<[u8]>` — `&str`, `String`, `&[u8]`, `Vec<u8>`, `Cow<str>`, and more.
 The engines take slices of anything `AsRef<[u8]>` and write into caller-owned buffers at a caller-chosen stride, so a pipeline allocates once and reuses those buffers across every batch.
 
 ## Installation
@@ -21,7 +21,7 @@ Or declare it in `Cargo.toml`:
 
 ```toml
 [dependencies]
-stringzilla = "5"
+stringzilla = "6.0.0-rc.1"
 ```
 
 The crate ships the C sources, and its `build.rs` builds them into `stringzilla_static` through CMake, so no system StringZilla install is required, but CMake and a C and C++ compiler are.
@@ -39,15 +39,14 @@ Without one, the engines are host-only and every other verb is unchanged:
 
 ```toml
 [dependencies]
-stringzilla = { version = "5", features = ["cuda"] } # CUDA-accelerated engines
+stringzilla = { version = "6.0.0-rc.1", features = ["cuda"] } # CUDA-accelerated engines
 ```
 
-Import by full module name or by alias:
+Import items directly, or alias the crate as `sz`:
 
 ```rust
-use stringzilla::sz;                       // free functions and batch engines
-use stringzilla::sz::StringZillableBinary; // search/split extension methods
-use stringzilla::sz::StringZillableUnary;  // hash/segmentation extension methods
+use stringzilla as sz;
+use stringzilla::{StringZillableBinary, StringZillableUnary};
 ```
 
 ### SIMD Dispatch
@@ -93,7 +92,7 @@ A buffer of the wrong length is reported as `Status::UnexpectedDimensions` rathe
 `Byteset` is constructed from bytes and supports inversion, useful for "not from" semantics:
 
 ```rust
-use stringzilla::sz::{self, Byteset};
+use stringzilla::{self as sz, Byteset};
 
 let vowels = Byteset::from("aeiou");
 let mut punct = Byteset::new();
@@ -110,7 +109,7 @@ let _ = (everything, not_vowels, punct);
 `end` saturates rather than overflowing, and `extract` returns `None` for a span that runs past the text.
 
 ```rust
-use stringzilla::sz::IndexSpan;
+use stringzilla::IndexSpan;
 
 let span = IndexSpan::new(6, 5);
 assert_eq!(span.range(), 6..11);
@@ -140,7 +139,7 @@ pub fn rfind_byte_not_from<H, N>(haystack: H, needles: N) -> Option<usize>; // l
 ```
 
 ```rust
-use stringzilla::sz;
+use stringzilla as sz;
 
 assert_eq!(sz::find("Hello, world!", "world"), Some(7));
 assert_eq!(sz::rfind("Hello, world, world!", "world"), Some(14));
@@ -156,7 +155,7 @@ The `StringZillableBinary<'a, N>` trait provides the same operations as methods 
 The blanket impl covers every `T: AsRef<[u8]> + ?Sized`, so they work on `&str`, `String`, `&[u8]`, `Cow<str>`, and more:
 
 ```rust
-use stringzilla::sz::StringZillableBinary;
+use stringzilla::StringZillableBinary;
 
 let haystack = "Hello, world!";
 assert_eq!(haystack.sz_find("world".as_bytes()), Some(7));
@@ -181,7 +180,7 @@ pub fn find_nth_utf8<T: AsRef<[u8]>>(text: T, n: usize) -> Option<usize>;
 `count_utf8` counts codepoint start bytes with SIMD; `find_nth_utf8` returns the byte offset of the Nth, zero-indexed, codepoint without decoding the whole string:
 
 ```rust
-use stringzilla::sz;
+use stringzilla as sz;
 
 assert_eq!(sz::count_utf8("你好世界"), 4);
 assert_eq!(sz::count_utf8("Hello🌍"), 6);
@@ -200,7 +199,7 @@ pub fn utf8_uncased_order<A, B>(a: A, b: B) -> core::cmp::Ordering;             
 ```
 
 ```rust
-use stringzilla::sz;
+use stringzilla as sz;
 use std::cmp::Ordering;
 
 assert_eq!(sz::order("apple", "banana"), Ordering::Less);
@@ -229,7 +228,7 @@ fn sz_find_last_not_of(&'a self, needles: &'a N) -> RFindMatches<'a>;
 Matching yields the matched sub-slices; splitting yields the segments between matches:
 
 ```rust
-use stringzilla::sz::StringZillableBinary;
+use stringzilla::StringZillableBinary;
 
 let haystack = b"hello world hello universe";
 let needle = b"hello";
@@ -248,7 +247,7 @@ assert_eq!(rsplits, vec![b"d", b"c", b"b", b"a"]);
 `find_first_of` / `find_last_of` match any byte present in the set; the `not_of` variants match any byte absent from the set:
 
 ```rust
-use stringzilla::sz::StringZillableBinary;
+use stringzilla::StringZillableBinary;
 
 let haystack = b"hello world";
 let any: Vec<&[u8]> = haystack.sz_find_first_of(b"or").collect();
@@ -261,7 +260,7 @@ assert_eq!(other, vec![b"c", b"c", b"c", b"d"]);
 By default the split iterators __keep__ empty segments, mirroring `str::split` / `str::rsplit`; chain `.skip_empty()` to drop zero-length segments:
 
 ```rust
-use stringzilla::sz::StringZillableBinary;
+use stringzilla::StringZillableBinary;
 
 let kept: Vec<&[u8]> = b"a,,b,".sz_splits(b",").collect();
 assert_eq!(kept, vec![b"a", &b""[..], b"b", &b""[..]]);
@@ -275,7 +274,7 @@ An inverted `Byteset` matches the bytes outside the set.
 Policies are compile-time markers, opted into with builder methods: `.overlapping()` (default `NonOverlapping`, like `str::matches`) and `.skip_empty()` (default `KeepEmpty`, like `str::split`):
 
 ```rust
-use stringzilla::sz::{Byteset, FindMatches, FindSplits, Matcher};
+use stringzilla::{Byteset, FindMatches, FindSplits, Matcher};
 
 let non_overlapping: Vec<&[u8]> = FindMatches::new(b"aaaa", Matcher::Substring(b"aa")).collect();
 assert_eq!(non_overlapping, vec![&b"aa"[..], &b"aa"[..]]);
@@ -306,7 +305,7 @@ pub fn lookup_inplace<T: AsMut<[u8]>>(buffer: &mut T, table: [u8; 256]);
 `lookup` maps every byte through a 256-entry table; for example to lowercase ASCII:
 
 ```rust
-use stringzilla::sz;
+use stringzilla as sz;
 
 let mut to_lower: [u8; 256] = core::array::from_fn(|i| i as u8);
 for (upper, lower) in ('A'..='Z').zip('a'..='z') {
@@ -332,7 +331,7 @@ Both replace all non-overlapping occurrences in place, returning the replacement
 Equal-length replacements overwrite, shorter ones compact forward without allocating, and longer ones resize once and rewrite from the back:
 
 ```rust
-use stringzilla::sz::{self, Byteset};
+use stringzilla::{self as sz, Byteset};
 
 let mut buffer = b"a-b-c".to_vec();
 let n = sz::replace_all(&mut buffer, b"-", b"__").unwrap();
@@ -359,7 +358,7 @@ pub fn utf8_find_denormalized<T: AsRef<[u8]>>(source: T, form: NormalForm) -> Op
 `utf8_find_denormalized` is a fast check returning the byte offset of the first non-conforming byte, or `None` if already normalized:
 
 ```rust
-use stringzilla::sz::{self, NormalForm};
+use stringzilla::{self as sz, NormalForm};
 
 let mut dest = [0u8; 33];
 let len = sz::utf8_uncased_fold("HELLO WORLD", &mut dest).unwrap();
@@ -422,7 +421,7 @@ impl<'a> StringsView<'a> {
 
 ```rust
 use std::alloc::Global;
-use stringzilla::sz::{Byteset, Capabilities, EscapeKind, NormalForm, SplitKind, Stream, Strings, StringsError, StringsView};
+use stringzilla::{Byteset, Capabilities, EscapeKind, NormalForm, SplitKind, Stream, Strings, StringsError, StringsView};
 
 let cpu = Stream::default(Capabilities::cpu_enabled());
 let names = StringsView::from_slices(&["Ada", "Grace \"Amazing\" Hopper", "Stra\u{df}e"]);
@@ -471,7 +470,7 @@ A `Utf8UncasedNeedle` is prepared once and only read by every search, so one nee
 Matches start on codepoint boundaries: overlapping iteration and any zero-length match advance one codepoint, so an empty needle matches at every codepoint boundary, the end included, three times in `"aé"`:
 
 ```rust
-use stringzilla::sz::{self, Utf8UncasedNeedle, Utf8UncasedMatches, IndexSpan};
+use stringzilla::{self as sz, Utf8UncasedNeedle, Utf8UncasedMatches, IndexSpan};
 
 assert_eq!(sz::utf8_uncased_search("Hello WORLD", "world"), Some((6, 5)));
 
@@ -497,7 +496,7 @@ pub fn hash_multiseed_into<T: AsRef<[u8]>>(text: T, seeds: &[u64], out: &mut [u6
 `hash_multiseed_into` hashes one input under many seeds in a single pass, handy for MinHash, Count-Min sketches, and Bloom/cuckoo filters; it returns `Status::UnexpectedDimensions` if `out.len() != seeds.len()`:
 
 ```rust
-use stringzilla::sz;
+use stringzilla as sz;
 
 assert_eq!(sz::bytesum("hi"), 209);
 assert_ne!(sz::hash("Hello"), sz::hash("World"));
@@ -511,7 +510,7 @@ sz::hash_multiseed_into("token", &seeds, &mut out).unwrap();
 These are also available as `StringZillableUnary` methods on any `AsRef<[u8]>`:
 
 ```rust
-use stringzilla::sz::StringZillableUnary;
+use stringzilla::StringZillableUnary;
 
 assert_eq!(b"Hello".sz_bytesum(), 500);
 assert_ne!(b"Hello".sz_hash(), b"World".sz_hash());
@@ -522,7 +521,7 @@ assert_ne!(b"Hello".sz_hash(), b"World".sz_hash());
 `Hasher` is an incremental AES-based hasher implementing `core::hash::Hasher`:
 
 ```rust
-use stringzilla::sz::Hasher;
+use stringzilla::Hasher;
 
 let mut hasher = Hasher::new(123);
 hasher.update(b"Hello, ").update(b"world!");
@@ -537,7 +536,7 @@ The seed defaults to `0` and is deterministic across runs, so pass a random seed
 
 ```rust
 use std::collections::{HashMap, HashSet};
-use stringzilla::sz::BuildSzHasher;
+use stringzilla::BuildSzHasher;
 
 let mut counts: HashMap<&str, i32, BuildSzHasher> = HashMap::with_hasher(BuildSzHasher::with_seed(0));
 for word in ["apple", "banana", "apple"] { *counts.entry(word).or_insert(0) += 1; }
@@ -569,7 +568,7 @@ pub fn hmac_sha256_multistate<Element: AsRef<[u8]>>(
 `Sha256` supports one-shot and incremental hashing, returning a 32-byte digest:
 
 ```rust
-use stringzilla::sz::{Sha256, hmac_sha256};
+use stringzilla::{Sha256, hmac_sha256};
 
 let digest = Sha256::hash(b"Hello, world!");
 assert_eq!(digest.len(), 32);
@@ -592,7 +591,7 @@ Lanes advance in lockstep within a group, so a group costs as much as its longes
 Every length is handled correctly, but throughput is best when messages of similar length share a group, which `argsort` arranges.
 
 ```rust
-use stringzilla::sz;
+use stringzilla as sz;
 
 let texts: Vec<String> = vec!["alpha".into(), "beta".into()];
 let mut states = vec![sz::Sha256::new(); texts.len()];
@@ -626,7 +625,7 @@ The binding indexes `data` itself, so the key only projects an element onto its 
 - `top(k)` / field `top: Option<usize>` — only fully order the leading `k` elements, a top-K or partial sort.
 
 ```rust
-use stringzilla::sz::{self, ArgsortOptions};
+use stringzilla::{self as sz, ArgsortOptions};
 
 let fruits = ["banana", "apple", "cherry"];
 let mut order = [0; 3];
@@ -662,7 +661,7 @@ Both compute the intersection of two collections, which may differ in length and
 They write the matching positions into output buffers each sized at least `min(data1.len(), data2.len())`, or return `Status::UnexpectedDimensions`, and return the intersection size:
 
 ```rust
-use stringzilla::sz;
+use stringzilla as sz;
 
 let set1 = ["banana", "apple", "cherry"];
 let set2 = ["cherry", "orange", "pineapple", "banana"];
@@ -682,7 +681,7 @@ pub fn fill_random<T: AsMut<[u8]>>(buffer: &mut T, nonce: u64);
 `fill_random` overwrites a buffer with deterministic pseudo-random bytes for a given `nonce` — the same nonce always yields the same output — useful for generating test data:
 
 ```rust
-use stringzilla::sz;
+use stringzilla as sz;
 
 let mut a = vec![0u8; 10];
 let mut b = vec![1u8; 10];
@@ -713,7 +712,7 @@ A stride wider than the candidate count is what lets one round fill a sub-block 
 A `bound` of `Some(limit)` keeps a distance exact up to `limit` and reports `limit + 1` for every candidate past it, on every backend, so a round can stop early; `None` keeps every distance exact.
 
 ```rust
-use stringzilla::sz::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, StringsView};
+use stringzilla::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, StringsView};
 
 let cpu = Stream::default(Capabilities::cpu_enabled());
 let mut engine = LevenshteinEngine::new(&["kitten", "saturday"], LevenshteinSymbol::Bytes, &cpu).unwrap();
@@ -762,7 +761,7 @@ The score is asymmetric — a candidate's window occurrences count against a que
 A `radius` of `Some(share)` is the share of the longer side's windows, summed over every width, a pair may miss and still score exactly; a pair past it scores `0.0` at every width, on every backend, and `None` keeps every score exact.
 
 ```rust
-use stringzilla::sz::{Capabilities, OverlapEngine, Stream, StringsView};
+use stringzilla::{Capabilities, OverlapEngine, Stream, StringsView};
 
 let cpu = Stream::default(Capabilities::cpu_enabled());
 let mut engine = OverlapEngine::new(&["the quick brown fox"], &[4, 8], 0, &cpu).unwrap();
@@ -819,7 +818,7 @@ The sizing walk always runs, so `report()` names `matches_emitted`, the true tot
 That is what lets one call with an empty output size the next one, with no walk in between.
 
 ```rust
-use stringzilla::sz::{
+use stringzilla::{
     Capabilities, CaseSensitivity, Stream, StringsView, SubstringsEngine, Match, SubstringsOverlapPolicy,
     SUBSTRINGS_HOT_STATES_AUTO, SUBSTRINGS_MATCHES_BUDGET_AUTO,
 };
@@ -864,7 +863,7 @@ Rewriting is defined only under a cover, so an engine built with `SubstringsOver
 A `target` too small is not an error either: `report().target_length` names the bytes the rewrite needed and the buffer's contents are then unspecified, so an empty `target` is how the next call is sized.
 
 ```rust
-use stringzilla::sz::{Bm25Params, Capabilities, CaseSensitivity, Stream, StringsView, SubstringsEngine,
+use stringzilla::{Bm25Params, Capabilities, CaseSensitivity, Stream, StringsView, SubstringsEngine,
                       SubstringsOverlapPolicy, SUBSTRINGS_HOT_STATES_AUTO, SUBSTRINGS_MATCHES_BUDGET_AUTO};
 
 let cpu = Stream::default(Capabilities::cpu_enabled());
@@ -927,7 +926,7 @@ Because these iterators borrow from the input, you can stream over millions of w
 `Utf8View` offers O(1) construction, `len()` counting the codepoints on demand, `offset_of(n)` for the byte offset of the Nth codepoint, and `iter()` for batched `char` iteration:
 
 ```rust
-use stringzilla::sz::StringZillableUnary;
+use stringzilla::StringZillableUnary;
 
 let view = "Hello🌍".sz_utf8_runes();
 assert_eq!(view.len(), 6);
@@ -939,7 +938,7 @@ assert_eq!(chars, vec!['H', 'e', 'l', 'l', 'o', '🌍']);
 The boundary iterators `wordbreaks`, `graphemes`, `sentences`, and `linebreaks` __tile__ the input — every byte belongs to exactly one segment, so consecutive segments are contiguous and no empty slices appear:
 
 ```rust
-use stringzilla::sz::StringZillableUnary;
+use stringzilla::StringZillableUnary;
 
 let words: Vec<&[u8]> = b"Hi, world".sz_utf8_wordbreaks().collect();
 assert_eq!(words, vec![&b"Hi"[..], &b","[..], &b" "[..], &b"world"[..]]);
@@ -951,7 +950,7 @@ assert_eq!(sentences, vec![&b"Hi. "[..], &b"Bye."[..]]);
 `split_newlines` splits on the 8 Unicode hard newlines, treating CRLF as a single delimiter and excluding the newline from each segment, while `split_whitespaces` splits on the 25 Unicode whitespace characters and __keeps__ empty segments by default; chain `.skip_empty()` for `str::split_whitespace`-style behavior:
 
 ```rust
-use stringzilla::sz::StringZillableUnary;
+use stringzilla::StringZillableUnary;
 
 let lines: Vec<&str> = "Hello\nWorld\r\nRust"
     .sz_utf8_split_newlines()
@@ -981,7 +980,7 @@ It is total: ill-formed bytes decode to U+FFFD, so every value written is a vali
 The end of `text` is the end of the input, so a truncated final sequence also decodes to one U+FFFD and is consumed; cut a streamed input into chunks at rune boundaries:
 
 ```rust
-use stringzilla::sz;
+use stringzilla as sz;
 
 let mut runes = [0u32; 16];
 assert_eq!(sz::utf8_decode(b"a\xE2\x82", &mut runes), (3, 2));
@@ -996,7 +995,7 @@ assert_eq!(runes[0], 'H' as u32);
 The producers report `Capabilities`, a set of `Capability` bits, for the CPU or for one GPU by its runtime's own ordinal.
 
 ```rust
-use stringzilla::sz::{self, Capabilities, Capability};
+use stringzilla::{self as sz, Capabilities, Capability};
 
 let v = sz::version();
 println!("StringZilla {}.{}.{}", v.major, v.minor, v.patch);
@@ -1041,7 +1040,7 @@ A device engine reads its rounds where they lie, so its candidates and its outpu
 The conversions of a column on a GPU stream, like `escape_in` or `normalize_in`, run on that GPU and write into the allocator they are given, which has to be one the GPU reaches.
 
 ```rust
-use stringzilla::sz::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, Strings, StringsView, UnifiedAllocator};
+use stringzilla::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, Strings, StringsView, UnifiedAllocator};
 
 let cpu = Stream::default(Capabilities::cpu_enabled());
 let stream = Stream::new(Capabilities::cuda_enabled(0)?, 0)?;

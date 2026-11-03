@@ -30,7 +30,7 @@ use super::*;
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla as sz;
+/// use stringzilla as sz;
 /// let source = "HELLO WORLD";
 /// let mut dest = [0u8; 33];
 /// let len = sz::utf8_uncased_fold(source, &mut dest).unwrap();
@@ -69,7 +69,7 @@ mod tests {
     extern crate alloc;
     use alloc::vec;
 
-    use crate::sz;
+    use crate as sz;
 
     #[test]
     fn utf8_uncased_fold_golden_vectors() {

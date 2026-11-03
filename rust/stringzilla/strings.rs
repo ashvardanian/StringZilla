@@ -32,7 +32,7 @@ use super::*;
 /// To convert uppercase ASCII characters to lowercase:
 ///
 /// ```
-/// use stringzilla::stringzilla as sz;
+/// use stringzilla as sz;
 /// let mut to_lower: [u8; 256] = core::array::from_fn(|i| i as u8);
 /// for (upper, lower) in ('A'..='Z').zip('a'..='z') {
 ///     to_lower[upper as usize] = lower as u8;
@@ -80,7 +80,7 @@ where
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla as sz;
+/// use stringzilla as sz;
 /// let mut to_lower: [u8; 256] = core::array::from_fn(|i| i as u8);
 /// for (upper, lower) in ('A'..='Z').zip('a'..='z') {
 ///     to_lower[upper as usize] = lower as u8;
@@ -162,7 +162,7 @@ unsafe fn lookup_tape(source: *const u8, target: *mut u8, length: usize, table: 
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla as sz;
+/// use stringzilla as sz;
 /// let mut buffer = vec![0; 10];
 /// sz::fill_random(&mut buffer, 42);
 /// ```
@@ -421,13 +421,13 @@ const BLOCK_ALIGNMENT: usize = 16;
 ///
 /// ```
 /// use std::alloc::Global;
-/// use stringzilla::sz::{Capabilities, EscapeKind, Stream, Strings, StringsView};
+/// use stringzilla::{Capabilities, EscapeKind, Stream, Strings, StringsView};
 ///
 /// let cpu = Stream::default(Capabilities::cpu_enabled());
 /// let names = Strings::copy_in(StringsView::from_slices(&["Ada", "Grace \"Amazing\" Hopper"]), Global, &cpu)?;
 /// let fields = names.view().escape_in(EscapeKind::Csv, Global, &cpu)?;
 /// assert_eq!(fields.view().get(1), Some(&br#""Grace ""Amazing"" Hopper""#[..]));
-/// # Ok::<(), stringzilla::sz::Status>(())
+/// # Ok::<(), stringzilla::Status>(())
 /// ```
 pub struct Strings<A: Allocator = Global> {
     span: sz_strings_span_t,
@@ -458,14 +458,14 @@ impl<A: Allocator> Strings<A> {
     ///
     /// ```
     /// use std::alloc::Global;
-    /// use stringzilla::sz::{Byteset, Capabilities, SplitKind, Stream, Strings};
+    /// use stringzilla::{Byteset, Capabilities, SplitKind, Stream, Strings};
     ///
     /// let cpu = Stream::default(Capabilities::cpu_enabled());
     /// let fields = Strings::split_in(b"Ada,,Grace", Byteset::from(","), SplitKind::Each, Global, &cpu)?;
     /// assert!(fields.view().iter().eq([&b"Ada"[..], b"", b"Grace"]));
     /// let words = Strings::split_in(b" Ada  Grace ", Byteset::from(" "), SplitKind::Runs, Global, &cpu)?;
     /// assert!(words.view().iter().eq([&b"Ada"[..], b"Grace"]));
-    /// # Ok::<(), stringzilla::sz::Status>(())
+    /// # Ok::<(), stringzilla::Status>(())
     /// ```
     pub fn split_in(
         text: &[u8],
@@ -643,7 +643,7 @@ unsafe extern "C" fn free_in<A: Allocator>(
 /// # Examples
 ///
 /// ```
-/// use stringzilla::sz::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Status, Stream, StringsView};
+/// use stringzilla::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Status, Stream, StringsView};
 ///
 /// // An Arrow `String` array sliced from its second element, so its offsets start past zero.
 /// let (data, offsets) = (b"catsittingkitten", [3u32, 10, 16]);
@@ -656,7 +656,7 @@ unsafe extern "C" fn free_in<A: Allocator>(
 /// let mut distances = [0usize; 2];
 /// cpu.scope(|scope| engine.distances(scope, candidates, None, &mut distances, 2))?;
 /// assert_eq!(distances, [3, 0]);
-/// # Ok::<(), stringzilla::sz::Status>(())
+/// # Ok::<(), stringzilla::Status>(())
 /// ```
 // A slice of views reaches C as an array of its `sz_strings_view_t`.
 #[repr(transparent)]
@@ -831,14 +831,14 @@ impl<'a> StringsView<'a> {
     ///
     /// ```
     /// use std::alloc::Global;
-    /// use stringzilla::sz::{Capabilities, Stream, StringsView};
+    /// use stringzilla::{Capabilities, Stream, StringsView};
     ///
     /// let cpu = Stream::default(Capabilities::cpu_enabled());
     /// let names = StringsView::from_slices(&["Ada", "Grace"]);
     /// let years = StringsView::from_u32_tape(b"18151906", &[0, 4, 8])?;
     /// let csv = StringsView::join_columns_in(&[names, years], &[b"", b",", b""], b"\n", Global, &cpu)?;
     /// assert_eq!(csv, b"Ada,1815\nGrace,1906");
-    /// # Ok::<(), stringzilla::sz::Status>(())
+    /// # Ok::<(), stringzilla::Status>(())
     /// ```
     pub fn join_columns_in<A: Allocator>(
         columns: &[StringsView<'_>],
@@ -934,14 +934,14 @@ impl<'a> StringsView<'a> {
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::sz::{Capabilities, Stream, StringsView};
+    /// use stringzilla::{Capabilities, Stream, StringsView};
     ///
     /// let cpu = Stream::default(Capabilities::cpu_enabled());
     /// let requests = StringsView::from_slices(&["GET /index", "POST /login", "GET /login"]);
     /// let mut positions = [0usize; 3];
     /// requests.find(b"login", &mut positions, &cpu)?;
     /// assert_eq!(positions, [usize::MAX, 6, 5]);
-    /// # Ok::<(), stringzilla::sz::Status>(())
+    /// # Ok::<(), stringzilla::Status>(())
     /// ```
     pub fn find(&self, needle: &[u8], positions: &mut [usize], stream: &Stream) -> Result<(), Status> {
         if positions.len() != self.view.count {
@@ -970,14 +970,14 @@ impl<'a> StringsView<'a> {
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::sz::{self, Capabilities, Stream, StringsView};
+    /// use stringzilla::{self as sz, Capabilities, Stream, StringsView};
     ///
     /// let cpu = Stream::default(Capabilities::cpu_enabled());
     /// let keys = StringsView::from_u32_tape(b"adagrace", &[0, 3, 8])?;
     /// let mut hashes = [0u64; 2];
     /// keys.hashes(42, &mut hashes, &cpu)?;
     /// assert_eq!(hashes, [sz::hash_with_seed("ada", 42), sz::hash_with_seed("grace", 42)]);
-    /// # Ok::<(), stringzilla::sz::Status>(())
+    /// # Ok::<(), stringzilla::Status>(())
     /// ```
     pub fn hashes(&self, seed: u64, hashes: &mut [u64], stream: &Stream) -> Result<(), Status> {
         if hashes.len() != self.view.count {
@@ -1136,8 +1136,8 @@ mod tests {
     use core::cell::Cell;
     use core::ptr::NonNull;
 
-    use crate::sz;
-    use crate::sz::{Byteset, EscapeKind, SplitKind, Status, Strings, StringsError, StringsView};
+    use crate as sz;
+    use crate::{Byteset, EscapeKind, SplitKind, Status, Strings, StringsError, StringsView};
 
     const KINDS: [EscapeKind; 7] = [
         EscapeKind::Json,

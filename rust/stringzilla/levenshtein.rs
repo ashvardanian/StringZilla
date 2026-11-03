@@ -36,7 +36,7 @@ pub enum LevenshteinSymbol {
 /// # Examples
 ///
 /// ```rust
-/// use stringzilla::sz::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, StringsView};
+/// use stringzilla::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, StringsView};
 ///
 /// let cpu = Stream::default(Capabilities::cpu_enabled());
 /// let mut engine = LevenshteinEngine::new(&["kitten", "saturday"], LevenshteinSymbol::Bytes, &cpu).unwrap();

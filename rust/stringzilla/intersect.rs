@@ -14,7 +14,7 @@ use super::*;
 /// # Example
 ///
 /// ```rust
-/// use stringzilla::stringzilla as sz;
+/// use stringzilla as sz;
 ///
 /// let set1 = ["banana", "apple", "cherry"];
 /// let set2 = ["cherry", "orange", "pineapple", "banana"];
@@ -50,7 +50,7 @@ pub fn intersection<Element: AsRef<[u8]>>(
 /// # Example
 ///
 /// ```rust
-/// use stringzilla::stringzilla as sz;
+/// use stringzilla as sz;
 ///
 /// struct Person { name: &'static str, age: u32 }
 ///
@@ -118,7 +118,7 @@ mod tests {
     #[cfg(feature = "std")]
     use std::collections::HashSet;
 
-    use crate::sz;
+    use crate as sz;
 
     #[test]
     #[cfg(feature = "std")]
