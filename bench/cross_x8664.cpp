@@ -14,6 +14,7 @@ void bench_cross_x8664([[maybe_unused]] environment_t &env) {
         bench_find_kernels<sz_find_westmere, sz_rfind_westmere>(env, "westmere");
         bench_find_byte_kernels<sz_find_byte_westmere, sz_rfind_byte_westmere>(env, "westmere");
         bench_hash_kernels<sz_hash_westmere>(env, "westmere");
+        bench_hash_strings_kernels<sz_hash_strings_westmere>(env, "westmere");
         bench_hash_multiseed_kernels<sz_hash_multiseed_westmere>(env, "westmere");
         bench_hash_stream_kernels<sz_hash_state_init_westmere, sz_hash_state_update_westmere,
                                   sz_hash_state_digest_westmere>(env, "westmere");
@@ -39,9 +40,11 @@ void bench_cross_x8664([[maybe_unused]] environment_t &env) {
 #if STRINGZILLA_TARGET_HASWELL
     if (section(env, "Cross Haswell", sz_cap_haswell_k)) {
         bench_find_kernels<sz_find_haswell, sz_rfind_haswell>(env, "haswell");
+        bench_find_strings_kernels<sz_find_strings_haswell>(env, "haswell");
         bench_find_byte_kernels<sz_find_byte_haswell, sz_rfind_byte_haswell>(env, "haswell");
         bench_find_byteset_kernels<sz_find_byteset_haswell, sz_rfind_byteset_haswell>(env, "haswell");
         bench_utf8_count_kernels<sz_utf8_count_haswell>(env, "haswell");
+        bench_utf8_count_strings_kernels<sz_utf8_count_strings_haswell>(env, "haswell");
         bench_utf8_seek_kernels<sz_utf8_seek_haswell>(env, "haswell");
         bench_utf8_decode_kernels<sz_utf8_decode_haswell>(env, "haswell");
         bench_utf8_newlines_kernels<sz_utf8_newlines_haswell>(env, "haswell");
@@ -93,6 +96,7 @@ void bench_cross_x8664([[maybe_unused]] environment_t &env) {
         bench_utf8_find_denormalized_kernels<sz_utf8_find_denormalized_skylake>(env, "skylake");
         bench_bytesum_kernels<sz_bytesum_skylake>(env, "skylake");
         bench_hash_kernels<sz_hash_skylake>(env, "skylake");
+        bench_hash_strings_kernels<sz_hash_strings_skylake>(env, "skylake");
         bench_hash_stream_kernels<sz_hash_state_init_skylake, sz_hash_state_update_skylake,
                                   sz_hash_state_digest_skylake>(env, "skylake");
         bench_sha256_multistate_kernels<sz_sha256_multistate_update_skylake, sz_sha256_multistate_digest_skylake>(

@@ -25,6 +25,27 @@ extern "C" {
 #pragma GCC target("sse4.2")
 #endif
 
+/** The @p length bytes, at most a lane, of @p text, zeros past them, from overlapping reads inside
+ *  it, as a byte loop would stall on store forwarding. */
+STRINGZILLA_INLINE __m128i sz_load_short_westmere_(sz_cptr_t text, sz_size_t length) {
+    sz_u64_t low = 0, high = 0;
+    if (length >= 8) {
+        // Two half shifts, as a span of eight bytes shifts the whole word out.
+        sz_size_t const passed = 16 - length;
+        low = sz_u64_load(text).u64;
+        high = (sz_u64_load(text + length - 8).u64 >> (passed * 4)) >> (passed * 4);
+    }
+    else if (length >= 4) {
+        low = (sz_u64_t)sz_u32_load(text).u32 | ((sz_u64_t)sz_u32_load(text + length - 4).u32 << ((length - 4) * 8));
+    }
+    else if (length) {
+        sz_size_t const middle = length / 2;
+        low = (sz_u64_t)(sz_u8_t)text[0] | ((sz_u64_t)(sz_u8_t)text[middle] << (middle * 8)) |
+              ((sz_u64_t)(sz_u8_t)text[length - 1] << ((length - 1) * 8));
+    }
+    return _mm_set_epi64x((long long)high, (long long)low);
+}
+
 STRINGZILLA_INLINE sz_ordering_t sz_order_westmere_(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     //! Before optimizing this, read the "Operations Not Worth Optimizing" in Contributions Guide:
     //! https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md#general-performance-observations
@@ -62,6 +83,25 @@ STRINGZILLA_INLINE sz_bool_t sz_equal_westmere_(sz_cptr_t a, sz_cptr_t b, sz_siz
     else {
         sz_size_t byte_index = 0;
         sz_u128_vec_t a_vec, b_vec;
+        // Past 128 bytes one `ptest` covers 64 bytes, after one register for what differs early.
+        if (length >= 128) {
+            a_vec.xmm = _mm_lddqu_si128((__m128i const *)a);
+            b_vec.xmm = _mm_lddqu_si128((__m128i const *)b);
+            if (_mm_movemask_epi8(_mm_cmpeq_epi8(a_vec.xmm, b_vec.xmm)) != 0xFFFF) return sz_false_k;
+            for (byte_index = 16; byte_index + 64 + 16 <= length; byte_index += 64) {
+                __m128i const first_u8x16 = _mm_xor_si128(_mm_lddqu_si128((__m128i const *)(a + byte_index + 0)),
+                                                          _mm_lddqu_si128((__m128i const *)(b + byte_index + 0)));
+                __m128i const second_u8x16 = _mm_xor_si128(_mm_lddqu_si128((__m128i const *)(a + byte_index + 16)),
+                                                           _mm_lddqu_si128((__m128i const *)(b + byte_index + 16)));
+                __m128i const third_u8x16 = _mm_xor_si128(_mm_lddqu_si128((__m128i const *)(a + byte_index + 32)),
+                                                          _mm_lddqu_si128((__m128i const *)(b + byte_index + 32)));
+                __m128i const fourth_u8x16 = _mm_xor_si128(_mm_lddqu_si128((__m128i const *)(a + byte_index + 48)),
+                                                           _mm_lddqu_si128((__m128i const *)(b + byte_index + 48)));
+                __m128i const any_u8x16 = _mm_or_si128(_mm_or_si128(first_u8x16, second_u8x16),
+                                                       _mm_or_si128(third_u8x16, fourth_u8x16));
+                if (!_mm_testz_si128(any_u8x16, any_u8x16)) return sz_false_k;
+            }
+        }
         do {
             a_vec.xmm = _mm_lddqu_si128((__m128i const *)(a + byte_index));
             b_vec.xmm = _mm_lddqu_si128((__m128i const *)(b + byte_index));

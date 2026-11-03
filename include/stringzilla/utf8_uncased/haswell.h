@@ -17,7 +17,8 @@
 #define STRINGZILLA_UTF8_UNCASED_HASWELL_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/find/haswell.h" // `sz_find_haswell_`
+#include "stringzilla/compare/westmere.h" // `sz_load_short_westmere_`
+#include "stringzilla/find/haswell.h"     // `sz_find_haswell_`
 #include "stringzilla/utf8_uncased/serial.h"
 
 #ifdef __cplusplus
@@ -75,25 +76,22 @@ STRINGZILLA_INLINE sz_u32_t sz_utf8_uncased_mask_until_haswell_(sz_size_t n) {
     return (sz_u32_t)_bzhi_u32(0xFFFFFFFFu, (unsigned)n);
 }
 
-/** Loads up to 32 bytes through a zeroed stack buffer, never touching memory past @p source +
- *  @p length. The zero padding mirrors Ice Lake's @c maskz loads: zero bytes match no probe inside
- *  a valid window and trip no alarm, so tail chunks reuse the main-loop logic unchanged instead of
+/** Loads up to 32 bytes as two partial lanes, never touching memory past @p source + @p length.
+ *  The zero padding mirrors Ice Lake's @c maskz loads: zero bytes match no probe inside a valid
+ *  window and trip no alarm, so tail chunks reuse the main-loop logic unchanged instead of
  *  branching into a separate epilogue. */
 STRINGZILLA_INLINE __m256i sz_utf8_uncased_load_padded_ymm_haswell_(sz_cptr_t source, sz_size_t length) {
-    sz_u8_t buffer[32] = {0};
-    for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) buffer[byte_index] = (sz_u8_t)source[byte_index];
-    return _mm256_lddqu_si256((__m256i const *)buffer);
+    sz_size_t const low_length = length < 16 ? length : 16;
+    return _mm256_set_m128i(sz_load_short_westmere_(source + low_length, length - low_length),
+                            sz_load_short_westmere_(source, low_length));
 }
 
 /** Loads up to 16 bytes for candidate-window verification without over-reading the haystack: the
  *  fast full load is taken whenever 16 bytes remain, and only the last few candidates near the
- *  haystack end pay for the zero-padded stack copy. */
+ *  haystack end take the zero-padded overlapping reads. */
 STRINGZILLA_INLINE __m128i sz_utf8_uncased_load_window_xmm_haswell_(sz_cptr_t source, sz_size_t available) {
     if (available >= 16) return _mm_lddqu_si128((__m128i const *)source);
-    sz_u8_t buffer[16] = {0};
-    for (sz_size_t byte_index = 0; byte_index < available; ++byte_index)
-        buffer[byte_index] = (sz_u8_t)source[byte_index];
-    return _mm_lddqu_si128((__m128i const *)buffer);
+    return sz_load_short_westmere_(source, available);
 }
 
 #pragma endregion Shared AVX2 Helpers

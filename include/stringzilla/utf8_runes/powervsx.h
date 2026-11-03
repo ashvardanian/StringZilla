@@ -350,15 +350,21 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_once_powervsx_( //
 
     sz_size_t const chunk = length < 64 ? length : 64;
 
-    // Stage the window into a zero-padded 64-byte buffer so tail lanes read as 0x00 (a 1-byte start of value 0 that
-    // never overruns and gates clean); decodable starts never read past `chunk` by construction.
+    // A full window loads directly. A tail is staged in a zero-padded 64-byte buffer so its lanes
+    // read as 0x00, a 1-byte start of value 0 that never overruns and gates clean; decodable
+    // starts never read past `chunk`.
     sz_u512_vec_t staging_vec;
-    for (sz_size_t index = 0; index < 64; ++index) staging_vec.u8s[index] = index < chunk ? (sz_u8_t)text[index] : 0;
+    sz_u8_t const *window_bytes = (sz_u8_t const *)text;
+    if (chunk != 64) {
+        for (sz_size_t index = 0; index < 64; ++index)
+            staging_vec.u8s[index] = index < chunk ? (sz_u8_t)text[index] : 0;
+        window_bytes = staging_vec.u8s;
+    }
     __vector unsigned char input_register_u8x16[4];
-    input_register_u8x16[0] = vec_xl(0, staging_vec.u8s + 0);
-    input_register_u8x16[1] = vec_xl(0, staging_vec.u8s + 16);
-    input_register_u8x16[2] = vec_xl(0, staging_vec.u8s + 32);
-    input_register_u8x16[3] = vec_xl(0, staging_vec.u8s + 48);
+    input_register_u8x16[0] = vec_xl(0, window_bytes + 0);
+    input_register_u8x16[1] = vec_xl(0, window_bytes + 16);
+    input_register_u8x16[2] = vec_xl(0, window_bytes + 32);
+    input_register_u8x16[3] = vec_xl(0, window_bytes + 48);
 
     // ASCII fast lane: a whole window of 1-byte runes widens directly with `vec_perm` zero-extend, no classification.
     __vector unsigned char const high_bit_mask_u8x16 = vec_splats((unsigned char)0x80);
@@ -369,7 +375,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_once_powervsx_( //
     sz_u64_t const nonascii = sz_utf8_mask_combine_powervsx_(nonascii_mask_u8x16) & loaded_mask;
     if (nonascii == 0) {
         sz_size_t const want = chunk < runes_capacity ? chunk : runes_capacity;
-        for (sz_size_t index = 0; index < want; ++index) runes[index] = (sz_rune_t)staging_vec.u8s[index];
+        for (sz_size_t index = 0; index < want; ++index) runes[index] = (sz_rune_t)window_bytes[index];
         *runes_count = want;
         return text + want;
     }

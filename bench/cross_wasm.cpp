@@ -28,6 +28,7 @@ void bench_cross_wasm([[maybe_unused]] environment_t &env) {
         bench_utf8_uncased_order_kernels<sz_utf8_uncased_order_v128>(env, "v128");
         bench_bytesum_kernels<sz_bytesum_v128>(env, "v128");
         bench_hash_kernels<sz_hash_v128>(env, "v128");
+        bench_hash_strings_kernels<sz_hash_strings_v128>(env, "v128");
         bench_hash_multiseed_kernels<sz_hash_multiseed_v128>(env, "v128");
         bench_hash_stream_kernels<sz_hash_state_init_v128, sz_hash_state_update_v128, sz_hash_state_digest_v128>(
             env, "v128");
@@ -56,6 +57,7 @@ void bench_cross_wasm([[maybe_unused]] environment_t &env) {
         bench_utf8_find_denormalized_kernels<sz_utf8_find_denormalized_v128relaxed>(env, "v128relaxed");
         bench_bytesum_kernels<sz_bytesum_v128relaxed>(env, "v128relaxed");
         bench_hash_kernels<sz_hash_v128relaxed>(env, "v128relaxed");
+        bench_hash_strings_kernels<sz_hash_strings_v128relaxed>(env, "v128relaxed");
         bench_hash_multiseed_kernels<sz_hash_multiseed_v128relaxed>(env, "v128relaxed");
         bench_hash_stream_kernels<sz_hash_state_init_v128relaxed, sz_hash_state_update_v128relaxed,
                                   sz_hash_state_digest_v128relaxed>(env, "v128relaxed");

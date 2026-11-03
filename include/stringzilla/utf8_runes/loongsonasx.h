@@ -248,15 +248,19 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_once_loongsonasx_( //
     sz_size_t const chunk = length < 32 ? length : 32;
     sz_u32_t const loaded_mask = chunk >= 32 ? 0xFFFFFFFFu : (((sz_u32_t)1 << chunk) - 1u);
 
-    // Load up to 32 bytes: tail lanes beyond `chunk` are zeroed (whole buffer pre-zeroed) then
-    // byte-filled, so we never read past `length`. The 64-byte union is padded so the per-block
-    // widen never runs past the end.
+    // Load up to 32 bytes. With 64 readable the text loads directly; otherwise tail lanes past
+    // `chunk` are zeroed (whole buffer pre-zeroed) then byte-filled, never reading past `length`.
+    // The 64-byte union is padded so the per-block widen never runs past the end.
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    sz_u8_t const *window_bytes = text_u8;
     sz_u512_vec_t staging_vec;
-    __lasx_xvst(__lasx_xvreplgr2vr_b(0), staging_vec.u8s, 0);
-    __lasx_xvst(__lasx_xvreplgr2vr_b(0), staging_vec.u8s + 32, 0);
-    for (sz_size_t i = 0; i < chunk; ++i) staging_vec.u8s[i] = text_u8[i];
-    __m256i const window_u8x32 = __lasx_xvld(staging_vec.u8s, 0);
+    if (length < 64) {
+        __lasx_xvst(__lasx_xvreplgr2vr_b(0), staging_vec.u8s, 0);
+        __lasx_xvst(__lasx_xvreplgr2vr_b(0), staging_vec.u8s + 32, 0);
+        for (sz_size_t i = 0; i < chunk; ++i) staging_vec.u8s[i] = text_u8[i];
+        window_bytes = staging_vec.u8s;
+    }
+    __m256i const window_u8x32 = __lasx_xvld(window_bytes, 0);
 
     // ASCII fast lane: a window with no high bit set widens directly, as `xvmskltz_b` flags lanes
     // with the sign bit set.
@@ -266,11 +270,11 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_once_loongsonasx_( //
         sz_size_t group = 0;
         for (; group + 4 <= runes_to_unpack; group += 4) {
             __m256i const widened_ascii_u32x8 = __lasx_xvsllwil_wu_hu(
-                __lasx_xvsllwil_hu_bu(__lasx_xvld(staging_vec.u8s + group, 0), 0), 0);
+                __lasx_xvsllwil_hu_bu(__lasx_xvld(window_bytes + group, 0), 0), 0);
             __lasx_xvstelm_d(widened_ascii_u32x8, runes + group, 0, 0);
             __lasx_xvstelm_d(widened_ascii_u32x8, runes + group, 8, 1);
         }
-        for (; group < runes_to_unpack; ++group) runes[group] = (sz_rune_t)staging_vec.u8s[group];
+        for (; group < runes_to_unpack; ++group) runes[group] = (sz_rune_t)window_bytes[group];
         *runes_count = runes_to_unpack;
         return text + runes_to_unpack;
     }

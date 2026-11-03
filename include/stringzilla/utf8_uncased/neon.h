@@ -21,7 +21,8 @@
 #define STRINGZILLA_UTF8_UNCASED_NEON_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/find/neon.h" // `sz_find_neon_`
+#include "stringzilla/compare/neon.h" // `sz_load_short_neon_`
+#include "stringzilla/find/neon.h"    // `sz_find_neon_`
 #include "stringzilla/utf8_uncased/serial.h"
 #include "stringzilla/utf8_uncased_fold/neon.h" // `sz_utf8_fold_ascii_neon_`
 
@@ -107,25 +108,24 @@ STRINGZILLA_INLINE sz_u32_t sz_utf8_uncased_mask_until_neon_(sz_size_t n) {
     return n >= 32 ? 0xFFFFFFFFu : ((sz_u32_t)1 << n) - 1;
 }
 
-/** Loads up to 32 bytes through a zeroed stack buffer, never touching memory past @p source +
- *  @p length. The zero padding mirrors Ice Lake's @c maskz loads: zero bytes match no probe inside
- *  a valid window and trip no alarm, so tail chunks reuse the main-loop logic unchanged instead of
+/** Loads up to 32 bytes as two partial lanes, never touching memory past @p source + @p length.
+ *  The zero padding mirrors Ice Lake's @c maskz loads: zero bytes match no probe inside a valid
+ *  window and trip no alarm, so tail chunks reuse the main-loop logic unchanged instead of
  *  branching into a separate epilogue. */
 STRINGZILLA_INLINE uint8x16x2_t sz_utf8_uncased_load_padded_u8x16x2_neon_(sz_cptr_t source, sz_size_t length) {
-    sz_u8_t buffer[32] = {0};
-    for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) buffer[byte_index] = (sz_u8_t)source[byte_index];
-    return vld1q_u8_x2(buffer);
+    sz_size_t const low_length = length < 16 ? length : 16;
+    uint8x16x2_t padded_u8x16x2;
+    padded_u8x16x2.val[0] = sz_load_short_neon_(source, low_length);
+    padded_u8x16x2.val[1] = sz_load_short_neon_(source + low_length, length - low_length);
+    return padded_u8x16x2;
 }
 
 /** Loads up to 16 bytes for candidate-window verification without over-reading the haystack: the
  *  fast full load is taken whenever 16 bytes remain, and only the last few candidates near the
- *  haystack end pay for the zero-padded stack copy. */
+ *  haystack end take the zero-padded overlapping reads. */
 STRINGZILLA_INLINE uint8x16_t sz_utf8_uncased_load_window_u8x16_neon_(sz_cptr_t source, sz_size_t available) {
     if (available >= 16) return vld1q_u8((sz_u8_t const *)source);
-    sz_u8_t buffer[16] = {0};
-    for (sz_size_t byte_index = 0; byte_index < available; ++byte_index)
-        buffer[byte_index] = (sz_u8_t)source[byte_index];
-    return vld1q_u8(buffer);
+    return sz_load_short_neon_(source, available);
 }
 
 #pragma endregion Shared NEON Helpers

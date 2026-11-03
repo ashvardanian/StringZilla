@@ -48,6 +48,24 @@ STRINGZILLA_INLINE sz_cptr_t sz_find_byte_neon_(sz_cptr_t haystack, sz_size_t ha
     sz_u128_vec_t haystack_vec, needle_vec, matches_vec;
     needle_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)needle);
 
+    // Most matches are close, so one register goes first.
+    if (haystack_length >= 16) {
+        matches = sz_find_vreinterpretq_u8_u4_(vceqq_u8(vld1q_u8((sz_u8_t const *)haystack), needle_vec.u8x16));
+        if (matches) return haystack + sz_u64_ctz_neon_(matches) / 4;
+        haystack += 16, haystack_length -= 16;
+    }
+
+    // One narrowing covers 64 bytes, and the loop below finds the match in them.
+    while (haystack_length >= 64) {
+        uint8x16x4_t const blocks_u8x16x4 = vld1q_u8_x4((sz_u8_t const *)haystack);
+        uint8x16_t const any_u8x16 = vorrq_u8(vorrq_u8(vceqq_u8(blocks_u8x16x4.val[0], needle_vec.u8x16),
+                                                       vceqq_u8(blocks_u8x16x4.val[1], needle_vec.u8x16)),
+                                              vorrq_u8(vceqq_u8(blocks_u8x16x4.val[2], needle_vec.u8x16),
+                                                       vceqq_u8(blocks_u8x16x4.val[3], needle_vec.u8x16)));
+        if (sz_find_vreinterpretq_u8_u4_(any_u8x16)) break;
+        haystack += 64, haystack_length -= 64;
+    }
+
     while (haystack_length >= 16) {
         haystack_vec.u8x16 = vld1q_u8((sz_u8_t const *)haystack);
         matches_vec.u8x16 = vceqq_u8(haystack_vec.u8x16, needle_vec.u8x16);

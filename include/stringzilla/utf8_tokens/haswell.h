@@ -90,39 +90,41 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_newlines_haswell_( //
             lead_e2_u8x32 = _mm256_set1_epi8('\xE2'), byte_80_u8x32 = _mm256_set1_epi8('\x80'),
             x_a8_u8x32 = _mm256_set1_epi8('\xA8'), x_a9_u8x32 = _mm256_set1_epi8('\xA9');
 
+    // Next bytes stay in registers, so of a transfer per byte class only 4 remain.
     while (position + 32 <= length && count < matches_capacity) {
         __m256i window_u8x32 = _mm256_loadu_si256((__m256i const *)(text_u8 + position));
+        __m256i following_u8x32 = _mm256_permute2x128_si256(window_u8x32, window_u8x32, 0x81);
+        __m256i next_u8x32 = _mm256_alignr_epi8(following_u8x32, window_u8x32, 1);
+        __m256i after_next_u8x32 = _mm256_alignr_epi8(following_u8x32, window_u8x32, 2);
 
         // 1-byte starts: \n, \v, \f, \r.
-        sz_u32_t newline_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, newline_u8x32));
-        sz_u32_t carriage_return_mask = (sz_u32_t)_mm256_movemask_epi8(
-            _mm256_cmpeq_epi8(window_u8x32, carriage_return_u8x32));
-        sz_u32_t one_byte_mask = newline_mask |
-                                 (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, vertical_tab_u8x32)) |
-                                 (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, form_feed_u8x32)) |
-                                 carriage_return_mask;
+        __m256i newline_cmp_u8x32 = _mm256_cmpeq_epi8(window_u8x32, newline_u8x32);
+        __m256i carriage_return_cmp_u8x32 = _mm256_cmpeq_epi8(window_u8x32, carriage_return_u8x32);
+        __m256i one_byte_cmp_u8x32 = _mm256_or_si256(
+            _mm256_or_si256(newline_cmp_u8x32, carriage_return_cmp_u8x32),
+            _mm256_or_si256(_mm256_cmpeq_epi8(window_u8x32, vertical_tab_u8x32),
+                            _mm256_cmpeq_epi8(window_u8x32, form_feed_u8x32)));
 
         // 2-byte NEL (C2 85); 3-byte LS/PS (E2 80 A8/A9) - computed unconditionally (cheaper than a data-dependent gate).
-        sz_u32_t lead_c2_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, lead_c2_u8x32));
-        sz_u32_t x_85_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, x_85_u8x32));
-        sz_u32_t lead_e2_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, lead_e2_u8x32));
-        sz_u32_t byte_80_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, byte_80_u8x32));
-        sz_u32_t x_a8_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, x_a8_u8x32));
-        sz_u32_t x_a9_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, x_a9_u8x32));
-
-        sz_u32_t nel_mask = lead_c2_mask & (x_85_mask >> 1);
-        sz_u32_t lead_e280_mask = lead_e2_mask & (byte_80_mask >> 1);
-        sz_u32_t line_para_mask = lead_e280_mask & ((x_a8_mask | x_a9_mask) >> 2);
+        __m256i nel_cmp_u8x32 = _mm256_and_si256(_mm256_cmpeq_epi8(window_u8x32, lead_c2_u8x32),
+                                                 _mm256_cmpeq_epi8(next_u8x32, x_85_u8x32));
+        __m256i line_para_cmp_u8x32 = _mm256_and_si256(
+            _mm256_and_si256(_mm256_cmpeq_epi8(window_u8x32, lead_e2_u8x32),
+                             _mm256_cmpeq_epi8(next_u8x32, byte_80_u8x32)),
+            _mm256_or_si256(_mm256_cmpeq_epi8(after_next_u8x32, x_a8_u8x32),
+                            _mm256_cmpeq_epi8(after_next_u8x32, x_a9_u8x32)));
         // CRLF: a CR whose next lane is LF is a single 2-byte match; its trailing LF must not also be emitted.
-        sz_u32_t crlf_mask = carriage_return_mask & (newline_mask >> 1);
-        sz_u32_t lf_of_crlf_mask = newline_mask & (carriage_return_mask << 1);
+        sz_u32_t crlf_mask = (sz_u32_t)_mm256_movemask_epi8(
+            _mm256_and_si256(carriage_return_cmp_u8x32, _mm256_cmpeq_epi8(next_u8x32, newline_u8x32)));
 
-        sz_u32_t two_byte_starts = crlf_mask | nel_mask;
-        sz_u32_t three_byte_starts = line_para_mask;
-        sz_u32_t starts = (one_byte_mask | nel_mask | line_para_mask) & ~lf_of_crlf_mask;
+        sz_u32_t two_byte_starts = crlf_mask | (sz_u32_t)_mm256_movemask_epi8(nel_cmp_u8x32);
+        sz_u32_t three_byte_starts = (sz_u32_t)_mm256_movemask_epi8(line_para_cmp_u8x32);
+        sz_u32_t starts = (sz_u32_t)_mm256_movemask_epi8(_mm256_or_si256(
+                              _mm256_or_si256(one_byte_cmp_u8x32, nel_cmp_u8x32), line_para_cmp_u8x32)) &
+                          ~(crlf_mask << 1);
         sz_u32_t start_bits = starts & ((1u << 30) - 1); // trust lanes [0,29]; step 30
         // Suppress a leading LF already consumed by a CRLF that straddled the previous window edge.
-        if (position != 0 && text_u8[position - 1] == '\r') start_bits &= ~(newline_mask & 1u);
+        if (position != 0 && text_u8[position - 1] == '\r' && text_u8[position] == '\n') start_bits &= ~1u;
 
         sz_size_t const window_matches = (sz_size_t)_mm_popcnt_u32(start_bits);
         sz_size_t const emit_count = sz_min_of_two(window_matches, matches_capacity - count);
@@ -431,58 +433,89 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_delimiters_haswell_( //
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t base = 0, count = 0;
 
+    __m256i const row0_u8x32 = _mm256_broadcastsi128_si256(
+        _mm_loadu_si128((__m128i const *)sz_utf8_delimiter_bmp_bitmaps_));
     while (base < length && count < matches_capacity) {
-        sz_utf8_rune_window_haswell_t const decoded = sz_utf8_rune_decode_window_haswell_(text_u8 + base,
-                                                                                          length - base);
-        sz_size_t const loaded = decoded.loaded;
+        sz_size_t const window_length = sz_min_of_two(length - base, (sz_size_t)64);
+        __m256i window_low_u8x32, window_high_u8x32;
+        sz_utf8_load_window_haswell_(text_u8 + base, window_length, &window_low_u8x32, &window_high_u8x32);
 
-        __m256i next1_lo_u8x32, next1_hi_u8x32, next2_lo_u8x32, next2_hi_u8x32;
-        sz_utf8_forward_neighbours_haswell_(decoded.window_low_u8x32, decoded.window_high_u8x32, &next1_lo_u8x32,
-                                            &next1_hi_u8x32, &next2_lo_u8x32, &next2_hi_u8x32);
-        __m256i next3_lo_u8x32, next3_hi_u8x32;
-        sz_delimiter_forward_neighbour3_haswell_(decoded.window_low_u8x32, decoded.window_high_u8x32, &next3_lo_u8x32,
-                                                 &next3_hi_u8x32);
+        sz_size_t byte_span = window_length;
+        sz_u64_t hits, two_byte_starts = 0, three_byte_starts = 0, four_byte_starts = 0;
 
-        // Effective-window trim: a multi-byte lead near the 64-byte edge whose span runs past `loaded` would decode
-        // against a wrapped neighbour; defer it to the next window. The lowest overrunning start bounds the span.
-        sz_size_t byte_span = loaded;
-        if (loaded >= 64) {
-            sz_u64_t const overrun = (decoded.two_byte_starts & ~sz_u64_mask_until_serial_(loaded - 1)) |
-                                     (decoded.three_byte_starts & ~sz_u64_mask_until_serial_(loaded - 2)) |
-                                     (decoded.four_byte_starts & ~sz_u64_mask_until_serial_(loaded - 3));
-            byte_span = overrun ? (sz_size_t)_tzcnt_u64(overrun) : loaded;
+        // All-ASCII window: every loaded lane is a valid one-byte start, and membership is one
+        // 16-byte `vpshufb` over the first half of bitmap row 0 (`bmp_block_[0] == 0`, and ASCII
+        // columns stop at (0x7F >> 3) == 15).
+        if (!_mm256_movemask_epi8(_mm256_or_si256(window_low_u8x32, window_high_u8x32))) {
+            __m256i const column_mask_u8x32 = _mm256_set1_epi8(0x0F);
+            __m256i const columns_low_u8x32 = _mm256_and_si256(_mm256_srli_epi16(window_low_u8x32, 3),
+                                                               column_mask_u8x32);
+            __m256i const columns_high_u8x32 = _mm256_and_si256(_mm256_srli_epi16(window_high_u8x32, 3),
+                                                                column_mask_u8x32);
+            hits = sz_utf8_mask_combine_haswell_(
+                       sz_delimiter_test_bit_haswell_(_mm256_shuffle_epi8(row0_u8x32, columns_low_u8x32),
+                                                      window_low_u8x32),
+                       sz_delimiter_test_bit_haswell_(_mm256_shuffle_epi8(row0_u8x32, columns_high_u8x32),
+                                                      window_high_u8x32)) &
+                   sz_u64_mask_until_serial_(window_length);
         }
-        sz_u64_t const span_mask = sz_u64_mask_until_serial_(byte_span);
+        else {
+            sz_utf8_rune_window_haswell_t const decoded = sz_utf8_rune_decode_window_haswell_(text_u8 + base,
+                                                                                              length - base);
+            sz_size_t const loaded = decoded.loaded;
 
-        sz_u64_t const valid_starts = sz_delimiter_valid_starts_haswell_(&decoded, next1_lo_u8x32, next1_hi_u8x32,
-                                                                         next2_lo_u8x32, next2_hi_u8x32, next3_lo_u8x32,
-                                                                         next3_hi_u8x32) &
-                                      decoded.codepoint_starts & span_mask;
+            __m256i next1_lo_u8x32, next1_hi_u8x32, next2_lo_u8x32, next2_hi_u8x32;
+            sz_utf8_forward_neighbours_haswell_(decoded.window_low_u8x32, decoded.window_high_u8x32, &next1_lo_u8x32,
+                                                &next1_hi_u8x32, &next2_lo_u8x32, &next2_hi_u8x32);
+            __m256i next3_lo_u8x32, next3_hi_u8x32;
+            sz_delimiter_forward_neighbour3_haswell_(decoded.window_low_u8x32, decoded.window_high_u8x32,
+                                                     &next3_lo_u8x32, &next3_hi_u8x32);
 
-        // BMP membership for every lane; astral membership blended onto the four-byte lanes (gated on presence).
-        sz_u64_t member = sz_utf8_mask_combine_haswell_(
-            sz_delimiter_bmp_membership_haswell_(decoded.window_low_u8x32, decoded.high_byte_low_u8x32,
-                                                 decoded.low_byte_low_u8x32),
-            sz_delimiter_bmp_membership_haswell_(decoded.window_high_u8x32, decoded.high_byte_high_u8x32,
-                                                 decoded.low_byte_high_u8x32));
-        sz_u64_t const four_byte = decoded.four_byte_starts & span_mask;
-        if (four_byte) {
-            sz_u64_t const astral_member = sz_utf8_mask_combine_haswell_(
-                sz_delimiter_astral_membership_haswell_(decoded.window_low_u8x32, next1_lo_u8x32, next2_lo_u8x32,
-                                                        next3_lo_u8x32),
-                sz_delimiter_astral_membership_haswell_(decoded.window_high_u8x32, next1_hi_u8x32, next2_hi_u8x32,
-                                                        next3_hi_u8x32));
-            member = (member & ~four_byte) | (astral_member & four_byte);
+            // Effective-window trim: a multi-byte lead near the 64-byte edge whose span runs past
+            // `loaded` would decode against a wrapped neighbour; defer it to the next window. The
+            // lowest overrunning start bounds the span.
+            if (loaded >= 64) {
+                sz_u64_t const overrun = (decoded.two_byte_starts & ~sz_u64_mask_until_serial_(loaded - 1)) |
+                                         (decoded.three_byte_starts & ~sz_u64_mask_until_serial_(loaded - 2)) |
+                                         (decoded.four_byte_starts & ~sz_u64_mask_until_serial_(loaded - 3));
+                byte_span = overrun ? (sz_size_t)_tzcnt_u64(overrun) : loaded;
+            }
+            sz_u64_t const span_mask = sz_u64_mask_until_serial_(byte_span);
+
+            sz_u64_t const valid_starts = sz_delimiter_valid_starts_haswell_(&decoded, next1_lo_u8x32, next1_hi_u8x32,
+                                                                             next2_lo_u8x32, next2_hi_u8x32,
+                                                                             next3_lo_u8x32, next3_hi_u8x32) &
+                                          decoded.codepoint_starts & span_mask;
+
+            // BMP membership for every lane; astral membership blended onto the four-byte lanes,
+            // gated on presence.
+            sz_u64_t member = sz_utf8_mask_combine_haswell_(
+                sz_delimiter_bmp_membership_haswell_(decoded.window_low_u8x32, decoded.high_byte_low_u8x32,
+                                                     decoded.low_byte_low_u8x32),
+                sz_delimiter_bmp_membership_haswell_(decoded.window_high_u8x32, decoded.high_byte_high_u8x32,
+                                                     decoded.low_byte_high_u8x32));
+            sz_u64_t const four_byte = decoded.four_byte_starts & span_mask;
+            if (four_byte) {
+                sz_u64_t const astral_member = sz_utf8_mask_combine_haswell_(
+                    sz_delimiter_astral_membership_haswell_(decoded.window_low_u8x32, next1_lo_u8x32, next2_lo_u8x32,
+                                                            next3_lo_u8x32),
+                    sz_delimiter_astral_membership_haswell_(decoded.window_high_u8x32, next1_hi_u8x32, next2_hi_u8x32,
+                                                            next3_hi_u8x32));
+                member = (member & ~four_byte) | (astral_member & four_byte);
+            }
+
+            hits = member & valid_starts;
+            two_byte_starts = decoded.two_byte_starts;
+            three_byte_starts = decoded.three_byte_starts;
+            four_byte_starts = decoded.four_byte_starts;
         }
-
-        sz_u64_t hits = member & valid_starts;
         while (hits && count < matches_capacity) {
             sz_size_t const lane = (sz_size_t)_tzcnt_u64(hits);
             hits &= hits - 1;
             sz_size_t length_at_lane = 1;
-            length_at_lane += (decoded.two_byte_starts >> lane) & 1;
-            length_at_lane += ((decoded.three_byte_starts >> lane) & 1) * 2;
-            length_at_lane += ((decoded.four_byte_starts >> lane) & 1) * 3;
+            length_at_lane += (two_byte_starts >> lane) & 1;
+            length_at_lane += ((three_byte_starts >> lane) & 1) * 2;
+            length_at_lane += ((four_byte_starts >> lane) & 1) * 3;
             match_offsets[count] = base + lane, match_lengths[count] = length_at_lane, ++count;
         }
         // Output buffer full: resume past the last emitted match, never at the window edge. The window's last hit

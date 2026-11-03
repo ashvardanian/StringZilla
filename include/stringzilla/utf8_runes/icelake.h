@@ -520,8 +520,27 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_count_icelake_(sz_cptr_t text, sz_size_t le
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t char_count = 0;
 
-    // Process 64 bytes at a time
+    // Below 256 bytes the reduction out of the lanes costs more than the popcounts it saves.
     sz_u512_vec_t text_vec;
+    if (length >= 256) {
+        __m512i const one_u8x64 = _mm512_set1_epi8(1);
+        __m512i counts_u64x8 = _mm512_setzero_si512();
+        // Each 64 bytes add at most 1 to a lane, so 255 of them fit before `vpsadbw` widens them.
+        while (length >= 64) {
+            sz_size_t const chunks = sz_min_of_two(length / 64, (sz_size_t)255);
+            __m512i starts_u8x64 = _mm512_setzero_si512();
+            for (sz_size_t chunk = 0; chunk != chunks; ++chunk, text_u8 += 64) {
+                text_vec.zmm = _mm512_loadu_epi8(text_u8);
+                __mmask64 start_byte_mask_m64 = sz_utf8_rune_start_mask_icelake_(text_vec.zmm, ~(__mmask64)0);
+                starts_u8x64 = _mm512_mask_add_epi8(starts_u8x64, start_byte_mask_m64, starts_u8x64, one_u8x64);
+            }
+            counts_u64x8 = _mm512_add_epi64(counts_u64x8, _mm512_sad_epu8(starts_u8x64, _mm512_setzero_si512()));
+            length -= chunks * 64;
+        }
+        char_count = (sz_size_t)_mm512_reduce_add_epi64(counts_u64x8);
+    }
+
+    // Process 64 bytes at a time
     while (length >= 64) {
         text_vec.zmm = _mm512_loadu_epi8(text_u8);
         __mmask64 start_byte_mask_m64 = sz_utf8_rune_start_mask_icelake_(text_vec.zmm, ~(__mmask64)0);

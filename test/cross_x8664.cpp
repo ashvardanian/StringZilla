@@ -34,6 +34,7 @@ std::size_t test_cross_x8664(environment_t const &env) {
         .init_kernel = sz_hash_state_init_westmere,
         .update_kernel = sz_hash_state_update_westmere,
         .digest_kernel = sz_hash_state_digest_westmere,
+        .strings_kernel = sz_hash_strings_westmere,
     };
     check("test_hash_equivalence_westmere", [&](test_context_t &context) {
         check_hash_equivalence_(context, hash_westmere);
@@ -109,6 +110,7 @@ std::size_t test_cross_x8664(environment_t const &env) {
         .rfind_byte = sz_rfind_byte_haswell,
         .find_byteset = sz_find_byteset_haswell,
         .rfind_byteset = sz_rfind_byteset_haswell,
+        .find_strings = sz_find_strings_haswell,
     };
     check("test_find_unit_haswell", [&] { check_find_unit_(find_haswell); });
     check("test_find_equivalence_haswell",
@@ -173,7 +175,7 @@ std::size_t test_cross_x8664(environment_t const &env) {
           [&](test_context_t &context) { check_subdocuments_equivalence_(context, subdocuments_haswell); });
 
     constexpr utf8_runes_backend_t utf8_runes_haswell {"haswell", sz_utf8_count_haswell, sz_utf8_seek_haswell,
-                                                       sz_utf8_decode_haswell};
+                                                       sz_utf8_decode_haswell, sz_utf8_count_strings_haswell};
     check("test_utf8_runes_unit_haswell", [&] { check_utf8_runes_unit_(utf8_runes_haswell); });
     check("test_utf8_runes_safety_haswell",
           [&](test_context_t &context) { check_utf8_runes_safety_(context, utf8_runes_haswell); });
@@ -266,6 +268,7 @@ std::size_t test_cross_x8664(environment_t const &env) {
         .init_kernel = sz_hash_state_init_skylake,
         .update_kernel = sz_hash_state_update_skylake,
         .digest_kernel = sz_hash_state_digest_skylake,
+        .strings_kernel = sz_hash_strings_skylake,
     };
     constexpr sha256_multistate_backend_t sha256_multistate_skylake {
         .update_kernel = sz_sha256_multistate_update_skylake,

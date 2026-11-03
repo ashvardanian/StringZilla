@@ -74,6 +74,28 @@ STRINGZILLA_INLINE sz_bool_t sz_equal_haswell_(sz_cptr_t a, sz_cptr_t b, sz_size
     else {
         sz_size_t byte_index = 0;
         sz_u256_vec_t a_vec, b_vec;
+        // Past 256 bytes one `vptest` covers 128 bytes, after one register for what differs early.
+        if (length >= 256) {
+            a_vec.ymm = _mm256_lddqu_si256((__m256i const *)a);
+            b_vec.ymm = _mm256_lddqu_si256((__m256i const *)b);
+            if (_mm256_movemask_epi8(_mm256_cmpeq_epi8(a_vec.ymm, b_vec.ymm)) != (int)0xFFFFFFFF) return sz_false_k;
+            for (byte_index = 32; byte_index + 128 + 32 <= length; byte_index += 128) {
+                __m256i const first_u8x32 = _mm256_xor_si256(_mm256_lddqu_si256((__m256i const *)(a + byte_index + 0)),
+                                                             _mm256_lddqu_si256((__m256i const *)(b + byte_index + 0)));
+                __m256i const second_u8x32 = _mm256_xor_si256(
+                    _mm256_lddqu_si256((__m256i const *)(a + byte_index + 32)),
+                    _mm256_lddqu_si256((__m256i const *)(b + byte_index + 32)));
+                __m256i const third_u8x32 = _mm256_xor_si256(
+                    _mm256_lddqu_si256((__m256i const *)(a + byte_index + 64)),
+                    _mm256_lddqu_si256((__m256i const *)(b + byte_index + 64)));
+                __m256i const fourth_u8x32 = _mm256_xor_si256(
+                    _mm256_lddqu_si256((__m256i const *)(a + byte_index + 96)),
+                    _mm256_lddqu_si256((__m256i const *)(b + byte_index + 96)));
+                __m256i const any_u8x32 = _mm256_or_si256(_mm256_or_si256(first_u8x32, second_u8x32),
+                                                          _mm256_or_si256(third_u8x32, fourth_u8x32));
+                if (!_mm256_testz_si256(any_u8x32, any_u8x32)) return sz_false_k;
+            }
+        }
         do {
             a_vec.ymm = _mm256_lddqu_si256((__m256i const *)(a + byte_index));
             b_vec.ymm = _mm256_lddqu_si256((__m256i const *)(b + byte_index));

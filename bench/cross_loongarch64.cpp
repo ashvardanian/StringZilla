@@ -28,6 +28,7 @@ void bench_cross_loongarch64([[maybe_unused]] environment_t &env) {
         bench_utf8_uncased_order_kernels<sz_utf8_uncased_order_loongsonasx>(env, "loongsonasx");
         bench_bytesum_kernels<sz_bytesum_loongsonasx>(env, "loongsonasx");
         bench_hash_kernels<sz_hash_loongsonasx>(env, "loongsonasx");
+        bench_hash_strings_kernels<sz_hash_strings_loongsonasx>(env, "loongsonasx");
         bench_hash_stream_kernels<sz_hash_state_init_loongsonasx, sz_hash_state_update_loongsonasx,
                                   sz_hash_state_digest_loongsonasx>(env, "loongsonasx");
         bench_sha256_kernels<sz_sha256_state_init_loongsonasx, sz_sha256_state_update_loongsonasx,

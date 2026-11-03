@@ -139,6 +139,7 @@ std::size_t test_cross_riscv64(environment_t const &env) {
         .init_kernel = sz_hash_state_init_rvvcrypto,
         .update_kernel = sz_hash_state_update_rvvcrypto,
         .digest_kernel = sz_hash_state_digest_rvvcrypto,
+        .strings_kernel = sz_hash_strings_rvvcrypto,
     };
     constexpr sha256_backend_t sha256_rvvcrypto {
         .init_kernel = sz_sha256_state_init_rvvcrypto,

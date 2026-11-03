@@ -48,6 +48,7 @@ std::size_t test_cross_ppc64(environment_t const &env) {
         .init_kernel = sz_hash_state_init_powervsx,
         .update_kernel = sz_hash_state_update_powervsx,
         .digest_kernel = sz_hash_state_digest_powervsx,
+        .strings_kernel = sz_hash_strings_powervsx,
     };
     constexpr sha256_backend_t sha256_powervsx {
         .init_kernel = sz_sha256_state_init_powervsx,

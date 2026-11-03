@@ -4,6 +4,8 @@
  *  @date September 29, 2026
  *  @brief Every family's @c sve2aes kernels, defined once for the StringZilla library.
  */
+#undef STRINGZILLA_TARGET_NEON
+#define STRINGZILLA_TARGET_NEON 0
 #undef STRINGZILLA_TARGET_NEONAES
 #define STRINGZILLA_TARGET_NEONAES 0
 #include "stringzilla/stringzilla.h"

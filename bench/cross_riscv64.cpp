@@ -43,6 +43,7 @@ void bench_cross_riscv64([[maybe_unused]] environment_t &env) {
 #if STRINGZILLA_TARGET_RVVCRYPTO
     if (section(env, "Cross RVV Crypto", sz_cap_rvvcrypto_k)) {
         bench_hash_kernels<sz_hash_rvvcrypto>(env, "rvvcrypto");
+        bench_hash_strings_kernels<sz_hash_strings_rvvcrypto>(env, "rvvcrypto");
         bench_hash_multiseed_kernels<sz_hash_multiseed_rvvcrypto>(env, "rvvcrypto");
         bench_sha256_kernels<sz_sha256_state_init_rvvcrypto, sz_sha256_state_update_rvvcrypto,
                              sz_sha256_state_digest_rvvcrypto>(env, "rvvcrypto");

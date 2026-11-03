@@ -712,8 +712,10 @@ STRINGZILLA_INLINE void sz_sha256_multistate_digest_lanes_skylake_(sz_sha256_sta
             sz_size_t const source_lane = lane_index < active_lanes_count ? lane_index : 0;
             sz_size_t const buffered = states[source_lane].block_length;
             __mmask64 const buffered_m64 = sz_u64_clamp_mask_until_(buffered);
-            staged_vec[lane_index].zmm = _mm512_maskz_loadu_epi8(buffered_m64, (void const *)states[source_lane].block);
-            staged_vec[lane_index].u8s[buffered] = 0x80;
+            // A byte write here would stall the whole-register load of compress.
+            staged_vec[lane_index].zmm = _mm512_mask_set1_epi8(
+                _mm512_maskz_loadu_epi8(buffered_m64, (void const *)states[source_lane].block),
+                (__mmask64)((sz_u64_t)1 << buffered), (char)0x80);
         }
         sz_sha256_compress_skylake_(hashes_u32x16, staged_blocks, overflow_m16);
     }
@@ -726,9 +728,11 @@ STRINGZILLA_INLINE void sz_sha256_multistate_digest_lanes_skylake_(sz_sha256_sta
         // block carries nothing but the trailing length.
         int const carried = (overflow_m16 >> lane_index) & 1;
         __mmask64 const buffered_m64 = carried ? (__mmask64)0 : sz_u64_clamp_mask_until_(buffered);
-        staged_vec[lane_index].zmm = _mm512_maskz_loadu_epi8(buffered_m64, (void const *)states[source_lane].block);
-        if (!carried) staged_vec[lane_index].u8s[buffered] = 0x80;
-        staged_vec[lane_index].u64s[7] = sz_u64_bytes_reverse(bit_length);
+        __mmask64 const terminator_m64 = carried ? (__mmask64)0 : (__mmask64)((sz_u64_t)1 << buffered);
+        staged_vec[lane_index].zmm = _mm512_mask_set1_epi64(
+            _mm512_mask_set1_epi8(_mm512_maskz_loadu_epi8(buffered_m64, (void const *)states[source_lane].block),
+                                  terminator_m64, (char)0x80),
+            (__mmask8)0x80, (long long)sz_u64_bytes_reverse(bit_length));
     }
     sz_sha256_compress_skylake_(hashes_u32x16, staged_blocks, (__mmask16)0xFFFF);
 
@@ -786,6 +790,21 @@ STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_skylake(sz_c
                                                                             sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *hash = sz_hash_skylake_(start, length, seed);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_hash_strings_skylake(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                    sz_size_t count, sz_u64_t seed, sz_u64_t *hashes,
+                                                    sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    // Views arrive 64 at a time, as an accessor costs one indirect call per batch.
+    sz_string_view_t views[64];
+    for (sz_size_t row = 0; row != count; ++row) {
+        if (row % 64 == 0 && order)
+            sz_strings_get_(strings, order + row, sz_min_of_two(count - row, (sz_size_t)64), views);
+        if (row % 64 == 0 && !order) sz_strings_get_block_(strings, row, views);
+        hashes[row] = sz_hash_skylake_(views[row % 64].start, views[row % 64].length, seed);
+    }
     return sz_success_k;
 }
 

@@ -8,6 +8,7 @@
 #define STRINGZILLA_UTF8_RUNES_HASWELL_H_
 
 #include "stringzilla/types.h"
+#include "stringzilla/compare/westmere.h" // `sz_load_short_westmere_`
 #include "stringzilla/utf8_runes/serial.h"
 
 #ifdef __cplusplus
@@ -36,6 +37,31 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_count_haswell_(sz_cptr_t text, sz_size_t le
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t char_count = 0;
+
+    // Below 512 bytes the reduction out of the lanes costs more than the popcounts it saves.
+    if (length >= 512) {
+        __m256i counts_u64x4 = _mm256_setzero_si256();
+        // Each 128 bytes add at most 4 to a lane, so 63 of them fit before `vpsadbw` widens them.
+        while (length >= 128) {
+            sz_size_t const chunks = sz_min_of_two(length / 128, (sz_size_t)63);
+            __m256i starts_u8x32 = _mm256_setzero_si256();
+            for (sz_size_t chunk = 0; chunk != chunks; ++chunk, text_u8 += 128) {
+                __m256i const first_u8x32 = _mm256_loadu_si256((__m256i const *)(text_u8 + 0));
+                __m256i const second_u8x32 = _mm256_loadu_si256((__m256i const *)(text_u8 + 32));
+                __m256i const third_u8x32 = _mm256_loadu_si256((__m256i const *)(text_u8 + 64));
+                __m256i const fourth_u8x32 = _mm256_loadu_si256((__m256i const *)(text_u8 + 96));
+                starts_u8x32 = _mm256_sub_epi8(starts_u8x32, _mm256_cmpgt_epi8(first_u8x32, start_threshold_vec.ymm));
+                starts_u8x32 = _mm256_sub_epi8(starts_u8x32, _mm256_cmpgt_epi8(second_u8x32, start_threshold_vec.ymm));
+                starts_u8x32 = _mm256_sub_epi8(starts_u8x32, _mm256_cmpgt_epi8(third_u8x32, start_threshold_vec.ymm));
+                starts_u8x32 = _mm256_sub_epi8(starts_u8x32, _mm256_cmpgt_epi8(fourth_u8x32, start_threshold_vec.ymm));
+            }
+            counts_u64x4 = _mm256_add_epi64(counts_u64x4, _mm256_sad_epu8(starts_u8x32, _mm256_setzero_si256()));
+            length -= chunks * 128;
+        }
+        __m128i const counts_u64x2 = _mm_add_epi64(_mm256_castsi256_si128(counts_u64x4),
+                                                   _mm256_extracti128_si256(counts_u64x4, 1));
+        char_count = (sz_size_t)_mm_cvtsi128_si64(counts_u64x2) + (sz_size_t)_mm_extract_epi64(counts_u64x2, 1);
+    }
 
     // Process 32 bytes at a time
     sz_u256_vec_t text_vec;
@@ -148,7 +174,7 @@ STRINGZILLA_INLINE sz_u64_t sz_utf8_mask_combine_haswell_(__m256i low_half_u8x32
 }
 
 /** Masked 64-byte load into two halves; bytes [loaded, 64) read as zero (the AVX2 stand-in for
- *  @c _mm512_maskz_loadu_epi8). A small stack staging union covers the partial tail so we never
+ *  @c _mm512_maskz_loadu_epi8). Whole quarters load directly and one partial follows, so we never
  *  read past <tt>text + loaded</tt>. */
 STRINGZILLA_INLINE void sz_utf8_load_window_haswell_( //
     sz_u8_t const *text, sz_size_t loaded, __m256i *out_low_u8x32, __m256i *out_high_u8x32) {
@@ -157,12 +183,13 @@ STRINGZILLA_INLINE void sz_utf8_load_window_haswell_( //
         *out_high_u8x32 = _mm256_loadu_si256((__m256i const *)(text + 32));
         return;
     }
-    sz_u512_vec_t staging_vec;
-    staging_vec.ymms[0] = _mm256_setzero_si256();
-    staging_vec.ymms[1] = _mm256_setzero_si256();
-    for (sz_size_t i = 0; i < loaded; ++i) staging_vec.u8s[i] = text[i];
-    *out_low_u8x32 = staging_vec.ymms[0];
-    *out_high_u8x32 = staging_vec.ymms[1];
+    sz_size_t const whole_quarters = loaded / 16;
+    __m128i quarters_u8x16[4] = {_mm_setzero_si128(), _mm_setzero_si128(), _mm_setzero_si128(), _mm_setzero_si128()};
+    for (sz_size_t quarter = 0; quarter != whole_quarters; ++quarter)
+        quarters_u8x16[quarter] = _mm_loadu_si128((__m128i const *)(text + quarter * 16));
+    quarters_u8x16[whole_quarters] = sz_load_short_westmere_((sz_cptr_t)text + whole_quarters * 16, loaded % 16);
+    *out_low_u8x32 = _mm256_set_m128i(quarters_u8x16[1], quarters_u8x16[0]);
+    *out_high_u8x32 = _mm256_set_m128i(quarters_u8x16[3], quarters_u8x16[2]);
 }
 
 /** Forward neighbours <tt>next1[i] = window[i+1]</tt>, <tt>next2[i] = window[i+2]</tt> over all 64 lanes, with
@@ -671,10 +698,9 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_once_haswell_( //
     __m256i window_u8x32; // The 32-byte window; lanes [chunk, 32) read as zero (the AVX2 masked-tail stand-in).
     if (chunk >= 32) { window_u8x32 = _mm256_loadu_si256((__m256i const *)text); }
     else {
-        sz_u256_vec_t staging_vec;
-        staging_vec.ymm = _mm256_setzero_si256();
-        for (sz_size_t i = 0; i < chunk; ++i) staging_vec.u8s[i] = (sz_u8_t)text[i];
-        window_u8x32 = staging_vec.ymm;
+        sz_size_t const low_length = chunk < 16 ? chunk : 16;
+        window_u8x32 = _mm256_set_m128i(sz_load_short_westmere_(text + low_length, chunk - low_length),
+                                        sz_load_short_westmere_(text, low_length));
     }
 
     // ASCII fast lane: a whole window of 1-byte runes widens directly with `vpmovzxbd`, no classification needed.
@@ -946,6 +972,79 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_haswell_( //
 
 #pragma endregion Total vectorized decode
 
+/** The Keiser-Lemire errors of the 32 bytes of @p text_u8x32 after the block @p previous_u8x32,
+ *  nonzero where the bytes are ill-formed. */
+STRINGZILLA_INLINE __m256i sz_utf8_errors_haswell_(__m256i text_u8x32, __m256i previous_u8x32) {
+    __m256i const nibble_u8x32 = _mm256_set1_epi8(15);
+    __m256i const by_high_u8x32 = _mm256_broadcastsi128_si256(_mm_loadu_si128((__m128i const *)sz_utf8_errors_));
+    __m256i const by_low_u8x32 = _mm256_broadcastsi128_si256(_mm_loadu_si128((__m128i const *)(sz_utf8_errors_ + 16)));
+    __m256i const by_next_u8x32 = _mm256_broadcastsi128_si256(_mm_loadu_si128((__m128i const *)(sz_utf8_errors_ + 32)));
+    // `vpalignr` works per 128-bit lane, so each lane of the text meets the lane before it.
+    __m256i const before_u8x32 = _mm256_permute2x128_si256(previous_u8x32, text_u8x32, 0x21);
+    __m256i const one_back_u8x32 = _mm256_alignr_epi8(text_u8x32, before_u8x32, 15);
+    __m256i const two_back_u8x32 = _mm256_alignr_epi8(text_u8x32, before_u8x32, 14);
+    __m256i const three_back_u8x32 = _mm256_alignr_epi8(text_u8x32, before_u8x32, 13);
+    __m256i const special_u8x32 = _mm256_and_si256(
+        _mm256_and_si256(
+            _mm256_shuffle_epi8(by_high_u8x32, _mm256_and_si256(_mm256_srli_epi16(one_back_u8x32, 4), nibble_u8x32)),
+            _mm256_shuffle_epi8(by_low_u8x32, _mm256_and_si256(one_back_u8x32, nibble_u8x32))),
+        _mm256_shuffle_epi8(by_next_u8x32, _mm256_and_si256(_mm256_srli_epi16(text_u8x32, 4), nibble_u8x32)));
+    // Two continuations in a row are well-formed only 2 or 3 bytes into a 3- or 4-byte rune.
+    __m256i const deep_u8x32 = _mm256_or_si256(_mm256_subs_epu8(two_back_u8x32, _mm256_set1_epi8(0xE0 - 0x80)),
+                                               _mm256_subs_epu8(three_back_u8x32, _mm256_set1_epi8(0xF0 - 0x80)));
+    return _mm256_xor_si256(_mm256_and_si256(deep_u8x32, _mm256_set1_epi8((char)0x80)), special_u8x32);
+}
+
+/**
+ *  @brief Validates and counts the @p count strings of a tape, read in its own order as one run of
+ *      bytes, resolving each string at its end in one step.
+ *
+ *  The run must be well-formed as one stream and every string must end before a byte starting a
+ *  rune, so no rune crosses into the next string. A block holding an error, or a string ending
+ *  inside a rune, sends the strings still unresolved to the serial pass, which names the first
+ *  malformed of them.
+ */
+STRINGZILLA_INLINE sz_status_t sz_utf8_count_run_haswell_(sz_strings_view_t const *strings, sz_size_t count,
+                                                          sz_size_t *runes, sz_size_t *malformed_index) {
+    sz_size_t const start = sz_strings_view_offset_(strings, 0);
+    sz_size_t const length = sz_strings_view_offset_(strings, count) - start;
+    sz_u8_t const *const text = (sz_u8_t const *)sz_strings_view_data_(strings) + start;
+    // The last block reads a zero-padded copy, and a zero after a lead is an error.
+    sz_size_t const copied_from = length & ~(sz_size_t)31;
+    sz_u8_t tail[32] = {0};
+    if (length != copied_from) memcpy(tail, text + copied_from, length - copied_from);
+    __m256i previous_u8x32 = _mm256_setzero_si256();
+    sz_size_t total = 0, counted = 0, row = 0;
+    for (sz_size_t block = 0; block < length; block += 32) {
+        __m256i const text_u8x32 = _mm256_loadu_si256((__m256i const *)(block < copied_from ? text + block : tail));
+        __m256i const errors_u8x32 = sz_utf8_errors_haswell_(text_u8x32, previous_u8x32);
+        if (!_mm256_testz_si256(errors_u8x32, errors_u8x32))
+            return sz_utf8_count_rows_serial_(strings, row, count, runes, malformed_index);
+        sz_u32_t const leads = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpgt_epi8(text_u8x32, _mm256_set1_epi8(-65)));
+        for (sz_size_t end; row != count && (end = sz_strings_view_offset_(strings, row + 1) - start) < block + 32;
+             ++row) {
+            sz_u32_t const lane = (sz_u32_t)(end - block);
+            // A string followed by a continuation byte ends inside a rune.
+            if (end != length && !(leads >> lane & 1))
+                return sz_utf8_count_rows_serial_(strings, row, count, runes, malformed_index);
+            sz_size_t const prefix = total + (sz_size_t)_mm_popcnt_u32(_bzhi_u32(leads, lane));
+            if (runes) runes[row] = prefix - counted;
+            counted = prefix;
+        }
+        total += (sz_size_t)_mm_popcnt_u32(leads), previous_u8x32 = text_u8x32;
+    }
+    // Zeros after the run make a rune it leaves open an error.
+    __m256i const closing_u8x32 = sz_utf8_errors_haswell_(_mm256_setzero_si256(), previous_u8x32);
+    if (!_mm256_testz_si256(closing_u8x32, closing_u8x32))
+        return sz_utf8_count_rows_serial_(strings, row, count, runes, malformed_index);
+    for (; row != count; ++row) {
+        if (runes) runes[row] = total - counted;
+        counted = total;
+    }
+    *malformed_index = count;
+    return sz_success_k;
+}
+
 /*  UAX-29 word boundary detection (vectorized). The same outer walk as the serial reference, but
  *  all-ASCII windows resolve their boundaries with @c _mm256_shuffle_epi8 Word_Break
  *  classification plus a local pair decision. Any stateful rule (WB4/6/7/7a/11/12/15/16/3c),
@@ -959,6 +1058,30 @@ STRINGZILLA_API sz_status_t sz_utf8_count_haswell(sz_cptr_t text, sz_size_t leng
     sz_assert_(stream == STRINGZILLA_NULL);
     *count = sz_utf8_count_haswell_(text, length);
     return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_utf8_count_strings_haswell(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                          sz_size_t count, sz_size_t *runes, sz_size_t *malformed_index,
+                                                          sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    if (!order && strings->layout != sz_strings_accessor_k)
+        return sz_utf8_count_run_haswell_(strings, count, runes, malformed_index);
+    // Orders and accessors check string by string, each a tape of one, fetching 64 views at a time.
+    sz_string_view_t views[64];
+    sz_size_t row = 0, malformed = 0;
+    for (; row != count; ++row) {
+        if (row % 64 == 0 && order)
+            sz_strings_get_(strings, order + row, sz_min_of_two(count - row, (sz_size_t)64), views);
+        if (row % 64 == 0 && !order) sz_strings_get_block_(strings, row, views);
+        sz_u64_t const offsets[2] = {0, views[row % 64].length};
+        sz_strings_view_t single;
+        single.layout = sz_strings_u64_tape_k, single.count = 1;
+        single.data.u64_tape.data = views[row % 64].start, single.data.u64_tape.offsets = offsets;
+        if (sz_utf8_count_run_haswell_(&single, 1, runes ? runes + row : STRINGZILLA_NULL, &malformed) != sz_success_k)
+            break;
+    }
+    *malformed_index = row;
+    return row == count ? sz_success_k : sz_invalid_utf8_k;
 }
 
 STRINGZILLA_API sz_status_t sz_utf8_seek_haswell(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,

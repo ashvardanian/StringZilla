@@ -506,6 +506,11 @@ STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_westmere(sz_
                                                                              sz_u64_t seed, sz_u64_t *hash,
                                                                              sz_stream_t stream);
 
+/** @copydoc sz_hash_strings_best */
+STRINGZILLA_API sz_status_t sz_hash_strings_westmere(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                     sz_size_t count, sz_u64_t seed, sz_u64_t *hashes,
+                                                     sz_stream_t stream);
+
 /** @copydoc sz_hash_multiseed_best */
 STRINGZILLA_API sz_status_t sz_hash_multiseed_westmere(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds,
                                                        sz_size_t seeds_count, sz_u64_t *hashes, sz_stream_t stream);
@@ -577,6 +582,11 @@ STRINGZILLA_API sz_status_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t length,
 STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_skylake(sz_cptr_t text, sz_size_t length,
                                                                             sz_u64_t seed, sz_u64_t *hash,
                                                                             sz_stream_t stream);
+
+/** @copydoc sz_hash_strings_best */
+STRINGZILLA_API sz_status_t sz_hash_strings_skylake(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                    sz_size_t count, sz_u64_t seed, sz_u64_t *hashes,
+                                                    sz_stream_t stream);
 
 /** @copydoc sz_fill_random_best */
 STRINGZILLA_API sz_status_t sz_fill_random_skylake(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
@@ -783,6 +793,11 @@ STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_rvvcrypto(sz
                                                                               sz_u64_t seed, sz_u64_t *hash,
                                                                               sz_stream_t stream);
 
+/** @copydoc sz_hash_strings_best */
+STRINGZILLA_API sz_status_t sz_hash_strings_rvvcrypto(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                      sz_size_t count, sz_u64_t seed, sz_u64_t *hashes,
+                                                      sz_stream_t stream);
+
 /** @copydoc sz_fill_random_best */
 STRINGZILLA_API sz_status_t sz_fill_random_rvvcrypto(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
                                                      sz_stream_t stream);
@@ -834,6 +849,10 @@ STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_v128(sz_cptr
                                                                          sz_u64_t seed, sz_u64_t *hash,
                                                                          sz_stream_t stream);
 
+/** @copydoc sz_hash_strings_best */
+STRINGZILLA_API sz_status_t sz_hash_strings_v128(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                 sz_size_t count, sz_u64_t seed, sz_u64_t *hashes, sz_stream_t stream);
+
 /** @copydoc sz_hash_multiseed_best */
 STRINGZILLA_API sz_status_t sz_hash_multiseed_v128(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds,
                                                    sz_size_t seeds_count, sz_u64_t *hashes, sz_stream_t stream);
@@ -876,6 +895,11 @@ STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_v128relaxed(
                                                                                 sz_u64_t seed, sz_u64_t *hash,
                                                                                 sz_stream_t stream);
 
+/** @copydoc sz_hash_strings_best */
+STRINGZILLA_API sz_status_t sz_hash_strings_v128relaxed(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                        sz_size_t count, sz_u64_t seed, sz_u64_t *hashes,
+                                                        sz_stream_t stream);
+
 /** @copydoc sz_hash_multiseed_best */
 STRINGZILLA_API sz_status_t sz_hash_multiseed_v128relaxed(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds,
                                                           sz_size_t seeds_count, sz_u64_t *hashes, sz_stream_t stream);
@@ -907,6 +931,11 @@ STRINGZILLA_API sz_status_t sz_bytesum_loongsonasx(sz_cptr_t text, sz_size_t len
 STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_loongsonasx(sz_cptr_t text, sz_size_t length,
                                                                                 sz_u64_t seed, sz_u64_t *hash,
                                                                                 sz_stream_t stream);
+
+/** @copydoc sz_hash_strings_best */
+STRINGZILLA_API sz_status_t sz_hash_strings_loongsonasx(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                        sz_size_t count, sz_u64_t seed, sz_u64_t *hashes,
+                                                        sz_stream_t stream);
 
 /** @copydoc sz_fill_random_best */
 STRINGZILLA_API sz_status_t sz_fill_random_loongsonasx(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
@@ -946,6 +975,11 @@ STRINGZILLA_API sz_status_t sz_bytesum_powervsx(sz_cptr_t text, sz_size_t length
 STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_powervsx(sz_cptr_t text, sz_size_t length,
                                                                              sz_u64_t seed, sz_u64_t *hash,
                                                                              sz_stream_t stream);
+
+/** @copydoc sz_hash_strings_best */
+STRINGZILLA_API sz_status_t sz_hash_strings_powervsx(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                     sz_size_t count, sz_u64_t seed, sz_u64_t *hashes,
+                                                     sz_stream_t stream);
 
 /** @copydoc sz_fill_random_best */
 STRINGZILLA_API sz_status_t sz_fill_random_powervsx(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,

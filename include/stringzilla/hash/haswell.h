@@ -474,6 +474,30 @@ STRINGZILLA_INLINE void sz_sha256_multistate_blocks_haswell_(sz_sha256_state_t *
 }
 
 /**
+ *  @brief Stages the first @p kept bytes of @p block and the terminator in registers, as byte
+ *      writes would stall the whole-register loads of @c sz_sha256_compress_haswell_.
+ *  @param[in] terminator Offset of the @c 0x80 byte, or 64 for none.
+ *  @param[out] low_u8x32 Bytes 0 to 31 of the zero-padded block.
+ *  @param[out] high_u8x32 Bytes 32 to 63 of the zero-padded block.
+ */
+STRINGZILLA_INLINE void sz_sha256_stage_haswell_(sz_u8_t const *block, sz_size_t kept, sz_size_t terminator,
+                                                 __m256i *low_u8x32, __m256i *high_u8x32) {
+    __m256i const low_offsets_u8x32 = _mm256_setr_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, //
+                                                       16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31);
+    __m256i const high_offsets_u8x32 = _mm256_add_epi8(low_offsets_u8x32, _mm256_set1_epi8(32));
+    __m256i const kept_u8x32 = _mm256_set1_epi8((char)kept);
+    __m256i const terminator_u8x32 = _mm256_set1_epi8((char)terminator);
+    __m256i const byte_80_u8x32 = _mm256_set1_epi8((char)0x80);
+    *low_u8x32 = _mm256_or_si256(
+        _mm256_and_si256(_mm256_loadu_si256((__m256i const *)block), _mm256_cmpgt_epi8(kept_u8x32, low_offsets_u8x32)),
+        _mm256_and_si256(_mm256_cmpeq_epi8(terminator_u8x32, low_offsets_u8x32), byte_80_u8x32));
+    *high_u8x32 = _mm256_or_si256(
+        _mm256_and_si256(_mm256_loadu_si256((__m256i const *)(block + 32)),
+                         _mm256_cmpgt_epi8(kept_u8x32, high_offsets_u8x32)),
+        _mm256_and_si256(_mm256_cmpeq_epi8(terminator_u8x32, high_offsets_u8x32), byte_80_u8x32));
+}
+
+/**
  *  @brief Finalizes 8 already-gathered lanes into their digests.
  *  @param[in] states The 8 lane states, left untouched.
  *  @param[in] active_lanes_count Lanes to emit, 1 to 8; the rest ride along and are discarded.
@@ -510,10 +534,8 @@ STRINGZILLA_INLINE void sz_sha256_multistate_digest_lanes_haswell_(sz_sha256_sta
         for (sz_size_t lane_index = 0; lane_index != 8; ++lane_index) {
             sz_size_t const source_lane = lane_index < active_lanes_count ? lane_index : 0;
             sz_size_t const buffered = states[source_lane].block_length;
-            for (sz_size_t byte_index = 0; byte_index != STRINGZILLA_SHA256_BLOCK_LENGTH; ++byte_index)
-                staged_vec[lane_index].u8s[byte_index] = byte_index < buffered ? states[source_lane].block[byte_index]
-                                                                               : (sz_u8_t)0;
-            staged_vec[lane_index].u8s[buffered] = 0x80;
+            sz_sha256_stage_haswell_(states[source_lane].block, buffered, buffered, &staged_vec[lane_index].ymms[0],
+                                     &staged_vec[lane_index].ymms[1]);
         }
         sz_sha256_compress_haswell_(hashes_u32x8, staged_blocks, overflow_vec.ymm);
     }
@@ -525,11 +547,14 @@ STRINGZILLA_INLINE void sz_sha256_multistate_digest_lanes_haswell_(sz_sha256_sta
         // carries nothing but the trailing length.
         int const carried = overflow_vec.u32s[lane_index] != 0;
         sz_size_t const kept = carried ? 0 : buffered;
-        for (sz_size_t byte_index = 0; byte_index != STRINGZILLA_SHA256_BLOCK_LENGTH; ++byte_index)
-            staged_vec[lane_index].u8s[byte_index] = byte_index < kept ? states[source_lane].block[byte_index]
-                                                                       : (sz_u8_t)0;
-        if (!carried) staged_vec[lane_index].u8s[buffered] = 0x80;
-        staged_vec[lane_index].u64s[7] = sz_u64_bytes_reverse(states[source_lane].total_length * 8);
+        __m256i low_u8x32, high_u8x32;
+        sz_sha256_stage_haswell_(states[source_lane].block, kept, carried ? 64 : buffered, &low_u8x32, &high_u8x32);
+        // A word write after this store would stall the whole-register load of compress.
+        __m128i const length_u64x2 = _mm_insert_epi64(
+            _mm256_extracti128_si256(high_u8x32, 1),
+            (long long)sz_u64_bytes_reverse(states[source_lane].total_length * 8), 1);
+        staged_vec[lane_index].ymms[0] = low_u8x32;
+        staged_vec[lane_index].ymms[1] = _mm256_inserti128_si256(high_u8x32, length_u64x2, 1);
     }
     sz_sha256_compress_haswell_(hashes_u32x8, staged_blocks, _mm256_set1_epi32(-1));
 

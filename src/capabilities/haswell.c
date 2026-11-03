@@ -4,6 +4,8 @@
  *  @date September 29, 2026
  *  @brief Every family's @c haswell kernels, defined once for the StringZilla library.
  */
+#undef STRINGZILLA_TARGET_WESTMERE
+#define STRINGZILLA_TARGET_WESTMERE 0
 #include "stringzilla/stringzilla.h"
 
 #include "stringzilla/compare/haswell.h"

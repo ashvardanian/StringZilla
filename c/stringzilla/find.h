@@ -245,6 +245,11 @@ STRINGZILLA_API sz_status_t sz_rfind_byte_haswell(sz_cptr_t haystack, sz_size_t 
 STRINGZILLA_API sz_status_t sz_find_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                             sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream);
 
+/** @copydoc sz_find_strings_best */
+STRINGZILLA_API sz_status_t sz_find_strings_haswell(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                    sz_size_t count, sz_cptr_t needle, sz_size_t needle_length,
+                                                    sz_size_t *positions, sz_stream_t stream);
+
 /** @copydoc sz_rfind_best */
 STRINGZILLA_API sz_status_t sz_rfind_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                              sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream);

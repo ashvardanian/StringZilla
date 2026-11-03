@@ -46,6 +46,7 @@ std::size_t test_cross_wasm(environment_t const &env) {
         .init_kernel = sz_hash_state_init_v128,
         .update_kernel = sz_hash_state_update_v128,
         .digest_kernel = sz_hash_state_digest_v128,
+        .strings_kernel = sz_hash_strings_v128,
     };
     constexpr sha256_backend_t sha256_v128 {
         .init_kernel = sz_sha256_state_init_v128,
@@ -185,6 +186,7 @@ std::size_t test_cross_wasm(environment_t const &env) {
         .init_kernel = sz_hash_state_init_v128relaxed,
         .update_kernel = sz_hash_state_update_v128relaxed,
         .digest_kernel = sz_hash_state_digest_v128relaxed,
+        .strings_kernel = sz_hash_strings_v128relaxed,
     };
     check("test_hash_equivalence_v128relaxed", [&](test_context_t &context) {
         check_bytesum_equivalence_(context, sz_bytesum_v128relaxed);

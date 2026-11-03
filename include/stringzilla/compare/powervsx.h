@@ -67,6 +67,27 @@ STRINGZILLA_INLINE sz_bool_t sz_equal_powervsx_(sz_cptr_t a, sz_cptr_t b, sz_siz
     // then close with one overlapping tail window read from the end.
     else {
         sz_size_t offset = 0;
+        // Past 128 bytes one reduction covers 64 bytes, after one register for what differs early.
+        if (length >= 128) {
+            __vector unsigned char const zeros_u8x16 = vec_splats((unsigned char)0);
+            if (!sz_equal_vec16_powervsx_(vec_xl(0, (unsigned char const *)a), vec_xl(0, (unsigned char const *)b)))
+                return sz_false_k;
+            for (offset = 16; offset + 64 <= length; offset += 64) {
+                __vector unsigned char const first_u8x16 = vec_xor(vec_xl(0, (unsigned char const *)(a + offset + 0)),
+                                                                   vec_xl(0, (unsigned char const *)(b + offset + 0)));
+                __vector unsigned char const second_u8x16 = vec_xor(
+                    vec_xl(0, (unsigned char const *)(a + offset + 16)),
+                    vec_xl(0, (unsigned char const *)(b + offset + 16)));
+                __vector unsigned char const third_u8x16 = vec_xor(vec_xl(0, (unsigned char const *)(a + offset + 32)),
+                                                                   vec_xl(0, (unsigned char const *)(b + offset + 32)));
+                __vector unsigned char const fourth_u8x16 = vec_xor(
+                    vec_xl(0, (unsigned char const *)(a + offset + 48)),
+                    vec_xl(0, (unsigned char const *)(b + offset + 48)));
+                if (!vec_all_eq(vec_or(vec_or(first_u8x16, second_u8x16), vec_or(third_u8x16, fourth_u8x16)),
+                                zeros_u8x16))
+                    return sz_false_k;
+            }
+        }
         while (offset + 32 <= length) {
             __vector unsigned char a_low_u8x16 = vec_xl(0, (unsigned char const *)(a + offset));
             __vector unsigned char b_low_u8x16 = vec_xl(0, (unsigned char const *)(b + offset));

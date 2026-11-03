@@ -192,13 +192,16 @@ static sz_capability_kernels_t const *sz_find_capabilities(void) {
 
 static sz_capability_kernels_t const *sz_find_strings_capabilities(void) {
     enum {
-        above_k = (sz_cap_serial_k | sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE |
-                   sz_cap_neon_k * STRINGZILLA_TARGET_NEON) *
-                  !STRINGZILLA_MULTIVERSIONED
+        above_k = (sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
+                   sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON) *
+        !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
         above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_find_strings_serial,
+#if STRINGZILLA_TARGET_HASWELL
+        above_k & ~(sz_cap_haswell_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_find_strings_haswell,
+#endif
 #if STRINGZILLA_TARGET_SKYLAKE
         above_k & ~(sz_cap_skylake_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_find_strings_skylake,
 #endif
@@ -207,7 +210,8 @@ static sz_capability_kernels_t const *sz_find_strings_capabilities(void) {
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
-        {sz_cap_serial_k | sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON,
+        {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
+             sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON,
          cpu},
         {0, sz_no_kernels_},
         {0, sz_no_kernels_},

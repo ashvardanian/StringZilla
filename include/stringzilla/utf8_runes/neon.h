@@ -44,6 +44,26 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_count_neon_(sz_cptr_t text, sz_size_t lengt
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t wide_count = 0;
     int8x16_t const start_threshold_i8x16 = vdupq_n_s8(-65);
+    // Below 256 bytes the reduction out of the lanes costs more than the per-chunk ones it saves.
+    while (length >= 256) {
+        // Four chains keep the subtractions independent, and 63 chunks of them sum below 256.
+        sz_size_t const chunks = sz_min_of_two(length / 64, (sz_size_t)63);
+        uint8x16_t counts0_u8x16 = vdupq_n_u8(0), counts1_u8x16 = vdupq_n_u8(0);
+        uint8x16_t counts2_u8x16 = vdupq_n_u8(0), counts3_u8x16 = vdupq_n_u8(0);
+        for (sz_size_t chunk = 0; chunk != chunks; ++chunk, text_u8 += 64) {
+            uint8x16_t const starts0_u8x16 = vcgtq_s8(vld1q_s8((sz_i8_t const *)text_u8), start_threshold_i8x16);
+            uint8x16_t const starts1_u8x16 = vcgtq_s8(vld1q_s8((sz_i8_t const *)text_u8 + 16), start_threshold_i8x16);
+            uint8x16_t const starts2_u8x16 = vcgtq_s8(vld1q_s8((sz_i8_t const *)text_u8 + 32), start_threshold_i8x16);
+            uint8x16_t const starts3_u8x16 = vcgtq_s8(vld1q_s8((sz_i8_t const *)text_u8 + 48), start_threshold_i8x16);
+            counts0_u8x16 = vsubq_u8(counts0_u8x16, starts0_u8x16);
+            counts1_u8x16 = vsubq_u8(counts1_u8x16, starts1_u8x16);
+            counts2_u8x16 = vsubq_u8(counts2_u8x16, starts2_u8x16);
+            counts3_u8x16 = vsubq_u8(counts3_u8x16, starts3_u8x16);
+        }
+        wide_count += vaddlvq_u8(
+            vaddq_u8(vaddq_u8(counts0_u8x16, counts1_u8x16), vaddq_u8(counts2_u8x16, counts3_u8x16)));
+        length -= chunks * 64;
+    }
     while (length >= 64) {
         uint8x16_t const starts0_u8x16 = vcgtq_s8(vld1q_s8((sz_i8_t const *)text_u8), start_threshold_i8x16);
         uint8x16_t const starts1_u8x16 = vcgtq_s8(vld1q_s8((sz_i8_t const *)text_u8 + 16), start_threshold_i8x16);

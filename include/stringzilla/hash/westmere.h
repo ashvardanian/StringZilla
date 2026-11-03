@@ -10,6 +10,7 @@
 #define STRINGZILLA_HASH_WESTMERE_H_
 
 #include "stringzilla/types.h"
+#include "stringzilla/compare/westmere.h" // `sz_load_short_westmere_`
 #include "stringzilla/hash/serial.h"
 
 #ifdef __cplusplus
@@ -203,13 +204,11 @@ STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_westmere_(sz
         sz_hash_state_short_init_aligned_westmere_(&state, seed);
 
         // Load the data and update the state
-        sz_u128_vec_t data_vec;
-        data_vec.xmm = _mm_setzero_si128();
-        for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) data_vec.u8s[byte_index] = start[byte_index];
+        __m128i const data_u8x16 = sz_load_short_westmere_(start, length);
 
         // Shuffle with the same mask
         __m128i const order_u8x16 = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_state_short_update_aligned_westmere_(&state, data_vec.xmm, order_u8x16);
+        sz_hash_state_short_update_aligned_westmere_(&state, data_u8x16, order_u8x16);
         return sz_hash_state_short_finalize_aligned_westmere_(&state, length);
     }
     else if (length <= 32) {
@@ -298,22 +297,15 @@ STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_westmere_(sz
  *  @brief Splits an input of up to 64 bytes into up to four 128-bit text-lanes using SSE loads.
  *
  *  Mirrors the loading ladder of @c sz_hash_westmere: full @c lddqu loads for complete lanes and
- *  one overlapping load plus an in-register shift for the partial tail; byte-by-byte only below 16
- *  bytes, where a 16-byte SSE load could read past the input.
+ *  one overlapping load plus an in-register shift for the partial tail;
+ *  @c sz_load_short_westmere_ up to 16 bytes, where a 16-byte SSE load could read past the input.
  *
  *  @return The number of populated text-lanes (1..4).
  */
 STRINGZILLA_INLINE sz_size_t sz_hash_multiseed_prepare_westmere_(sz_cptr_t text, sz_size_t length,
                                                                  sz_u512_vec_t *text_lanes_vec) {
     if (length <= 16) {
-        sz_u128_vec_t lane_vec;
-        if (length == 16) { lane_vec.xmm = _mm_lddqu_si128((__m128i const *)text); }
-        else {
-            lane_vec.xmm = _mm_setzero_si128();
-            for (sz_size_t byte_index = 0; byte_index < length; ++byte_index)
-                lane_vec.u8s[byte_index] = text[byte_index];
-        }
-        text_lanes_vec->u128s[0] = lane_vec;
+        text_lanes_vec->u128s[0].xmm = sz_load_short_westmere_(text, length);
         return 1;
     }
     sz_size_t const text_lanes_count = sz_size_divide_round_up(length, 16);
@@ -477,6 +469,21 @@ STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_westmere(sz_
                                                                              sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *hash = sz_hash_westmere_(start, length, seed);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_hash_strings_westmere(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                     sz_size_t count, sz_u64_t seed, sz_u64_t *hashes,
+                                                     sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    // Views arrive 64 at a time, as an accessor costs one indirect call per batch.
+    sz_string_view_t views[64];
+    for (sz_size_t row = 0; row != count; ++row) {
+        if (row % 64 == 0 && order)
+            sz_strings_get_(strings, order + row, sz_min_of_two(count - row, (sz_size_t)64), views);
+        if (row % 64 == 0 && !order) sz_strings_get_block_(strings, row, views);
+        hashes[row] = sz_hash_westmere_(views[row % 64].start, views[row % 64].length, seed);
+    }
     return sz_success_k;
 }
 

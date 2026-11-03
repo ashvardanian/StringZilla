@@ -193,6 +193,10 @@ STRINGZILLA_API sz_status_t sz_utf8_decode_serial( //
 /** @copydoc sz_utf8_count_best */
 STRINGZILLA_API sz_status_t sz_utf8_count_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *count,
                                                   sz_stream_t stream);
+/** @copydoc sz_utf8_count_strings_best */
+STRINGZILLA_API sz_status_t sz_utf8_count_strings_haswell(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                          sz_size_t count, sz_size_t *runes, sz_size_t *malformed_index,
+                                                          sz_stream_t stream);
 /** @copydoc sz_utf8_seek_best */
 STRINGZILLA_API sz_status_t sz_utf8_seek_haswell(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
                                                  sz_stream_t stream);

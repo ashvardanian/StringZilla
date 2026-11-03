@@ -136,23 +136,51 @@ static sz_capability_kernels_t const *sz_hash_capabilities(void) {
 
 static sz_capability_kernels_t const *sz_hash_strings_capabilities(void) {
     enum {
-        above_k = (sz_cap_serial_k | sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE |
-                   sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES) *
-                  !STRINGZILLA_MULTIVERSIONED
+        above_k = (sz_cap_serial_k | sz_cap_westmere_k * STRINGZILLA_TARGET_WESTMERE |
+                   sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE | sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE |
+                   sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO |
+                   sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
+                   sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
+        !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
         above_k & ~(sz_cap_serial_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_hash_strings_serial,
+#if STRINGZILLA_TARGET_WESTMERE
+        above_k & ~(sz_cap_westmere_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_hash_strings_westmere,
+#endif
+#if STRINGZILLA_TARGET_SKYLAKE
+        above_k & ~(sz_cap_skylake_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_hash_strings_skylake,
+#endif
 #if STRINGZILLA_TARGET_ICELAKE
         above_k & ~(sz_cap_icelake_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_hash_strings_icelake,
 #endif
 #if STRINGZILLA_TARGET_NEONAES
         above_k & ~(sz_cap_neonaes_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_hash_strings_neonaes,
 #endif
+#if STRINGZILLA_TARGET_RVVCRYPTO
+        above_k & ~(sz_cap_rvvcrypto_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_hash_strings_rvvcrypto,
+#endif
+#if STRINGZILLA_TARGET_V128
+        above_k & ~(sz_cap_v128_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_hash_strings_v128,
+#endif
+#if STRINGZILLA_TARGET_V128RELAXED
+        above_k & ~(sz_cap_v128relaxed_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_hash_strings_v128relaxed,
+#endif
+#if STRINGZILLA_TARGET_LOONGSONASX
+        above_k & ~(sz_cap_loongsonasx_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_hash_strings_loongsonasx,
+#endif
+#if STRINGZILLA_TARGET_POWERVSX
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_hash_strings_powervsx,
+#endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
-        {sz_cap_serial_k | sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE |
-             sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES,
+        {sz_cap_serial_k | sz_cap_westmere_k * STRINGZILLA_TARGET_WESTMERE |
+             sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE | sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE |
+             sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO |
+             sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
+             sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX | sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
         {0, sz_no_kernels_},
         {0, sz_no_kernels_},

@@ -10,6 +10,7 @@
 #define STRINGZILLA_HASH_NEONAES_H_
 
 #include "stringzilla/types.h"
+#include "stringzilla/compare/neon.h" // `sz_load_short_neon_`
 #include "stringzilla/hash/serial.h"
 
 #ifdef __cplusplus
@@ -276,27 +277,6 @@ STRINGZILLA_INLINE sz_u64_t sz_hash_state_digest_neonaes_(sz_hash_state_t const 
     }
 }
 
-/** The @p length bytes of a key shorter than a lane, zeros past its end, from overlapping reads
- *  that stay inside it, as a byte loop would stall on store forwarding. */
-STRINGZILLA_INLINE uint8x16_t sz_hash_load_short_neon_(sz_cptr_t text, sz_size_t length) {
-    sz_u64_t low = 0, high = 0;
-    if (length >= 8) {
-        // Two half shifts, as a key of eight bytes shifts the whole word out.
-        sz_size_t const passed = 16 - length;
-        low = sz_u64_load(text).u64;
-        high = (sz_u64_load(text + length - 8).u64 >> (passed * 4)) >> (passed * 4);
-    }
-    else if (length >= 4) {
-        low = (sz_u64_t)sz_u32_load(text).u32 | ((sz_u64_t)sz_u32_load(text + length - 4).u32 << ((length - 4) * 8));
-    }
-    else if (length) {
-        sz_size_t const middle = length / 2;
-        low = (sz_u64_t)(sz_u8_t)text[0] | ((sz_u64_t)(sz_u8_t)text[middle] << (middle * 8)) |
-              ((sz_u64_t)(sz_u8_t)text[length - 1] << ((length - 1) * 8));
-    }
-    return vcombine_u8(vcreate_u8(low), vcreate_u8(high));
-}
-
 STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_neonaes_(sz_cptr_t text, sz_size_t length,
                                                                              sz_u64_t seed) {
     if (length <= 16) {
@@ -306,7 +286,7 @@ STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_neonaes_(sz_
         // Load the data and update the state
         sz_u128_vec_t data_vec;
         if (length == 16) { data_vec.u8x16 = vld1q_u8((sz_u8_t const *)text); } // Full in-bounds block
-        else { data_vec.u8x16 = sz_hash_load_short_neon_(text, length); }
+        else { data_vec.u8x16 = sz_load_short_neon_(text, length); }
         sz_hash_state_short_update_neon_(&state, data_vec.u8x16);
         return sz_hash_state_short_finalize_neon_(&state, length);
     }
@@ -389,7 +369,7 @@ STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_neonaes_(sz_
  *  @brief Splits an input of up to 64 bytes into up to four 128-bit text-lanes using NEON loads.
  *
  *  Mirrors the loading ladder of @c sz_hash_neonaes: full @c vld1q_u8 loads for complete lanes and
- *  one overlapping load plus an in-register shift for the partial tail; @c sz_hash_load_short_neon_
+ *  one overlapping load plus an in-register shift for the partial tail; @c sz_load_short_neon_
  *  below 16 bytes, where a 16-byte NEON load could read past the input.
  *
  *  @return The number of populated text-lanes (1..4).
@@ -399,7 +379,7 @@ STRINGZILLA_INLINE sz_size_t sz_hash_multiseed_prepare_neon_(sz_cptr_t text, sz_
     if (length <= 16) {
         sz_u128_vec_t lane_vec;
         if (length == 16) { lane_vec.u8x16 = vld1q_u8((sz_u8_t const *)text); }
-        else { lane_vec.u8x16 = sz_hash_load_short_neon_(text, length); }
+        else { lane_vec.u8x16 = sz_load_short_neon_(text, length); }
         text_lanes_vec->u128s[0] = lane_vec;
         return 1;
     }

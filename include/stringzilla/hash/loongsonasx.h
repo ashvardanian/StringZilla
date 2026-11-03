@@ -401,14 +401,35 @@ STRINGZILLA_INLINE void sz_hash_state_store_loongsonasx_(sz_hash_state_t *packed
 STRINGZILLA_INLINE void sz_hash_state_absorb_loongsonasx_(sz_hash_state_aligned_t *state);
 STRINGZILLA_INLINE sz_u64_t sz_hash_state_finalize_loongsonasx_(sz_hash_state_aligned_t state);
 
+/** The @p length bytes, at most a lane, of @p text, zeros past them, from overlapping reads inside
+ *  it, as a byte loop would stall on store forwarding. */
+STRINGZILLA_INLINE sz_u128_vec_t sz_load_short_loongsonasx_(sz_cptr_t text, sz_size_t length) {
+    sz_u64_t low = 0, high = 0;
+    if (length >= 8) {
+        // Two half shifts, as a span of eight bytes shifts the whole word out.
+        sz_size_t const passed = 16 - length;
+        low = sz_u64_load(text).u64;
+        high = (sz_u64_load(text + length - 8).u64 >> (passed * 4)) >> (passed * 4);
+    }
+    else if (length >= 4) {
+        low = (sz_u64_t)sz_u32_load(text).u32 | ((sz_u64_t)sz_u32_load(text + length - 4).u32 << ((length - 4) * 8));
+    }
+    else if (length) {
+        sz_size_t const middle = length / 2;
+        low = (sz_u64_t)(sz_u8_t)text[0] | ((sz_u64_t)(sz_u8_t)text[middle] << (middle * 8)) |
+              ((sz_u64_t)(sz_u8_t)text[length - 1] << ((length - 1) * 8));
+    }
+    sz_u128_vec_t lane_vec;
+    lane_vec.lsx = __lsx_vinsgr2vr_d(__lsx_vreplgr2vr_d((long long)low), (long long)high, 1);
+    return lane_vec;
+}
+
 STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_loongsonasx_(sz_cptr_t start, sz_size_t length,
                                                                                  sz_u64_t seed) {
     if (length <= 16) {
         sz_align_(16) sz_hash_state_aligned_for_short_t state;
         sz_hash_state_short_init_loongsonasx_(&state, seed);
-        sz_u128_vec_t data_vec;
-        data_vec.u64s[0] = data_vec.u64s[1] = 0;
-        for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) data_vec.u8s[byte_index] = start[byte_index];
+        sz_u128_vec_t const data_vec = sz_load_short_loongsonasx_(start, length);
         sz_hash_state_short_update_loongsonasx_(&state, data_vec);
         return sz_hash_state_short_finalize_loongsonasx_(&state, length);
     }
@@ -481,6 +502,21 @@ STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_loongsonasx(
                                                                                 sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *hash = sz_hash_loongsonasx_(start, length, seed);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_hash_strings_loongsonasx(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                        sz_size_t count, sz_u64_t seed, sz_u64_t *hashes,
+                                                        sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    // Views arrive 64 at a time, as an accessor costs one indirect call per batch.
+    sz_string_view_t views[64];
+    for (sz_size_t row = 0; row != count; ++row) {
+        if (row % 64 == 0 && order)
+            sz_strings_get_(strings, order + row, sz_min_of_two(count - row, (sz_size_t)64), views);
+        if (row % 64 == 0 && !order) sz_strings_get_block_(strings, row, views);
+        hashes[row] = sz_hash_loongsonasx_(views[row % 64].start, views[row % 64].length, seed);
+    }
     return sz_success_k;
 }
 

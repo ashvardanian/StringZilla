@@ -255,26 +255,43 @@ STRINGZILLA_INLINE sz_u64_t sz_hash_state_finalize_powervsx_(sz_hash_state_align
 
 #pragma endregion
 
+/** The @p length bytes, at most a lane, of @p text, zeros past them, from overlapping reads inside
+ *  it, as a byte loop would stall on store forwarding. */
+STRINGZILLA_INLINE sz_u128_vec_t sz_load_short_powervsx_(sz_cptr_t text, sz_size_t length) {
+    sz_u64_t low = 0, high = 0;
+    if (length >= 8) {
+        // Two half shifts, as a span of eight bytes shifts the whole word out.
+        sz_size_t const passed = 16 - length;
+        low = sz_u64_load(text).u64;
+        high = (sz_u64_load(text + length - 8).u64 >> (passed * 4)) >> (passed * 4);
+    }
+    else if (length >= 4) {
+        low = (sz_u64_t)sz_u32_load(text).u32 | ((sz_u64_t)sz_u32_load(text + length - 4).u32 << ((length - 4) * 8));
+    }
+    else if (length) {
+        sz_size_t const middle = length / 2;
+        low = (sz_u64_t)(sz_u8_t)text[0] | ((sz_u64_t)(sz_u8_t)text[middle] << (middle * 8)) |
+              ((sz_u64_t)(sz_u8_t)text[length - 1] << ((length - 1) * 8));
+    }
+    sz_u128_vec_t lane_vec;
+    lane_vec.vsx_u64 = (__vector unsigned long long) {low, high};
+    return lane_vec;
+}
+
 STRINGZILLA_INLINE
 STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_powervsx_(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
     if (length <= 16) {
         sz_align_(16) sz_hash_state_aligned_for_short_t state;
         sz_hash_state_short_init_serial_(&state, seed);
-        sz_u128_vec_t data_vec;
-        data_vec.u64s[0] = data_vec.u64s[1] = 0;
-        for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) data_vec.u8s[byte_index] = start[byte_index];
-        sz_hash_state_short_update_powervsx_(&state, data_vec);
+        sz_hash_state_short_update_powervsx_(&state, sz_load_short_powervsx_(start, length));
         return sz_hash_state_short_finalize_powervsx_(&state, length);
     }
     else if (length <= 32) {
         sz_align_(16) sz_hash_state_aligned_for_short_t state;
         sz_hash_state_short_init_serial_(&state, seed);
         sz_u128_vec_t data0_vec, data1_vec;
-        data0_vec.u64s[0] = data0_vec.u64s[1] = 0;
-        data1_vec.u64s[0] = data1_vec.u64s[1] = 0;
-        for (sz_size_t byte_index = 0; byte_index < 16; ++byte_index) data0_vec.u8s[byte_index] = start[byte_index];
-        for (sz_size_t byte_index = 0; byte_index < 16; ++byte_index)
-            data1_vec.u8s[byte_index] = start[length - 16 + byte_index];
+        data0_vec.vsx_u8 = vec_xl(0, (unsigned char const *)start);
+        data1_vec.vsx_u8 = vec_xl(0, (unsigned char const *)(start + length - 16));
         sz_hash_shift_in_register_serial_(&data1_vec, (int)(32 - length));
         sz_hash_state_short_update_powervsx_(&state, data0_vec);
         sz_hash_state_short_update_powervsx_(&state, data1_vec);
@@ -284,14 +301,9 @@ STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_powervsx_(sz_cptr_t start, sz_s
         sz_align_(16) sz_hash_state_aligned_for_short_t state;
         sz_hash_state_short_init_serial_(&state, seed);
         sz_u128_vec_t data0_vec, data1_vec, data2_vec;
-        data0_vec.u64s[0] = data0_vec.u64s[1] = 0;
-        data1_vec.u64s[0] = data1_vec.u64s[1] = 0;
-        data2_vec.u64s[0] = data2_vec.u64s[1] = 0;
-        for (sz_size_t byte_index = 0; byte_index < 16; ++byte_index) data0_vec.u8s[byte_index] = start[byte_index];
-        for (sz_size_t byte_index = 0; byte_index < 16; ++byte_index)
-            data1_vec.u8s[byte_index] = start[16 + byte_index];
-        for (sz_size_t byte_index = 0; byte_index < 16; ++byte_index)
-            data2_vec.u8s[byte_index] = start[length - 16 + byte_index];
+        data0_vec.vsx_u8 = vec_xl(0, (unsigned char const *)start);
+        data1_vec.vsx_u8 = vec_xl(0, (unsigned char const *)(start + 16));
+        data2_vec.vsx_u8 = vec_xl(0, (unsigned char const *)(start + length - 16));
         sz_hash_shift_in_register_serial_(&data2_vec, (int)(48 - length));
         sz_hash_state_short_update_powervsx_(&state, data0_vec);
         sz_hash_state_short_update_powervsx_(&state, data1_vec);
@@ -302,17 +314,10 @@ STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_powervsx_(sz_cptr_t start, sz_s
         sz_align_(16) sz_hash_state_aligned_for_short_t state;
         sz_hash_state_short_init_serial_(&state, seed);
         sz_u128_vec_t data0_vec, data1_vec, data2_vec, data3_vec;
-        data0_vec.u64s[0] = data0_vec.u64s[1] = 0;
-        data1_vec.u64s[0] = data1_vec.u64s[1] = 0;
-        data2_vec.u64s[0] = data2_vec.u64s[1] = 0;
-        data3_vec.u64s[0] = data3_vec.u64s[1] = 0;
-        for (sz_size_t byte_index = 0; byte_index < 16; ++byte_index) data0_vec.u8s[byte_index] = start[byte_index];
-        for (sz_size_t byte_index = 0; byte_index < 16; ++byte_index)
-            data1_vec.u8s[byte_index] = start[16 + byte_index];
-        for (sz_size_t byte_index = 0; byte_index < 16; ++byte_index)
-            data2_vec.u8s[byte_index] = start[32 + byte_index];
-        for (sz_size_t byte_index = 0; byte_index < 16; ++byte_index)
-            data3_vec.u8s[byte_index] = start[length - 16 + byte_index];
+        data0_vec.vsx_u8 = vec_xl(0, (unsigned char const *)start);
+        data1_vec.vsx_u8 = vec_xl(0, (unsigned char const *)(start + 16));
+        data2_vec.vsx_u8 = vec_xl(0, (unsigned char const *)(start + 32));
+        data3_vec.vsx_u8 = vec_xl(0, (unsigned char const *)(start + length - 16));
         sz_hash_shift_in_register_serial_(&data3_vec, (int)(64 - length));
         sz_hash_state_short_update_powervsx_(&state, data0_vec);
         sz_hash_state_short_update_powervsx_(&state, data1_vec);
@@ -352,6 +357,21 @@ STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_powervsx(sz_
     return sz_success_k;
 }
 
+STRINGZILLA_API sz_status_t sz_hash_strings_powervsx(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                     sz_size_t count, sz_u64_t seed, sz_u64_t *hashes,
+                                                     sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    // Views arrive 64 at a time, as an accessor costs one indirect call per batch.
+    sz_string_view_t views[64];
+    for (sz_size_t row = 0; row != count; ++row) {
+        if (row % 64 == 0 && order)
+            sz_strings_get_(strings, order + row, sz_min_of_two(count - row, (sz_size_t)64), views);
+        if (row % 64 == 0 && !order) sz_strings_get_block_(strings, row, views);
+        hashes[row] = sz_hash_powervsx_(views[row % 64].start, views[row % 64].length, seed);
+    }
+    return sz_success_k;
+}
+
 STRINGZILLA_API sz_status_t sz_hash_multiseed_powervsx(sz_cptr_t text, sz_size_t length,             //
                                                        sz_u64_t const *seeds, sz_size_t seeds_count, //
                                                        sz_u64_t *hashes, sz_stream_t stream) {
@@ -380,11 +400,7 @@ STRINGZILLA_API sz_status_t sz_hash_multiseed_powervsx(sz_cptr_t text, sz_size_t
     for (sz_size_t lane_index = 0; lane_index != text_lanes_count; ++lane_index) {
         sz_size_t const lane_offset = lane_index * 16;
         sz_size_t const lane_length = sz_min_of_two(length - lane_offset, (sz_size_t)16);
-        sz_u128_vec_t lane_vec;
-        lane_vec.vsx_u64 = vec_splats((unsigned long long)0);
-        for (sz_size_t byte_index = 0; byte_index != lane_length; ++byte_index)
-            lane_vec.u8s[byte_index] = (sz_u8_t)text[lane_offset + byte_index];
-        __vector unsigned char const lane_u8x16 = lane_vec.vsx_u8;
+        __vector unsigned char const lane_u8x16 = sz_load_short_powervsx_(text + lane_offset, lane_length).vsx_u8;
         text_lanes_u64x2[lane_index] = (__vector unsigned long long)lane_u8x16;
         reversed_lanes_u8x16[lane_index] = vec_perm(lane_u8x16, lane_u8x16, reverse_u8x16);
     }
@@ -581,6 +597,13 @@ STRINGZILLA_API sz_status_t sz_hash_powervsx(sz_cptr_t start, sz_size_t length, 
     sz_assert_(stream == STRINGZILLA_NULL);
     *hash = sz_hash_serial_(start, length, seed);
     return sz_success_k;
+}
+
+/** Big-endian Power stub: delegates to @c sz_hash_strings_serial. */
+STRINGZILLA_API sz_status_t sz_hash_strings_powervsx(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                     sz_size_t count, sz_u64_t seed, sz_u64_t *hashes,
+                                                     sz_stream_t stream) {
+    return sz_hash_strings_serial(strings, order, count, seed, hashes, stream);
 }
 
 /** Big-endian Power stub: delegates to @c sz_hash_multiseed_serial. */

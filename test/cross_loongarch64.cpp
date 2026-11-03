@@ -48,6 +48,7 @@ std::size_t test_cross_loongarch64(environment_t const &env) {
         .init_kernel = sz_hash_state_init_loongsonasx,
         .update_kernel = sz_hash_state_update_loongsonasx,
         .digest_kernel = sz_hash_state_digest_loongsonasx,
+        .strings_kernel = sz_hash_strings_loongsonasx,
     };
     constexpr sha256_backend_t sha256_loongsonasx {
         .init_kernel = sz_sha256_state_init_loongsonasx,
