@@ -80,10 +80,10 @@ spotless {
     }
 
     // Palantir's fork of google-java-format indents four spaces and wraps at 120 columns, as `.clang-format` does.
-    // It reads javac internals, so it runs on a JDK no newer than 23.
+    // It reads javac internals, so a new JDK can need a newer release of it.
     java {
         target 'java/src/**/*.java'
-        palantirJavaFormat('2.50.0')
+        palantirJavaFormat('2.103.0')
         removeUnusedImports()
     }
 }

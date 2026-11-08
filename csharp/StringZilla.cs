@@ -45,6 +45,8 @@ public static unsafe class Sz {
         }
     }
 
+    /// <summary>Like <see cref="IndexOf(ReadOnlySpan{byte}, ReadOnlySpan{byte})"/> from the end:
+    /// the last byte offset of <paramref name="needle"/>, or -1.</summary>
     public static long LastIndexOf(ReadOnlySpan<byte> haystack, ReadOnlySpan<byte> needle) {
         if (needle.Length == 0) return haystack.Length;
         if (needle.Length > haystack.Length) return -1;
@@ -57,6 +59,8 @@ public static unsafe class Sz {
         }
     }
 
+    /// <summary>Like <see cref="IndexOf(ReadOnlySpan{byte}, ReadOnlySpan{byte})"/>, for a single
+    /// byte: the first offset of <paramref name="needle"/>, or -1.</summary>
     public static long IndexOf(ReadOnlySpan<byte> haystack, byte needle) {
         fixed (byte* h = haystack) {
             nint r;
@@ -66,6 +70,8 @@ public static unsafe class Sz {
         }
     }
 
+    /// <summary>Like <see cref="LastIndexOf(ReadOnlySpan{byte}, ReadOnlySpan{byte})"/>, for a
+    /// single byte: the last offset of <paramref name="needle"/>, or -1.</summary>
     public static long LastIndexOf(ReadOnlySpan<byte> haystack, byte needle) {
         fixed (byte* h = haystack) {
             nint r;
@@ -138,6 +144,8 @@ public static unsafe class Sz {
         return hash;
     }
 
+    /// <summary>Sum of all byte values in <paramref name="data"/> as an unsigned 64-bit
+    /// integer.</summary>
     public static ulong ByteSum(ReadOnlySpan<byte> data) {
         ulong checksum;
         fixed (byte* p = data)
@@ -674,6 +682,8 @@ public static unsafe class Sz {
         return Marshal.PtrToStringUTF8((nint)names, (int)written);
     }
 
+    /// <summary>Version of the native StringZilla library this binding is running
+    /// against.</summary>
     public static Version Version =>
         new(Native.sz_version_major(), Native.sz_version_minor(), Native.sz_version_patch());
 
@@ -801,8 +811,10 @@ internal struct IntBuf64 {
 public readonly ref struct RuneEnumerable {
     private readonly ReadOnlySpan<byte> _text;
 
+    /// <summary>Creates a source over the UTF-8 codepoints of <paramref name="text"/>.</summary>
     public RuneEnumerable(ReadOnlySpan<byte> text) => _text = text;
 
+    /// <summary>Returns an enumerator over the codepoints.</summary>
     public RuneEnumerator GetEnumerator() => new(_text);
 }
 
@@ -815,8 +827,11 @@ public ref struct RuneEnumerator {
 
     internal RuneEnumerator(ReadOnlySpan<byte> text) => _rest = text;
 
+    /// <summary>The codepoint at the current position.</summary>
     public Rune Current { get; private set; }
 
+    /// <summary>Advances to the next codepoint, decoding another batch when the current one is used
+    /// up.</summary>
     public bool MoveNext() {
         if (_index == _count) {
             if (_rest.IsEmpty) return false;
@@ -834,11 +849,14 @@ public readonly ref struct SegmentEnumerable {
     private readonly ReadOnlySpan<byte> _text;
     private readonly Sz.SegmentKind _kind;
 
+    /// <summary>Creates a source over the segments of <paramref name="text"/> of the given
+    /// <paramref name="kind"/>.</summary>
     public SegmentEnumerable(ReadOnlySpan<byte> text, Sz.SegmentKind kind) {
         _text = text;
         _kind = kind;
     }
 
+    /// <summary>Returns an enumerator over the segments.</summary>
     public SegmentEnumerator GetEnumerator() => new(_text, _kind);
 }
 
@@ -855,8 +873,11 @@ public ref struct SegmentEnumerator {
         _kind = kind;
     }
 
+    /// <summary>The segment at the current position, as a view into the original text.</summary>
     public ReadOnlySpan<byte> Current { get; private set; }
 
+    /// <summary>Advances to the next segment, asking the native library for another batch when
+    /// needed.</summary>
     public bool MoveNext() {
         if (_index == _count) {
             if (_rest.IsEmpty) return false;
@@ -912,6 +933,7 @@ public readonly ref struct SplitEnumerable {
     public SplitEnumerable WithMaxSplit(long maxSplit) =>
         new(_text, _separator, _byteset, _reverse, _keepSeparator, _skipEmpty, maxSplit);
 
+    /// <summary>Returns an enumerator over the split segments.</summary>
     public SplitEnumerator GetEnumerator() =>
         new(_text, _separator, _byteset, _reverse, _keepSeparator, _skipEmpty, _maxSplit);
 }
@@ -939,8 +961,11 @@ public ref struct SplitEnumerator {
         _end = text.Length;
     }
 
+    /// <summary>The segment at the current position, as a view into the original text.</summary>
     public ReadOnlySpan<byte> Current { get; private set; }
 
+    /// <summary>Advances to the next segment, honoring the skip-empty, keep-separator and maximum
+    /// split settings.</summary>
     public bool MoveNext() {
         while (_start <= _end) {
             ReadOnlySpan<byte> rest = _text[_start.._end];
@@ -971,6 +996,8 @@ public ref struct SplitEnumerator {
             ? _reverse ? Sz.LastIndexOfAny(rest, ref _byteset) : Sz.IndexOfAny(rest, ref _byteset)
             : _reverse ? Sz.LastIndexOf(rest, _separator) : Sz.IndexOf(rest, _separator);
 
+    /// <summary>Returns a copy of this enumerator, so it can be used directly in
+    /// <c>foreach</c>.</summary>
     public SplitEnumerator GetEnumerator() => this;
 }
 
@@ -989,6 +1016,7 @@ public readonly ref struct MatchEnumerable {
     /// <summary>Report overlapping matches (advance by one byte instead of the needle length).</summary>
     public MatchEnumerable Overlapping() => new(_haystack, _needle, 1);
 
+    /// <summary>Returns an enumerator over the match offsets.</summary>
     public MatchEnumerator GetEnumerator() => new(_haystack, _needle, _stride);
 }
 
@@ -1005,8 +1033,11 @@ public ref struct MatchEnumerator {
         _stride = stride;
     }
 
+    /// <summary>The byte offset of the current match.</summary>
     public long Current { get; private set; }
 
+    /// <summary>Advances to the next match, or returns false once the haystack has no
+    /// more.</summary>
     public bool MoveNext() {
         if (_cursor > _haystack.Length) return false;
         long found = Sz.IndexOf(_haystack[(int)_cursor..], _needle);
@@ -1019,6 +1050,8 @@ public ref struct MatchEnumerator {
         return true;
     }
 
+    /// <summary>Returns a copy of this enumerator, so it can be used directly in
+    /// <c>foreach</c>.</summary>
     public MatchEnumerator GetEnumerator() => this;
 }
 
@@ -1052,6 +1085,7 @@ public readonly ref struct TokenSplitEnumerable {
     /// <summary>Drop zero-length segments.</summary>
     public TokenSplitEnumerable SkipEmpty() => new(_text, _kind, _parts, true);
 
+    /// <summary>Returns an enumerator over the separator-token split spans.</summary>
     public TokenSplitEnumerator GetEnumerator() => new(_text, _kind, _parts, _skipEmpty);
 }
 
@@ -1074,8 +1108,11 @@ public ref struct TokenSplitEnumerator {
         _count = Sz.Tokenize(text, kind, _offsets[..], _lengths[..]);
     }
 
+    /// <summary>The span at the current position, as a view into the original text.</summary>
     public ReadOnlySpan<byte> Current { get; private set; }
 
+    /// <summary>Advances to the next span, tokenizing another batch of separators when
+    /// needed.</summary>
     public bool MoveNext() {
         while (true) {
             if (_step == 2 * _count && _count == 64) {
@@ -1095,21 +1132,29 @@ public ref struct TokenSplitEnumerator {
         }
     }
 
+    /// <summary>Returns a copy of this enumerator, so it can be used directly in
+    /// <c>foreach</c>.</summary>
     public TokenSplitEnumerator GetEnumerator() => this;
 }
 
 /// <summary>A single split point: the spans before, of, and after a separator. See <see cref="Sz.Partition"/>.</summary>
 public readonly ref struct Partition {
+    /// <summary>The span before the separator.</summary>
     public readonly ReadOnlySpan<byte> Before;
+    /// <summary>The separator itself.</summary>
     public readonly ReadOnlySpan<byte> Separator;
+    /// <summary>The span after the separator.</summary>
     public readonly ReadOnlySpan<byte> After;
 
+    /// <summary>Creates a partition from the three given spans.</summary>
     public Partition(ReadOnlySpan<byte> before, ReadOnlySpan<byte> separator, ReadOnlySpan<byte> after) {
         Before = before;
         Separator = separator;
         After = after;
     }
 
+    /// <summary>Assigns <see cref="Before"/>, <see cref="Separator"/> and <see cref="After"/> to
+    /// the output parameters.</summary>
     public void Deconstruct(out ReadOnlySpan<byte> before, out ReadOnlySpan<byte> separator, out ReadOnlySpan<byte> after) {
         before = Before;
         separator = Separator;
@@ -1120,9 +1165,12 @@ public readonly ref struct Partition {
 /// <summary>One case-insensitive match: its byte offset and matched length (folding may make the latter
 /// differ from the needle length).</summary>
 public readonly struct UncasedMatch {
+    /// <summary>Byte offset of the match in the haystack.</summary>
     public readonly long Offset;
+    /// <summary>Matched length in bytes, which may differ from the needle length.</summary>
     public readonly long Length;
 
+    /// <summary>Creates a match from a byte offset and a matched length.</summary>
     public UncasedMatch(long offset, long length) {
         Offset = offset;
         Length = length;
@@ -1144,6 +1192,7 @@ public readonly ref struct UncasedMatchEnumerable {
     /// <summary>Report overlapping matches (advance by one byte) instead of skipping past each match.</summary>
     public UncasedMatchEnumerable Overlapping() => new(_haystack, _needle, true);
 
+    /// <summary>Returns an enumerator over the uncased matches.</summary>
     public UncasedMatchEnumerator GetEnumerator() => new(_haystack, _needle, _overlapping);
 }
 
@@ -1166,8 +1215,11 @@ public unsafe ref struct UncasedMatchEnumerator {
                 (nint)n, (nuint)needle.Length, prepared, Sz.Cpus, nint.Zero));
     }
 
+    /// <summary>The current uncased match.</summary>
     public UncasedMatch Current { get; private set; }
 
+    /// <summary>Advances to the next uncased match, or returns false once the haystack has no
+    /// more.</summary>
     public bool MoveNext() {
         if (_cursor > _haystack.Length) return false;
         fixed (byte* needle = _needle)
@@ -1193,6 +1245,8 @@ public unsafe ref struct UncasedMatchEnumerator {
     private static int Utf8LeadWidth(byte lead) =>
         (lead & 0x80) == 0 ? 1 : (lead & 0xE0) == 0xC0 ? 2 : (lead & 0xF0) == 0xE0 ? 3 : (lead & 0xF8) == 0xF0 ? 4 : 1;
 
+    /// <summary>Returns a copy of this enumerator, so it can be used directly in
+    /// <c>foreach</c>.</summary>
     public UncasedMatchEnumerator GetEnumerator() => this;
 }
 
@@ -1229,18 +1283,24 @@ public sealed class StatusException : InvalidOperationException {
 public unsafe struct Byteset {
     private fixed ulong _w[4];
 
+    /// <summary>Adds <paramref name="value"/> to the set.</summary>
     public void Add(byte value) => _w[value >> 6] |= 1UL << (value & 63);
 
+    /// <summary>Adds every byte of <paramref name="values"/> to the set.</summary>
     public void AddRange(ReadOnlySpan<byte> values) {
         foreach (byte v in values) Add(v);
     }
 
+    /// <summary>Returns true if <paramref name="value"/> is in the set.</summary>
     public bool Contains(byte value) => (_w[value >> 6] & (1UL << (value & 63))) != 0;
 
+    /// <summary>Replaces the set with its complement, so members become non-members and the
+    /// reverse.</summary>
     public void Invert() {
         _w[0] = ~_w[0]; _w[1] = ~_w[1]; _w[2] = ~_w[2]; _w[3] = ~_w[3];
     }
 
+    /// <summary>Creates a set holding every byte of <paramref name="values"/>.</summary>
     public static Byteset FromBytes(ReadOnlySpan<byte> values) {
         Byteset s = default;
         s.AddRange(values);
@@ -1253,11 +1313,15 @@ public sealed unsafe class Hasher : IDisposable {
     // sz_hash_state_t is 216 bytes; over-allocate and 64-byte align for SIMD safety.
     private void* _state;
 
+    /// <summary>Allocates and initializes the native hash state with the given <paramref
+    /// name="seed"/>.</summary>
     public Hasher(ulong seed = 0) {
         _state = NativeMemory.AlignedAlloc(256, 64);
         Sz.Check("sz_hash_state_init_best", Native.sz_hash_state_init_best((nint)_state, seed, Sz.Cpus, nint.Zero));
     }
 
+    /// <summary>Feeds <paramref name="data"/> into the hash. Throws <see
+    /// cref="ObjectDisposedException"/> after disposal.</summary>
     public void Update(ReadOnlySpan<byte> data) {
         if (_state == null) throw new ObjectDisposedException(nameof(Hasher));
         fixed (byte* p = data)
@@ -1273,6 +1337,7 @@ public sealed unsafe class Hasher : IDisposable {
         return hash;
     }
 
+    /// <summary>Frees the native hash state; calling it again does nothing.</summary>
     public void Dispose() {
         if (_state != null) { NativeMemory.AlignedFree(_state); _state = null; }
     }
@@ -1286,6 +1351,8 @@ public sealed unsafe class Hasher : IDisposable {
 public sealed unsafe class UncasedNeedle : IDisposable {
     private SzUtf8UncasedNeedle* _needle; // followed by the copy of the needle bytes it points into
 
+    /// <summary>Copies <paramref name="needle"/> into native memory and prepares it for caseless
+    /// search.</summary>
     public UncasedNeedle(ReadOnlySpan<byte> needle) {
         _needle = (SzUtf8UncasedNeedle*)NativeMemory.Alloc((nuint)(sizeof(SzUtf8UncasedNeedle) + needle.Length));
         byte* bytes = (byte*)(_needle + 1);
@@ -1300,6 +1367,7 @@ public sealed unsafe class UncasedNeedle : IDisposable {
         return Sz.UncasedSearch(haystack, _needle, out matchedLength);
     }
 
+    /// <summary>Frees the native copy of the needle; calling it again does nothing.</summary>
     public void Dispose() {
         if (_needle != null) { NativeMemory.Free(_needle); _needle = null; }
     }
@@ -1333,6 +1401,8 @@ public sealed unsafe class Sha256 : IDisposable {
         Sz.Check("sz_sha256_state_init_best", Native.sz_sha256_state_init_best((nint)_state, Sz.Cpus, nint.Zero));
     }
 
+    /// <summary>Feeds <paramref name="data"/> into the hash. Throws <see
+    /// cref="ObjectDisposedException"/> after disposal.</summary>
     public void Update(ReadOnlySpan<byte> data) {
         if (_state == null) throw new ObjectDisposedException(nameof(Sha256));
         fixed (byte* p = data)
@@ -1365,6 +1435,7 @@ public sealed unsafe class Sha256 : IDisposable {
         return h.Digest();
     }
 
+    /// <summary>Frees the native hash state; calling it again does nothing.</summary>
     public void Dispose() {
         if (_state != null) { NativeMemory.AlignedFree(_state); _state = null; }
     }

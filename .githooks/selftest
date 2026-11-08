@@ -3409,7 +3409,6 @@ stage_release_fixture() { # stage_release_fixture <version> [<relative-path> <se
             done
             printf '  }\n}\n'
         } > package.json
-        printf 'cff-version: 1.2.0\nversion: %s\n' "$version" > CITATION.cff
         printf '<Project>\n  <PropertyGroup>\n    <Version>%s</Version>\n  </PropertyGroup>\n</Project>\n' "$version" > StringZilla.csproj
         printf '#define STRINGZILLA_VERSION_MAJOR %s\n#define STRINGZILLA_VERSION_MINOR %s\n#define STRINGZILLA_VERSION_PATCH %s\n' \
             "$major" "$minor" "$patch" > c/stringzilla/types.h

@@ -239,7 +239,7 @@ Pick one.
 For MSVC (Developer Prompt):
 
 ```bat
-cmake -B build_release -G "Visual Studio 17 2022" -A x64 -D STRINGZILLA_BUILD_TEST=1 -D CMAKE_BUILD_TYPE=Release
+cmake -B build_release -G "Visual Studio 18 2026" -A x64 -D STRINGZILLA_BUILD_TEST=1 -D CMAKE_BUILD_TYPE=Release
 cmake --build build_release --config Release --parallel
 build_release\\Release\\stringzilla_test.exe
 ```
@@ -908,7 +908,7 @@ cargo package --list --allow-dirty
 
 If you want to run benchmarks against third-party implementations, check out the [`ashvardanian/StringWars`](https://github.com/ashvardanian/StringWars/) repository.
 
-## GoLang
+## Go
 
 The binding links the static library, so first build it and copy it next to the Go sources:
 

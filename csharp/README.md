@@ -1,4 +1,4 @@
-# StringZilla 🦖 for C# / .NET
+# StringZilla for C#
 
 Zero-copy .NET bindings for StringZilla.
 SIMD-accelerated search, comparison, hashing, UTF-8 segmentation, case-folding, normalization, and sorting, operating directly on UTF-8 `byte` spans with no UTF-16 transcode and no copy.

@@ -8,7 +8,7 @@
 # Every wheel runs the full suite on the interpreter it was built for.
 [build-system]
 build-backend = "scikit_build_core.build"
-requires = ["scikit-build-core>=0.10"]
+requires = ["scikit-build-core>=0.11"]
 
 [project]
 authors = [{ email = "1983160+ashvardanian@users.noreply.github.com", name = "Ash Vardanian" }]
@@ -34,7 +34,7 @@ classifiers = [
 ]
 description = "Search, hash, sort, and process strings faster via SWAR and SIMD"
 dynamic = ["version"]
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
 name = "stringzilla"
 readme = "README.md"
 requires-python = ">=3.12"

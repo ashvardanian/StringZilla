@@ -79,7 +79,7 @@ jobs:
       - name: Build Wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
-          CIBW_BUILD: "cp312-* cp313-* cp314-* cp315-*"
+          CIBW_BUILD: "cp312-* cp313-* cp314-* cp314t-* cp315-* cp315t-*"
           CIBW_ARCHS_LINUX: ${{ matrix.arch }}
           CIBW_ENVIRONMENT_LINUX: STRINGZILLA_IN_QEMU=1 STRINGZILLA_SCALE=0.05 CMAKE_BUILD_PARALLEL_LEVEL=2
       - name: Upload Wheels

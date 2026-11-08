@@ -18,12 +18,12 @@ jobs:
         run: |
           cmake --preset release_shared
           cmake --build --preset release_shared
-      # JDK 23: the final Foreign Function & Memory API, and the newest JDK Palantir Java Format runs on.
+      # JDK 25, the current long-term release, compiling for the `release = 22` floor.
       - name: Set Up JDK
         uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: "23"
+          java-version: "25"
       - name: Set Up Gradle
         uses: gradle/actions/setup-gradle@v6
       - name: Check Formatting

@@ -286,6 +286,8 @@ public final class StringZilla {
         return indexOf(haystack, 0, haystack.length, needle);
     }
 
+    /** Like {@link #indexOf(byte[], byte[])}, but searches {@code len} bytes of {@code haystack}
+     *  from {@code off}, and the returned offset is relative to {@code off}. */
     public static long indexOf(byte[] haystack, int off, int len, byte[] needle) {
         if (needle.length == 0) return 0;
         if (needle.length > len) return -1;
@@ -298,6 +300,8 @@ public final class StringZilla {
         }
     }
 
+    /** Last byte offset of {@code needle} in {@code haystack}, or -1. The {@code byte[]} form of
+     *  {@link #lastIndexOf(MemorySegment, MemorySegment)}. */
     public static long lastIndexOf(byte[] haystack, byte[] needle) {
         if (needle.length == 0) return haystack.length;
         if (needle.length > haystack.length) return -1;
@@ -319,6 +323,7 @@ public final class StringZilla {
         }
     }
 
+    /** Last offset of any byte in {@code set}, or -1. The reverse of {@link #indexOfAny}. */
     public static long lastIndexOfAny(byte[] haystack, Byteset set) {
         try (Arena a = Arena.ofConfined()) {
             MemorySegment h = a.allocate(haystack.length == 0 ? 1 : haystack.length);
@@ -378,10 +383,12 @@ public final class StringZilla {
         return hash(data, 0L);
     }
 
+    /** Like {@link #hash(byte[])}, under the given {@code seed}. */
     public static long hash(byte[] data, long seed) {
         return hash(MemorySegment.ofArray(data), seed);
     }
 
+    /** Like {@link #hash(byte[], long)}, over a {@code MemorySegment}. */
     public static long hash(MemorySegment data, long seed) {
         try {
             long[] hash = new long[1];
@@ -393,6 +400,7 @@ public final class StringZilla {
         }
     }
 
+    /** Sums the bytes of {@code data}, computed by the native {@code sz_bytesum_best}. */
     public static long byteSum(byte[] data) {
         try {
             long[] checksum = new long[1];
@@ -419,6 +427,7 @@ public final class StringZilla {
         return countRunes(MemorySegment.ofArray(text));
     }
 
+    /** Like {@link #countRunes(byte[])}, over a {@code MemorySegment}. */
     public static long countRunes(MemorySegment text) {
         try {
             long[] count = new long[1];
@@ -452,6 +461,7 @@ public final class StringZilla {
         return decode(MemorySegment.ofArray(text), destination);
     }
 
+    /** Like {@link #decode(byte[], int[])}, over a {@code MemorySegment}. */
     public static int decode(MemorySegment text, int[] destination) {
         long[] unpacked = new long[1];
         long[] consumedIgnored = new long[1];
@@ -476,6 +486,7 @@ public final class StringZilla {
         return decodeAll(MemorySegment.ofArray(text));
     }
 
+    /** Like {@link #decodeAll(byte[])}, over a {@code MemorySegment}. */
     public static int[] decodeAll(MemorySegment text) {
         int[] runes = new int[Math.toIntExact(text.byteSize())]; // a rune per byte at most
         return java.util.Arrays.copyOf(runes, decode(text, runes));
@@ -487,14 +498,19 @@ public final class StringZilla {
 
     /** A tiling segmentation: every byte lands in exactly one segment. */
     public enum SegmentKind {
+        /** Grapheme clusters. */
         GRAPHEMES("sz_utf8_graphemes_best"),
+        /** Word segments. */
         WORDS("sz_utf8_wordbreaks_best"),
+        /** Sentence segments. */
         SENTENCES("sz_utf8_sentences_best"),
+        /** Segments between line-break opportunities. */
         LINE_BREAKS("sz_utf8_linebreaks_best");
 
         private final String function;
         private final MethodHandle kernel;
 
+        /** Binds the C function named {@code function} that computes this segmentation. */
         SegmentKind(String function) {
             this.function = function;
             this.kernel = downCritical(
@@ -506,13 +522,17 @@ public final class StringZilla {
 
     /** The separator tokens that {@link TokenSplits} splits on. */
     private enum TokenKind {
+        /** Unicode newlines. */
         NEWLINES("sz_utf8_newlines_best"),
+        /** Unicode whitespace. */
         WHITESPACES("sz_utf8_whitespaces_best"),
+        /** Unicode delimiters. */
         DELIMITERS("sz_utf8_delimiters_best");
 
         private final String function;
         private final MethodHandle kernel;
 
+        /** Binds the C function named {@code function} that finds this kind of separator. */
         TokenKind(String function) {
             this.function = function;
             this.kernel = downCritical(
@@ -534,6 +554,8 @@ public final class StringZilla {
         return segment(MemorySegment.ofArray(text), textOffset, textLength, kind, lengths);
     }
 
+    /** Like {@link #segment(byte[], int, int, SegmentKind, long[])}, over a {@code MemorySegment}
+     *  with {@code long} bounds. */
     public static int segment(MemorySegment text, long textOffset, long textLength, SegmentKind kind, long[] lengths) {
         try {
             long[] count = new long[1];
@@ -748,10 +770,15 @@ public final class StringZilla {
     /** Unicode normalization forms, {@code NFKC_CASEFOLD} being NFKC with full case folding and without
      *  default-ignorable codepoints, the Unicode toNFKC_Casefold that caseless keys match on. */
     public enum NormalForm {
+        /** Canonical decomposition. */
         NFD,
+        /** Canonical decomposition followed by canonical composition. */
         NFC,
+        /** Compatibility decomposition. */
         NFKD,
+        /** Compatibility decomposition followed by canonical composition. */
         NFKC,
+        /** NFKC with full case folding, as described on {@link NormalForm}. */
         NFKC_CASEFOLD
     }
 
@@ -816,9 +843,6 @@ public final class StringZilla {
 
     // region Collections
 
-    /** Returns the permutation that sorts {@code items} lexicographically by bytes (stable).
-     *  {@code top} &gt; 0 partial-sorts the smallest N. Like {@code Collections.sort} with an ordinal
-     *  comparator, but returns indices over UTF-8 bytes. */
     /** Writes the sorting permutation of {@code items} into {@code order} (must hold ≥ items.size()
      *  entries) and returns the count of sorted indices ({@code top} if &gt; 0, else items.size()).
      *  Like {@code Collections.sort} with an ordinal comparator, but returns indices over UTF-8 bytes. */
@@ -855,6 +879,8 @@ public final class StringZilla {
         return count == n ? order : java.util.Arrays.copyOf(order, count);
     }
 
+    /** Returns the ascending, case-sensitive permutation of all {@code items}, as
+     *  {@link #argSort} with no limit. */
     public static long[] argSort(java.util.List<byte[]> items) {
         return argSort(items, false, 0, false);
     }
@@ -879,8 +905,6 @@ public final class StringZilla {
         }
     }
 
-    /** Inner-join two de-duplicated sequences. Returns {@code {firstPositions, secondPositions}} —
-     *  the matching index pairs into {@code a} and {@code b}. */
     /** Inner-joins two de-duplicated sequences, writing matching index pairs into {@code firstPositions}
      *  and {@code secondPositions} (each must hold ≥ min(a.size(), b.size()) entries) and returns the
      *  match count. Allocation-free for the result. */
@@ -910,6 +934,7 @@ public final class StringZilla {
         }
     }
 
+    /** Like {@link #intersect}, seed 0. */
     public static int intersect(
             java.util.List<byte[]> a, java.util.List<byte[]> b, long[] firstPositions, long[] secondPositions) {
         return intersect(a, b, firstPositions, secondPositions, 0L);
@@ -925,6 +950,7 @@ public final class StringZilla {
         return IntStream.of(decodeAll(text));
     }
 
+    /** Like {@link #runes(byte[])}, over a {@code MemorySegment}. */
     public static IntStream runes(MemorySegment text) {
         return IntStream.of(decodeAll(text));
     }
@@ -936,30 +962,37 @@ public final class StringZilla {
         return new Segments(MemorySegment.ofArray(text), SegmentKind.WORDS);
     }
 
+    /** Like {@link #words(byte[])}, over a {@code MemorySegment}. */
     public static Segments words(MemorySegment text) {
         return new Segments(text, SegmentKind.WORDS);
     }
 
+    /** Lazily yields the grapheme cluster segments, like {@link #words(byte[])}. */
     public static Segments graphemes(byte[] text) {
         return new Segments(MemorySegment.ofArray(text), SegmentKind.GRAPHEMES);
     }
 
+    /** Like {@link #graphemes(byte[])}, over a {@code MemorySegment}. */
     public static Segments graphemes(MemorySegment text) {
         return new Segments(text, SegmentKind.GRAPHEMES);
     }
 
+    /** Lazily yields the sentence segments, like {@link #words(byte[])}. */
     public static Segments sentences(byte[] text) {
         return new Segments(MemorySegment.ofArray(text), SegmentKind.SENTENCES);
     }
 
+    /** Like {@link #sentences(byte[])}, over a {@code MemorySegment}. */
     public static Segments sentences(MemorySegment text) {
         return new Segments(text, SegmentKind.SENTENCES);
     }
 
+    /** Lazily yields the segments between line-break opportunities, like {@link #words(byte[])}. */
     public static Segments lineBreaks(byte[] text) {
         return new Segments(MemorySegment.ofArray(text), SegmentKind.LINE_BREAKS);
     }
 
+    /** Like {@link #lineBreaks(byte[])}, over a {@code MemorySegment}. */
     public static Segments lineBreaks(MemorySegment text) {
         return new Segments(text, SegmentKind.LINE_BREAKS);
     }
@@ -977,6 +1010,7 @@ public final class StringZilla {
         return Splits.substring(MemorySegment.ofArray(text), MemorySegment.ofArray(separator), false);
     }
 
+    /** Like {@link #split(byte[], byte[])}, over {@code MemorySegment} inputs. */
     public static Splits split(MemorySegment text, MemorySegment separator) {
         return Splits.substring(text, separator, false);
     }
@@ -986,6 +1020,7 @@ public final class StringZilla {
         return Splits.substring(MemorySegment.ofArray(text), MemorySegment.ofArray(separator), true);
     }
 
+    /** Like {@link #rsplit(byte[], byte[])}, over {@code MemorySegment} inputs. */
     public static Splits rsplit(MemorySegment text, MemorySegment separator) {
         return Splits.substring(text, separator, true);
     }
@@ -995,6 +1030,7 @@ public final class StringZilla {
         return Splits.byteset(MemorySegment.ofArray(text), separators, false);
     }
 
+    /** Like {@link #splitAny(byte[], Byteset)}, over a {@code MemorySegment}. */
     public static Splits splitAny(MemorySegment text, Byteset separators) {
         return Splits.byteset(text, separators, false);
     }
@@ -1004,6 +1040,7 @@ public final class StringZilla {
         return Splits.byteset(MemorySegment.ofArray(text), separators, true);
     }
 
+    /** Like {@link #rsplitAny(byte[], Byteset)}, over a {@code MemorySegment}. */
     public static Splits rsplitAny(MemorySegment text, Byteset separators) {
         return Splits.byteset(text, separators, true);
     }
@@ -1014,22 +1051,27 @@ public final class StringZilla {
         return new TokenSplits(MemorySegment.ofArray(text), TokenKind.NEWLINES, SplitParts.BETWEEN, false);
     }
 
+    /** Like {@link #splitNewlines(byte[])}, over a {@code MemorySegment}. */
     public static TokenSplits splitNewlines(MemorySegment text) {
         return new TokenSplits(text, TokenKind.NEWLINES, SplitParts.BETWEEN, false);
     }
 
+    /** Lazily splits on Unicode whitespace, as {@link #splitNewlines(byte[])} does on newlines. */
     public static TokenSplits splitWhitespaces(byte[] text) {
         return new TokenSplits(MemorySegment.ofArray(text), TokenKind.WHITESPACES, SplitParts.BETWEEN, false);
     }
 
+    /** Like {@link #splitWhitespaces(byte[])}, over a {@code MemorySegment}. */
     public static TokenSplits splitWhitespaces(MemorySegment text) {
         return new TokenSplits(text, TokenKind.WHITESPACES, SplitParts.BETWEEN, false);
     }
 
+    /** Lazily splits on Unicode delimiters, as {@link #splitNewlines(byte[])} does on newlines. */
     public static TokenSplits splitDelimiters(byte[] text) {
         return new TokenSplits(MemorySegment.ofArray(text), TokenKind.DELIMITERS, SplitParts.BETWEEN, false);
     }
 
+    /** Like {@link #splitDelimiters(byte[])}, over a {@code MemorySegment}. */
     public static TokenSplits splitDelimiters(MemorySegment text) {
         return new TokenSplits(text, TokenKind.DELIMITERS, SplitParts.BETWEEN, false);
     }
@@ -1040,6 +1082,7 @@ public final class StringZilla {
         return matches(MemorySegment.ofArray(haystack), MemorySegment.ofArray(needle));
     }
 
+    /** Like {@link #matches(byte[], byte[])}, over {@code MemorySegment} inputs. */
     public static Matches matches(MemorySegment haystack, MemorySegment needle) {
         return new Matches(haystack, needle, Math.max(needle.byteSize(), 1));
     }
@@ -1051,6 +1094,7 @@ public final class StringZilla {
         return new UncasedMatches(MemorySegment.ofArray(haystack), MemorySegment.ofArray(needle), false);
     }
 
+    /** Like {@link #uncasedMatches(byte[], byte[])}, over {@code MemorySegment} inputs. */
     public static UncasedMatches uncasedMatches(MemorySegment haystack, MemorySegment needle) {
         return new UncasedMatches(haystack, needle, false);
     }
@@ -1061,6 +1105,7 @@ public final class StringZilla {
         return partition(MemorySegment.ofArray(text), MemorySegment.ofArray(separator));
     }
 
+    /** Like {@link #partition(byte[], byte[])}, over {@code MemorySegment} inputs. */
     public static Partition partition(MemorySegment text, MemorySegment separator) {
         long at;
         try (Arena arena = Arena.ofConfined()) {
@@ -1077,6 +1122,7 @@ public final class StringZilla {
         return rpartition(MemorySegment.ofArray(text), MemorySegment.ofArray(separator));
     }
 
+    /** Like {@link #rpartition(byte[], byte[])}, over {@code MemorySegment} inputs. */
     public static Partition rpartition(MemorySegment text, MemorySegment separator) {
         long at;
         try (Arena arena = Arena.ofConfined()) {
@@ -1094,9 +1140,13 @@ public final class StringZilla {
 
     /** Which runtime a device belongs to, as the {@code sz_<kind>_*} C functions name it. */
     public enum DeviceKind {
+        /** The host CPU. */
         CPU,
+        /** NVIDIA GPUs, through CUDA. */
         CUDA,
+        /** AMD GPUs, through ROCm. */
         ROCM,
+        /** Apple GPUs, through Metal. */
         METAL
     }
 
@@ -1211,6 +1261,7 @@ public final class StringZilla {
         }
     }
 
+    /** The native library version, formatted as {@code major.minor.patch}. */
     public static String version() {
         try {
             int major = (int) STRINGZILLA_VERSION_MAJOR.invokeExact();
@@ -1271,17 +1322,20 @@ public final class StringZilla {
     public static final class Byteset {
         private final long[] w = new long[4];
 
+        /** Adds {@code value} to the set and returns this set. */
         public Byteset add(byte value) {
             int c = value & 0xFF;
             w[c >> 6] |= 1L << (c & 63);
             return this;
         }
 
+        /** Adds every byte of {@code values} to the set and returns this set. */
         public Byteset addAll(byte[] values) {
             for (byte v : values) add(v);
             return this;
         }
 
+        /** True if {@code value} is in the set. */
         public boolean contains(byte value) {
             int c = value & 0xFF;
             return (w[c >> 6] & (1L << (c & 63))) != 0;
@@ -1293,6 +1347,7 @@ public final class StringZilla {
             return s;
         }
 
+        /** A set holding exactly the bytes of {@code values}. */
         public static Byteset of(byte[] values) {
             return new Byteset().addAll(values);
         }
@@ -1307,6 +1362,7 @@ public final class StringZilla {
             this(0L);
         }
 
+        /** Starts a streaming hash under {@code seed}; the no-argument constructor uses seed 0. */
         public Hasher(long seed) {
             // sz_hash_state_t is 216 bytes; over-allocate and 64-byte align for SIMD safety.
             state = arena.allocate(256, 64);
@@ -1318,6 +1374,7 @@ public final class StringZilla {
             }
         }
 
+        /** Feeds {@code data} into the hash and returns this hasher. */
         public Hasher update(byte[] data) {
             try {
                 check("sz_hash_state_update_best", (int) STRINGZILLA_HASH_STATE_UPDATE.invokeExact(
@@ -1340,6 +1397,7 @@ public final class StringZilla {
             }
         }
 
+        /** Frees the native state. */
         @Override
         public void close() {
             arena.close();
@@ -1352,6 +1410,7 @@ public final class StringZilla {
         private final Arena arena = Arena.ofShared();
         private final MemorySegment prepared; // points into the arena's copy of the needle
 
+        /** Prepares {@code needle} for case-insensitive search. */
         public UncasedNeedle(byte[] needle) {
             prepared = uncasedNeedleInit(nativeView(MemorySegment.ofArray(needle), arena), arena);
         }
@@ -1363,6 +1422,7 @@ public final class StringZilla {
             }
         }
 
+        /** Frees the native memory of the prepared needle. */
         @Override
         public void close() {
             arena.close();
@@ -1384,6 +1444,7 @@ public final class StringZilla {
             }
         }
 
+        /** Feeds {@code data} into the digest and returns this instance. */
         public Sha256 update(byte[] data) {
             try {
                 check("sz_sha256_state_update_best", (int) STRINGZILLA_SHA256_UPDATE.invokeExact(
@@ -1419,6 +1480,7 @@ public final class StringZilla {
             }
         }
 
+        /** Frees the native state. */
         @Override
         public void close() {
             arena.close();
@@ -1477,8 +1539,11 @@ public final class StringZilla {
 
     /** Which spans a separator-token split yields: the gaps, the separator runs, or both (lossless). */
     public enum SplitParts {
+        /** The gaps between separator runs. */
         BETWEEN,
+        /** The separator runs only. */
         SEPARATORS,
+        /** The gaps and the separator runs, interleaved. */
         BOTH
     }
 
@@ -1518,6 +1583,7 @@ public final class StringZilla {
             this.kind = kind;
         }
 
+        /** Advances to the next segment, returning false once the text is exhausted. */
         public boolean next() {
             long end = start + length;
             if (index == count) {
@@ -1530,14 +1596,17 @@ public final class StringZilla {
             return true;
         }
 
+        /** Byte offset of the current segment in the text. */
         public long startOffset() {
             return start;
         }
 
+        /** Byte length of the current segment. */
         public long length() {
             return length;
         }
 
+        /** A zero-copy view of the current segment. */
         public MemorySegment current() {
             return text.asSlice(start, length);
         }
@@ -1554,16 +1623,19 @@ public final class StringZilla {
             this.kind = kind;
         }
 
+        /** A new zero-allocation {@link Segmenter} positioned before the first segment. */
         public Segmenter cursor() {
             return new Segmenter(text, kind);
         }
 
+        /** Iterates over zero-copy slices of the segments. */
         @Override
         public Iterator<MemorySegment> iterator() {
             Segmenter cursor = cursor();
             return StringZilla.iterator(cursor::next, cursor::current);
         }
 
+        /** A sequential stream of the segments. */
         public Stream<MemorySegment> stream() {
             return StreamSupport.stream(spliterator(), false);
         }
@@ -1599,6 +1671,7 @@ public final class StringZilla {
             this.cursor = reverse ? data.byteSize() : 0;
         }
 
+        /** Advances to the next split, returning false once the text is exhausted. */
         public boolean next() {
             while (cursor >= 0) {
                 MemorySegment rest = reverse ? data.asSlice(0, cursor) : data.asSlice(cursor);
@@ -1630,14 +1703,17 @@ public final class StringZilla {
             return reverse ? rfindByteset(rest, byteset) : findByteset(rest, byteset);
         }
 
+        /** Byte offset of the current split in the text. */
         public long startOffset() {
             return start;
         }
 
+        /** Byte length of the current split. */
         public long length() {
             return length;
         }
 
+        /** A zero-copy view of the current split. */
         public MemorySegment current() {
             return data.asSlice(start, length);
         }
@@ -1677,6 +1753,7 @@ public final class StringZilla {
             return new Splits(text, null, byteset, reverse, false, false, -1);
         }
 
+        /** Drops zero-length segments. */
         public Splits skipEmpty() {
             return new Splits(text, separator, byteset, reverse, keepSeparator, true, maxSplit);
         }
@@ -1692,6 +1769,7 @@ public final class StringZilla {
             return new Splits(text, separator, byteset, reverse, keepSeparator, skipEmpty, limit);
         }
 
+        /** A new zero-allocation {@link Splitter}; a heap-backed text is copied off-heap once. */
         public Splitter cursor() {
             Arena arena = Arena.ofAuto();
             MemorySegment data = nativeView(text, arena);
@@ -1700,12 +1778,14 @@ public final class StringZilla {
             return new Splitter(data, needle, set, reverse, keepSeparator, skipEmpty, maxSplit);
         }
 
+        /** Iterates over zero-copy slices of the splits. */
         @Override
         public Iterator<MemorySegment> iterator() {
             Splitter cursor = cursor();
             return StringZilla.iterator(cursor::next, cursor::current);
         }
 
+        /** A sequential stream of the splits. */
         public Stream<MemorySegment> stream() {
             return StreamSupport.stream(spliterator(), false);
         }
@@ -1732,6 +1812,7 @@ public final class StringZilla {
             this.count = tokenize(text, kind, offsets, lengths);
         }
 
+        /** Advances to the next piece under the {@link SplitParts} policy, or returns false. */
         public boolean next() {
             while (true) {
                 if (step == 2 * count && count == offsets.length) {
@@ -1752,14 +1833,17 @@ public final class StringZilla {
             }
         }
 
+        /** Byte offset of the current piece in the text. */
         public long startOffset() {
             return start;
         }
 
+        /** Byte length of the current piece. */
         public long length() {
             return length;
         }
 
+        /** A zero-copy view of the current piece. */
         public MemorySegment current() {
             return text.asSlice(start, length);
         }
@@ -1789,20 +1873,24 @@ public final class StringZilla {
             return new TokenSplits(text, kind, SplitParts.SEPARATORS, skipEmpty);
         }
 
+        /** Drops zero-length pieces. */
         public TokenSplits skipEmpty() {
             return new TokenSplits(text, kind, parts, true);
         }
 
+        /** A new zero-allocation {@link TokenSplitter} positioned before the first piece. */
         public TokenSplitter cursor() {
             return new TokenSplitter(text, kind, parts, skipEmpty);
         }
 
+        /** Iterates over zero-copy slices of the pieces. */
         @Override
         public Iterator<MemorySegment> iterator() {
             TokenSplitter cursor = cursor();
             return StringZilla.iterator(cursor::next, cursor::current);
         }
 
+        /** A sequential stream of the pieces. */
         public Stream<MemorySegment> stream() {
             return StreamSupport.stream(spliterator(), false);
         }
@@ -1821,6 +1909,7 @@ public final class StringZilla {
             this.stride = stride;
         }
 
+        /** Advances to the next match, returning false when no match remains. */
         public boolean next() {
             if (cursor > data.byteSize()) return false;
             long found = indexOf(data.asSlice(cursor), needle);
@@ -1833,6 +1922,7 @@ public final class StringZilla {
             return true;
         }
 
+        /** Byte offset of the current match. */
         public long offset() {
             return offset;
         }
@@ -1857,11 +1947,13 @@ public final class StringZilla {
             return new Matches(haystack, needle, 1);
         }
 
+        /** A new zero-allocation {@link Matcher}; heap-backed inputs are copied off-heap once. */
         public Matcher cursor() {
             Arena arena = Arena.ofAuto();
             return new Matcher(nativeView(haystack, arena), nativeView(needle, arena), stride);
         }
 
+        /** The byte offsets of all matches, in order. */
         public long[] toArray() {
             Matcher cursor = cursor();
             long[] buffer = new long[16];
@@ -1873,6 +1965,7 @@ public final class StringZilla {
             return java.util.Arrays.copyOf(buffer, count);
         }
 
+        /** The byte offsets of all matches as a {@code LongStream}. */
         public LongStream stream() {
             return LongStream.of(toArray());
         }
@@ -1892,6 +1985,7 @@ public final class StringZilla {
             this.overlapping = overlapping;
         }
 
+        /** Advances to the next match, returning false when no match remains. */
         public boolean next() {
             long textLength = data.byteSize();
             if (cursor > textLength) return false;
@@ -1911,6 +2005,7 @@ public final class StringZilla {
             return true;
         }
 
+        /** Byte offset of the current match. */
         public long offset() {
             return offset;
         }
@@ -1934,16 +2029,19 @@ public final class StringZilla {
             this.overlapping = overlapping;
         }
 
+        /** Reports overlapping matches, stepping one codepoint past each match. */
         public UncasedMatches overlapping() {
             return new UncasedMatches(haystack, needle, true);
         }
 
+        /** A new zero-allocation {@link UncasedMatcher}; the needle is prepared once per call. */
         public UncasedMatcher cursor() {
             Arena arena = Arena.ofAuto();
             MemorySegment needle = uncasedNeedleInit(nativeView(this.needle, arena), arena);
             return new UncasedMatcher(nativeView(haystack, arena), needle, overlapping);
         }
 
+        /** All matches in order, as {@link Match} records. */
         public java.util.List<Match> toList() {
             UncasedMatcher cursor = cursor();
             java.util.List<Match> out = new java.util.ArrayList<>();
@@ -1951,6 +2049,7 @@ public final class StringZilla {
             return out;
         }
 
+        /** The matches in order, as a stream of {@link Match} records. */
         public Stream<Match> stream() {
             return toList().stream();
         }

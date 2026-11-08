@@ -3,11 +3,42 @@ OUTPUT_DIRECTORY       = ../build/
 INPUT                  = ../c/stringzilla ../include/stringzilla ../cpp/stringzilla
 RECURSIVE              = YES
 FILE_PATTERNS          = *.h *.hpp
+INPUT_FILTER           = "sed -E 's/^( [*]  )@(author|date) .*/\1/'"
 EXTENSION_MAPPING      = cuh=C++
 EXCLUDE_SYMBOLS        = *_ sz_aes256*_serial sz_allocator*_serial sz_bytesum*_serial sz_equal*_serial \
                          sz_fill*_serial sz_find*_serial sz_hash*_serial sz_intersect*_serial sz_order*_serial \
                          sz_rfind*_serial sz_sha256*_serial sz_sort*_serial sz_stream*_serial sz_strings*_serial \
-                         sz_utf8*_serial
+                         sz_utf8*_serial dummy_alloc is_same_type end_sentinel_t matcher_find* matcher_rfind \
+                         matcher_view_for sz_aes256_gcm_direction_t sz_grapheme_bit_route_t sz_grapheme_carry_t \
+                         sz_grapheme_state_serial_t sz_grapheme_window_masks_t sz_hash_state_aligned_for_short_t \
+                         sz_hash_state_aligned_t sz_levenshtein_classes_width_t sz_levenshtein_deadline_t \
+                         sz_levenshtein_engine_layout_t sz_levenshtein_engine_shape_t \
+                         sz_levenshtein_length_bucket_t sz_levenshtein_u64x1_state_serial_t \
+                         sz_levenshtein_u64x1_vertical_serial_t sz_line_break_carry_t sz_line_break_cluster_t \
+                         sz_line_break_state_serial_t sz_line_break_window_t sz_overlap_round_t \
+                         sz_regex_body_t sz_regex_builder_t sz_regex_checkpoint_t sz_regex_dfa_t \
+                         sz_regex_direction_t sz_regex_flags_t sz_regex_follow_t sz_regex_fragment_t \
+                         sz_regex_greed_t sz_regex_image_t sz_regex_lookaround_kind_t sz_regex_lookaround_t \
+                         sz_regex_look_t sz_regex_match_kind_t sz_regex_nfa_kind_t sz_regex_nfa_link_t \
+                         sz_regex_nfa_state_t sz_regex_nfa_t sz_regex_node_kind_t sz_regex_node_t sz_regex_parser_t \
+                         sz_regex_pike_t sz_regex_position_t sz_regex_prefixes_t sz_regex_prefix_path_t \
+                         sz_regex_range_t sz_regex_set_t sz_regex_walk_t sz_regex_width_t sz_sentence_decision_t \
+                         sz_sentence_state_serial_t sz_strings_scratch_t sz_subdocuments_block_t \
+                         sz_subdocuments_builder_t sz_subdocuments_carry_t sz_subdocuments_comparison_t \
+                         sz_subdocuments_cursor_t sz_subdocuments_expect_t sz_subdocuments_filter_t \
+                         sz_subdocuments_frame_t sz_subdocuments_instruction_t sz_subdocuments_kind_t \
+                         sz_subdocuments_node_t sz_subdocuments_operation_t sz_subdocuments_parser_t \
+                         sz_subdocuments_primary_t sz_subdocuments_value_t sz_substrings_builder_t \
+                         sz_substrings_collector_t sz_substrings_folded_byte_t sz_substrings_folded_cursor_t \
+                         sz_substrings_frequencies_t sz_substrings_gpu_pass_t sz_substrings_host_arena_t \
+                         sz_substrings_layout_t sz_substrings_leftmost_context_t sz_substrings_output_t \
+                         sz_substrings_pending_end_t sz_substrings_pending_start_t sz_substrings_report_order_t \
+                         sz_substrings_resolved_match_t sz_substrings_rewriter_t sz_substrings_ring_t \
+                         sz_substrings_tally_t sz_substrings_trie_node_t sz_substrings_walk_t sz_utf8_folded_iter_t \
+                         sz_utf8_folded_reverse_iter_t sz_utf8_norm_out_t sz_utf8_sentence_break_carry_t \
+                         sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_window_t \
+                         sz_utf8_uncased_rune_safety_profile_t sz_utf8_word_break_partition_t \
+                         sz_utf8_word_break_window_t sz_word_element_t sz_word_state_serial_t
 ENABLE_PREPROCESSING   = YES
 MACRO_EXPANSION        = YES
 EXPAND_ONLY_PREDEF     = YES
@@ -30,6 +61,7 @@ EXTRACT_STATIC         = YES
 GENERATE_HTML          = NO
 GENERATE_LATEX         = NO
 GENERATE_XML           = YES
+XML_PROGRAMLISTING     = NO
 HAVE_DOT               = NO
 QUIET                  = YES
 WARN_IF_UNDOCUMENTED   = NO

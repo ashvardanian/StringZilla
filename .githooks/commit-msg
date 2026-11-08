@@ -13,6 +13,7 @@
 # Bypass knowingly, which you almost never should, with: git commit --no-verify
 
 set -u
+
 export LC_ALL=C
 
 approved_verbs='Add|Break|Chore|Docs|Fix|Improve|Make'
@@ -42,7 +43,6 @@ Release:*)
             git show ":javascript/@stringzilla-$platform/package.json" 2>/dev/null | grep -qxF "  \"version\": \"$version\"," ||
                 stale="$stale javascript/@stringzilla-$platform/package.json"
         done
-        git show :CITATION.cff 2>/dev/null | grep -qxF "version: $version" || stale="$stale CITATION.cff"
         git show :StringZilla.csproj 2>/dev/null | grep -qxF "    <Version>$version</Version>" || stale="$stale StringZilla.csproj"
         # The C macros take numbers only, so a candidate keeps its core there.
         for field in "MAJOR $major" "MINOR $minor" "PATCH $patch"; do

@@ -50,15 +50,15 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     env:
-      CC: gcc-13
-      CXX: g++-13
+      CC: gcc-15
+      CXX: g++-15
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
       - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y build-essential gcc-13 g++-13
+          sudo apt install -y build-essential gcc-15 g++-15
       - name: Build the Debug Library
         run: |
           cmake --preset debug -B build_golang -D STRINGZILLA_BUILD_SANITIZERS=off -D CMAKE_C_COMPILER="$CC" -D CMAKE_CXX_COMPILER="$CXX"

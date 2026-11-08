@@ -13,6 +13,13 @@
 # Bypass knowingly, which you almost never should, with: git commit --no-verify
 
 set -u
+
+# CITATION.cff cites the concept DOI, which spans every release, so it never carries a version.
+if git show :CITATION.cff 2> /dev/null | grep -q '^version:'; then
+    echo "pre-commit: CITATION.cff carries no version; the concept DOI spans every release." >&2
+    exit 1
+fi
+
 export LC_ALL=C # Byte-wise regexes, immune to the committer's locale
 unset FORCE_COLOR CLICOLOR_FORCE # Plain tool output, since the checks parse it by its colons
 
@@ -1991,7 +1998,8 @@ check_proper_names_capitalized() {
 # fires, so touching a line never forces a rename the commit is not about. A path HEAD lacks, whether new or a
 # rename git cannot pair, is weighed against every name in HEAD's headers, as it reuses the library's types.
 # A capitalized macro the file does not define, like the kernel's `RISCV_HWPROBE_EXT_ZABHA`, belongs to another
-# project and never fires, as do literal contents and names under `third_party_identifier_prefixes`.
+# project and never fires, as do literal contents, names the standard qualifies as `std::align_val_t`, and names
+# under `third_party_identifier_prefixes`.
 check_abbreviations_spelled_out() {
     local abbreviated previous_text
     previous_text=$(git show "HEAD:$staged_path" 2> /dev/null) ||
@@ -2026,11 +2034,12 @@ check_abbreviations_spelled_out() {
         FILENAME == ARGV[3] { original[FNR] = substr($0, 2); next }
         {
             prose = ($0 ~ /^\+[[:space:]]*(\*([[:space:]]|$)|\/\*|\/\/)/)
-            line = substr($0, 2)
+            line = substr($0, 2); previous = ""
             if (prose) { gsub(/"[^"]*"/, "", line); gsub(/`[^`]*`/, "", line); gsub(/<\/tt>/, "\001", line); gsub(/<tt>[^\001]*\001/, "", line); gsub(/@[pc][[:space:]]+[^[:space:]]+/, "", line) }
             while (match(line, /[A-Za-z_][A-Za-z0-9_]*/)) {
                 token = substr(line, RSTART, RLENGTH); accessor = substr(line, 1, RSTART - 1); line = substr(line, RSTART + RLENGTH)
-                if (!has_banned_segment(token) || accessor ~ /(\.|->)$/ || is_third_party(token)) continue
+                standard = accessor == "::" && previous == "std"; previous = token
+                if (!has_banned_segment(token) || accessor ~ /(\.|->)$/ || standard || is_third_party(token)) continue
                 if (token == toupper(token) && !(token in defined)) continue
                 if (prose && (token in declared || token == toupper(token))) continue
                 if ((prose && token !~ /_/) || !(token in existing)) { print "    " token ": " original[FNR]; break }
@@ -2792,6 +2801,13 @@ check_single_space_between_sentences() {
 # region Shared Dispatch
 
 # Routes one staged file through every shared check its extension calls for, reading the `staged_*` globals.
+# Whether @p 1 is written in a language with C comments, which the comment blanking and the shared C checks read.
+speaks_c_comments() {
+    case "$1" in
+    *.c | *.h | *.hpp | *.cpp | *.cc | *.cu | *.cuh | *.hip | *.metal | *.pml) return 0 ;;
+    esac
+    return 1
+}
 run_shared_checks() {
     case "$staged_path" in
     CMakeLists.txt | */CMakeLists.txt | *.cmake)
@@ -2799,8 +2815,7 @@ run_shared_checks() {
             rejection_count=$((rejection_count + 1))
         ;;
     esac
-    case "$staged_path" in
-    *.c | *.h | *.hpp | *.cpp | *.cc | *.cu | *.cuh | *.hip | *.metal | *.pml)
+    if speaks_c_comments "$staged_path"; then
         check_docblock_documents_a_declaration
         check_file_header_tag_order
         check_enumerators_documented_individually
@@ -2856,8 +2871,7 @@ run_shared_checks() {
             check_parameter_references_use_p
             check_docblock_without_backticks
         fi
-        ;;
-    esac
+    fi
     case "$staged_path" in
     *.hpp | *.h | *.c | *.cpp | *.cc | *.cu | *.cuh | *.hip | *.metal)
         check_boolean_parameters
@@ -3848,8 +3862,7 @@ load_path_files() {
     staged_added_text=$(< "$results_directory/$ordinal.added")
     staged_added_unquoted_path=$results_directory/$ordinal.added
     staged_file_text=$(< "$staged_text_path")
-    case "$staged_path" in
-    *.c | *.h | *.hpp | *.cpp | *.cc | *.cu | *.cuh | *.hip | *.metal)
+    if speaks_c_comments "$staged_path"; then
         staged_code_path=$results_directory/$ordinal.code
         staged_added_code_path=$results_directory/$ordinal.added-code
         staged_added_unquoted_path=$results_directory/$ordinal.added-unquoted
@@ -3857,8 +3870,7 @@ load_path_files() {
         scan_staged_file_marking_added_lines 'FNR in added { print "+" $0 }' "$staged_code_path" > "$staged_added_code_path"
         blank_c_comments_preserving_columns literals < "$staged_text_path" |
             scan_staged_file_marking_added_lines 'FNR in added { print "+" $0 }' - > "$staged_added_unquoted_path"
-        ;;
-    esac
+    fi
 }
 
 # `--all-lines <path>...` judges whole working-tree files as though every line outside a function body were

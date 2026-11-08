@@ -530,9 +530,9 @@ static PyObject *SubstringsEngine_replace(SubstringsEngine *self, PyObject *cons
 }
 
 static char const doc_SubstringsEngine_bm25_scores[] =                                                  //
-    "bm25_scores(haystacks, needle_weights, out, *, document_lengths=None,\n"                           //
-    "            term_frequency_saturation=1.2, length_normalization=0.75,\n"                           //
-    "            average_document_length=0.0, stream=None) -> None\n"                                   //
+    "bm25_scores(haystacks, needle_weights, out, *, document_lengths=None, "                            //
+    "term_frequency_saturation=1.2, length_normalization=0.75, "                                        //
+    "average_document_length=0.0, stream=None) -> None\n"                                               //
     "\n"                                                                                                //
     "Score every haystack against the vocabulary, which is the query, into `out`.\n"                    //
     "\n"                                                                                                //
@@ -731,9 +731,9 @@ static PyObject *SubstringsEngine_get_report(SubstringsEngine *self, void *closu
 #pragma region Type Registration
 
 static char const doc_SubstringsEngine[] =                                                              //
-    "SubstringsEngine(needles, case_sensitivity='cased', overlap_policy='overlapping',\n"               //
-    "                 hot_states=None, matches_budget=0, *, haystacks_budget=0,\n"                      //
-    "                 capabilities=None, stream=None)\n"                                                //
+    "SubstringsEngine(needles, case_sensitivity='cased', overlap_policy='overlapping', "                //
+    "hot_states=None, matches_budget=0, *, haystacks_budget=0, capabilities=None, "                     //
+    "stream=None)\n"                                                                                    //
     "\n"                                                                                                //
     "Compile a vocabulary once and stream many collections of haystacks through it.\n"                  //
     "\n"                                                                                                //

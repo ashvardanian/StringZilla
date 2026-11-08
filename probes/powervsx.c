@@ -6,7 +6,8 @@
  */
 #define STRINGZILLA_HEADER_ONLY 1
 #define STRINGZILLA_TARGET_POWERVSX 1
-#include <stringzilla/find/powervsx.h>
+#include "stringzilla/find/powervsx.h"
+#include "stringzilla/cipher/powervsx.h" // Needs the POWER9 half of `altivec.h`, closed to Clang at the floor
 
 int main(void) {
     char haystack[64] = {'x'};

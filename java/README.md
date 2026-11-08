@@ -1,4 +1,4 @@
-# StringZilla 🦖 for Java
+# StringZilla for Java
 
 Zero-copy Java bindings for StringZilla via the Foreign Function & Memory API (FFM, JDK 22+), with no JNI.
 SIMD-accelerated search, comparison, hashing, UTF-8 segmentation, case-folding, normalization, and sorting, operating directly on UTF-8 bytes.

@@ -14,6 +14,8 @@ __version__: str
 type _Buffer = Any
 type _StringLike = String | str | bytes | bytearray | memoryview
 
+# region Capability Flags
+
 class Capability(enum.IntFlag):
     SERIAL = ...
     WESTMERE = ...
@@ -33,6 +35,10 @@ class Capability(enum.IntFlag):
     V128RELAXED = ...
     LOONGSONASX = ...
     POWERVSX = ...
+
+# endregion Capability Flags
+
+# region Encryption
 
 class AuthenticationError(ValueError):
     """Raised when a Galois/counter mode tag does not authenticate the bytes it accompanies.
@@ -307,6 +313,10 @@ class Aes256GcmDecryptor:
           True
         """
 
+# endregion Encryption
+
+# region Memory-Mapped Files
+
 @final
 class File:
     r"""File(path, mode='r')
@@ -328,6 +338,10 @@ class File:
     """
 
     def __init__(self, path: str, mode: str = "r") -> None: ...
+
+# endregion Memory-Mapped Files
+
+# region Searching and Counting
 
 def equal(first: _StringLike, second: _StringLike, /, *, capabilities: Capability | None = None) -> bool:
     """Check if two strings are equal.
@@ -701,6 +715,10 @@ def count_byteset(
       5
     """
 
+# endregion Searching and Counting
+
+# region Splitting and Partitioning
+
 def split(
     text: _StringLike,
     separator: _StringLike,
@@ -931,6 +949,10 @@ def splitlines(
       ['a', 'b', 'c']
     """
 
+# endregion Splitting and Partitioning
+
+# region Trimming
+
 def lstrip(text: _StringLike, chars: _StringLike | None = None, *, capabilities: Capability | None = None) -> String:
     """Remove leading characters from a string.
 
@@ -975,6 +997,10 @@ def strip(text: _StringLike, chars: _StringLike | None = None, *, capabilities: 
       >>> sz.String('  hi  ').strip() == 'hi'
       True
     """
+
+# endregion Trimming
+
+# region Hashing and Checksums
 
 def hash(text: _StringLike, seed: int = 0, /, *, capabilities: Capability | None = None) -> int:
     """Compute the hash value of the string.
@@ -1128,6 +1154,10 @@ def random(
       16
     """
 
+# endregion Hashing and Checksums
+
+# region Decoding and Translating
+
 def decode(text: _StringLike, encoding: str = "utf-8", errors: str = "strict") -> str:
     """Decode the bytes into a Unicode string with a given encoding.
 
@@ -1207,6 +1237,10 @@ def translate(
       True
     """
 
+# endregion Decoding and Translating
+
+# region Dumping JSON and CSV
+
 def to_json(
     columns: Mapping[str, Strings | Sequence[str]], ensure_ascii: bool = True, *, capabilities: Capability | None = None
 ) -> bytes:
@@ -1250,6 +1284,10 @@ def to_csv(
       >>> sz.to_csv({'name': ['Ada', 'Grace "Amazing" Hopper'], 'city': ['London', 'New York']})
       b'name,city\nAda,London\n"Grace ""Amazing"" Hopper",New York\n'
     """
+
+# endregion Dumping JSON and CSV
+
+# region Runtime Dispatch
 
 def cpu_capabilities_detected() -> Capability:
     """Get the capabilities this CPU can execute.
@@ -1517,6 +1555,10 @@ def synchronize(capabilities: Capability, stream: int | None = None) -> None:
     Signature:
         >>> def synchronize(capabilities, stream=None) -> None: ...
     """
+
+# endregion Runtime Dispatch
+
+# region Unicode Segmentation
 
 def utf8_count(text: _StringLike, *, capabilities: Capability | None = None) -> int:
     r"""Count the number of UTF-8 characters in a string.
@@ -1954,6 +1996,10 @@ def utf8_uncased_matches(
         [sz.String('Straße'), sz.String('STRASSE')]
     """
 
+# endregion Unicode Segmentation
+
+# region Lazy Split Iterators
+
 @final
 class FindSplits:
     """FindSplits(string, separator, ...)
@@ -1983,6 +2029,10 @@ class FindSplits:
 
     def __iter__(self) -> Iterator[String]: ...
     def __next__(self) -> String: ...
+
+# endregion Lazy Split Iterators
+
+# region Incremental Hashing
 
 @final
 class Hasher:
@@ -2215,6 +2265,10 @@ class Sha256s:
           Sha256s: A new object that can be advanced separately from the original.
         """
 
+# endregion Incremental Hashing
+
+# region Edit Distances and Overlaps
+
 @final
 class LevenshteinEngine:
     """LevenshteinEngine(queries, symbol='bytes', *, capabilities=None, stream=None)
@@ -2321,6 +2375,10 @@ class OverlapEngine:
           >>> out[0, 0, 0]
           1.0
         """
+
+# endregion Edit Distances and Overlaps
+
+# region Unicode Iterators
 
 class Utf8Graphemes:
     """Utf8Graphemes(string, ...)
@@ -2495,6 +2553,10 @@ class Utf8SplitDelimiters:
 class Utf8Delimiters:
     def __iter__(self) -> Iterator[String]: ...
     def __next__(self) -> String: ...
+
+# endregion Unicode Iterators
+
+# region Multi-Pattern Matching
 
 @final
 class RegexEngine:
@@ -2878,6 +2940,10 @@ class SubstringsEngine:
           0.0
         """
 
+# endregion Multi-Pattern Matching
+
+# region Strings Collections
+
 @final
 class Strings:
     """Strings(sequence=())
@@ -3216,6 +3282,10 @@ class Strings:
           b'["Ada","Grace"]'
         """
 
+# endregion Strings Collections
+
+# region String Type
+
 @final
 class String:
     """String(source)
@@ -3275,7 +3345,6 @@ class String:
         """Check if a string contains a substring.
 
         Args:
-          text (String or str or bytes): The string object.
           substring (str): The substring to search for.
           start (int, optional): The starting index, defaulting to 0.
           end (int, optional): The ending index, defaulting to the string length.
@@ -3299,7 +3368,6 @@ class String:
         """Count the occurrences of a substring.
 
         Args:
-          text (String or str or bytes): The string object.
           substring (str): The substring to count.
           start (int, optional): The starting index, defaulting to 0.
           end (int, optional): The ending index, defaulting to the string length.
@@ -3318,7 +3386,6 @@ class String:
         r"""Split a string by line breaks, like `str.splitlines`.
 
         Args:
-          text (String or str or bytes): The string object.
           keeplinebreaks (bool, optional): Include line breaks in the results, defaulting to False.
           maxsplit (int, optional): Maximum number of splits, defaulting to no limit.
           capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.
@@ -3335,7 +3402,6 @@ class String:
         """Check if a string starts with a given prefix.
 
         Args:
-          text (String or str or bytes): The string object.
           prefix (str): The prefix to check.
           start (int, optional): The starting index, defaulting to 0.
           end (int, optional): The ending index, defaulting to the string length.
@@ -3353,7 +3419,6 @@ class String:
         """Check if a string ends with a given suffix.
 
         Args:
-          text (String or str or bytes): The string object.
           suffix (str): The suffix to check.
           start (int, optional): The starting index, defaulting to 0.
           end (int, optional): The ending index, defaulting to the string length.
@@ -3369,7 +3434,6 @@ class String:
         """Decode the bytes into a Unicode string with a given encoding.
 
         Args:
-          text (String or str or bytes): The string object.
           encoding (str, optional): The encoding to use, defaulting to 'utf-8'.
           errors (str, optional): Error handling scheme, defaulting to 'strict'.
         Returns:
@@ -3407,7 +3471,6 @@ class String:
         many seeds (feature hashing, Count-Min sketches, Bloom/cuckoo filters, MinHash/LSH).
 
         Args:
-          text (String or str or bytes): The string to hash, positional-only when standalone.
           seeds (buffer of uint64): Contiguous 64-bit seeds, e.g. numpy.uint64 array or array('Q', ...).
                Plain int lists are not accepted - wrap them in array('Q', seeds) or numpy.
           out (writable uint64 buffer, optional): A contiguous buffer of at least len(seeds) elements.
@@ -3440,7 +3503,6 @@ class String:
         """Remove leading characters from a string.
 
         Args:
-          text (String or str or bytes): The string object.
           chars (str, optional): Characters to remove, defaulting to whitespace.
           capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.
         Returns:
@@ -3454,7 +3516,6 @@ class String:
         """Remove trailing characters from a string.
 
         Args:
-          text (String or str or bytes): The string object.
           chars (str, optional): Characters to remove, defaulting to whitespace.
           capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.
         Returns:
@@ -3468,7 +3529,6 @@ class String:
         """Remove leading and trailing characters from a string.
 
         Args:
-          text (String or str or bytes): The string object.
           chars (str, optional): Characters to remove, defaulting to whitespace.
           capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.
         Returns:
@@ -3499,7 +3559,6 @@ class String:
         """Find the first occurrence of a substring.
 
         Args:
-          text (String or str or bytes): The string object.
           substring (str): The substring to find.
           start (int, optional): The starting index, defaulting to 0.
           end (int, optional): The ending index, defaulting to the string length.
@@ -3517,7 +3576,6 @@ class String:
         """Find the first occurrence of a substring or raise an error if not found.
 
         Args:
-          text (String or str or bytes): The string object.
           substring (str): The substring to find.
           start (int, optional): The starting index, defaulting to 0.
           end (int, optional): The ending index, defaulting to the string length.
@@ -3537,7 +3595,6 @@ class String:
         """Split the string into a 3-tuple around the first occurrence of a separator.
 
         Args:
-          text (String or str or bytes): The string object.
           separator (str): The separator to partition by.
           capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.
         Returns:
@@ -3559,7 +3616,6 @@ class String:
         """Split a string by a separator, like `str.split`.
 
         Args:
-          text (String or str or bytes): The string object.
           separator (str): The separator to split by; an empty one leaves the text whole.
           maxsplit (int, optional): Maximum number of splits, defaulting to no limit.
           keepseparator (bool, optional): Include the separator in results, defaulting to False.
@@ -3578,7 +3634,6 @@ class String:
         """Find the last occurrence of a substring.
 
         Args:
-          text (String or str or bytes): The string object.
           substring (str): The substring to find.
           start (int, optional): The starting index, defaulting to 0.
           end (int, optional): The ending index, defaulting to the string length.
@@ -3596,7 +3651,6 @@ class String:
         """Find the last occurrence of a substring or raise an error if not found.
 
         Args:
-          text (String or str or bytes): The string object.
           substring (str): The substring to find.
           start (int, optional): The starting index, defaulting to 0.
           end (int, optional): The ending index, defaulting to the string length.
@@ -3616,7 +3670,6 @@ class String:
         """Split the string into a 3-tuple around the last occurrence of a separator.
 
         Args:
-          text (String or str or bytes): The string object.
           separator (str): The separator to partition by.
           capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.
         Returns:
@@ -3638,7 +3691,6 @@ class String:
         """Split a string by a separator starting from the end, like `str.rsplit`.
 
         Args:
-          text (String or str or bytes): The string object.
           separator (str): The separator to split by; an empty one leaves the text whole.
           maxsplit (int, optional): Maximum number of splits, defaulting to no limit.
           keepseparator (bool, optional): Include the separator in results, defaulting to False.
@@ -3657,7 +3709,6 @@ class String:
         """Find the index of the first occurrence of any character from another string.
 
         Args:
-          text (String or str or bytes): The string object.
           chars (str): A string containing characters to search for.
           start (int, optional): Starting index, defaulting to 0.
           end (int, optional): Ending index, defaulting to the string length.
@@ -3675,7 +3726,6 @@ class String:
         """Find the index of the last occurrence of any character from another string.
 
         Args:
-          text (String or str or bytes): The string object.
           chars (str): A string containing characters to search for.
           start (int, optional): Starting index, defaulting to 0.
           end (int, optional): Ending index, defaulting to the string length.
@@ -3693,7 +3743,6 @@ class String:
         """Find the index of the first character not in another string.
 
         Args:
-          text (String or str or bytes): The string object.
           chars (str): A string containing characters to exclude.
           start (int, optional): Starting index, defaulting to 0.
           end (int, optional): Ending index, defaulting to the string length.
@@ -3711,7 +3760,6 @@ class String:
         """Find the index of the last character not in another string.
 
         Args:
-          text (String or str or bytes): The string object.
           chars (str): A string containing characters to exclude.
           start (int, optional): Starting index, defaulting to 0.
           end (int, optional): Ending index, defaulting to the string length.
@@ -3729,7 +3777,6 @@ class String:
         """Count the occurrences of any character from a set of characters.
 
         Args:
-          text (String or str or bytes): The string object.
           chars (str): A string containing characters to count.
           start (int, optional): Starting index, defaulting to 0.
           end (int, optional): Ending index, defaulting to the string length.
@@ -3753,7 +3800,6 @@ class String:
         """Split a string by a set of character separators.
 
         Args:
-          text (String or str or bytes): The string object.
           separators (str): A string containing separator characters.
           maxsplit (int, optional): Maximum number of splits, defaulting to no limit.
           keepseparator (bool, optional): Include separators in results, defaulting to False.
@@ -3778,7 +3824,6 @@ class String:
         """Split a string by a set of character separators in reverse order.
 
         Args:
-          text (String or str or bytes): The string object.
           separators (str): A string containing separator characters.
           maxsplit (int, optional): Maximum number of splits, defaulting to no limit.
           keepseparator (bool, optional): Include separators in results, defaulting to False.
@@ -3803,7 +3848,6 @@ class String:
         """Create an iterator for splitting a string by a separator.
 
         Args:
-          text (String or str or bytes): The string object.
           separator (str): The separator to split by; an empty one leaves the text whole.
           maxsplit (int, optional): Maximum number of splits, defaulting to no limit.
           keepseparator (bool, optional): Include separator in results, defaulting to False.
@@ -3829,7 +3873,6 @@ class String:
         """Create an iterator for splitting a string by a separator in reverse order.
 
         Args:
-          text (String or str or bytes): The string object.
           separator (str): The separator to split by; an empty one leaves the text whole.
           maxsplit (int, optional): Maximum number of splits, defaulting to no limit.
           keepseparator (bool, optional): Include separator in results, defaulting to False.
@@ -3855,7 +3898,6 @@ class String:
         """Create an iterator for splitting a string by a set of character separators.
 
         Args:
-          text (String or str or bytes): The string object.
           separators (str): A string containing separator characters.
           maxsplit (int, optional): Maximum number of splits, defaulting to no limit.
           keepseparator (bool, optional): Include separators in results, defaulting to False.
@@ -3881,7 +3923,6 @@ class String:
         """Create an iterator for splitting a string by a set of character separators in reverse order.
 
         Args:
-          text (String or str or bytes): The string object.
           separators (str): A string containing separator characters.
           maxsplit (int, optional): Maximum number of splits, defaulting to no limit.
           keepseparator (bool, optional): Include separators in results, defaulting to False.
@@ -3902,7 +3943,6 @@ class String:
         handling multi-byte UTF-8 sequences correctly.
 
         Args:
-          text (String or str or bytes): The string object.
           capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.
         Returns:
           int: Number of UTF-8 characters in the string.
@@ -3922,7 +3962,6 @@ class String:
         Unlike splitlines(), this returns an iterator for memory-efficient processing.
 
         Args:
-          text (String or str or bytes): The string object.
           skip_empty (bool, optional): Skip empty lines, defaulting to False.
           with_separators (bool, optional): Interleave the separators losslessly, defaulting to False.
           capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.
@@ -3946,7 +3985,6 @@ class String:
         Yields each newline separator; utf8_split_newlines() yields the lines between them.
 
         Args:
-          text (String or str or bytes): The string object.
           skip_empty (bool, optional): Skip empty segments, defaulting to False.
           capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.
         Returns:
@@ -3969,7 +4007,6 @@ class String:
         Splits on each whitespace codepoint; pass skip_empty=True for str.split()-style tokens.
 
         Args:
-          text (String or str or bytes): The string object.
           skip_empty (bool, optional): Skip empty segments, defaulting to False.
           with_separators (bool, optional): Interleave the separators losslessly, defaulting to False.
           capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.
@@ -3995,7 +4032,6 @@ class String:
         Yields each whitespace codepoint; utf8_split_whitespaces() yields the tokens between them.
 
         Args:
-          text (String or str or bytes): The string object.
           skip_empty (bool, optional): Skip empty segments, defaulting to False.
           capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.
         Returns:
@@ -4021,7 +4057,6 @@ class String:
         Splits on delimiters, one separator per codepoint, and yields the segments between them.
 
         Args:
-          text (String or str or bytes): The string object.
           skip_empty (bool, optional): Skip empty segments, defaulting to False.
           with_separators (bool, optional): Interleave the separators losslessly, defaulting to False.
           capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.
@@ -4042,7 +4077,6 @@ class String:
         utf8_split_delimiters() yields the fields between them.
 
         Args:
-          text (String or str or bytes): The string object.
           skip_empty (bool, optional): Skip empty segments, defaulting to False.
           capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.
         Returns:
@@ -4059,7 +4093,6 @@ class String:
         Unlike str.split(), this is UAX-29 compliant and supports all Unicode scripts.
 
         Args:
-            string: The input UTF-8 string to split into words.
             capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.
 
         Returns:
@@ -4079,7 +4112,6 @@ class String:
         total and never raises on malformed input.
 
         Args:
-            string: The input UTF-8 string to decode into code points.
             capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.
 
         Returns:
@@ -4098,7 +4130,6 @@ class String:
         marks, or an emoji ZWJ sequence) and may span several code points.
 
         Args:
-            string: The input UTF-8 string to split into grapheme clusters.
             capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.
 
         Returns:
@@ -4117,7 +4148,6 @@ class String:
         UAX-29 compliant and Unicode-script aware, unlike naive period splitting.
 
         Args:
-            string: The input UTF-8 string to split into sentences.
             capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.
 
         Returns:
@@ -4137,7 +4167,6 @@ class String:
         For hard-line splitting (str.splitlines()), use utf8_split_newlines().
 
         Args:
-            string: The input UTF-8 string to split at line-break opportunities.
             capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.
 
         Returns:
@@ -4156,7 +4185,6 @@ class String:
         handling one-to-many expansions, like German sharp S to 'ss'.
 
         Args:
-            text (String or str or bytes): The input UTF-8 string.
             validate (bool): If True, validate UTF-8 before processing. Default: False.
             capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.
 
@@ -4177,7 +4205,6 @@ class String:
         case folding and no default-ignorable codepoints.
 
         Args:
-            text (String or str or bytes): The input UTF-8 string.
             form (str): One of 'NFC', 'NFD', 'NFKC', 'NFKD', 'NFKC_Casefold'.
             validate (bool): If True, validate UTF-8 before processing. Default: False.
             capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.
@@ -4202,7 +4229,6 @@ class String:
         fully normalized.
 
         Args:
-            text (String or str or bytes): The input UTF-8 string.
             form (str): One of 'NFC', 'NFD', 'NFKC', 'NFKD', 'NFKC_Casefold'.
             capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.
 
@@ -4234,7 +4260,6 @@ class String:
           - bytes input: start/end are BYTE offsets, returns BYTE offset
 
         Args:
-            haystack (String or str or bytes): The string to search in.
             needle (String or str or bytes): The substring to find.
             start (int, optional): Starting index, defaulting to 0.
             end (int, optional): Ending index, defaulting to length.
@@ -4265,7 +4290,6 @@ class String:
         An empty needle matches at every codepoint boundary, the end included.
 
         Args:
-            haystack (String or str or bytes): The string to search in.
             needle (String or str or bytes): The pattern to find.
             include_overlapping (bool, optional): Allow overlapping matches, defaulting to False.
             capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.
@@ -4288,8 +4312,7 @@ class String:
         one-to-many expansions, like 'Straße' equaling 'STRASSE'.
 
         Args:
-            a (String or str or bytes): First string to compare.
-            b (String or str or bytes): Second string to compare.
+            other (String or str or bytes): The string to compare with.
             validate (bool): If True, validate UTF-8 before processing. Default: False.
             capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.
 
@@ -4306,7 +4329,6 @@ class String:
         """Return the raw byte offset of this StringZilla string within a larger StringZilla string.
 
         Args:
-          text (String or str or bytes): The substring.
           larger (String): The larger string to search within.
         Returns:
           int: The byte offset where 'self' is found within 'larger', or -1 if not found.
@@ -4320,7 +4342,6 @@ class String:
         """Write the string to a file.
 
         Args:
-          text (String or str or bytes): The string object.
           filename (str): The file path to write to.
         Returns:
           None.
@@ -4342,7 +4363,6 @@ class String:
         """Perform transformation of a string using a look-up table.
 
         Args:
-          text (String or str or bytes): The string object.
           table (str or dict): A 256-byte string, or a dict mapping characters below U+0100 to such.
           inplace (bool, optional): If True, the string is modified in place, defaulting to False.
 
@@ -4373,7 +4393,6 @@ class String:
         """Fill a string-like buffer in place with pseudo-random bytes.
 
         Args:
-          buffer (String or bytes-like): Writable, contiguous byte buffer (e.g., memoryview/bytearray).
           nonce (int, optional): Seed ensuring reproducible output for the same inputs, defaulting to 0.
           alphabet (str or bytes, optional): If provided, remaps random bytes to its characters.
           start (int, optional): Starting index, defaulting to 0.
@@ -4388,3 +4407,5 @@ class String:
           >>> len(buf)
           16
         """
+
+# endregion String Type

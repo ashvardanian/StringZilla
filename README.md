@@ -1,6 +1,9 @@
-# StringZilla 🦖
+# StringZilla 🦖: SIMD, SWAR & GPU Kernels for Strings
 
-![StringZilla banner](https://github.com/ashvardanian/ashvardanian/blob/master/repositories/StringZilla-v5.png?raw=true)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/ashvardanian/ashvardanian/blob/master/repositories/StringZilla-v6-dark.jpg?raw=true">
+  <img alt="StringZilla banner" src="https://github.com/ashvardanian/ashvardanian/blob/master/repositories/StringZilla-v6.jpg?raw=true">
+</picture>
 
 Strings are the first fundamental data type every programming language implements in software rather than hardware — the closest CPUs come to a "find substring" instruction is x86's `PCMPISTRI`, which is too slow and too narrow to build a library on, and nothing ships a "compute string hash" instruction at all.
 So most string-processing code still looks like `for (i = 0; i < length; ++i) if (text[i] == 'x') …` — a tangle of loops, branches, and per-character lookups, where the surrounding control flow often costs more than the character-level logic itself, whether the text is ASCII or UTF-8 encoded Unicode.
@@ -20,9 +23,9 @@ StringZilla is the GodZilla of string libraries, accelerating exact and fuzzy ma
 
 Reach for it from your language of choice:
 
-- 🐂 __[C](#c-and-c):__ Upgrade LibC's `<string.h>` to `<stringzilla/stringzilla.h>` in C 99
-- 🐉 __[C++](#c-and-c):__ Upgrade STL's `<string>` to `<stringzilla/stringzilla.hpp>` in C++ 20
-- 🧮 __[CUDA](include/stringzilla/README.md):__ Score batches on a device with engines built for its capabilities in CUDA C++ 20
+- 🐂 __[C](#c--c):__ Upgrade LibC's `<string.h>` to `<stringzilla/stringzilla.h>` in C 99
+- 🐉 __[C++](#c--c):__ Upgrade STL's `<string>` to `<stringzilla/stringzilla.hpp>` in C++ 20
+- 🧮 __[CUDA](https://github.com/ashvardanian/StringZilla/blob/main/include/stringzilla/README.md):__ Score batches on a device with engines built for its capabilities in CUDA C++ 20
 - 🐍 __[Python](#python):__ Upgrade your `str` to faster `String`
 - 🦀 __[Rust](#rust):__ Use the `StringZilla` traits crate
 - 🦫 __[Go](#go):__ Use the `StringZilla` cGo module
@@ -80,15 +83,136 @@ Split lines separated by \n or \r  (GB/s)
 > The two CPUs therefore differ in standard library as much as in ISA, which is most of the gap in the `strstr`, `strcspn`, and `std::string::find_first_of` rows; the StringZilla rows build from the same source on both.
 > These will not reproduce exactly; the links below carry the methodology and the per-library breakdowns.
 
-The batch engines are timed per family and per backend, CPU beside GPU, in [`levenshtein/README.md`](include/stringzilla/levenshtein/README.md), [`overlap/README.md`](include/stringzilla/overlap/README.md), and [`substrings/README.md`](include/stringzilla/substrings/README.md).
+The batch engines are timed per family and per backend, CPU beside GPU, in [`levenshtein/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/include/stringzilla/levenshtein/README.md), [`overlap/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/include/stringzilla/overlap/README.md), and [`substrings/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/include/stringzilla/substrings/README.md).
 
 Most StringZilla modules ship ready-to-run benchmarks for C, C++, Python, and more.
-Grab them from `./bench`, and see [`CONTRIBUTING.md`](CONTRIBUTING.md), [`test/README.md`](test/README.md), and [`bench/README.md`](bench/README.md) for instructions.
+Grab them from `./bench`, and see [`CONTRIBUTING.md`](https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md), [`test/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/test/README.md), and [`bench/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/bench/README.md) for instructions.
 For wider head-to-heads against Rust and Python favorites, browse the __[StringWars][stringwars]__ repository.
 To inspect collision resistance and distribution shapes for our hashers, see __[HashEvals][hashevals]__.
 
 [stringwars]: https://github.com/ashvardanian/StringWars
 [hashevals]: https://github.com/ashvardanian/HashEvals
+
+## Quickstart
+
+Each binding has its own install command, import line, and dedicated guide, all collected in the per-language sections below.
+The batch engines ship inside the same package and the same crate as the single-string kernels, so there is nothing extra to install for them.
+
+### Python
+
+`pip install stringzilla` &centerdot; guide: [`python/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/python/README.md)
+
+```python
+import stringzilla as sz
+
+text = sz.String("the quick brown fox")
+text.find("brown")          # 10
+text.split()                # sz.Strings(['the', 'quick', 'brown', 'fox'])
+sz.hash("hello")            # fast 64-bit hash
+```
+
+The Python package upgrades `str` and `bytes` with SIMD search, sorting, hashing, UTF-8 segmentation, and Unicode case-folding, plus the batch engines that score one prepared set of queries against many collections of candidates.
+
+### C & C++
+
+Link `stringzilla::static` through CMake `FetchContent`, or `find_package(stringzilla)` an installed build, or go header-only in C &centerdot; guide: [`include/stringzilla/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/include/stringzilla/README.md)
+
+```c
+#include <stringzilla/stringzilla.h>
+sz_capability_t capabilities = sz_cap_serial_k;
+sz_capabilities_enabled_cpu(&capabilities); // what this CPU runs and this binary holds
+sz_cptr_t match = NULL;
+sz_find_best(haystack, h_length, "brown", 5, &match, capabilities, NULL); // pointer to the match, or NULL
+```
+
+```cpp
+#include <stringzilla/stringzilla.hpp>
+namespace sz = ashvardanian::stringzilla;
+sz::string_view_t("the quick brown fox").find("brown"); // 10
+```
+
+The library covers search, hashing, sorting, comparison, set intersection, collection conversions like escaping, normalization and Arrow-compatible tapes, and lazy UTF-8 segmentation, plus the engines for edit distances, window overlap, and multi-pattern search, each with a host arm, a CUDA and ROCm one, and a Metal one.
+
+### Rust
+
+`cargo add stringzilla` &centerdot; guide: [`rust/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/rust/README.md)
+
+```rust
+use stringzilla as sz;
+
+assert_eq!(sz::find("the quick brown fox", "brown"), Some(10));
+let digest = sz::hash("hello"); // fast 64-bit hash
+```
+
+The crate adds SIMD search, sorting, hashing, and UTF-8 segmentation to any `AsRef<[u8]>`, plus the `LevenshteinEngine`, `OverlapEngine` and `SubstringsEngine` batch engines, whose device arms come with the `cuda` feature.
+
+### JavaScript
+
+`npm install stringzilla` &centerdot; guide: [`javascript/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/javascript/README.md)
+
+```js
+import sz from "stringzilla";
+
+sz.find(Buffer.from("the quick brown fox"), Buffer.from("brown")); // => 10n
+sz.hash(Buffer.from("hello"));                                     // 64-bit BigInt
+```
+
+The Node-API addon runs on Node, Bun, and Deno, exposing zero-copy search, hashing, SHA-256, and Unicode case-folding over `Buffer` objects.
+
+### Swift
+
+Add the Swift Package Manager dependency &centerdot; guide: [`swift/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/swift/README.md)
+
+```swift
+import StringZilla
+
+let i = "the quick brown fox".findFirst(substring: "brown") // Index of "brown"
+let h = "hello".hash()                                       // fast 64-bit hash
+```
+
+The Foundation-free package extends `String` with SIMD search, comparison, hashing, Unicode case-folding, normalization, and word and line segmentation, on Linux and embedded targets as well as Apple platforms.
+
+### Go
+
+`go get github.com/ashvardanian/stringzilla/golang` &centerdot; guide: [`golang/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/golang/README.md)
+
+```go
+import sz "github.com/ashvardanian/stringzilla/golang"
+
+sz.Index("the quick brown fox", "brown") // 10
+sz.Hash("hello", 0)                      // fast 64-bit hash
+```
+
+The cgo module exposes byte-level search, counting, checksums, SHA-256, and UTF-8 case-folding to Go.
+
+### C#
+
+Build from source &centerdot; guide: [`csharp/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/csharp/README.md) &centerdot; __not yet on NuGet__
+
+```csharp
+using StringZilla;
+
+Sz.IndexOf("the quick brown fox"u8, "brown"u8); // 10
+Sz.Hash("hello"u8);                             // fast 64-bit hash
+```
+
+Zero-copy over `ReadOnlySpan<byte>` (and Unity's `NativeArray<byte>`); `net8.0`, NativeAOT-friendly.
+Exposes search, hashing, SHA-256, UTF-8 segmentation, case-folding, normalization, sorting, and allocation-free splitting and iteration.
+
+### Java
+
+Build from source with `gradle` &centerdot; guide: [`java/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/java/README.md) &centerdot; __not yet on Maven Central__
+
+```java
+import com.stringzilla.StringZilla;
+
+StringZilla.indexOf("the quick brown fox".getBytes(), "brown".getBytes());  // 10
+StringZilla.hash("hello".getBytes());                                       // fast 64-bit hash
+```
+
+Pure [Foreign Function & Memory API](https://openjdk.org/jeps/454) (JDK 22+), __no JNI__.
+Zero-copy over `byte[]` and `MemorySegment` — including Lucene `BytesRef` and Spark `UTF8String` backing memory.
+Lazy `Iterable`/`Stream` splitting and iteration, with zero-allocation cursors as the escape hatch.
 
 ## Why StringZilla
 
@@ -168,127 +292,6 @@ Consider contributing if you need a feature that's not yet implemented.
 > ✅ are implemented.
 > ⚪ are considered.
 > ❌ are not intended.
-
-## Quick Start
-
-Each binding has its own install command, import line, and dedicated guide, all collected in the per-language sections below.
-The batch engines ship inside the same package and the same crate as the single-string kernels, so there is nothing extra to install for them.
-
-### Python
-
-`pip install stringzilla` &centerdot; guide: [`python/README.md`](python/README.md)
-
-```python
-import stringzilla as sz
-
-text = sz.String("the quick brown fox")
-text.find("brown")          # 10
-text.split()                # sz.Strings(['the', 'quick', 'brown', 'fox'])
-sz.hash("hello")            # fast 64-bit hash
-```
-
-The Python package upgrades `str` and `bytes` with SIMD search, sorting, hashing, UTF-8 segmentation, and Unicode case-folding, plus the batch engines that score one prepared set of queries against many collections of candidates.
-
-### C and C++
-
-Link `stringzilla::static` through CMake `FetchContent`, or `find_package(stringzilla)` an installed build, or go header-only in C &centerdot; guide: [`include/stringzilla/README.md`](include/stringzilla/README.md)
-
-```c
-#include <stringzilla/stringzilla.h>
-sz_capability_t capabilities = sz_cap_serial_k;
-sz_capabilities_enabled_cpu(&capabilities); // what this CPU runs and this binary holds
-sz_cptr_t match = NULL;
-sz_find_best(haystack, h_length, "brown", 5, &match, capabilities, NULL); // pointer to the match, or NULL
-```
-
-```cpp
-#include <stringzilla/stringzilla.hpp>
-namespace sz = ashvardanian::stringzilla;
-sz::string_view_t("the quick brown fox").find("brown"); // 10
-```
-
-The library covers search, hashing, sorting, comparison, set intersection, collection conversions like escaping, normalization and Arrow-compatible tapes, and lazy UTF-8 segmentation, plus the engines for edit distances, window overlap, and multi-pattern search, each with a host arm, a CUDA and ROCm one, and a Metal one.
-
-### Rust
-
-`cargo add stringzilla` &centerdot; guide: [`rust/README.md`](rust/README.md)
-
-```rust
-use stringzilla as sz;
-
-assert_eq!(sz::find("the quick brown fox", "brown"), Some(10));
-let digest = sz::hash("hello"); // fast 64-bit hash
-```
-
-The crate adds SIMD search, sorting, hashing, and UTF-8 segmentation to any `AsRef<[u8]>`, plus the `LevenshteinEngine`, `OverlapEngine` and `SubstringsEngine` batch engines, whose device arms come with the `cuda` feature.
-
-### JavaScript
-
-`npm install stringzilla` &centerdot; guide: [`javascript/README.md`](javascript/README.md)
-
-```js
-import sz from "stringzilla";
-
-sz.find(Buffer.from("the quick brown fox"), Buffer.from("brown")); // => 10n
-sz.hash(Buffer.from("hello"));                                     // 64-bit BigInt
-```
-
-The Node-API addon runs on Node, Bun, and Deno, exposing zero-copy search, hashing, SHA-256, and Unicode case-folding over `Buffer` objects.
-
-### Swift
-
-Add the Swift Package Manager dependency &centerdot; guide: [`swift/README.md`](swift/README.md)
-
-```swift
-import StringZilla
-
-let i = "the quick brown fox".findFirst(substring: "brown") // Index of "brown"
-let h = "hello".hash()                                       // fast 64-bit hash
-```
-
-The Foundation-free package extends `String` with SIMD search, comparison, hashing, Unicode case-folding, normalization, and word and line segmentation, on Linux and embedded targets as well as Apple platforms.
-
-### Go
-
-`go get github.com/ashvardanian/stringzilla/golang` &centerdot; guide: [`golang/README.md`](golang/README.md)
-
-```go
-import sz "github.com/ashvardanian/stringzilla/golang"
-
-sz.Index("the quick brown fox", "brown") // 10
-sz.Hash("hello", 0)                      // fast 64-bit hash
-```
-
-The cgo module exposes byte-level search, counting, checksums, SHA-256, and UTF-8 case-folding to Go.
-
-### C#
-
-Build from source &centerdot; guide: [`csharp/README.md`](csharp/README.md) &centerdot; __not yet on NuGet__
-
-```csharp
-using StringZilla;
-
-Sz.IndexOf("the quick brown fox"u8, "brown"u8); // 10
-Sz.Hash("hello"u8);                             // fast 64-bit hash
-```
-
-Zero-copy over `ReadOnlySpan<byte>` (and Unity's `NativeArray<byte>`); `net8.0`, NativeAOT-friendly.
-Exposes search, hashing, SHA-256, UTF-8 segmentation, case-folding, normalization, sorting, and allocation-free splitting and iteration.
-
-### Java
-
-Build from source with `gradle` &centerdot; guide: [`java/README.md`](java/README.md) &centerdot; __not yet on Maven Central__
-
-```java
-import com.stringzilla.StringZilla;
-
-StringZilla.indexOf("the quick brown fox".getBytes(), "brown".getBytes());  // 10
-StringZilla.hash("hello".getBytes());                                       // fast 64-bit hash
-```
-
-Pure [Foreign Function & Memory API](https://openjdk.org/jeps/454) (JDK 22+), __no JNI__.
-Zero-copy over `byte[]` and `MemorySegment` — including Lucene `BytesRef` and Spark `UTF8String` backing memory.
-Lazy `Iterable`/`Stream` splitting and iteration, with zero-allocation cursors as the escape hatch.
 
 ## Algorithms & Design Decisions
 
@@ -375,7 +378,7 @@ The naive implementation, however:
 There are several ways to improve the original algorithm.
 One is to use sparse DFA representation, which is more cache-friendly, but would require extra processing to navigate state transitions.
 
-StringZilla takes that route in [`substrings`](include/stringzilla/substrings/README.md), compiling a needle vocabulary once into a goto-completed Aho-Corasick automaton and reusing it across every later round of haystacks.
+StringZilla takes that route in [`substrings`](https://github.com/ashvardanian/StringZilla/blob/main/include/stringzilla/substrings/README.md), compiling a needle vocabulary once into a goto-completed Aho-Corasick automaton and reusing it across every later round of haystacks.
 The automaton is split into two tiers — a dense goto-completed row per frequently-visited state, one target per byte class, and a double array for the rest — so a step is one load with no failure-following at runtime.
 It matches raw bytes or applies full Unicode case folding to both sides, runs on the host or on a CUDA device, and answers counts, located matches, rewritten haystacks, or BM25 scores out of the one walk.
 Where only near-duplicate detection or candidate filtering is needed, the window-overlap machinery described below is the cheaper tool.
@@ -456,7 +459,7 @@ This results in much better vectorization for intra-core parallelism, and parall
 
 [rapidfuzz]: https://github.com/rapidfuzz/RapidFuzz
 
-### Escaping, Normalizing, and Gathering Collections
+### Escaping, Normalizing & Gathering Collections
 
 Strings in data pipelines travel in columns: log streams, Arrow arrays, Pandas series, the nodes of a parsed document.
 StringZilla converts a whole collection in one call, reading any layout, from Arrow `String` and `LargeString` tapes to an accessor over arbitrary records, and writing an Arrow-compatible tape it sizes exactly once.
@@ -465,7 +468,7 @@ Every kernel skips the bytes that need no work with the SIMD byte-set search and
 Every conversion is also atomic: it leaves the output tape holding the whole result, or fails with the tape exactly as it was, so a refused allocation or a malformed string never strands a half-converted column.
 Normalization adds NFKC_Casefold to the four UAX #15 forms, the caseless key that search engines match on, folding clean runs with the case-folding kernels and rewriting only the segments that change.
 
-Single-threaded on an Apple M5 Pro, over 4 MiB of English sentences, the NEON kernels move:
+Single-threaded on an Apple M5 Pro, over 4 MB of English sentences, the NEON kernels move:
 
 - JSON escaping at 3.37 GB/s and unescaping at 3.33 GB/s, 2.8× and 3.2× the serial code.
 - CSV escaping at 2.78 GB/s and unescaping at 3.96 GB/s, 2.3× and 2.6× the serial code.
@@ -547,7 +550,7 @@ That is also why there is no Ice Lake tier for it: SHA-NI has no VEX or EVEX enc
 Independent messages are a different story: they compress in parallel lanes, sixteen at a time on AVX-512 and eight on AVX2, which is what `sz_sha256_multistate_update_best` exposes.
 That lane-parallel form nearly triples the hash rate of dedicated SHA-NI silicon on token-sized inputs, and still leads by half again on line-sized ones.
 Lanes retire independently, so a batch of mixed lengths stays vectorized to each lane's own last block rather than dropping to scalar when one lane runs short.
-A group still costs as much as its longest member, so feeding inputs in length order is the caller's lever — `sz_sort_order_best` produces that ordering, and per-backend numbers are in [`include/stringzilla/hash/README.md`](include/stringzilla/hash/README.md).
+A group still costs as much as its longest member, so feeding inputs in length order is the caller's lever — `sz_sort_order_best` produces that ordering, and per-backend numbers are in [`include/stringzilla/hash/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/include/stringzilla/hash/README.md).
 
 ### AES-256 Encryption
 
@@ -575,7 +578,7 @@ Backends cover AES-NI and PCLMUL, VAES and VPCLMULQDQ, Arm crypto extensions and
 On realistic record sizes the authenticated path outruns both Ring and OpenSSL, in either direction, and unauthenticated counter mode is faster still.
 Counter mode's margin is an artifact of coverage rather than of arithmetic: OpenSSL ships hand-written AVX-512 assembly for Galois/counter mode and the cipher-block chaining variants, but not for counter mode, so that comparison is a vectorized kernel against a sixteen-byte one.
 Key setup runs the other way, since an AES-256 schedule is real work where adopting a stream-cipher key is a copy, so workloads that churn through short-lived keys favour the ChaCha implementations.
-Per-backend numbers are in [`include/stringzilla/cipher/README.md`](include/stringzilla/cipher/README.md).
+Per-backend numbers are in [`include/stringzilla/cipher/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/include/stringzilla/cipher/README.md).
 
 [faq-fips197]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf
 [faq-gcm]: https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf
@@ -597,7 +600,7 @@ Very small inputs fall back to insertion sort.
 - Average time complexity: O(n log n)
 - Worst-case time complexity: quadratic (due to QuickSort), mitigated in practice by 3‑way partitioning and the n‑gram staging
 
-### Unicode 17, UTF-8, and Wide Characters
+### Unicode 17, UTF-8 & Wide Characters
 
 Most StringZilla operations are byte-level, so they work well with ASCII and UTF-8 content out of the box.
 In some cases, like edit-distance computation, the result of byte-level evaluation and character-level evaluation may differ.
@@ -613,7 +616,7 @@ Moreover, StringZilla implements the Unicode 17.0 standard, being practically th
 
 [wide-char-offsets]: https://josephg.com/blog/string-length-lies/
 
-### Case Folding and Uncased Search
+### Case Folding & Uncased Search
 
 StringZilla provides Unicode-aware uncased substring search that handles the full complexity of Unicode case folding.
 This includes multi-character expansions:
@@ -634,7 +637,7 @@ Under the hood, folding uses register-resident lookup tables for the common sing
 Uncased search folds on the fly, so the haystack is never pre-folded into a second buffer; the matcher tracks the byte-length mismatch whenever a folded form differs in length from its source, returning offsets into the original text.
 The folding paths live in the `utf8_uncased*` files.
 
-### UTF-8 Decoding and Unicode Segmentation
+### UTF-8 Decoding & Unicode Segmentation
 
 Codepoint decoding walks the input in register-wide chunks, classifying each lead byte by its continuation-byte count through a register-resident lookup table rather than branching byte by byte.
 It runs under a __fill-and-drain__ contract: a decode-once step fills a buffer of runes, and a separate drain step emits them, which keeps the hot loop tight and lets callers consume runes at their own pace.
@@ -730,7 +733,7 @@ sz.cpu_capabilities_enabled()                                # e.g. <Capability.
 sz.find("haystack", "st", capabilities=sz.Capability.SERIAL) # one call on the scalar kernel
 ```
 
-## Contributing 👾
+## Contributing
 
 Please check out the [contributing guide](https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md) for more details on how to set up the development environment and contribute to this project.
 If you like this project, you may also enjoy [USearch][usearch], [UCall][ucall], [UForm][uform], and [SimSIMD][simsimd]. 🤗
@@ -763,18 +766,19 @@ If StringZilla helps your research or product, please cite it:
 ```bibtex
 @software{Vardanian_StringZilla,
   author = {Vardanian, Ash},
-  title = {{StringZilla: Fast SIMD, SWAR, and GPGPU String Processing}},
+  title = {{StringZilla: SIMD, SWAR and GPU Kernels for String Search, Hashing, Sorting, Unicode and Edit Distances}},
   doi = {10.5281/zenodo.21472332},
   url = {https://github.com/ashvardanian/StringZilla},
   license = {Apache-2.0}
 }
 ```
 
-A machine-readable [`CITATION.cff`](CITATION.cff) is provided at the repository root.
+A machine-readable [`CITATION.cff`](https://github.com/ashvardanian/StringZilla/blob/main/CITATION.cff) is provided at the repository root.
 
-## License 📜
+## License
 
-Feel free to use the project under Apache 2.0 or the Three-clause BSD license at your preference.
+Licensed under the Apache License, Version 2.0.
+See `LICENSE` for details.
 
 <!-- Link references -->
 

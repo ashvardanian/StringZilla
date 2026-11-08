@@ -47,6 +47,7 @@ function (stringzilla_add_cpu_capability capability_name_ capability_macro_)
             stringzilla_target_${capability_name_}_compiles ${CMAKE_BINARY_DIR}/stringzilla_probes
             ${PROJECT_SOURCE_DIR}/probes/${capability_name_}.c
             CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${PROJECT_SOURCE_DIR}/c;${PROJECT_SOURCE_DIR}/include" C_STANDARD 99
+            COMPILE_DEFINITIONS ${stringzilla_unit_arch_flags_}
         )
     endif ()
     message(

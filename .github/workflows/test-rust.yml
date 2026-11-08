@@ -44,7 +44,7 @@ jobs:
       # Otherwise `cargo publish` is the first thing that ever reads the `include` list, so this builds through CMake.
       - name: Package the Crate
         if: runner.os == 'Linux'
-        run: cargo package --locked
+        run: cargo package
 
   test_rust_windows:
     name: Test Rust on ${{ matrix.os }} ${{ matrix.arch }}

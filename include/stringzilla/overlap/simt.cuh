@@ -149,7 +149,8 @@ STRINGZILLA_DEVICE sz_u32_t sz_overlap_roll_step_simt_(sz_u32_t hash, sz_u32_t i
  *  instead of three. The first @p warm_bytes endings only prime the hashes, and a window not yet
  *  full is never probed. A caller resumes a walk by passing the @p hashes this one left.
  *
- *  @param[in,out] hashes, matches One entry per width, up to @ref sz_overlap_gpu_widths_per_walk_k.
+ *  @param[in,out] hashes One entry per width, up to @ref sz_overlap_gpu_widths_per_walk_k.
+ *  @param[in,out] matches One entry per width, up to @ref sz_overlap_gpu_widths_per_walk_k.
  */
 STRINGZILLA_DEVICE void sz_overlap_roll_simt_(sz_u8_t const *walk, sz_size_t from, sz_size_t until,
                                               sz_size_t warm_bytes, sz_u32_t const *widths, sz_u32_t const *powers,
@@ -406,7 +407,8 @@ STRINGZILLA_DEVICE sz_size_t sz_overlap_candidate_walk_simt_(sz_overlap_btree_si
  *  two chunks per thread, as a chunk takes at least the tile's bytes over the block's threads.
  *
  *  @param[in] shuffle_up The vendor's cross-lane step.
- *  @param[in] open, next The tile queue's steps, which differ per generation.
+ *  @param[in] open The tile queue's opening step, which differs per generation.
+ *  @param[in] next The tile queue's drawing step, which differs per generation.
  */
 STRINGZILLA_DEVICE void sz_overlap_scores_simt_(sz_overlap_engine_t engine, sz_strings_view_t candidates,
                                                 sz_u32_t *matches, sz_size_t matches_query_stride,
@@ -505,7 +507,8 @@ STRINGZILLA_DEVICE void sz_overlap_scores_simt_(sz_overlap_engine_t engine, sz_s
  *
  *  @param[in] misses_bound The radius as @ref sz_overlap_misses_bound_ rounds it.
  *  @param[in] shuffle_index The vendor's cross-lane step within a group of lanes.
- *  @param[in] open, next The tile queue's steps, which differ per generation.
+ *  @param[in] open The tile queue's opening step, which differs per generation.
+ *  @param[in] next The tile queue's drawing step, which differs per generation.
  */
 STRINGZILLA_DEVICE void sz_overlap_bounded_scores_simt_(
     sz_overlap_engine_t engine, sz_strings_view_t candidates, sz_u32_t *matches, sz_size_t matches_query_stride,
@@ -581,7 +584,9 @@ STRINGZILLA_DEVICE void sz_overlap_bounded_scores_simt_(
  *      then a power per width.
  *  @param[out] query Points into @p span and at @p widths.
  *  @param[in] lane The calling lane, below 32.
- *  @param[in] shuffle_up, shuffle_index, ballot The vendor's cross-lane steps.
+ *  @param[in] shuffle_up The vendor's cross-lane shift to the lanes above.
+ *  @param[in] shuffle_index The vendor's indexed shuffle.
+ *  @param[in] ballot The vendor's lane vote.
  */
 STRINGZILLA_DEVICE void sz_overlap_query_prepare_simt_(sz_cptr_t text, sz_size_t length, sz_u32_t const *widths,
                                                        sz_size_t widths_count, sz_ptr_t span, sz_overlap_query_t *query,

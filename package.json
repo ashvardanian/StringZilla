@@ -5,6 +5,7 @@
   "author": "Ash Vardanian",
   "license": "Apache-2.0",
   "main": "javascript/stringzilla.js",
+  "types": "javascript/stringzilla.d.ts",
   "type": "module",
   "repository": {
     "type": "git",
@@ -38,6 +39,7 @@
     "src/",
     "probes/*.c",
     "javascript/stringzilla.js",
+    "javascript/stringzilla.d.ts",
     "javascript/stringzilla.c",
     "javascript/stage-prebuild.cjs",
     "VERSION",

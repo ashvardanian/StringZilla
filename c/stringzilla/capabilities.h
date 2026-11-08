@@ -98,36 +98,80 @@ typedef sz_u64_t sz_capability_t;
 /** Mask representing any capability. */
 #define sz_cap_any_k (~(sz_capability_t)0)
 
-/** CPU capabilities, each architecture's in a contiguous run of bits ascending by preference, so
+/*  CPU capabilities, each architecture's in a contiguous run of bits ascending by preference, so
  *  the highest bit a mask shares with a verb's kernels names the one to run. */
+
+/** x86 SSE4.2 with AES-NI, carry-less multiplication, BMI and LZCNT, as on Westmere. */
 #define sz_cap_westmere_k ((sz_capability_t)1 << 1)
+
+/** x86 SSSE3 and SSE4.1 with the SHA extensions, as on Goldmont. */
 #define sz_cap_goldmont_k ((sz_capability_t)1 << 2)
+
+/** x86 AVX2 with FMA, BMI2, POPCNT and LZCNT, as on Haswell. */
 #define sz_cap_haswell_k ((sz_capability_t)1 << 3)
+
+/** x86 AVX-512 F, VL, BW and DQ with AES-NI, as on Skylake servers. */
 #define sz_cap_skylake_k ((sz_capability_t)1 << 4)
+
+/** x86 AVX-512 VBMI, VBMI2 and VNNI with VAES, VPCLMULQDQ and SHA, as on Ice Lake. */
 #define sz_cap_icelake_k ((sz_capability_t)1 << 5)
+
+/** Arm NEON, the Advanced SIMD of every Armv8.0-A core. */
 #define sz_cap_neon_k ((sz_capability_t)1 << 6)
+
+/** Arm NEON with the AES instructions, optional since Armv8.0-A. */
 #define sz_cap_neonaes_k ((sz_capability_t)1 << 7)
+
+/** Arm NEON with the SHA2 instructions, optional since Armv8.0-A. */
 #define sz_cap_neonsha_k ((sz_capability_t)1 << 8)
+
+/** Arm SVE, the Scalable Vector Extension, optional since Armv8.2-A. */
 #define sz_cap_sve_k ((sz_capability_t)1 << 9)
+
+/** Arm SVE2, optional since Armv9.0-A. */
 #define sz_cap_sve2_k ((sz_capability_t)1 << 10)
+
+/** Arm SVE2 with its AES instructions. */
 #define sz_cap_sve2aes_k ((sz_capability_t)1 << 11)
+
+/** RISC-V Vector extension 1.0, with length-agnostic registers. */
 #define sz_cap_rvv_k ((sz_capability_t)1 << 12)
+
+/** RISC-V Vector Crypto: the Zvkned AES and Zvknhb SHA extensions. */
 #define sz_cap_rvvcrypto_k ((sz_capability_t)1 << 13)
+
+/** WebAssembly 128-bit SIMD. */
 #define sz_cap_v128_k ((sz_capability_t)1 << 14)
+
+/** WebAssembly 128-bit SIMD with the relaxed SIMD instructions. */
 #define sz_cap_v128relaxed_k ((sz_capability_t)1 << 15)
+
+/** LoongArch Advanced SIMD eXtension, the 256-bit LASX. */
 #define sz_cap_loongsonasx_k ((sz_capability_t)1 << 16)
+
+/** IBM Power Vector-Scalar eXtension at the POWER9 level, ISA 3.0. */
 #define sz_cap_powervsx_k ((sz_capability_t)1 << 17)
 
-/** GPU capabilities, as each vendor's <tt>sz_&lt;vendor&gt;_capabilities_*</tt> functions report them for one
+/*  GPU capabilities, as each vendor's <tt>sz_&lt;vendor&gt;_capabilities_*</tt> functions report them for one
  *  device, grouped by vendor above bit 47 to leave room for more CPU capabilities and more per
  *  vendor. Each vendor's baseline runs on all its devices, as @c serial runs on every CPU, and each
  *  later tier on every device from its generation on: @c hopper from compute capability 9.0, for
  *  its clusters and their distributed shared memory, and @c blackwell from 10.0, for cluster launch
  *  control, which lets a block take over the tile of one not yet started. */
+
+/** NVIDIA GPUs through CUDA, on every device. */
 #define sz_cap_cuda_k ((sz_capability_t)1 << 48)
+
+/** NVIDIA GPUs from compute capability 9.0, for clusters and their distributed shared memory. */
 #define sz_cap_hopper_k ((sz_capability_t)1 << 51)
+
+/** NVIDIA GPUs from compute capability 10.0, for cluster launch control. */
 #define sz_cap_blackwell_k ((sz_capability_t)1 << 52)
+
+/** AMD GPUs through ROCm, on every device. */
 #define sz_cap_rocm_k ((sz_capability_t)1 << 56)
+
+/** Apple GPUs through Metal, on every device. */
 #define sz_cap_metal_k ((sz_capability_t)1 << 60)
 
 /** Every GPU capability above, which the CPU queries never detect, compile or enable. */
@@ -994,14 +1038,14 @@ STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_arm64_(void) {
 
 #elif (STRINGZILLA_OS_LINUX_ || STRINGZILLA_OS_FREEBSD_) && STRINGZILLA_WITH_LIBC
 
+    unsigned long const hwcap_cpuid = 1ul << 11; // HWCAP_CPUID: the kernel emulates EL0 reads of the ID registers
 #if STRINGZILLA_OS_LINUX_
     unsigned long hwcap = getauxval(AT_HWCAP);
 #else
     unsigned long hwcap = 0;
     elf_aux_info(AT_HWCAP, &hwcap, sizeof(hwcap));
 #endif
-    // HWCAP_CPUID, bit 11: the kernel emulates EL0 reads of the ID registers, which trap otherwise.
-    if (!(hwcap & (1UL << 11))) return (sz_capability_t)(sz_cap_neon_k | sz_cap_serial_k);
+    if (!(hwcap & hwcap_cpuid)) return (sz_capability_t)(sz_cap_neon_k | sz_cap_serial_k);
 
     // Each raw `mrs` writes x0, as older assemblers reject the symbolic names of the SVE registers.
     unsigned long id_aa64isar0_el1 = 0, id_aa64pfr0_el1 = 0, id_aa64zfr0_el1 = 0;
@@ -1139,32 +1183,27 @@ STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_riscv64_(void) {
 
     // The base "V" extension is reported through the auxiliary vector, but the individual
     // vector sub-extensions (vector crypto, bf16, …) are only exposed through the
-    // `riscv_hwprobe(2)` syscall (number 258), introduced in Linux 6.4.
+    // `riscv_hwprobe(2)` syscall, introduced in Linux 6.4. Values as in `asm/hwprobe.h`.
+    unsigned long const hwcap_isa_v = 1ul << ('V' - 'A'); // COMPAT_HWCAP_ISA_V, RVV 1.0
+    long const riscv_hwprobe = 258;                       // __NR_riscv_hwprobe
+    long const hwprobe_extensions_key = 4;                // RISCV_HWPROBE_KEY_IMA_EXT_0
+    unsigned long long const hwprobe_zvkned = 1ull << 21; // RISCV_HWPROBE_EXT_ZVKNED, vector AES
+    unsigned long long const hwprobe_zvknhb = 1ull << 23; // RISCV_HWPROBE_EXT_ZVKNHB, vector SHA-2
     unsigned long hwcap = getauxval(AT_HWCAP);
     sz_capability_t caps = sz_cap_serial_k;
-
-    // HWCAP bit 21 (`COMPAT_HWCAP_ISA_V`, i.e. `1UL << ('V' - 'A')`) marks RVV 1.0.
-    if (hwcap & (1UL << 21)) {
+    if (hwcap & hwcap_isa_v) {
         caps = (sz_capability_t)(caps | sz_cap_rvv_k);
-
-        // `riscv_hwprobe(2)`: fill an array of {key, value} pairs. We query a single key,
-        // `RISCV_HWPROBE_KEY_IMA_EXT_0` (= 4), whose value carries the extension bitmask.
-        // Constants confirmed against `/usr/riscv64-linux-gnu/include/asm/hwprobe.h`:
-        //   RISCV_HWPROBE_KEY_IMA_EXT_0 == 4
-        //   RISCV_HWPROBE_EXT_ZVKNED    == (1 << 21)  // Zvkned (AES)
-        //   RISCV_HWPROBE_EXT_ZVKNHB    == (1 << 23)  // Zvknhb (SHA-256/512)
         struct {
             long long key;
             unsigned long long value;
         } pairs[1];
-        pairs[0].key = 4; // RISCV_HWPROBE_KEY_IMA_EXT_0
+        pairs[0].key = hwprobe_extensions_key;
         pairs[0].value = 0;
         // `long syscall(SYS_riscv_hwprobe, pairs, pair_count, cpu_count, cpus, flags)`.
-        if (syscall(258, pairs, (unsigned long)1, (unsigned long)0, (void *)0, (unsigned long)0) == 0) {
-            unsigned long long const has_zvkned = pairs[0].value & (1ULL << 21); // RISCV_HWPROBE_EXT_ZVKNED
-            unsigned long long const has_zvknhb = pairs[0].value & (1ULL << 23); // RISCV_HWPROBE_EXT_ZVKNHB
-            if (has_zvkned && has_zvknhb) caps = (sz_capability_t)(caps | sz_cap_rvvcrypto_k);
-        }
+        long const probed = syscall(riscv_hwprobe, pairs, (unsigned long)1, (unsigned long)0, (void *)0,
+                                    (unsigned long)0);
+        if (probed == 0 && (pairs[0].value & hwprobe_zvkned) && (pairs[0].value & hwprobe_zvknhb))
+            caps = (sz_capability_t)(caps | sz_cap_rvvcrypto_k);
     }
     return caps;
 
@@ -1172,10 +1211,11 @@ STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_riscv64_(void) {
 
     // FreeBSD exposes HWCAP through `elf_aux_info`, but lacks the Linux `riscv_hwprobe`
     // syscall, so the vector crypto sub-extensions stay compile-time only here.
+    unsigned long const hwcap_isa_v = 1ul << ('V' - 'A'); // COMPAT_HWCAP_ISA_V, RVV 1.0
     unsigned long hwcap = 0;
     elf_aux_info(AT_HWCAP, &hwcap, sizeof(hwcap));
     sz_capability_t caps = sz_cap_serial_k;
-    if (hwcap & (1UL << 21)) caps = (sz_capability_t)(caps | sz_cap_rvv_k);
+    if (hwcap & hwcap_isa_v) caps = (sz_capability_t)(caps | sz_cap_rvv_k);
     return caps;
 
 #else
@@ -1191,11 +1231,9 @@ STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_riscv64_(void) {
 STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_loongarch64_(void) {
 #if STRINGZILLA_OS_LINUX_ && STRINGZILLA_WITH_LIBC
 
-    // The SIMD extensions are reported through the auxiliary vector, matching `asm/hwcap.h`:
-    //   HWCAP_LOONGARCH_LSX  == (1 << 4)  // 128-bit SIMD
-    //   HWCAP_LOONGARCH_LASX == (1 << 5)  // 256-bit SIMD, implies LSX
+    unsigned long const hwcap_loongarch_lasx = 1ul << 5; // HWCAP_LOONGARCH_LASX, 256-bit SIMD implying LSX
     unsigned long hwcap = getauxval(AT_HWCAP);
-    return (sz_capability_t)((sz_cap_loongsonasx_k * ((hwcap & (1UL << 5)) != 0)) | sz_cap_serial_k);
+    return (sz_capability_t)((sz_cap_loongsonasx_k * ((hwcap & hwcap_loongarch_lasx) != 0)) | sz_cap_serial_k);
 
 #else
     return sz_capabilities_implied_cpu_();
@@ -1210,10 +1248,9 @@ STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_loongarch64_(void) {
 STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_power64_(void) {
 #if (STRINGZILLA_OS_LINUX_ || STRINGZILLA_OS_FREEBSD_) && STRINGZILLA_WITH_LIBC
 
-    // The `powervsx` kernels target POWER9 (`-mcpu=power9`), so both facts are required,
-    // matching the constants in `arch/powerpc/include/uapi/asm/cputable.h`:
-    //   PPC_FEATURE_HAS_VSX     == 0x00000080 // in AT_HWCAP
-    //   PPC_FEATURE2_ARCH_3_00  == 0x00800000 // in AT_HWCAP2, the POWER9 ISA level
+    // The `powervsx` kernels target POWER9 (`-mcpu=power9`), so both facts are required.
+    unsigned long const hwcap_ppc_vsx = 0x00000080ul;        // PPC_FEATURE_HAS_VSX, in AT_HWCAP
+    unsigned long const hwcap2_ppc_arch_3_00 = 0x00800000ul; // PPC_FEATURE2_ARCH_3_00, in AT_HWCAP2: POWER9
     unsigned long hwcap = 0, hwcap2 = 0;
 #if STRINGZILLA_OS_LINUX_
     hwcap = getauxval(AT_HWCAP);
@@ -1222,7 +1259,7 @@ STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_power64_(void) {
     elf_aux_info(AT_HWCAP, &hwcap, sizeof(hwcap));
     elf_aux_info(AT_HWCAP2, &hwcap2, sizeof(hwcap2));
 #endif
-    unsigned const supports_powervsx = ((hwcap & 0x00000080UL) != 0) && ((hwcap2 & 0x00800000UL) != 0);
+    unsigned const supports_powervsx = ((hwcap & hwcap_ppc_vsx) != 0) && ((hwcap2 & hwcap2_ppc_arch_3_00) != 0);
     return (sz_capability_t)((sz_cap_powervsx_k * supports_powervsx) | sz_cap_serial_k);
 
 #else

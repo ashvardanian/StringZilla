@@ -81,9 +81,9 @@ elseif (STRINGZILLA_MARCH AND NOT stringzilla_arch_wasm_)
                 "MSVC takes STRINGZILLA_MARCH=native only; pass an /arch: value such as AVX2, AVX512 or AVX10.2 "
                 "through CMAKE_C_FLAGS instead of `${STRINGZILLA_MARCH}`"
         )
-    elseif (stringzilla_arch_arm64_)
+    elseif (stringzilla_arch_arm64_ OR stringzilla_arch_ppc64_)
         # AArch64 names CPUs through `-mcpu`, like `neoverse-v2`, as `-march` takes only architecture versions; Apple
-        # Clang's `-march=native` also advertises just a subset of host features.
+        # Clang's `-march=native` also advertises just a subset of host features. Power compilers have no `-march`.
         set(stringzilla_host_arch_flags_ -mcpu=${STRINGZILLA_MARCH})
     else ()
         set(stringzilla_host_arch_flags_ -march=${STRINGZILLA_MARCH})

@@ -30,6 +30,7 @@ __pycache__
 .mypy_cache/
 # A minimal binding with few dependencies would carry thousands of lockfile lines
 uv.lock
+Cargo.lock
 
 # Rust
 /target*/
