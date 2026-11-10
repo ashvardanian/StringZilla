@@ -18,28 +18,6 @@
 
 #include "stringzilla/types.h" // `sz_u64_t`, `sz_status_t`, `STRINGZILLA_TARGET_*`
 
-/** Inferring target OS: Windows, MacOS, Linux, or FreeBSD. */
-#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || defined(__CYGWIN__)
-#define STRINGZILLA_OS_WINDOWS_ 1
-#else
-#define STRINGZILLA_OS_WINDOWS_ 0
-#endif
-#if defined(__APPLE__) && defined(__MACH__)
-#define STRINGZILLA_OS_APPLE_ 1
-#else
-#define STRINGZILLA_OS_APPLE_ 0
-#endif
-#if defined(__linux__)
-#define STRINGZILLA_OS_LINUX_ 1
-#else
-#define STRINGZILLA_OS_LINUX_ 0
-#endif
-#if defined(__FreeBSD__)
-#define STRINGZILLA_OS_FREEBSD_ 1
-#else
-#define STRINGZILLA_OS_FREEBSD_ 0
-#endif
-
 /* On Apple Silicon, @c mrs is not allowed in user-space, so we need to use the @c sysctl API */
 #if STRINGZILLA_OS_APPLE_
 #include <sys/sysctl.h>

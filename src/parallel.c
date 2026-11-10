@@ -9,10 +9,10 @@
  */
 #include "parallel.h"
 
-#if defined(__APPLE__)
+#if STRINGZILLA_OS_APPLE_
 #include <dispatch/dispatch.h> // `dispatch_apply_f`, part of libSystem
 #include <unistd.h>            // `sysconf`
-#elif defined(_WIN32)
+#elif STRINGZILLA_OS_WINDOWS_
 #include <windows.h> // `CreateThreadpoolWork`, part of kernel32
 #else
 #include <unistd.h> // `sysconf`
@@ -22,7 +22,7 @@
 #endif
 
 /** OpenMP schedules tiles itself, so the counter below is for the other pools. */
-#if !defined(__APPLE__) && !defined(_WIN32) && defined(_OPENMP)
+#if !STRINGZILLA_OS_APPLE_ && !STRINGZILLA_OS_WINDOWS_ && defined(_OPENMP)
 #define STRINGZILLA_PARALLEL_VIA_OPENMP 1
 #else
 #define STRINGZILLA_PARALLEL_VIA_OPENMP 0
@@ -43,7 +43,7 @@ typedef struct sz_tile_queue_t {
 #else
     sz_size_t next_tile;
 #endif
-#if defined(_WIN32)
+#if STRINGZILLA_OS_WINDOWS_
     volatile long long next_worker;
 #endif
 } sz_tile_queue_t;
@@ -72,14 +72,14 @@ static void sz_tile_queue_drain_(sz_tile_queue_t *queue, sz_size_t worker) {
 
 #pragma region Platform Pools
 
-#if defined(__APPLE__)
+#if STRINGZILLA_OS_APPLE_
 
 /** libdispatch hands each worker its index, also its status slot; the queue picks its tiles. */
 static void sz_tile_worker_dispatch_(void *context, size_t worker_index) {
     sz_tile_queue_drain_((sz_tile_queue_t *)context, (sz_size_t)worker_index);
 }
 
-#elif defined(_WIN32)
+#elif STRINGZILLA_OS_WINDOWS_
 
 /** The pool passes no index, so each submitted worker claims its status slot from a counter. */
 static void CALLBACK sz_tile_worker_threadpool_(PTP_CALLBACK_INSTANCE instance, PVOID context, PTP_WORK work) {
@@ -96,7 +96,7 @@ static void CALLBACK sz_tile_worker_threadpool_(PTP_CALLBACK_INSTANCE instance, 
 #endif
 
 sz_size_t sz_parallel_concurrency(void) {
-#if defined(_WIN32)
+#if STRINGZILLA_OS_WINDOWS_
     DWORD const count = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
     return count ? (sz_size_t)count : 1;
 #elif defined(_SC_NPROCESSORS_ONLN)
@@ -143,10 +143,10 @@ sz_status_t sz_parallel_for_tiles(sz_size_t tile_count, sz_size_t threads, sz_ti
     queue.statuses = statuses;
     queue.next_tile = 0;
 
-#if defined(__APPLE__)
+#if STRINGZILLA_OS_APPLE_
     dispatch_apply_f((size_t)threads, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), &queue,
                      sz_tile_worker_dispatch_);
-#elif defined(_WIN32)
+#elif STRINGZILLA_OS_WINDOWS_
     queue.next_worker = 0;
     PTP_WORK work = CreateThreadpoolWork(sz_tile_worker_threadpool_, &queue, NULL);
     if (!work) {

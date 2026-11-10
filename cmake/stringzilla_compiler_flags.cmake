@@ -27,11 +27,11 @@ add_library(stringzilla_warnings INTERFACE)
 # a buffer end) when an ISA kernel is inlined into a string-literal-sized caller. Keep it a visible warning, not a
 # build-breaking error.
 set(stringzilla_gnu_warnings_
-    "-Wall;-Wextra;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function;-Wno-sign-conversion;-Wno-error=array-bounds"
+    "-Wall;-Wextra;-Wundef;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function;-Wno-sign-conversion;-Wno-error=array-bounds"
 )
 # `-Wno-error=pass-failed`: `#pragma unroll` is a hint to NVCC, while HIP's Clang warns when a multi-exit loop stays whole.
 set(stringzilla_clang_warnings_
-    "-Wall;-Wextra;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-sign-conversion;-Wdocumentation;-Wno-error=pass-failed;-Wno-unused-function"
+    "-Wall;-Wextra;-Wundef;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-sign-conversion;-Wdocumentation;-Wno-error=pass-failed;-Wno-unused-function"
 )
 set(stringzilla_msvc_warnings_
     "/Bt" # Display build timings

@@ -162,6 +162,58 @@
 #endif
 #endif
 
+#pragma region Platform Identity
+
+/*  Derived once from the compiler's predefines, which no other file reads and no build sets. */
+#if defined(STRINGZILLA_OS_LINUX_) || defined(STRINGZILLA_OS_APPLE_) || defined(STRINGZILLA_OS_WINDOWS_) || \
+    defined(STRINGZILLA_OS_FREEBSD_) || defined(STRINGZILLA_OS_POSIX_)
+#error "STRINGZILLA_OS_*_ are identity, derived from the compiler; no build sets them"
+#endif
+
+/** Whether the kernel is Linux, Android included, as 1 or 0. */
+#if defined(__linux__)
+#define STRINGZILLA_OS_LINUX_ 1
+#else
+#define STRINGZILLA_OS_LINUX_ 0
+#endif
+
+/** Whether the kernel is Darwin: macOS, iOS, tvOS, watchOS or visionOS, as 1 or 0. */
+#if defined(__APPLE__)
+#define STRINGZILLA_OS_APPLE_ 1
+#else
+#define STRINGZILLA_OS_APPLE_ 0
+#endif
+
+/** Whether the target is Windows, MinGW included and Cygwin not, as 1 or 0. */
+#if defined(_WIN32)
+#define STRINGZILLA_OS_WINDOWS_ 1
+#else
+#define STRINGZILLA_OS_WINDOWS_ 0
+#endif
+
+/** Whether the kernel is FreeBSD, as 1 or 0. */
+#if defined(__FreeBSD__)
+#define STRINGZILLA_OS_FREEBSD_ 1
+#else
+#define STRINGZILLA_OS_FREEBSD_ 0
+#endif
+
+/** Whether the POSIX interfaces exist: Linux, Darwin, FreeBSD or Cygwin, as 1 or 0. */
+#if STRINGZILLA_OS_LINUX_ || STRINGZILLA_OS_APPLE_ || STRINGZILLA_OS_FREEBSD_ || defined(__CYGWIN__)
+#define STRINGZILLA_OS_POSIX_ 1
+#else
+#define STRINGZILLA_OS_POSIX_ 0
+#endif
+
+#if STRINGZILLA_OS_LINUX_ + STRINGZILLA_OS_APPLE_ + STRINGZILLA_OS_WINDOWS_ + STRINGZILLA_OS_FREEBSD_ > 1
+#error "Two operating-system identities hold at once"
+#endif
+#if STRINGZILLA_OS_POSIX_ && STRINGZILLA_OS_WINDOWS_
+#error "POSIX and Windows identities hold at once"
+#endif
+
+#pragma endregion Platform Identity
+
 /** Threshold for switching to SWAR (8-bytes at a time) backend over serial byte-level for-loops. On
  *  very short strings, under 16 bytes long, at most a single word will be processed with SWAR.
  *  Assuming potentially misaligned loads, SWAR makes sense only after ~24 bytes. */
@@ -360,7 +412,7 @@
  *  which the RISC-V @c riscv_hwprobe capability probe in <tt>capabilities.h</tt> relies on. As the first
  *  StringZilla header every translation unit includes, this is the one place that covers every
  *  build system, be it CMake, Cargo, or setuptools. */
-#if defined(__linux__) && STRINGZILLA_WITH_LIBC && !defined(_DEFAULT_SOURCE) && !defined(_GNU_SOURCE)
+#if STRINGZILLA_OS_LINUX_ && STRINGZILLA_WITH_LIBC && !defined(_DEFAULT_SOURCE) && !defined(_GNU_SOURCE)
 #define _DEFAULT_SOURCE 1
 #endif
 
@@ -470,7 +522,7 @@
 /*  AES is optional since Armv8.0-A, but never became mandatory, and MSVC cannot probe for it. */
 #if !defined(STRINGZILLA_TARGET_NEONAES) || (STRINGZILLA_TARGET_NEONAES && !STRINGZILLA_ARCH_ARM64_)
 #undef STRINGZILLA_TARGET_NEONAES
-#if STRINGZILLA_ARCH_ARM64_ && (defined(__ARM_FEATURE_AES) || defined(__ARM_FEATURE_CRYPTO) || defined(__APPLE__))
+#if STRINGZILLA_ARCH_ARM64_ && (defined(__ARM_FEATURE_AES) || defined(__ARM_FEATURE_CRYPTO) || STRINGZILLA_OS_APPLE_)
 #define STRINGZILLA_TARGET_NEONAES (1)
 #else
 #define STRINGZILLA_TARGET_NEONAES (0)
@@ -480,7 +532,7 @@
 /*  SHA2 is optional since Armv8.0-A, but never became mandatory, and MSVC cannot probe for it. */
 #if !defined(STRINGZILLA_TARGET_NEONSHA) || (STRINGZILLA_TARGET_NEONSHA && !STRINGZILLA_ARCH_ARM64_)
 #undef STRINGZILLA_TARGET_NEONSHA
-#if STRINGZILLA_ARCH_ARM64_ && (defined(__ARM_FEATURE_SHA2) || defined(__ARM_FEATURE_CRYPTO) || defined(__APPLE__))
+#if STRINGZILLA_ARCH_ARM64_ && (defined(__ARM_FEATURE_SHA2) || defined(__ARM_FEATURE_CRYPTO) || STRINGZILLA_OS_APPLE_)
 #define STRINGZILLA_TARGET_NEONSHA (1)
 #else
 #define STRINGZILLA_TARGET_NEONSHA (0)
@@ -1900,7 +1952,7 @@ STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_batch_consistent_(sz_size_t length, sz_s
  *  @see De Bruijn Sequence: https://www.chessprogramming.org/De_Bruijn_Sequence
  *  @see Bit-scan with De Bruijn: https://gist.github.com/resilar/e722d4600dbec9752771ab4c9d47044f
  */
-#if (defined(_WIN32) && !defined(_WIN64)) || defined(_M_ARM) || defined(_M_ARM64)
+#if !STRINGZILLA_ARCH_X8664_
 STRINGZILLA_CONSTEXPR int sz_u64_ctz(sz_u64_t x) {
     sz_assert_(x != 0);
     int n = 0;

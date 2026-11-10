@@ -10,7 +10,7 @@
  *  produced by @c File_new. Shared by @c File_dealloc and the re-initialization guard of
  *  @c File_init. */
 static void File_release_(File *self) {
-#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
+#if STRINGZILLA_OS_WINDOWS_
     if (self->memory.start) {
         UnmapViewOfFile(self->memory.start);
         self->memory.start = NULL;
@@ -49,7 +49,7 @@ static PyObject *File_new(PyTypeObject *type, PyObject *positional_args, PyObjec
         return NULL;
     }
 
-#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
+#if STRINGZILLA_OS_WINDOWS_
     self->file_handle = NULL;
     self->mapping_handle = NULL;
 #else
@@ -81,7 +81,7 @@ static int File_init(File *self, PyObject *positional_args, PyObject *named_args
     // Re-initialization: release any mapping/handles from a prior __init__ before opening a new file
     File_release_(self);
 
-#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
+#if STRINGZILLA_OS_WINDOWS_
     DWORD path_attributes = GetFileAttributes(path);
     if (path_attributes == INVALID_FILE_ATTRIBUTES) {
         PyErr_SetString(PyExc_OSError, "Couldn't get file attributes!");

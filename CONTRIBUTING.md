@@ -103,20 +103,24 @@ Every all-caps name starts with the full project name, `STRINGZILLA_`.
 A trailing `_` marks a name as internal: it may change in any release, and nothing outside this repository may define or test it.
 A name without it is a public contract, either a switch you may set or a value you may read.
 
-| Family                            | Form                          | Example                              |
-| :-------------------------------- | :---------------------------- | :----------------------------------- |
-| ISA tier, backend, GPU generation | `STRINGZILLA_TARGET_<TIER>`   | `STRINGZILLA_TARGET_HASWELL`         |
-| Build mode                        | `STRINGZILLA_HEADER_ONLY`     |                                      |
-| Optional feature                  | `STRINGZILLA_WITH_<FEATURE>`  | `STRINGZILLA_WITH_LIBC`              |
-| Permission for a liberty          | `STRINGZILLA_ALLOW_<LIBERTY>` | `STRINGZILLA_ALLOW_MISALIGNED_LOADS` |
-| Architecture fact                 | `STRINGZILLA_ARCH_<ARCH>_`    | `STRINGZILLA_ARCH_X8664_`            |
-| Operating-system fact             | `STRINGZILLA_OS_<OS>_`        | `STRINGZILLA_OS_LINUX_`              |
-| Toolchain fact                    | `STRINGZILLA_HAS_<FEATURE>_`  | `STRINGZILLA_HAS_CLANG_EVEX512_`     |
+| Family                                      | Form                                 | Example                              |
+| :------------------------------------------ | :----------------------------------- | :----------------------------------- |
+| ISA tier, backend, GPU generation           | `STRINGZILLA_TARGET_<TIER>`          | `STRINGZILLA_TARGET_HASWELL`         |
+| Header-only build, without runtime dispatch | `STRINGZILLA_HEADER_ONLY`            |                                      |
+| Debug-only checks                           | `STRINGZILLA_DEBUG`                  |                                      |
+| Optional facility                           | `STRINGZILLA_WITH_[<OS>_]<FACILITY>` | `STRINGZILLA_WITH_LIBC`              |
+| Permission for a liberty                    | `STRINGZILLA_ALLOW_<LIBERTY>`        | `STRINGZILLA_ALLOW_MISALIGNED_LOADS` |
+| Architecture fact                           | `STRINGZILLA_ARCH_<ARCH>_`           | `STRINGZILLA_ARCH_X8664_`            |
+| Operating-system fact                       | `STRINGZILLA_OS_<OS>_`               | `STRINGZILLA_OS_LINUX_`              |
+| Toolchain fact                              | `STRINGZILLA_HAS_<FEATURE>_`         | `STRINGZILLA_HAS_CLANG_EVEX512_`     |
 
 Architectures are spelled as one token each, `X8664`, `X8632`, `ARM64`, `RISCV64`, `PPC64`, `LOONGARCH64`, `S390X` and `WASM`, and GPU platforms `CUDA` and `ROCM`.
 A GPU platform holds beside the host's architecture in both compiler passes, so it never follows a CPU architecture in an `#elif` chain.
 Metal has no compiler macro on the host side, so its host API is a switch the build sets where it links Metal and Foundation.
-Every name in these families is always defined, as 0 or 1, and tested with `#if`, never with `defined(...)`.
+Every name in these families is always defined, as 0 or 1, and tested with `#if`.
+`defined(...)` appears only in a `!defined` default and in a guard that an `#error` follows.
+Only the Platform Identity region of `c/stringzilla/types.h` reads operating-system predefines like `__linux__`.
+Compiler predefines like `__clang__`, `__GNUC__` and `_MSC_VER` are read raw where they matter.
 
 C names put the capability last, `sz_<family>_<what>_<capability>`, like `sz_find_haswell`.
 Only a role suffix may follow it: `_t` for a type, `_k` for a constant, `_kernel_` for a GPU entry point, or the trailing `_` of an internal name, like `sz_levenshtein_u64x1_sweep_serial_` and `sz_overlap_scores_blackwell_kernel_`.

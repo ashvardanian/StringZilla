@@ -18,7 +18,9 @@
 #ifndef STRINGZILLA_PYTHON_STRINGZILLA_H_
 #define STRINGZILLA_PYTHON_STRINGZILLA_H_
 
-#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
+#include "stringzilla/types.h" // `STRINGZILLA_OS_WINDOWS_`
+
+#if STRINGZILLA_OS_WINDOWS_
 #define NOMINMAX
 #include <windows.h>
 #else
@@ -145,7 +147,7 @@ extern struct PyModuleDef stringzilla_module;
 typedef struct {
     PyObject ob_base;
 
-#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
+#if STRINGZILLA_OS_WINDOWS_
     HANDLE file_handle;
     HANDLE mapping_handle;
 #else

@@ -87,21 +87,22 @@
 #include <utility>      // `std::index_sequence`
 #include <vector>       // `std::vector`
 
-#if defined(_WIN32)
-#include <io.h> // `_write`
-#else
-#include <unistd.h> // `write`, `STDERR_FILENO`
-#endif
-#if defined(__linux__) && defined(__GLIBC__)
-#include <execinfo.h> // `backtrace`, `backtrace_symbols_fd`
-#endif
-
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <fmt/std.h>
 
 #include "stringzilla/metal.h" // The Metal layer the Metal suites drive
 #include "stringzilla/types.hpp"
+
+#if STRINGZILLA_OS_WINDOWS_
+#include <io.h> // `_write`
+#else
+#include <unistd.h> // `write`, `STDERR_FILENO`
+#endif
+/*  Only glibc and Darwin ship `backtrace` in libc itself; FreeBSD and musl need another library. */
+#if (defined(__GLIBC__) || STRINGZILLA_OS_APPLE_) && __has_include(<execinfo.h>)
+#include <execinfo.h> // `backtrace`, `backtrace_symbols_fd`
+#endif
 
 namespace sz = ashvardanian::stringzilla;
 
@@ -926,12 +927,12 @@ struct environment_t {
  *  thread may already hold the stdio lock that @c fmt::println takes. */
 inline void test_fatal_signal_handler(int signal_number) noexcept {
     std::string_view constexpr message = "\n*** Fatal signal - backtrace follows ***\n";
-#if defined(_WIN32)
+#if STRINGZILLA_OS_WINDOWS_
     [[maybe_unused]] auto const written = _write(2, message.data(), static_cast<unsigned>(message.size()));
 #else
     [[maybe_unused]] auto const written = ::write(STDERR_FILENO, message.data(), message.size());
 #endif
-#if defined(__linux__) && defined(__GLIBC__)
+#if (defined(__GLIBC__) || STRINGZILLA_OS_APPLE_) && __has_include(<execinfo.h>)
     void *frames[64];
     int const frames_count = backtrace(frames, sizeof(frames) / sizeof(frames[0]));
     backtrace_symbols_fd(frames, frames_count, STDERR_FILENO);

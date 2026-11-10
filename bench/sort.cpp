@@ -47,17 +47,17 @@
 #include <numeric>       // `std::iota`
 #include <unordered_set> // `std::unordered_set`
 
-#if __linux__ && defined(_GNU_SOURCE)
-#include <stdlib.h> // `qsort_r`
-#endif
-
 #include <fmt/format.h>
 
 #include "cross.hpp"
 
+#if STRINGZILLA_OS_LINUX_ && defined(_GNU_SOURCE)
+#include <stdlib.h> // `qsort_r`
+#endif
+
 namespace ashvardanian::stringzilla::bench {
 
-#if __linux__ && defined(_GNU_SOURCE) && !defined(__BIONIC__)
+#if STRINGZILLA_OS_LINUX_ && defined(_GNU_SOURCE) && !defined(__BIONIC__)
 #define STRINGZILLA_HAS_QSORT_R_ 1
 #else
 #define STRINGZILLA_HAS_QSORT_R_ 0

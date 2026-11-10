@@ -11,14 +11,9 @@
  *  <tt>src/capabilities/metal.c</tt>.
  */
 
-/** glibc feature selection must precede the libc headers pulled in by <stdatomic.h>. */
-#if defined(__linux__) && !defined(_DEFAULT_SOURCE) && !defined(_GNU_SOURCE)
-#define _DEFAULT_SOURCE 1
-#endif
+#include "stringzilla/stringzilla.h" // `sz_capabilities_detected_cpu_`, the family finders
 
 #include <stdatomic.h> // `atomic_load`, `atomic_store`
-
-#include "stringzilla/stringzilla.h" // `sz_capabilities_detected_cpu_`, the family finders
 
 #include "dispatch.h" // `sz_capabilities_runnable_`, `sz_capability_group_cpu_k`
 
