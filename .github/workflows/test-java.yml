@@ -18,7 +18,7 @@ jobs:
         run: |
           cmake --preset release_shared
           cmake --build --preset release_shared
-      # JDK 25, the current long-term release, compiling for the `release = 22` floor.
+      # JDK 25, the long-term release `build.gradle` compiles for.
       - name: Set Up JDK
         uses: actions/setup-java@v6
         with:

@@ -3,7 +3,7 @@
  *  @author Ash Vardanian
  *  @date June 29, 2026
  *  @brief Zero-copy Java bindings for the StringZilla core C library, via the Foreign Function &
- *      Memory API (FFM, JDK 22+). No JNI.
+ *      Memory API (FFM, JDK 25+). No JNI.
  *
  *  Exposes the core single-string operations over UTF-8 byte buffers:
  *
@@ -48,7 +48,7 @@ import java.util.stream.LongStream;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
-/** Core StringZilla operations: search, compare, hash. Pure FFM, JDK 22+. */
+/** Core StringZilla operations: search, compare, hash. Pure FFM, JDK 25+. */
 public final class StringZilla {
 
     private StringZilla() {}

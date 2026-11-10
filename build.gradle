@@ -10,9 +10,9 @@ repositories {
     mavenCentral()
 }
 
-// The Foreign Function & Memory API is final from JDK 22, the floor callers need.
+// FFM is final from JDK 22, and JDK 25 is the oldest long-term release that has it.
 tasks.withType(JavaCompile).configureEach {
-    options.release = 22
+    options.release = 25
     options.encoding = 'UTF-8'
 }
 

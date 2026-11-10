@@ -9,7 +9,7 @@ SIMD-accelerated search, comparison, hashing, UTF-8 segmentation, case-folding, 
 dotnet add package StringZilla
 ```
 
-The package targets .NET 8+ (`net8.0`) and is NativeAOT- and trimming-compatible.
+The package targets .NET 10+ (`net10.0`) and is NativeAOT- and trimming-compatible.
 Native libraries for `win-x64`, `linux-x64`, `osx-arm64`, and more are bundled in the package.
 
 ```csharp
@@ -143,24 +143,6 @@ int matches = Sz.Intersect(left, right, firstPositions, secondPositions); // mat
 ```
 
 A failed native call throws `StatusException`, whose `Status` is the C `sz_status_t` code and `StatusName` its enumerator name.
-
-## Zero-Copy in Unity
-
-StringZilla's native byte kernels are a strong fit for Unity's `NativeArray<byte>` (loaded text assets, network buffers), searched and hashed without marshalling.
-
-```csharp
-using StringZilla;
-using Unity.Collections;
-
-NativeArray<byte> asset = LoadUtf8Asset();
-ReadOnlySpan<byte> text = asset.AsReadOnlySpan(); // no copy
-long position = Sz.IndexOf(text, "player_id"u8);
-ulong identifier = Sz.Hash(text);
-```
-
-The managed package targets `net8.0`, which loads on Unity 6.2+ with the CoreCLR/.NET runtime.
-On older Unity (Mono/IL2CPP), drop the platform native library into `Assets/Plugins/<platform>/` and call the same API.
-The native binary itself is Unity-compatible; only the managed wrapper's target framework is the gate.
 
 ## Runtime Dispatch
 

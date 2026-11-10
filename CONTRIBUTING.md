@@ -853,13 +853,13 @@ Running Swift on Linux requires a couple of extra steps - [`swift.org/install` p
 Alternatively, on Linux, the official Swift Docker image can be used for builds and tests:
 
 ```bash
-sudo docker run --rm -v "$PWD:/workspace" -w /workspace swift:6.0 /bin/bash -cl "swift build -c release --static-swift-stdlib && swift test -c release"
+sudo docker run --rm -v "$PWD:/workspace" -w /workspace swift:6.4 /bin/bash -cl "swift build -c release --static-swift-stdlib && swift test -c release"
 ```
 
 To format the code on Linux:
 
 ```bash
-sudo docker run --rm -v "$PWD:/workspace" -w /workspace swift:6.0 /bin/bash -c "swift format . -i -r --configuration .swift-format"
+sudo docker run --rm -v "$PWD:/workspace" -w /workspace swift:6.4 /bin/bash -c "swift format . -i -r --configuration .swift-format"
 ```
 
 ## Rust
@@ -949,7 +949,7 @@ go run bench/stringzilla.go
 
 ## Java
 
-The binding loads `libstringzilla_shared` through the Foreign Function & Memory API, so it needs JDK 22 or newer, while Palantir Java Format runs on JDK 23 at most.
+The binding loads `libstringzilla_shared` through the Foreign Function & Memory API, and compiles for JDK 25, the oldest long-term release that has it.
 `gradle build` stages the shared library from `build_release_shared/`, or from `-PstringzillaLibraryPath=<directory>`, where `NativeLoader` finds it, then runs the tests:
 
 ```sh

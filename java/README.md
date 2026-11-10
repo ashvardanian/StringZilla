@@ -1,6 +1,6 @@
 # StringZilla for Java
 
-Zero-copy Java bindings for StringZilla via the Foreign Function & Memory API (FFM, JDK 22+), with no JNI.
+Zero-copy Java bindings for StringZilla via the Foreign Function & Memory API (FFM, JDK 25+), with no JNI.
 SIMD-accelerated search, comparison, hashing, UTF-8 segmentation, case-folding, normalization, and sorting, operating directly on UTF-8 bytes.
 
 ## Installation
@@ -13,7 +13,7 @@ SIMD-accelerated search, comparison, hashing, UTF-8 segmentation, case-folding, 
 </dependency>
 ```
 
-The bindings require JDK 22+ and native access enabled at launch.
+The bindings require JDK 25+ and native access enabled at launch.
 
 ```sh
 java --enable-native-access=ALL-UNNAMED ...
