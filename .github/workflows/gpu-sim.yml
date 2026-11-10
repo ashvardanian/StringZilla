@@ -1,0 +1,93 @@
+name: CUDA tests (simulated H100)
+
+# Optional, non-required check. The hosted runners have no GPU, so this builds
+# the StringZillas CUDA tests and runs them on a simulated NVIDIA H100
+# (https://github.com/pantheongpu/pantheonsim). A simulator cannot reproduce
+# hardware-specific behavior or timing, so it complements real-GPU testing and
+# does not replace it.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "include/stringzillas/**"
+      - "include/stringzilla/**"
+      - "c/stringzillas/**"
+      - "test/stringzillas.cu"
+      - "test/similarities.cuh"
+      - "test/fingerprints.cuh"
+      - "CMakeLists.txt"
+      - ".github/workflows/gpu-sim.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  cuda-sim:
+    name: CUDA 13.0, simulated H100
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up the simulated GPU and CUDA toolkit
+        uses: pantheongpu/setup-pantheonsim@ca87fe3143b29166822b923d6050945c5179408c # v0.1.5
+        with:
+          gpu: nvidia/h100
+          cuda-toolkit: "13.0"
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ccache ninja-build
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-gpu-sim-${{ github.sha }}
+          restore-keys: |
+            ccache-gpu-sim-
+
+      # The simulator runs PTX only, so the test must be built for `90-virtual`
+      # instead of the pinned `80-real;90-real` (SASS), and it needs a shared
+      # CUDA runtime. The architecture lists are hardcoded in CMakeLists.txt, so
+      # patch the two places in the CI checkout; the repository is not changed.
+      #
+      # The Hopper DPX tier is left out of the test (`SZ_USE_HOPPER 0`): the
+      # simulator does not implement `max.s32.relu` yet, which
+      # `__viaddmax_s32_relu` and `__vimax3_s32_relu` compile to. The base and
+      # Kepler GPU tiers still run in full. Drop the second `sed` once
+      # the simulator supports it.
+      - name: Build the CUDA test for PTX only
+        run: |
+          sed -i \
+            -e 's|set(STRINGZILLA_CUDA_ARCHS "80-real;90-real")|set(STRINGZILLA_CUDA_ARCHS "90-virtual")|' \
+            -e 's|stringzillas_cuda_static cuda_static STATIC "${STRINGZILLA_CUDA_ARCHS}" "80-real" "90-real"|stringzillas_cuda_static cuda_static STATIC "${STRINGZILLA_CUDA_ARCHS}" "90-virtual" "90-virtual"|' \
+            CMakeLists.txt
+          sed -i 's|^#include "stringzilla.hpp"|#define SZ_USE_HOPPER 0\n#include "stringzilla.hpp"|' test/stringzillas.cu
+          git diff --stat
+          cmake -B build -S . -GNinja \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_CUDA_COMPILER=/usr/local/cuda-13.0/bin/nvcc \
+                -DCUDAToolkit_ROOT=/usr/local/cuda-13.0 \
+                -DCMAKE_CUDA_RUNTIME_LIBRARY=Shared \
+                -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache \
+                -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+                -DSTRINGZILLA_BUILD_TEST=1 \
+                -DSTRINGZILLA_BUILD_BENCHMARK=0
+          ccache -z
+          cmake --build build --target stringzillas_test_cu20 -j3
+          ccache -s
+
+      - name: Run the CUDA tests
+        run: vgpu run ./build/stringzillas_test_cu20
