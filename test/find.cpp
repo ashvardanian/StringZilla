@@ -52,6 +52,8 @@
 #if defined(_WIN32)
 #define NOMINMAX     // Keeps `std::numeric_limits<...>::max()` usable, as in `stringzilla.h`
 #include <windows.h> // `VirtualAlloc`, `VirtualProtect`, `VirtualFree`
+#elif defined(__wasm__)
+// No page protection: the end of linear memory serves as the inaccessible boundary instead.
 #else
 #include <sys/mman.h> // `mmap`, `mprotect`, `munmap`
 #include <unistd.h>   // `sysconf`
@@ -422,7 +424,8 @@ void test_compare_unit() {
 
 /**
  *  @brief Runs one forward byte-search kernel over haystacks that end right before an inaccessible page,
- *         passing `memchr`-style lengths that run past the readable memory, up to `SZ_SIZE_MAX`.
+ *         passing `memchr`-style lengths that run past the readable memory, up to `SZ_SIZE_MAX`. On WebAssembly,
+ *         where pages can't be protected, the haystacks end at the end of linear memory instead.
  */
 static void check_find_byte_safety_(sz_find_byte_t find_byte) {
 
@@ -430,6 +433,8 @@ static void check_find_byte_safety_(sz_find_byte_t find_byte) {
     SYSTEM_INFO system_info;
     GetSystemInfo(&system_info);
     std::size_t const page_size = system_info.dwPageSize;
+#elif defined(__wasm__)
+    std::size_t const page_size = 65536; // WebAssembly page size
 #else
     std::size_t const page_size = (std::size_t)sysconf(_SC_PAGESIZE);
 #endif
@@ -442,6 +447,13 @@ static void check_find_byte_safety_(sz_find_byte_t find_byte) {
     DWORD old_protection;
     verify(region != NULL);
     verify(VirtualProtect(region + readable_size, page_size, PAGE_NOACCESS, &old_protection));
+#elif defined(__wasm__)
+    // Grow linear memory and use the new pages directly, so the readable region ends exactly where memory
+    // ends and any load past it traps. The allocator never sees these pages, so they are simply leaked.
+    std::size_t const first_new_page = __builtin_wasm_memory_grow(0, readable_size / page_size);
+    verify(first_new_page != SZ_SIZE_MAX);
+    char *const region = (char *)(first_new_page * page_size);
+    verify(__builtin_wasm_memory_size(0) * page_size == (std::size_t)(region + readable_size));
 #else
     char *const region = (char *)mmap(NULL, readable_size + page_size, PROT_READ | PROT_WRITE,
                                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -473,6 +485,8 @@ static void check_find_byte_safety_(sz_find_byte_t find_byte) {
 
 #if defined(_WIN32)
     VirtualFree(region, 0, MEM_RELEASE);
+#elif defined(__wasm__)
+    // Linear memory can't shrink, so the grown pages stay allocated.
 #else
     munmap(region, readable_size + page_size);
 #endif

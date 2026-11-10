@@ -873,8 +873,9 @@ jobs:
 
       # The same C++ test suite every native platform runs, cross-compiled to wasm32-wasip1: the WASI SDK
       # `eh` multilib plus `-fwasm-exceptions` (exnref flavor) gives working C++ exceptions under
-      # Wasmtime's exceptions proposal, and WASI signal emulation covers the harness hooks. The `utf8`
-      # filter scopes the run to the Unicode families; `test_hash_unit` still asserts on wasm and is
+      # Wasmtime's exceptions proposal, and WASI signal emulation covers the harness hooks. The filter
+      # scopes the run to the Unicode families and the `memchr`-style byte-search safety test, which
+      # places haystacks at the end of linear memory; `test_hash_unit` still asserts on wasm and is
       # tracked separately, so the filter widens once that is fixed.
       - name: Build C++ tests for wasm32-wasip1
         run: |
@@ -891,9 +892,9 @@ jobs:
             -DCMAKE_CXX_FLAGS="-msimd128 -D_WASI_EMULATED_SIGNAL -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false" \
             -DCMAKE_EXE_LINKER_FLAGS="-lwasi-emulated-signal -lunwind -fwasm-exceptions"
           cmake --build build_wasi --target stringzilla_test_cpp20
-      - name: Test C++ UTF-8 suites under Wasmtime
+      - name: Test C++ UTF-8 and byte-search safety suites under Wasmtime
         env:
-          SZ_TESTS_FILTER: utf8
+          SZ_TESTS_FILTER: "utf8|test_find_byte_safety"
           SZ_TESTS_MULTIPLIER: "0.05"
         run: |
           wasmtime -W exceptions=y --dir . --env SZ_TESTS_FILTER --env SZ_TESTS_MULTIPLIER \

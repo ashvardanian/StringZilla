@@ -65,6 +65,14 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_v128(sz_cptr_t haystack, sz_size_t haysta
             if (haystack[head_offset] == needle[0]) return haystack + head_offset;
     haystack += head_length, haystack_length -= head_length;
 
+    // The unrolled loop below loads 64 bytes before checking any of them, so it must start 64-byte aligned
+    // to keep the whole group within one page. Single blocks cover the gap up to that boundary.
+    while (((sz_size_t)haystack & 63) && haystack_length >= 16) {
+        sz_cptr_t found = sz_locate_first_v128_(wasm_i8x16_eq(wasm_v128_load(haystack), needle_u8x16), haystack);
+        if (found) return found;
+        haystack += 16, haystack_length -= 16;
+    }
+
     // Scan 64 bytes per iteration: OR four equality masks and gate with a single `any_true`, only
     // descending into the per-block locate when one of the windows actually contains a match.
     while (haystack_length >= 64) {
