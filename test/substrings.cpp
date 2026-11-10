@@ -138,7 +138,7 @@ void test_substrings_unit() {
         verify(sz_substrings_counts(&engine, &haystack_strings, counts.data(), 1, nullptr) == sz_success_k);
         verify(sz_substrings_contains(&engine, &haystack_strings, contained.data(), nullptr) == sz_success_k);
         for (std::size_t index = 0; index != haystacks.size(); ++index)
-            verify((contained[index >> 3] >> (index & 7) & 1) == (counts[index] != 0));
+            verify(((contained[index >> 3] >> (index & 7) & 1) != 0) == (counts[index] != 0));
         verify((contained.back() >> (haystacks.size() & 7)) == 0);
         sz_substrings_engine_free(&engine, nullptr);
     }

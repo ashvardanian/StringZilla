@@ -95,7 +95,7 @@ struct strings_from_std_t {
     sz_kernel_bytesum_t checksum = output_checksum_kernel();
 
     call_result_t operator()(std::size_t token_index) {
-        std::size_t const end = std::min(token_index + batch, corpus.tokens.size());
+        std::size_t const end = min_of(token_index + batch, corpus.tokens.size());
         std::size_t bytes = 0;
         output.clear();
         for (std::size_t index = token_index; index != end; ++index) {
@@ -205,7 +205,7 @@ void bench_strings_normalize(environment_t const &env, corpus_t const &corpus, s
         strings_from_sz_t best {strings_normalize_call(cpu_best<sz_strings_normalize_best>, form), lines, batch};
         auto const normalize_alone = [form, scratch = std::string()](std::string &output,
                                                                      std::string_view line) mutable {
-            scratch.resize(std::max(scratch.size(), line.size() * sz_utf8_norm_decomp_max_k));
+            scratch.resize(max_of(scratch.size(), line.size() * sz_utf8_norm_decomp_max_k));
             sz_size_t written = 0;
             if (sz_utf8_norm_best(line.data(), line.size(), form, scratch.data(), &written, sz::default_capabilities(),
                                   nullptr) != sz_success_k)

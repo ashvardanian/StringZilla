@@ -350,11 +350,6 @@ STRINGZILLA_INLINE sz_subdocuments_engine_t sz_subdocuments_engine_rebase_simt_(
  *  settle one live set, or carry one block-wide collective, for the walks and kernels below. */
 #pragma region Steps
 
-/** The index of the lowest set bit of a nonzero @p word. */
-STRINGZILLA_DEVICE sz_size_t sz_subdocuments_ctz_simt_(sz_u64_t word) {
-    return (sz_size_t)__ffsll((long long)word) - 1;
-}
-
 /** The masks of one block, and what its classification hands the next, as the serial tier keeps
  *  them; a group walking one document together also keeps its window's masks, 32 bytes to a lane,
  *  and hands the carries on from window to window. */
@@ -480,16 +475,16 @@ STRINGZILLA_DEVICE void sz_subdocuments_window_simt_(sz_subdocuments_cursor_simt
     sz_u32_t const settled = (((backslashes << 1) | odd_bits) - backslashes) ^ odd_bits;
     sz_u32_t const blocking = ~group->ballot(backslashes == 0xFFFFFFFFu) & (0xFFFFFFFFu >> (31 - last));
     sz_u32_t const handing = group->ballot((settled & backslashes) >> 31);
-    sz_u32_t const escape_in = blocking & below ? handing >> (31 - __clz(blocking & below)) & 1u
+    sz_u32_t const escape_in = blocking & below ? handing >> (31 - sz_u32_clz_simt_(blocking & below)) & 1u
                                                 : (sz_u32_t)cursor->escaped;
     sz_u32_t const potential_escape = backslashes & ~escape_in;
     sz_u32_t const escape_and_terminal = (((potential_escape << 1) | odd_bits) - potential_escape) ^ odd_bits;
     sz_u32_t const quotes = classes.quotes & ~(escape_and_terminal ^ (backslashes | escape_in));
-    sz_u32_t const odd_lanes = group->ballot(__popc(quotes) & 1);
+    sz_u32_t const odd_lanes = group->ballot(sz_u32_popcount_simt_(quotes) & 1);
     sz_u32_t in_string = quotes, opens, closes, separators, scalars, scalar_before;
     in_string ^= in_string << 1, in_string ^= in_string << 2, in_string ^= in_string << 4;
     in_string ^= in_string << 8, in_string ^= in_string << 16;
-    in_string ^= 0u - (((sz_u32_t)__popc(odd_lanes & below) ^ (sz_u32_t)cursor->in_string) & 1u);
+    in_string ^= 0u - (((sz_u32_t)sz_u32_popcount_simt_(odd_lanes & below) ^ (sz_u32_t)cursor->in_string) & 1u);
     opens = classes.opens & ~in_string, closes = classes.closes & ~in_string;
     separators = classes.separators & ~in_string;
     scalars = ~(in_string | quotes | classes.blanks | opens | closes | separators);
@@ -498,8 +493,8 @@ STRINGZILLA_DEVICE void sz_subdocuments_window_simt_(sz_subdocuments_cursor_simt
     scalar_before = group->shuffle(scalars >> 31, (lane + last) & last);
     cursor->lane_pending = opens | closes | separators | quotes |
                            (scalars & ~(scalars << 1 | (lane ? scalar_before : (sz_u32_t)cursor->scalar)));
-    cursor->escaped = blocking ? handing >> (31 - __clz(blocking)) & 1u : cursor->escaped;
-    cursor->in_string = 0 - (sz_u64_t)(((sz_u32_t)__popc(odd_lanes) ^ (sz_u32_t)cursor->in_string) & 1u);
+    cursor->escaped = blocking ? handing >> (31 - sz_u32_clz_simt_(blocking)) & 1u : cursor->escaped;
+    cursor->in_string = 0 - (sz_u64_t)(((sz_u32_t)sz_u32_popcount_simt_(odd_lanes) ^ (sz_u32_t)cursor->in_string) & 1u);
     cursor->scalar = group->shuffle(scalars >> 31, last);
     cursor->window_end = window + 32 * group->lanes;
 }
@@ -513,7 +508,7 @@ STRINGZILLA_DEVICE sz_u32_t sz_subdocuments_from_mask_simt_(sz_size_t base, sz_s
 STRINGZILLA_DEVICE unsigned sz_subdocuments_select_simt_(sz_u32_t bits, unsigned rank) {
     unsigned position = 0;
     for (unsigned width = 16; width; width >>= 1) {
-        unsigned const lower = (unsigned)__popc(bits & ((1u << width) - 1u));
+        unsigned const lower = (unsigned)sz_u32_popcount_simt_(bits & ((1u << width) - 1u));
         if (rank >= lower) rank -= lower, bits >>= width, position += width;
     }
     return position;
@@ -561,9 +556,9 @@ STRINGZILLA_DEVICE sz_size_t sz_subdocuments_next_simt_(sz_subdocuments_cursor_s
                   sz_subdocuments_from_mask_simt_(cursor->window_end - window_bytes + 32 * lane, from);
         holding = group->ballot(pending != 0);
         if (holding) {
-            unsigned const first = (unsigned)__ffs((int)holding) - 1;
+            unsigned const first = (unsigned)sz_u32_ctz_simt_(holding);
             return cursor->window_end - window_bytes + 32 * first +
-                   (unsigned)__ffs((int)group->shuffle(pending, first)) - 1;
+                   (unsigned)sz_u32_ctz_simt_(group->shuffle(pending, first));
         }
     }
 }
@@ -590,17 +585,17 @@ STRINGZILLA_DEVICE sz_size_t sz_subdocuments_skip_simt_(sz_subdocuments_cursor_s
         opens = cursor->lane_opens & mask, closes = cursor->lane_closes & mask;
         for (brackets = closes ? opens | closes : 0; brackets; brackets &= brackets - 1)
             running += opens & brackets & (0u - brackets) ? 1 : -1, lowest = running < lowest ? running : lowest;
-        net = (sz_u32_t)(__popc(opens) - __popc(closes));
+        net = (sz_u32_t)(sz_u32_popcount_simt_(opens) - sz_u32_popcount_simt_(closes));
         before_lane = sz_subdocuments_lanes_sum_simt_(group, net) - net;
         before = depth + (sz_i64_t)(int)before_lane;
         closing = group->ballot(before + lowest <= 0);
         if (closing) {
-            unsigned const first = (unsigned)__ffs((int)closing) - 1;
+            unsigned const first = (unsigned)sz_u32_ctz_simt_(closing);
             sz_u32_t found = 0;
             for (brackets = lane == first ? opens | closes : 0; brackets; brackets &= brackets - 1) {
                 if (opens & brackets & (0u - brackets)) ++before;
                 else if (--before == 0) {
-                    found = 32 * lane + (unsigned)__ffs((int)brackets) - 1;
+                    found = 32 * lane + (unsigned)sz_u32_ctz_simt_(brackets);
                     break;
                 }
             }
@@ -637,7 +632,7 @@ STRINGZILLA_DEVICE sz_size_t sz_subdocuments_scalar_length_simt_(sz_u8_t const *
                                sz_subdocuments_bytes_equal_simt_(word, 0x22222222u) |
                                sz_subdocuments_bytes_equal_simt_(folded, 0x7B7B7B7Bu) |
                                sz_subdocuments_bytes_equal_simt_(folded, 0x7D7D7D7Du) | outside;
-        unsigned const stop = stops ? (unsigned)(__ffs((int)stops) - 1) / 8 : 4;
+        unsigned const stop = stops ? (unsigned)sz_u32_ctz_simt_(stops) / 8 : 4;
         sz_u32_t const shifted = word ^ 0x30303030u;
         others |= ((shifted & 0x7F7F7F7Fu) + 0x76767676u | shifted) & 0x80808080u &
                   (stop == 4 ? 0xFFFFFFFFu : (1u << (8 * stop)) - 1u);
@@ -865,7 +860,7 @@ STRINGZILLA_DEVICE sz_u64_t sz_subdocuments_child_word_simt_(sz_subdocuments_eng
         sz_u64_t positional = candidates & ~engine->wildcard_steps[word] & ~tentative;
         selected = (candidates & engine->wildcard_steps[word]) | tentative;
         for (; positional; positional &= positional - 1) {
-            sz_size_t const step = word * 64 + sz_subdocuments_ctz_simt_(positional);
+            sz_size_t const step = word * 64 + sz_u64_ctz_simt_(positional);
             for (sz_u32_t slice = engine->slices_offsets[step]; slice != engine->slices_offsets[step + 1]; ++slice)
                 if (sz_subdocuments_slice_selects_simt_(&engine->slices[slice], (sz_i64_t)selector, known_length)) {
                     selected |= positional & (0 - positional);
@@ -939,7 +934,7 @@ STRINGZILLA_DEVICE void sz_subdocuments_report_simt_(sz_subdocuments_engine_t co
             if (*emitted < matches_capacity) {
                 sz_match_t *const match = &matches[*emitted];
                 match->haystack_index = document;
-                match->needle_index = engine->steps_paths[word * 64 + sz_subdocuments_ctz_simt_(reported)];
+                match->needle_index = engine->steps_paths[word * 64 + sz_u64_ctz_simt_(reported)];
                 match->byte_offset = byte_offset, match->byte_length = byte_length;
             }
             ++*emitted;
@@ -1321,15 +1316,15 @@ STRINGZILLA_DEVICE sz_status_t sz_subdocuments_batch_simt_(
         if (*from >= cursor->window_end && !sz_subdocuments_advance_simt_(cursor, group)) return sz_success_k;
         window = cursor->window_end - 32 * (sz_size_t)lanes;
         pending = cursor->lane_pending & sz_subdocuments_from_mask_simt_(window + 32 * lane, *from);
-        inclusive = sz_subdocuments_lanes_sum_simt_(group, (sz_u32_t)__popc(pending));
+        inclusive = sz_subdocuments_lanes_sum_simt_(group, (sz_u32_t)sz_u32_popcount_simt_(pending));
         total = group->shuffle(inclusive, top_lane);
         if (total) break;
     }
     for (step = lanes / 2; step; step >>= 1)
         if (group->shuffle(inclusive, source + step - 1) <= lane) source += step;
     bits = group->shuffle(pending, source);
-    offset = 32 * source +
-             sz_subdocuments_select_simt_(bits, lane - (group->shuffle(inclusive, source) - (sz_u32_t)__popc(bits)));
+    offset = 32 * source + sz_subdocuments_select_simt_(bits, lane - (group->shuffle(inclusive, source) -
+                                                                      (sz_u32_t)sz_u32_popcount_simt_(bits)));
     position = window + offset;
     tokens = total < lanes ? total : lanes;
     byte = lane < tokens ? text[position] : (sz_u8_t)' ';
@@ -1337,7 +1332,7 @@ STRINGZILLA_DEVICE sz_status_t sz_subdocuments_batch_simt_(
     // Quotes pair up in order, and a string closing past the batch waits for the next one.
     quotes = group->ballot(lane < tokens && byte == '"');
     quote = (sz_bool_t)(quotes >> lane & 1u);
-    opening = (sz_bool_t)(quote && !(__popc(quotes & below) & 1));
+    opening = (sz_bool_t)(quote && !(sz_u32_popcount_simt_(quotes & below) & 1));
     openings = group->ballot(opening);
     if (openings >> (tokens - 1) & 1u && (total > lanes || cursor->window_end < length)) --tokens;
     if (!tokens) return sz_success_k;
@@ -1419,10 +1414,10 @@ STRINGZILLA_DEVICE sz_status_t sz_subdocuments_batch_simt_(
     }
     elements = group->ballot(is_value && closer == ']');
     closes = group->ballot(walked && is_close);
-    since = closes & below ? ~0u << (31 - __clz((int)(closes & below))) << 1 : ~0u;
+    since = closes & below ? ~0u << (31 - sz_u32_clz_simt_(closes & below)) << 1 : ~0u;
     if (is_value && closer == ']') {
         sz_u64_t carry = 0;
-        name = owner->next_position + (sz_size_t)__popc(elements & below & since);
+        name = owner->next_position + (sz_size_t)sz_u32_popcount_simt_(elements & below & since);
         live = sz_subdocuments_child_word_simt_(engine, &owner_live, (sz_u64_t const *)STRINGZILLA_NULL, 0, &carry,
                                                 sz_true_k, name, 0);
     }
@@ -1456,11 +1451,11 @@ STRINGZILLA_DEVICE sz_status_t sz_subdocuments_batch_simt_(
                   : 0;
     keeping = (sz_bool_t)(pending_run ? entering || reported : entering);
     kept = group->ballot(keeping);
-    kept_slot = pending_run ? (sz_i64_t)(*top + (sz_size_t)__popc(kept & below)) : slot + 1;
+    kept_slot = pending_run ? (sz_i64_t)(*top + (sz_size_t)sz_u32_popcount_simt_(kept & below)) : slot + 1;
     ends = group->ballot(valid && is_close && depth_before == lowest + 1);
     {
         sz_u32_t const ends_after = ends & above;
-        sz_u32_t const closing = group->shuffle(offset, ends_after ? (unsigned)__ffs((int)ends_after) - 1 : lane);
+        sz_u32_t const closing = group->shuffle(offset, ends_after ? (unsigned)sz_u32_ctz_simt_(ends_after) : lane);
         unfinished = (sz_bool_t)(is_value && is_open && !continuing && !ends_after);
         if (is_value && is_open && !continuing) end = window + closing + 1;
     }
@@ -1468,7 +1463,7 @@ STRINGZILLA_DEVICE sz_status_t sz_subdocuments_batch_simt_(
         end = position + sz_subdocuments_scalar_length_simt_(text, position, length);
         malformed = (sz_bool_t)(malformed || end == position);
     }
-    reports = pending_run ? 0 : (sz_u32_t)__popcll(reported);
+    reports = pending_run ? 0 : (sz_u32_t)sz_u64_popcount_simt_(reported);
     reports_through = sz_subdocuments_lanes_sum_simt_(group, reports);
 
     // The batch commits up to its first stop; the first failure before it fails the walk.
@@ -1477,14 +1472,14 @@ STRINGZILLA_DEVICE sz_status_t sz_subdocuments_batch_simt_(
     stops = group->ballot(walked &&
                           (unescape || waiting ||
                            (pending_run && ((is_close && slot == (sz_i64_t)run) || depth_after < -(int)top_lane))));
-    if (stops) commit = sz_min_of_two(commit, (unsigned)__ffs((int)stops) - 1);
+    if (stops) commit = sz_min_of_two(commit, (unsigned)sz_u32_ctz_simt_(stops));
     stops = group->ballot(walked && ((entering && !waiting) || unfinished));
-    if (stops) commit = sz_min_of_two(commit, (unsigned)__ffs((int)stops));
+    if (stops) commit = sz_min_of_two(commit, (unsigned)sz_u32_ctz_simt_(stops) + 1);
     if (!commit) return sz_success_k;
     committed = commit == 32 ? ~0u : (1u << commit) - 1u;
     failures = group->ballot(malformed || (keeping && kept_slot + 2 > (sz_i64_t)frames)) & committed;
     if (failures)
-        return group->shuffle(malformed, (unsigned)__ffs((int)failures) - 1) ? sz_invalid_syntax_k : sz_bad_alloc_k;
+        return group->shuffle(malformed, (unsigned)sz_u32_ctz_simt_(failures)) ? sz_invalid_syntax_k : sz_bad_alloc_k;
 
     // Matches go in place, and the containers open before the batch that it closes settle theirs.
     if (committed >> lane & 1u) {
@@ -1493,7 +1488,7 @@ STRINGZILLA_DEVICE sz_status_t sz_subdocuments_batch_simt_(
             if (index < matches_capacity) {
                 sz_match_t *const match = &matches[index];
                 match->haystack_index = document;
-                match->needle_index = engine->steps_paths[sz_subdocuments_ctz_simt_(left)];
+                match->needle_index = engine->steps_paths[sz_u64_ctz_simt_(left)];
                 match->byte_offset = position;
                 if (!entering && !unfinished) match->byte_length = end - position;
             }
@@ -1512,27 +1507,28 @@ STRINGZILLA_DEVICE sz_status_t sz_subdocuments_batch_simt_(
         sz_size_t const last_reports = group->shuffle(reports, last);
         sz_size_t const reports_committed = group->shuffle(reports_through, last);
         sz_u32_t const closes_committed = closes & committed, kept_committed = kept & committed;
-        sz_u32_t const tail = closes_committed ? ~0u << (31 - __clz((int)closes_committed)) << 1 : ~0u;
-        sz_u32_t const appended = (sz_u32_t)__popc(elements & committed & tail);
+        sz_u32_t const tail = closes_committed ? ~0u << (31 - sz_u32_clz_simt_(closes_committed)) << 1 : ~0u;
+        sz_u32_t const appended = (sz_u32_t)sz_u32_popcount_simt_(elements & committed & tail);
         sz_u32_t const last_after = group->shuffle(after, last);
         sz_u8_t const last_byte = (sz_u8_t)group->shuffle(byte, last);
         sz_u32_t left;
         // In a run, the containers the batch closes keep spans and element counts for the replay.
         for (left = pending_run ? closes_committed : 0; left; left &= left - 1) {
-            unsigned const closing = (unsigned)__ffs((int)left) - 1;
+            unsigned const closing = (unsigned)sz_u32_ctz_simt_(left);
             sz_u32_t const before_closing = closes_committed & ((1u << closing) - 1u);
-            sz_u32_t const from_lane = before_closing ? ~0u << (31 - __clz((int)before_closing)) << 1 : ~0u;
+            sz_u32_t const from_lane = before_closing ? ~0u << (31 - sz_u32_clz_simt_(before_closing)) << 1 : ~0u;
             sz_subdocuments_frame_t *const frame =
                 (sz_subdocuments_frame_t *)(stack + group->shuffle((sz_u32_t)slot, closing) * frame_words);
-            frame->next_position += (sz_size_t)__popc(elements & from_lane & ((1u << closing) - 1u));
+            frame->next_position += (sz_size_t)sz_u32_popcount_simt_(elements & from_lane & ((1u << closing) - 1u));
             frame->byte_length = window + group->shuffle(offset, closing) + 1 - frame->byte_offset;
         }
         // Inside a run, every value a path selects keeps a frame for the replay.
         for (left = pending_run ? kept_committed & ~group->ballot(entering) & ~group->ballot(unfinished) : 0; left;
              left &= left - 1) {
-            unsigned const keeper = (unsigned)__ffs((int)left) - 1;
-            sz_u64_t *const slot_words = stack + (sz_size_t)(*top + (sz_size_t)__popc(kept & ((1u << keeper) - 1u))) *
-                                                     frame_words;
+            unsigned const keeper = (unsigned)sz_u32_ctz_simt_(left);
+            sz_u64_t *const slot_words =
+                stack +
+                (sz_size_t)(*top + (sz_size_t)sz_u32_popcount_simt_(kept & ((1u << keeper) - 1u))) * frame_words;
             sz_subdocuments_frame_t *const frame = (sz_subdocuments_frame_t *)slot_words;
             sz_size_t const begin = window + group->shuffle(offset, keeper);
             frame->parent = group->shuffle((sz_u32_t)slot, keeper), frame->byte_offset = begin;
@@ -1545,11 +1541,11 @@ STRINGZILLA_DEVICE sz_status_t sz_subdocuments_batch_simt_(
                                        (sz_u64_t)group->shuffle((sz_u32_t)(live >> 32), keeper) << 32;
         }
         if (appended && open >= 0) ((sz_subdocuments_frame_t *)(stack + open * frame_words))->next_position += appended;
-        if (pending_run) *top += (sz_size_t)__popc(kept_committed);
+        if (pending_run) *top += (sz_size_t)sz_u32_popcount_simt_(kept_committed);
         // A key whose value lies past the batch leaves its live set where that value will read it.
         keys = group->ballot(walked && keyed && lane < commit && lane + 3 >= commit);
         if (keys) {
-            unsigned const key_lane = (unsigned)__ffs((int)keys) - 1;
+            unsigned const key_lane = (unsigned)sz_u32_ctz_simt_(keys);
             sz_u64_t *const slot_words =
                 stack +
                 (pending_run ? *top : (sz_size_t)(int)group->shuffle((sz_u32_t)slot, key_lane) + 1) * frame_words;
@@ -1615,7 +1611,7 @@ STRINGZILLA_DEVICE sz_size_t sz_subdocuments_markup_find_simt_(sz_u8_t const *te
         sz_u32_t const word = sz_u32_load_bounded_simt_((sz_u32_t const *)(at - misalignment), text + length) >>
                               (8 * misalignment);
         sz_u32_t const found = sz_subdocuments_bytes_equal_simt_(word, repeated) & (0x80808080u >> (8 * misalignment));
-        if (found) return sz_min_of_two(from + (sz_size_t)((__ffs((int)found) - 1) >> 3), length);
+        if (found) return sz_min_of_two(from + (sz_size_t)(sz_u32_ctz_simt_(found) >> 3), length);
         from += 4 - misalignment;
     } while (from < length);
     return length;
@@ -1674,7 +1670,7 @@ STRINGZILLA_DEVICE void sz_subdocuments_node_live_simt_(sz_subdocuments_engine_t
                               : candidates & (named | engine->wildcard_steps[word]) & ~engine->attribute_steps[word];
         carried = advancing >> 63;
         for (sz_u64_t counted = tested; counted; counted &= counted - 1) {
-            sz_size_t const step = word * 64 + sz_subdocuments_ctz_simt_(counted);
+            sz_size_t const step = word * 64 + sz_u64_ctz_simt_(counted);
             sz_u32_t const slice = engine->slices_offsets[step];
             if (slice == engine->slices_offsets[step + 1]) continue;
             if (!sz_subdocuments_slice_selects_simt_(&engine->slices[slice], counters[slice],
@@ -1739,9 +1735,9 @@ STRINGZILLA_DEVICE sz_size_t sz_subdocuments_frames_simt_(sz_subdocuments_engine
     cursor.slashes = 0;
     for (; position < length; position += 64) {
         sz_subdocuments_load_simt_(&cursor, position);
-        structurals += (sz_size_t)__popcll(cursor.pending);
+        structurals += (sz_size_t)sz_u64_popcount_simt_(cursor.pending);
         for (sz_u64_t brackets = cursor.opens | cursor.closes; brackets; brackets &= brackets - 1)
-            if (cursor.opens >> sz_subdocuments_ctz_simt_(brackets) & 1) deepest = sz_max_of_two(deepest, ++depth);
+            if (cursor.opens >> sz_u64_ctz_simt_(brackets) & 1) deepest = sz_max_of_two(deepest, ++depth);
             else if (depth) --depth;
     }
     for (sz_size_t word = 0; word != engine->words_count; ++word) relative |= engine->relative_steps[word];

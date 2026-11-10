@@ -34,9 +34,7 @@
 #define STRINGZILLA_WITH_STL (1) // true or false
 #endif
 
-/*  MSVC pins @c __cplusplus at 199711L unless `/Zc:__cplusplus` is passed, so read
- *  @c _MSVC_LANG there. */
-#if (defined(_MSVC_LANG) ? _MSVC_LANG : __cplusplus) < 202002L
+#if STRINGZILLA_CXX_STANDARD_ < 202002L
 #error "StringZilla's C++ interface requires C++20; the C interface in `stringzilla.h` has no such floor."
 #endif
 
@@ -142,6 +140,21 @@ using u64_vec_t = sz_u64_vec_t;
 using u128_vec_t = sz_u128_vec_t;
 using u256_vec_t = sz_u256_vec_t;
 using u512_vec_t = sz_u512_vec_t;
+
+/** The smaller of @p first and @p second; arithmetic only, so a caller's own @c min_of never
+ *  meets this one by argument-dependent lookup. */
+template <typename value_type_>
+    requires std::is_arithmetic_v<value_type_>
+constexpr value_type_ min_of(value_type_ first, value_type_ second) noexcept {
+    return second < first ? second : first;
+}
+
+/** The larger of @p first and @p second, the @c max twin of @ref min_of. */
+template <typename value_type_>
+    requires std::is_arithmetic_v<value_type_>
+constexpr value_type_ max_of(value_type_ first, value_type_ second) noexcept {
+    return first < second ? second : first;
+}
 
 #pragma region Status
 

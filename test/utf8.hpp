@@ -519,7 +519,7 @@ inline void apply_mutation_passes_(std::string &text, std::mt19937 &generator) {
 
     // Truncate the last codepoint: drop a 1-3 byte trailing run so a multi-byte sequence loses its tail.
     std::uniform_int_distribution<std::size_t> truncate_distribution(1, 3);
-    std::size_t const truncate_by = std::min((std::size_t)truncate_distribution(generator), text.size());
+    std::size_t const truncate_by = min_of((std::size_t)truncate_distribution(generator), text.size());
     text.resize(text.size() - truncate_by);
 
     // Insert a stray continuation byte at a random position, breaking codepoint alignment.

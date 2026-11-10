@@ -114,7 +114,7 @@ STRINGZILLA_DEVICE void sz_regex_bound_simt_(sz_regex_engine_t const *engine, sz
             result = sz_regex_flow_walk_simt_(engine, round, &pike, &table, &haystack, from, to, sets, sets + stride,
                                               sz_false_k, dfa);
             for (word = 0, count = 0; word != words; ++word)
-                count += (sz_size_t)__popcll(result[word] & ~handoff[word]);
+                count += (sz_size_t)sz_u64_popcount_simt_(result[word] & ~handoff[word]);
             // A body's DFA holds one state, so one it reaches from every state is the answer.
             if (round->body != sz_regex_none_simt_k && count == 1) {
                 for (word = 0; word != words; ++word) handoff[word] = result[word];
@@ -123,7 +123,7 @@ STRINGZILLA_DEVICE void sz_regex_bound_simt_(sz_regex_engine_t const *engine, sz
             if (count <= sz_regex_undecided_simt_k) {
                 for (word = 0, count = 0; word != words; ++word)
                     for (bits = result[word] & ~handoff[word]; bits; bits &= bits - 1)
-                        undecided->indices[count++] = (sz_u32_t)(word * 64 + sz_regex_lowest_simt_(bits));
+                        undecided->indices[count++] = (sz_u32_t)(word * 64 + sz_u64_ctz_simt_(bits));
                 undecided->count = (sz_u32_t)count;
                 break;
             }
@@ -738,7 +738,7 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
                 bit = (sz_u32_t)(haystack.first + 1 + at - low);
                 words[bit / 64] |= (sz_u64_t)mask << (bit % 64);
                 if (bit % 64 + count > 64) words[bit / 64 + 1] |= (sz_u64_t)mask >> (64 - bit % 64);
-                marked += (sz_u32_t)__popc(mask);
+                marked += (sz_u32_t)sz_u32_popcount_simt_(mask);
             }
             if (haystack.first < low || sz_regex_step_edge_simt_(&table, state, haystack.first) < accepts) continue;
             bit = (sz_u32_t)(haystack.first - low);
@@ -816,7 +816,7 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
              index += blockDim.x) {
             sz_size_t const chunk = (tile - round.segment_begin) / sz_regex_chunk_slots_simt_k + index;
             round.starts[chunk] = words[index];
-            round.chunk_offsets[chunk] = (sz_size_t)__popcll(words[index]);
+            round.chunk_offsets[chunk] = (sz_size_t)sz_u64_popcount_simt_(words[index]);
         }
     }
 }
@@ -872,7 +872,7 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
             if (first == 0 && sz_regex_step_edge_simt_(&table, state, haystack.first) >= accepts)
                 words[(haystack.first - low) / 64] |= (sz_u64_t)1 << ((haystack.first - low) % 64);
         }
-        for (word = 0; word != width / 64; ++word) marked += (sz_u32_t)__popcll(words[word]);
+        for (word = 0; word != width / 64; ++word) marked += (sz_u32_t)sz_u64_popcount_simt_(words[word]);
         round.chunk_offsets[chunk] = marked;
     }
 }
@@ -930,7 +930,7 @@ STRINGZILLA_DEVICE void sz_regex_mark_positions_simt_(sz_regex_engine_t const *e
                                           sz_regex_looks_at_simt_(&round->looks, haystack.first));
             if (other[0] >> 1 & 1) bits[(haystack.first - low) / 64] |= (sz_u64_t)1 << ((haystack.first - low) % 64);
         }
-        for (word = 0; word != width / 64; ++word) marked += (sz_u32_t)__popcll(bits[word]);
+        for (word = 0; word != width / 64; ++word) marked += (sz_u32_t)sz_u64_popcount_simt_(bits[word]);
         round->chunk_offsets[chunk] = marked;
     }
 }
@@ -962,7 +962,7 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
         for (word = 0; word != width / 64; ++word) {
             sz_u64_t bits = round.starts[offset / 64 + word];
             for (; bits; bits &= bits - 1)
-                round.slots[index++] = (sz_u32_t)(offset + word * 64 + sz_regex_lowest_simt_(bits));
+                round.slots[index++] = (sz_u32_t)(offset + word * 64 + sz_u64_ctz_simt_(bits));
         }
     }
 }
@@ -1030,7 +1030,7 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
         for (word = (high - low + 63) / 64; word-- != 0;) {
             sz_u64_t bits = round.starts[(low - begin) / 64 + word];
             while (bits) {
-                sz_u32_t const bit = 63 - (sz_u32_t)__clzll((long long)bits);
+                sz_u32_t const bit = (sz_u32_t)sz_size_log2i_nonzero_simt_(bits);
                 sz_size_t const mark = low + word * 64 + bit;
                 sz_size_t start, at, stepped = 1, kind = 0, last_end = 0, last_at = 0, inherited_end = 0;
                 sz_size_t recorded_low = 0, recorded_high = 0;
@@ -1398,7 +1398,7 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
             continue;
         sz_regex_unit_after_simt_(sz_true_k, haystack.text, haystack.length, start, &image);
         if (!(image.rune_ends & (image.rune_ends - 1))) continue;
-        offset = sz_regex_lowest_simt_(image.rune_ends) + 1;
+        offset = sz_u64_ctz_simt_(image.rune_ends) + 1;
         if (sz_regex_match_at_simt_(&engine, &table, STRINGZILLA_NULL, &haystack, start, &end, &pattern, &offset))
             round.results[item].link = sz_regex_none_simt_k, round.results[item].pattern = pattern,
             round.results[item].end = haystack.first + end;

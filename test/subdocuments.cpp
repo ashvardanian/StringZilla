@@ -71,7 +71,7 @@ void test_subdocuments_unit() {
         verify(sz_subdocuments_contains(&engine, &document_strings, contained.data(), &malformed_index, nullptr) ==
                sz_success_k);
         for (std::size_t index = 0; index != documents.size(); ++index)
-            verify((contained[index >> 3] >> (index & 7) & 1) == (counts[index] != 0));
+            verify(((contained[index >> 3] >> (index & 7) & 1) != 0) == (counts[index] != 0));
         verify((contained.back() >> (documents.size() & 7)) == 0);
 
         // The walk stops at its first match, so a document broken past it is marked, not refused.

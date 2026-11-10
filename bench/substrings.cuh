@@ -7,7 +7,7 @@
  */
 #pragma once
 
-#include <algorithm>   // `std::sort`, `std::min`, `std::max`
+#include <algorithm>   // `std::sort`
 #include <limits>      // `std::numeric_limits`
 #include <numeric>     // `std::iota`
 #include <optional>    // `std::optional`
@@ -172,10 +172,10 @@ struct substrings_ranking_t {
 static std::vector<std::string> substrings_vocabulary(substrings_ranking_t const &ranking, substrings_slice_t slice) {
     // ? A corpus without repeated words, such as nucleotides, has no word slice.
     if (ranking.words.empty()) return {};
-    std::size_t const dropped = std::min<std::size_t>(
+    std::size_t const dropped = min_of<std::size_t>(
         (std::size_t)((double)ranking.distinct_total * substrings_frequent_cutoff_k), ranking.words.size());
     std::size_t const available = ranking.words.size() - dropped;
-    std::size_t const wanted = std::max<std::size_t>(available / 100, 1);
+    std::size_t const wanted = max_of<std::size_t>(available / 100, 1);
     std::size_t const first = slice == substrings_slice_t::frequent_k ? dropped : dropped + available - wanted;
     return {ranking.words.begin() + first, ranking.words.begin() + first + wanted};
 }
@@ -284,8 +284,8 @@ struct substrings_corpus_t {
     std::vector<sz_string_view_t> views;
 
     /** Views over the leading @p limit tokens of @p corpus, or over all of them. */
-    explicit substrings_corpus_t(corpus_t const &corpus, std::size_t limit = std::numeric_limits<std::size_t>::max())
-        : views(std::min(corpus.tokens.size(), limit)) {
+    explicit substrings_corpus_t(corpus_t const &corpus, std::size_t limit = (std::numeric_limits<std::size_t>::max)())
+        : views(min_of(corpus.tokens.size(), limit)) {
         for (std::size_t index = 0; index != views.size(); ++index) {
             token_view_t const token = corpus.tokens[index];
             views[index] = {token.data(), token.size()};
@@ -501,7 +501,7 @@ struct substrings_bm25_from_sz {
           weights(engine.engine.needles_count, 1.0f, unified_alloc<sz_f32_t>(engine.engine.allocator, engine.stream)),
           runtime(runtime) {
         std::size_t const bytes = corpus.bytes();
-        parameters.average_document_length = (sz_f32_t)bytes / (sz_f32_t)std::max<std::size_t>(corpus.views.size(), 1);
+        parameters.average_document_length = (sz_f32_t)bytes / (sz_f32_t)max_of<std::size_t>(corpus.views.size(), 1);
         bool const separate = runtime && runtime->get().separate();
         scores = pinned_vector<sz_f32_t>(
             corpus.views.size(), 0.0f,

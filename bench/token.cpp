@@ -128,7 +128,7 @@ struct hash_strings_by_loop_t {
     std::vector<sz_u64_t> hashes {};
 
     call_result_t operator()(std::size_t token_index) {
-        std::size_t const count = std::min(batch, corpus.tokens.size() - token_index);
+        std::size_t const count = min_of(batch, corpus.tokens.size() - token_index);
         std::size_t bytes = 0;
         hashes.resize(count);
         for (std::size_t position = 0; position != count; ++position) {
@@ -250,11 +250,11 @@ struct equality_from_memcmp_t {
     }
 
     inline call_result_t operator()(std::string_view a, std::string_view b) const noexcept {
-        bool ab = std::memcmp(a.data(), b.data(), std::min(a.size(), b.size())) == 0;
+        bool ab = std::memcmp(a.data(), b.data(), min_of(a.size(), b.size())) == 0;
         bool aa = std::memcmp(a.data(), a.data(), a.size()) == 0;
         bool bb = std::memcmp(b.data(), b.data(), b.size()) == 0;
-        bool ba = std::memcmp(b.data(), a.data(), std::min(a.size(), b.size())) == 0;
-        std::size_t max_bytes_passed = a.size() + b.size() + std::min(a.size(), b.size());
+        bool ba = std::memcmp(b.data(), a.data(), min_of(a.size(), b.size())) == 0;
+        std::size_t max_bytes_passed = a.size() + b.size() + min_of(a.size(), b.size());
         check_value_t check_value = ab;
         do_not_optimize(ab);
         do_not_optimize(aa);
@@ -277,7 +277,7 @@ struct ordering_from_memcmp_t {
         int aa = memcmp_for_ordering(a, a);
         int bb = memcmp_for_ordering(b, b);
         int ba = memcmp_for_ordering(b, a);
-        std::size_t max_bytes_passed = 4 * std::min(a.size(), b.size());
+        std::size_t max_bytes_passed = 4 * min_of(a.size(), b.size());
         check_value_t check_value = ab + aa * 3 + bb * 9 + ba * 27; // Each can have 3 unique values
         do_not_optimize(ab);
         do_not_optimize(aa);

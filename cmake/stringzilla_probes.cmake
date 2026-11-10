@@ -7,8 +7,8 @@
 # `-D STRINGZILLA_TARGET_<CAPABILITY>=0` leaves a capability out, and `stringzilla_target_<capability>_enabled` caches
 # the verdict after it. A monoversioned build also compiles `probes/implied.c` at the floor into the cached
 # `stringzilla_target_<capability>_implied`, and keeps only the capabilities the floor's predefined macros imply. MSVC
-# enables capabilities by `_MSC_VER` instead, so its native build runs each enabled probe, caching whether this host
-# runs the capability as `stringzilla_target_<capability>_runs`, and a monoversioned one keeps those.
+# has no `-march=native`, so its native build runs each enabled probe, caching whether this host runs the capability
+# as `stringzilla_target_<capability>_runs`, and a monoversioned one keeps those.
 #
 # A compiled capability is not one the unit's own flags enable, nor one the CPU runs. `stringzilla_header` carries no
 # macro, so its consumers enable what their flags name, and the runtime mask picks among the compiled ones.

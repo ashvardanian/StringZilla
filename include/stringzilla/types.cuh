@@ -42,6 +42,28 @@ extern "C" {
  *  every cross-lane step stays inside its own half. */
 #pragma region Lanes
 
+/** The trailing zero bits of a nonzero @p word, as @ref sz_u64_ctz counts them on the host. */
+STRINGZILLA_DEVICE int sz_u64_ctz_simt_(sz_u64_t word) { return __ffsll((long long)word) - 1; }
+
+/** The leading zero bits of a nonzero @p word, as @ref sz_u64_clz counts them on the host. */
+STRINGZILLA_DEVICE int sz_u64_clz_simt_(sz_u64_t word) { return __clzll((long long)word); }
+
+/** The set bits of @p word, as @ref sz_u64_popcount counts them on the host. */
+STRINGZILLA_DEVICE int sz_u64_popcount_simt_(sz_u64_t word) { return __popcll(word); }
+
+/** The trailing zero bits of a nonzero @p word, as @ref sz_u32_ctz counts them on the host. */
+STRINGZILLA_DEVICE int sz_u32_ctz_simt_(sz_u32_t word) { return __ffs((int)word) - 1; }
+
+/** The leading zero bits of a nonzero @p word, as @ref sz_u32_clz counts them on the host. */
+STRINGZILLA_DEVICE int sz_u32_clz_simt_(sz_u32_t word) { return __clz((int)word); }
+
+/** The set bits of @p word, as @ref sz_u32_popcount counts them on the host. */
+STRINGZILLA_DEVICE int sz_u32_popcount_simt_(sz_u32_t word) { return __popc(word); }
+
+/** The floor of the binary logarithm of a nonzero @p x, as @ref sz_size_log2i_nonzero computes it
+ *  on the host. */
+STRINGZILLA_DEVICE sz_size_t sz_size_log2i_nonzero_simt_(sz_size_t x) { return (sz_size_t)(63 - sz_u64_clz_simt_(x)); }
+
 /**
  *  @brief The block's exclusive prefix sum of @p value, with the block's own total left
  *      in @p total.

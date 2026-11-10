@@ -352,7 +352,7 @@ STRINGZILLA_CONSTEXPR sz_bool_t sz_substrings_leftmost_wins(sz_substrings_pendin
  *  suffice. Rounded up to a power of two, which turns the slot lookup into a mask rather than
  *  a runtime division.
  */
-STRINGZILLA_CONSTEXPR sz_size_t sz_substrings_pending_starts_width(sz_size_t max_source_match_bytes) {
+STRINGZILLA_INLINE sz_size_t sz_substrings_pending_starts_width(sz_size_t max_source_match_bytes) {
     sz_size_t const wanted = max_source_match_bytes > 1 ? max_source_match_bytes : 1;
     return sz_size_bit_ceil(wanted);
 }

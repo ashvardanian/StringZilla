@@ -13,6 +13,7 @@
 #include <dispatch/dispatch.h> // `dispatch_apply_f`, part of libSystem
 #include <unistd.h>            // `sysconf`
 #elif STRINGZILLA_OS_WINDOWS_
+#include <winsock2.h>
 #include <windows.h> // `CreateThreadpoolWork`, part of kernel32
 #else
 #include <unistd.h> // `sysconf`

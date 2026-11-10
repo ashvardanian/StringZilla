@@ -508,11 +508,11 @@ struct equality_from_sz {
 
     inline call_result_t operator()(std::string_view a, std::string_view b) const noexcept {
         sz_bool_t ab = sz_false_k, aa = sz_false_k, bb = sz_false_k, ba = sz_false_k;
-        func_(a.data(), b.data(), std::min(a.size(), b.size()), &ab, nullptr);
+        func_(a.data(), b.data(), min_of(a.size(), b.size()), &ab, nullptr);
         func_(a.data(), a.data(), a.size(), &aa, nullptr);
         func_(b.data(), b.data(), b.size(), &bb, nullptr);
-        func_(b.data(), a.data(), std::min(a.size(), b.size()), &ba, nullptr);
-        std::size_t max_bytes_passed = a.size() + b.size() + std::min(a.size(), b.size());
+        func_(b.data(), a.data(), min_of(a.size(), b.size()), &ba, nullptr);
+        std::size_t max_bytes_passed = a.size() + b.size() + min_of(a.size(), b.size());
         check_value_t check_value = ab;
         do_not_optimize(ab);
         do_not_optimize(aa);
@@ -540,7 +540,7 @@ struct ordering_from_sz {
         func_(a.data(), a.size(), a.data(), a.size(), &aa, nullptr);
         func_(b.data(), b.size(), b.data(), b.size(), &bb, nullptr);
         func_(b.data(), b.size(), a.data(), a.size(), &ba, nullptr);
-        std::size_t max_bytes_passed = 4 * std::min(a.size(), b.size());
+        std::size_t max_bytes_passed = 4 * min_of(a.size(), b.size());
         check_value_t check_value = ab + aa * 3 + bb * 9 + ba * 27; // Each can have 3 unique values
         do_not_optimize(ab);
         do_not_optimize(aa);
@@ -750,7 +750,7 @@ struct intersect_inputs_t {
         std::mt19937 generator(seed);
         std::sample(unique_tokens.begin(), unique_tokens.end(), //
                     std::back_inserter(tokens_b), corpus.tokens.size() / 2, generator);
-        std::size_t const max_tokens_in_intersection = (std::min)(tokens_a.size(), tokens_b.size());
+        std::size_t const max_tokens_in_intersection = min_of(tokens_a.size(), tokens_b.size());
         permute_a.resize(max_tokens_in_intersection), permute_b.resize(max_tokens_in_intersection);
     }
 };
@@ -1007,7 +1007,7 @@ struct strings_from_sz_t {
     void preprocess() { input.preprocess(); }
 
     call_result_t operator()(std::size_t token_index) {
-        std::size_t const count = std::min(batch, input.tape.count - token_index);
+        std::size_t const count = min_of(batch, input.tape.count - token_index);
         sz_strings_view_t const strings = input.slice(token_index, count);
         if (call(&strings, &heap, &tape) != sz_success_k) throw std::runtime_error("The strings kernel failed.");
         bool const narrow = tape.layout == sz_strings_u32_tape_k;
@@ -1079,7 +1079,7 @@ struct find_strings_from_sz {
 
     void preprocess() { lines.preprocess(); }
     call_result_t operator()(std::size_t token_index) {
-        std::size_t const count = std::min(batch, lines.tape.count - token_index);
+        std::size_t const count = min_of(batch, lines.tape.count - token_index);
         std::string_view const needle = words.tokens[token_index % words.tokens.size()];
         sz_strings_view_t const strings = lines.slice(token_index, count);
         positions.resize(count);
@@ -1100,7 +1100,7 @@ struct hash_strings_from_sz {
 
     void preprocess() { tokens.preprocess(); }
     call_result_t operator()(std::size_t token_index) {
-        std::size_t const count = std::min(batch, tokens.tape.count - token_index);
+        std::size_t const count = min_of(batch, tokens.tape.count - token_index);
         sz_strings_view_t const strings = tokens.slice(token_index, count);
         hashes.resize(count);
         if (hash_strings_(&strings, nullptr, count, 42, hashes.data(), nullptr) != sz_success_k)
@@ -1119,7 +1119,7 @@ struct utf8_count_strings_from_sz {
 
     void preprocess() { lines.preprocess(); }
     call_result_t operator()(std::size_t token_index) {
-        std::size_t const count = std::min(batch, lines.tape.count - token_index);
+        std::size_t const count = min_of(batch, lines.tape.count - token_index);
         sz_strings_view_t const strings = lines.slice(token_index, count);
         runes.resize(count);
         sz_size_t malformed_index = 0;
@@ -1622,7 +1622,7 @@ struct levenshtein_distances_from_sz {
           views(candidates), init(init), symbol(symbol) {
         for (std::size_t query = 0; query != query_views.size(); ++query) {
             std::string_view const token = corpus.tokens[query % corpus.tokens.size()];
-            query_views[query] = {token.data(), std::min(token.size(), query_bytes)};
+            query_views[query] = {token.data(), min_of(token.size(), query_bytes)};
         }
     }
 
@@ -2573,7 +2573,7 @@ struct utf8_unpack_from_sz {
     mutable std::vector<sz_rune_t> runes;
     utf8_unpack_from_sz(corpus_t const &corpus_) : corpus(corpus_) {
         std::size_t max_token = 1;
-        for (auto const &token : corpus.tokens) max_token = std::max(max_token, token.size());
+        for (auto const &token : corpus.tokens) max_token = max_of(max_token, token.size());
         runes.resize(max_token + 1);
     }
     inline call_result_t operator()(std::size_t i) const noexcept {
@@ -2685,7 +2685,7 @@ struct utf8_word_forward_from_sz {
     mutable std::vector<sz_size_t> lengths;
     utf8_word_forward_from_sz(corpus_t const &corpus_) : corpus(corpus_) {
         std::size_t max_token = 1;
-        for (auto const &token : corpus.tokens) max_token = std::max(max_token, token.size());
+        for (auto const &token : corpus.tokens) max_token = max_of(max_token, token.size());
         lengths.resize(max_token + 1);
     }
     inline call_result_t operator()(std::size_t i) const noexcept {
@@ -2752,7 +2752,7 @@ inline void utf8_outputs_prepare_(corpus_t const &corpus,
                                   std::size_t growth, pinned_vector<char> &output, device_vector<char> &device_text,
                                   device_vector<char> &device_output, device_vector<sz_size_t> &device_length) {
     std::size_t longest = 0;
-    for (token_view_t const &token : corpus.tokens) longest = std::max(longest, token.size());
+    for (token_view_t const &token : corpus.tokens) longest = max_of(longest, token.size());
     std::size_t const capacity = longest * growth;
     sz_allocator_t heap;
     if (sz_allocator_init_heap(&heap) != sz_success_k)

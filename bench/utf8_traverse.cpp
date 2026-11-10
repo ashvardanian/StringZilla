@@ -44,7 +44,7 @@ struct utf8_count_strings_by_loop_t {
     std::vector<sz_size_t> runes {};
 
     call_result_t operator()(std::size_t token_index) {
-        std::size_t const count = std::min(batch, lines.tokens.size() - token_index);
+        std::size_t const count = min_of(batch, lines.tokens.size() - token_index);
         std::size_t bytes = 0;
         runes.resize(count);
         for (std::size_t position = 0; position != count; ++position) {

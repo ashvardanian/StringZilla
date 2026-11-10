@@ -12,7 +12,7 @@
 #include <cstddef> // `std::size_t`
 #include <cstring> // `std::memset`
 
-#include <algorithm>   // `std::sort`, `std::copy`, `std::min`
+#include <algorithm>   // `std::sort`, `std::copy`
 #include <array>       // `std::array`
 #include <random>      // `std::mt19937`, `std::uniform_real_distribution`
 #include <type_traits> // `std::is_null_pointer_v`
@@ -707,7 +707,7 @@ struct overlap_device_corpus_t {
         randomize_string(generator, arena);
         for (std::size_t at = 0; at < total;) {
             std::string const &query = queries[generator() % queries.size()];
-            std::size_t const span = std::min({(std::size_t)(1 + generator() % 128), query.size(), total - at});
+            std::size_t const span = min_of(min_of((std::size_t)(1 + generator() % 128), query.size()), total - at);
             std::size_t const from = generator() % (query.size() - span + 1);
             std::copy(query.begin() + (std::ptrdiff_t)from, query.begin() + (std::ptrdiff_t)(from + span),
                       arena.begin() + (std::ptrdiff_t)at);
@@ -1184,7 +1184,7 @@ inline void check_bm25_against_serial_(auto const &backend, device_corpus_t &cor
                                               device_scores.data(), 1, backend.runtime.stream) == sz_success_k);
         join_(backend.runtime, backend.runtime.stream);
         for (std::size_t index = 0; index != haystacks.size(); ++index) {
-            double const tolerance = 1e-5 * std::max(1.0, std::fabs((double)serial_scores[index]));
+            double const tolerance = 1e-5 * max_of(1.0, std::fabs((double)serial_scores[index]));
             verify(std::fabs(device_scores[index] - serial_scores[index]) <= tolerance);
         }
     }

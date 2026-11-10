@@ -375,7 +375,7 @@ FIXTURE
 
 assert_rejects "misordered includes after an #endif" "misgroups its includes" include/$project_directory/probe.h <<'FIXTURE'
 #if defined(PROBE_EXTRAS)
-#include <windows.h>
+#include <io.h>
 #endif
 #include <span>
 #include <cstdint>
@@ -1753,6 +1753,124 @@ FIXTURE
 assert_accepts "switch and fact inside the vocabulary" include/$project_directory/probe.h <<FIXTURE
 #if ${macro_prefix}_WITH_PROBE && ${macro_prefix}_HAS_PROBE_
 static int probe(void) { return 1; }
+#endif
+FIXTURE
+
+assert_rejects "std::max call" "which <windows.h> defines as macros" include/$project_directory/probe.hpp <<'FIXTURE'
+static inline int probe(int count, int size) { return std::max(count, size); }
+FIXTURE
+
+assert_rejects "parenthesized std::min" "which <windows.h> defines as macros" include/$project_directory/probe.hpp <<'FIXTURE'
+static inline int probe(int count, int size) { return (std::min)(count, size); }
+FIXTURE
+
+assert_rejects "unparenthesized numeric_limits max" "which <windows.h> defines as macros" test/probe.cpp <<'FIXTURE'
+static int probe() noexcept { return std::numeric_limits<int>::max(); }
+FIXTURE
+
+assert_rejects "member min call" "which <windows.h> defines as macros" include/$project_directory/probe.hpp <<'FIXTURE'
+template <typename range_type_>
+inline int probe(range_type_ const &range) noexcept { return range.min(); }
+FIXTURE
+
+assert_accepts "helpers, parenthesized limits, lowest, and min or max in prose and strings" include/$project_directory/probe.hpp <<'FIXTURE'
+/** The larger of @p count and @p size, like <tt>std::max(count, size)</tt>, below the int maximum. */
+static inline int probe(int count, int size) {
+    char const *label = "max(count, size)";
+    return label ? max_of(count, size) - (std::numeric_limits<int>::max)() - std::numeric_limits<int>::lowest() : 0;
+}
+FIXTURE
+
+assert_rejects "device bit intrinsic" "calls a device bit intrinsic" test/probe.cu <<'FIXTURE'
+static __device__ unsigned probe_simt_(unsigned word) { return __popc(word); }
+FIXTURE
+
+assert_rejects "NOMINMAX in a public header" "defines NOMINMAX or WIN32_LEAN_AND_MEAN" include/$project_directory/probe.hpp <<'FIXTURE'
+#define NOMINMAX
+int probe();
+FIXTURE
+
+assert_rejects "WIN32_LEAN_AND_MEAN in a test unit" "defines NOMINMAX or WIN32_LEAN_AND_MEAN" test/probe.cpp <<FIXTURE
+#if ${macro_prefix}_OS_WINDOWS_
+#define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#include <windows.h>
+#endif
+int probe() { return 0; }
+FIXTURE
+
+assert_rejects "windows.h before winsock2.h" "includes <windows.h> before <winsock2.h>" test/probe.cpp <<FIXTURE
+#if ${macro_prefix}_OS_WINDOWS_
+#include <windows.h>
+#include <winsock2.h>
+#endif
+int probe() { return 0; }
+FIXTURE
+
+assert_accepts "winsock2.h before windows.h, and prose naming the reverse" include/$project_directory/probe.hpp <<FIXTURE
+/*  Never a bare #include <windows.h> ahead of winsock2. */
+#if ${macro_prefix}_OS_WINDOWS_
+#include <winsock2.h>
+#include <windows.h>
+#endif
+int probe();
+FIXTURE
+
+assert_rejects "identifier small" "names an identifier a system header defines as a macro" include/$project_directory/probe.hpp <<'FIXTURE'
+inline int probe(int large) noexcept {
+    int small = large / 2;
+    return small;
+}
+FIXTURE
+
+assert_rejects "identifier linux" "names an identifier a system header defines as a macro" include/$project_directory/probe.hpp <<'FIXTURE'
+inline int probe(int backend) noexcept {
+    int const linux = 1;
+    return backend == linux ? 0 : backend;
+}
+FIXTURE
+
+assert_rejects "identifier nil" "names an identifier a system header defines as a macro" include/$project_directory/probe.hpp <<'FIXTURE'
+inline unsigned probe(unsigned sentinel) noexcept {
+    unsigned const nil = ~0u;
+    return sentinel == nil ? 0u : sentinel;
+}
+FIXTURE
+
+assert_rejects "call to major" "names an identifier a system header defines as a macro" include/$project_directory/probe.hpp <<'FIXTURE'
+inline unsigned probe(unsigned device) noexcept { return major(device); }
+FIXTURE
+
+assert_accepts "function-like macro names as members, and linux in paths and prefixes" include/$project_directory/probe.hpp <<'FIXTURE'
+#include <linux/fs.h>
+struct version_t {
+    int major, minor;
+};
+inline int probe(version_t version, int linux_uring) noexcept { return version.major + version.minor + linux_uring; }
+FIXTURE
+
+assert_rejects "identifier uuid_t" "spell uuid_t as uuid128_t" include/$project_directory/probe.hpp <<'FIXTURE'
+struct uuid_t {
+    unsigned char octets[16];
+};
+FIXTURE
+
+assert_accepts "spared standard names, and macro names in prose and strings" include/$project_directory/probe.hpp <<'FIXTURE'
+/** Returns @c errno, which is never small, through an interface named in prose only. */
+inline int probe(int smaller) noexcept {
+    char const *label = "small interface";
+    return label ? errno + smaller + int(offsetof(probe_t, field)) : 0;
+}
+FIXTURE
+
+assert_rejects "_ITERATOR_DEBUG_LEVEL defined" "defines _ITERATOR_DEBUG_LEVEL" test/probe.cpp <<'FIXTURE'
+#define _ITERATOR_DEBUG_LEVEL 0
+int probe() { return 0; }
+FIXTURE
+
+assert_accepts "_ITERATOR_DEBUG_LEVEL tested" test/probe.cpp <<'FIXTURE'
+#if defined(_ITERATOR_DEBUG_LEVEL) && _ITERATOR_DEBUG_LEVEL > 0
+int probe() { return 1; }
 #endif
 FIXTURE
 
@@ -3220,7 +3338,7 @@ def test_probe(seed_value):
         pass
 FIXTURE
 
-assert_rejects "retired prefix" "spells the retired SZ_ prefix" include/stringzilla/probe.h <<'FIXTURE'
+assert_rejects "short prefix" "spells an all-caps name with SZ_" include/stringzilla/probe.h <<'FIXTURE'
 static int probe(void) { return SZ_DEBUG; }
 FIXTURE
 

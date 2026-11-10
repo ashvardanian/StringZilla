@@ -7,12 +7,6 @@
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
-/** The Visual C++ run-time library detects incorrect iterator use, and asserts and displays a
- *  dialog box at run time on Windows. */
-#if !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
-#define _ITERATOR_DEBUG_LEVEL 1
-#endif
-
 #undef STRINGZILLA_DEBUG
 #define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
@@ -63,7 +57,7 @@ void test_levenshtein_unit() {
                                           &layout));
     shape = {0xFFFFFFFFu, 256, 0};
     verify(sz_levenshtein_engine_layout_(1, sz_levenshtein_bytes_k, sz_cap_serial_k, &shape, 0, &layout) ==
-           (sizeof(sz_size_t) > 4));
+           (sizeof(sz_size_t) > 4 ? sz_true_k : sz_false_k));
     check_levenshtein_unit_(levenshtein_dispatched);
 }
 

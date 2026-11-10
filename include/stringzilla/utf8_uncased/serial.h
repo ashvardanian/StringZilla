@@ -1993,8 +1993,8 @@ STRINGZILLA_CONSTEXPR sz_utf8_uncased_rune_safety_profile_t sz_utf8_uncased_rune
     // 2-byte UTF-8 (U+0080 to U+07FF):
     // Must check exact ranges that the fold functions handle, not just lead bytes
     if (rune_bytes == 2) {
-        sz_u8_t lead = (rune >> 6) | 0xC0;     // Reconstruct lead byte
-        sz_u8_t second = (rune & 0x3F) | 0x80; // Reconstruct continuation byte
+        sz_u8_t lead = (sz_u8_t)((rune >> 6) | 0xC0); // Reconstruct lead byte
+        sz_u8_t second = (rune & 0x3F) | 0x80;        // Reconstruct continuation byte
 
         // Latin-1 Supplement (C2/C3 lead bytes)
         // Exclude: 'å' (U+00E5, C3 A5) - Angstrom Sign 'Å' (U+212B, E2 84 AB) → 'å' (U+00E5, C3 A5) also folds to it
@@ -2154,7 +2154,7 @@ STRINGZILLA_CONSTEXPR sz_utf8_uncased_rune_safety_profile_t sz_utf8_uncased_rune
 
     // 3-byte UTF-8 (U+0800 to U+FFFF)
     if (rune_bytes == 3) {
-        sz_u8_t lead = (rune >> 12) | 0xE0;
+        sz_u8_t lead = (sz_u8_t)((rune >> 12) | 0xE0);
         sz_u8_t second = ((rune >> 6) & 0x3F) | 0x80;
         sz_u8_t third = (rune & 0x3F) | 0x80;
 

@@ -21,7 +21,7 @@ set(stringzilla_gcc_style_link_ "$<NOT:$<OR:${stringzilla_msvc_link_},$<LINK_LAN
 
 # Maximum warnings level, linked by every target `stringzilla_set_compiler_flags` configures, so fetched dependencies
 # build with their own flags. MSVC uses numeric values: > 4068 for "unknown pragmas", > 4146 for "unary minus operator
-# applied to unsigned type"; `/utf-8` keeps UTF-8 symbols in tests intact.
+# applied to unsigned type".
 add_library(stringzilla_warnings INTERFACE)
 # `-Wno-error=array-bounds`: GCC 12+ false-positives on StringZilla's intentional wide reads (u32/u64/ vector loads near
 # a buffer end) when an ISA kernel is inlined into a string-literal-sized caller. Keep it a visible warning, not a
@@ -42,7 +42,11 @@ set(stringzilla_msvc_warnings_
     "/wd4996" # Disable warning: 'unsafe' functions like getenv, fopen (use _s variants)
     "/wd4244" # Disable warning: conversion with possible loss of data (e.g., float to int)
     "/wd4267" # Disable warning: conversion from 'size_t' to smaller type, possible loss of data
-    "/utf-8" # Set source and execution character sets to UTF-8
+    # The conformance switches MSVC leaves off by default, which every other supported compiler behaves as.
+    "/Zc:preprocessor"
+    "/utf-8"
+    "/bigobj"
+    "$<$<COMPILE_LANGUAGE:CXX>:/permissive-;/Zc:__cplusplus>"
 )
 # NVCC forwards the host flags to the C++ compiler it drives.
 if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
@@ -163,9 +167,6 @@ function (stringzilla_set_compiler_flags target_ cpp_standard_)
             set_target_properties(${target_} PROPERTIES CXX_STANDARD ${cpp_standard_})
         endif ()
     endif ()
-
-    # Use the `/Zc:__cplusplus` flag to correctly define the `__cplusplus` macro in MSVC
-    target_compile_options(${target_} PRIVATE "$<${stringzilla_msvc_}:/Zc:__cplusplus>")
 
     # Make sure CUDA C++ allows calling `constexpr` from device code
     target_compile_options(${target_} PRIVATE "$<${stringzilla_nvcc_}:--expt-relaxed-constexpr>")

@@ -440,7 +440,8 @@ enum { sz_levenshtein_gpu_words_max_k = 256 };
  *  one lane keeps verticals for, so a warp at its widest reaches the family's word limit. */
 enum {
     sz_levenshtein_gpu_warp_lanes_k = 32,
-    sz_levenshtein_gpu_warp_words_per_lane_max_k = sz_levenshtein_gpu_words_max_k / sz_levenshtein_gpu_warp_lanes_k,
+    sz_levenshtein_gpu_warp_words_per_lane_max_k = (int)sz_levenshtein_gpu_words_max_k /
+        sz_levenshtein_gpu_warp_lanes_k,
 };
 
 /** Query words from which the warped rung is launched rather than the threaded one. Swept on XLSum
@@ -482,7 +483,7 @@ typedef struct sz_levenshtein_length_bucket_t {
 } sz_levenshtein_length_bucket_t;
 
 /** Maps lengths to buckets: empty, one, two, three through four, five through eight, and so on. */
-STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_length_bucket_(sz_size_t length) {
+STRINGZILLA_INLINE sz_size_t sz_levenshtein_length_bucket_(sz_size_t length) {
     return length <= 1 ? length : sz_size_log2i_nonzero(length - 1) + 2;
 }
 

@@ -86,7 +86,7 @@ int _get_qsort_order(void const *a, void const *b, void *arg) {
     sz_size_t const index_b = *(sz_size_t const *)b;
     std::string_view const string_a = strings[index_a], string_b = strings[index_b];
 
-    int result = strncmp(string_a.data(), string_b.data(), std::min(string_a.size(), string_b.size()));
+    int result = strncmp(string_a.data(), string_b.data(), min_of(string_a.size(), string_b.size()));
     return result ? result : (int)(string_a.size() - string_b.size());
 }
 

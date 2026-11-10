@@ -121,7 +121,7 @@ jobs:
       matrix:
         include:
           - { os: windows-2025-vs2026, arch: x64, preset: msvc2026_x64 }
-          - { os: windows-11-vs2026-arm64, arch: arm64, preset: msvc2026_arm64 }
+          - { os: windows-11-vs2026-arm, arch: arm64, preset: msvc2026_arm64 }
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7

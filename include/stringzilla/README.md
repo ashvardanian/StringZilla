@@ -156,7 +156,7 @@ The per-ISA SIMD kernels and the project's own tests are CI-validated with these
 | :-------- | :------------------- |
 | GCC       | 13 or newer          |
 | Clang     | 18 or newer          |
-| MSVC      | Visual Studio 2022   |
+| MSVC      | Visual Studio 2026   |
 | NVCC      | CUDA 13+             |
 
 The RVV kernels need Clang 21 or newer, as older Clang hides the 64-bit vector types from a unit compiled without `v`, and an older compiler builds the libraries without them.

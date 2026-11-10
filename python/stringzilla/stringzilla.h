@@ -21,7 +21,7 @@
 #include "stringzilla/types.h" // `STRINGZILLA_OS_WINDOWS_`
 
 #if STRINGZILLA_OS_WINDOWS_
-#define NOMINMAX
+#include <winsock2.h>
 #include <windows.h>
 #else
 #include <fcntl.h>    // `O_RDNLY`

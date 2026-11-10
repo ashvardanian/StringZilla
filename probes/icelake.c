@@ -9,7 +9,8 @@
 #include <stringzilla/hash/icelake.h>
 
 int main(void) {
-    char text[64] = {'x'};
+    // Past 64 bytes the kernel takes its 512-bit VAES loop; shorter ones stay in 128-bit registers.
+    char text[128] = {'x'};
     sz_u64_t hash = 0;
     sz_hash_icelake(text, sizeof(text), 42, &hash, 0);
     return hash == 0;

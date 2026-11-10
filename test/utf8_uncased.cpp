@@ -6,12 +6,6 @@
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
-/** The Visual C++ run-time library detects incorrect iterator use, and asserts and displays a
- *  dialog box at run time on Windows. */
-#if !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
-#define _ITERATOR_DEBUG_LEVEL 1
-#endif
-
 #undef STRINGZILLA_DEBUG
 #define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 

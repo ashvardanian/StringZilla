@@ -311,9 +311,9 @@ static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_
         sz_subdocuments_chunk_cursor_simt_(&large, &place, text, chunk, &cursor);
         for (sz_size_t offset = start; offset < end; offset += 64) {
             sz_subdocuments_load_simt_(&cursor, offset);
-            tokens += (sz_u64_t)__popcll(cursor.pending);
+            tokens += (sz_u64_t)sz_u64_popcount_simt_(cursor.pending);
             for (sz_u64_t brackets = cursor.opens | cursor.closes; brackets; brackets &= brackets - 1)
-                if (cursor.opens >> sz_subdocuments_ctz_simt_(brackets) & 1)
+                if (cursor.opens >> sz_u64_ctz_simt_(brackets) & 1)
                     ++opens, ++depth, highest = sz_max_of_two(highest, depth);
                 else --depth, lowest = sz_min_of_two(lowest, depth);
         }
@@ -385,7 +385,7 @@ static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_
         for (sz_size_t offset = start; offset < end; offset += 64) {
             sz_subdocuments_load_simt_(&cursor, offset);
             for (sz_u64_t pending = cursor.pending; pending; pending &= pending - 1, ++token) {
-                sz_size_t const position = offset + sz_subdocuments_ctz_simt_(pending);
+                sz_size_t const position = offset + sz_u64_ctz_simt_(pending);
                 sz_u8_t const byte = text[position];
                 sz_u8_t kind;
                 if (byte == '"')
@@ -655,7 +655,7 @@ static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_
                                                          selector, element ? large.elements[current] : 0);
                     sz_u64_t reported = live & engine.final_steps[word];
                     if (!large.storing) {
-                        counted += (sz_size_t)__popcll(reported);
+                        counted += (sz_size_t)sz_u64_popcount_simt_(reported);
                         continue;
                     }
                     if (reported && byte_length == STRINGZILLA_SIZE_MAX)
@@ -664,7 +664,7 @@ static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_
                         if (emitted < round.matches_capacity) {
                             sz_match_t *const match = &round.matches[emitted];
                             match->haystack_index = place.document;
-                            match->needle_index = engine.steps_paths[word * 64 + sz_subdocuments_ctz_simt_(reported)];
+                            match->needle_index = engine.steps_paths[word * 64 + sz_u64_ctz_simt_(reported)];
                             match->byte_offset = large.positions[token], match->byte_length = byte_length;
                         }
                 }

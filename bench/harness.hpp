@@ -174,7 +174,7 @@ inline std::optional<bytes_t> parse_size(std::string_view text) noexcept {
     };
     for (std::string_view const known : std::array<std::string_view, 5> {"", "kb", "mb", "gb", "tb"}) {
         if (std::equal(unit.begin(), unit.end(), known.begin(), known.end(), same_letter)) return bytes_t {bytes};
-        if (bytes > std::numeric_limits<std::size_t>::max() / 1024) return std::nullopt;
+        if (bytes > (std::numeric_limits<std::size_t>::max)() / 1024) return std::nullopt;
         bytes *= 1024;
     }
     return std::nullopt;
@@ -1121,7 +1121,7 @@ inline std::size_t median_token_bytes(corpus_t const &corpus) {
  *  median tokens of @p corpus as fill the first-level cache. */
 inline std::size_t candidates_per_call(environment_t const &env, corpus_t const &corpus) {
     if (env.settings.candidates_per_core) return *env.settings.candidates_per_core;
-    return std::max<std::size_t>(1, env.machine.specs.l1_bytes / median_token_bytes(corpus));
+    return max_of<std::size_t>(1, env.machine.specs.l1_bytes / median_token_bytes(corpus));
 }
 
 /** Candidates per device call, using reported geometry or one group of 2048 when unavailable. */

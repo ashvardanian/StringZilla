@@ -22,7 +22,7 @@
 #include <cstdint> // `std::uint64_t`
 #include <cstring> // `std::memcmp`, `std::memset`
 
-#include <algorithm>   // `std::min`, `std::max`
+#include <algorithm>   // `std::sort`, `std::unique`, `std::shuffle`
 #include <array>       // `std::array`
 #include <limits>      // `std::numeric_limits`
 #include <map>         // `std::map`, the block sizes a sized heap remembers
@@ -235,10 +235,10 @@ struct sized_heap_t {
     std::size_t mismatches = 0;
 
     /** Calls that allocate or grow a block left to grant, refusing every one after them. */
-    std::size_t growths_left = std::numeric_limits<std::size_t>::max();
+    std::size_t growths_left = (std::numeric_limits<std::size_t>::max)();
 
     /** Calls that shrink a block but keep it left to grant, refusing every one after them. */
-    std::size_t shrinks_left = std::numeric_limits<std::size_t>::max();
+    std::size_t shrinks_left = (std::numeric_limits<std::size_t>::max)();
     sz_allocator_t allocator {};
 
     sized_heap_t() noexcept {
@@ -687,7 +687,7 @@ inline void check_strings_split_unit_(strings_backend_t const &backend) {
     {
         strings_layouts_t const letters({"a", "bb", "c", "d"});
         sz_strings_view_t const column = letters.u32_tape();
-        sz_size_t const half = std::numeric_limits<sz_size_t>::max() / 2 + 1, length_before = 7;
+        sz_size_t const half = (std::numeric_limits<sz_size_t>::max)() / 2 + 1, length_before = 7;
         sz_string_view_t const halves[2] = {{nullptr, half}, {nullptr, half}};
         sz_string_view_t const quarters[2] = {{nullptr, half / 2}, {nullptr, 0}};
         sz_string_view_t const empties[2] = {{nullptr, 0}, {nullptr, 0}};
@@ -1502,23 +1502,23 @@ inline void check_strings_rows_gaps_(strings_backend_t const &backend) {
  *  an allocator refusing everything leave a zeroed span empty. */
 inline void check_strings_arena_refusals_(strings_backend_t const &backend) {
     for (strings_verb_t const verb : strings_verbs_()) {
-        std::vector<std::string> const small = strings_input_for_(backend, verb, {"ab"});
-        std::vector<std::string> const large = strings_input_for_(backend, verb, {std::string(1024, '"')});
-        strings_layouts_t const small_layouts(small), large_layouts(large);
+        std::vector<std::string> const fitting = strings_input_for_(backend, verb, {"ab"});
+        std::vector<std::string> const overflowing = strings_input_for_(backend, verb, {std::string(1024, '"')});
+        strings_layouts_t const fitting_layouts(fitting), overflowing_layouts(overflowing);
         alignas(64) char buffer[512];
         sz_allocator_t arena;
         verify(sz_allocator_init_arena(&arena, buffer, sizeof(buffer), 8) == sz_success_k);
         sz_strings_span_t tape {};
-        verify(strings_outcome_(backend, verb, small_layouts.u32_tape(), nullptr, 1, &arena, tape).status ==
+        verify(strings_outcome_(backend, verb, fitting_layouts.u32_tape(), nullptr, 1, &arena, tape).status ==
                sz_success_k);
         std::vector<std::string> const kept = strings_in_(tape);
-        strings_outcome_t const refused = strings_outcome_(backend, verb, large_layouts.u32_tape(), nullptr, 1, &arena,
-                                                           tape);
+        strings_outcome_t const refused = strings_outcome_(backend, verb, overflowing_layouts.u32_tape(), nullptr, 1,
+                                                           &arena, tape);
         verify(refused.status == sz_bad_alloc_k && refused.strings == kept);
 
         sz_allocator_t refusing = refusing_allocator_();
         sz_strings_span_t untouched {};
-        verify(strings_outcome_(backend, verb, small_layouts.u32_tape(), nullptr, 1, &refusing, untouched).status ==
+        verify(strings_outcome_(backend, verb, fitting_layouts.u32_tape(), nullptr, 1, &refusing, untouched).status ==
                sz_bad_alloc_k);
         verify(untouched.count == 0);
     }
@@ -1575,7 +1575,7 @@ inline void check_strings_rationed_growths_(strings_backend_t const &backend) {
         sz_strings_span_free(&reference, &heap.allocator, nullptr);
         std::vector<std::string> const *const starts[] = {nullptr, &shorter, &longer, &strings};
         for (std::vector<std::string> const *start : starts)
-            for (std::size_t const shrinks : {std::numeric_limits<std::size_t>::max(), std::size_t {0}})
+            for (std::size_t const shrinks : {(std::numeric_limits<std::size_t>::max)(), std::size_t {0}})
                 for (rationed_growth_t const growth : {rationed_growth_t::reallocating_k, rationed_growth_t::moving_k})
                     verify(strings_first_granted_(backend, verb, strings, start, shrinks, growth) == expected);
     }
@@ -1608,7 +1608,7 @@ inline void check_strings_long_normalization_(strings_backend_t const &backend) 
             heap.growths_left = 0;
             verify(strings_outcome_(backend, verb, layouts.u32_tape(), nullptr, 3, &heap.allocator, borrowed).status ==
                    sz_bad_alloc_k);
-            heap.growths_left = std::numeric_limits<std::size_t>::max();
+            heap.growths_left = (std::numeric_limits<std::size_t>::max)();
             verify(strings_outcome_(backend, verb, layouts.u32_tape(), nullptr, 3, &heap.allocator, borrowed).strings ==
                    expected);
             verify(borrowed.data.u32_tape.data == lent.data.u32_tape.data &&
@@ -1780,7 +1780,7 @@ inline void check_find_strings_equivalence_(test_context_t &context, char const 
             if (starts[index] == starts[index + 1] || !plant_distribution(generator)) continue;
             std::size_t const at = std::uniform_int_distribution<std::size_t>(starts[index],
                                                                               starts[index + 1] - 1)(generator);
-            std::size_t const planted = std::min(needle.size(), payload.size() - at);
+            std::size_t const planted = min_of(needle.size(), payload.size() - at);
             payload.replace(at, planted, needle, 0, planted);
         }
         if (density && payload.size() >= needle.size())
@@ -2377,7 +2377,7 @@ inline void check_hash_strings_safety_(sz_kernel_hash_strings_t hash_strings) {
         std::vector<sz_u64_t> u64_offsets {0};
         std::string joined;
         for (std::size_t row = 0; joined.size() != length; ++row) {
-            std::size_t const key_length = std::min(hash_strings_key_lengths_[row % 13], length - joined.size());
+            std::size_t const key_length = min_of(hash_strings_key_lengths_[row % 13], length - joined.size());
             keys.emplace_back(key_length, static_cast<char>('a' + row % 26));
             joined += keys.back();
             u32_offsets.push_back(static_cast<sz_u32_t>(joined.size())), u64_offsets.push_back(joined.size());
@@ -2450,9 +2450,9 @@ inline void check_hash_equivalence_(test_context_t &context, hash_backend_t cons
     // Let's try different-length strings repeating a "abc" pattern:
     std::vector<sz_u64_t> seeds = {
         0u,
-        42u,                                  //
-        std::numeric_limits<sz_u32_t>::max(), //
-        std::numeric_limits<sz_u64_t>::max(), //
+        42u,                                    //
+        (std::numeric_limits<sz_u32_t>::max)(), //
+        (std::numeric_limits<sz_u64_t>::max)(), //
     };
     // A fixed repeat ladder: `inputs` already carries the multiplier, so scaling both compounds.
     for (auto seed : seeds)
@@ -2492,8 +2492,8 @@ inline void check_hash_multiseed_equivalence_(test_context_t &context, hash_mult
                                    1u,
                                    42u,
                                    314159u,
-                                   std::numeric_limits<sz_u32_t>::max(),
-                                   std::numeric_limits<sz_u64_t>::max(),
+                                   (std::numeric_limits<sz_u32_t>::max)(),
+                                   (std::numeric_limits<sz_u64_t>::max)(),
                                    7u,
                                    8u,
                                    9u,
@@ -2543,9 +2543,9 @@ inline void check_fill_random_equivalence_(test_context_t &context, sz_kernel_fi
     // Boundary nonces are always exercised, including the 0 and max extremes:
     std::vector<sz_u64_t> nonces = {
         0u,
-        42u,                                  //
-        std::numeric_limits<sz_u32_t>::max(), //
-        std::numeric_limits<sz_u64_t>::max(), //
+        42u,                                    //
+        (std::numeric_limits<sz_u32_t>::max)(), //
+        (std::numeric_limits<sz_u64_t>::max)(), //
     };
 
     // The fixed structured lengths cover the sub-cache-line, cache-line, and multi-block tiers;
@@ -3260,7 +3260,7 @@ inline void check_sort_equivalence_(test_context_t &context, sort_backend_t cons
             // Only the repetition count rides the multiplier; scaling the sizes too would make the
             // dial multiplicative, so a 10x run would cost a hundredfold. Never below 33, so the
             // QuickSort partition rather than the insertion-sort fallback keeps running.
-            std::size_t const count = std::max<std::size_t>(33, full_count);
+            std::size_t const count = max_of<std::size_t>(33, full_count);
             // Short strings over a tiny alphabet, so many exact duplicates fill the equal region.
             strs_t fixed_dups;
             for (std::size_t i = 0; i < count; ++i) fixed_dups.push_back(random_string(generator, i % 5, "ab"));
@@ -3343,7 +3343,7 @@ inline void check_intersect_pairs_(sz_kernel_intersect_t intersect, std::vector<
     std::vector<sz_u32_t> offsets;
     sz_strings_view_t const first_layouts[] = {strings_from_(first), strings_tape_from_(first, payload, offsets)};
     sz_strings_view_t const second_strings = strings_from_(second);
-    sz_size_t const capacity = std::min(first.size(), second.size());
+    sz_size_t const capacity = min_of(first.size(), second.size());
     for (sz_strings_view_t const &first_strings : first_layouts) {
         std::vector<sz_size_t> first_positions(capacity), second_positions(capacity);
         sz_size_t intersection_count = 0;
@@ -3388,8 +3388,8 @@ std::size_t levenshtein_reference_(symbols_type_ const &first, symbols_type_ con
         for (std::size_t second_position = 1; second_position <= second.size(); ++second_position) {
             std::size_t const substitution = previous[second_position - 1] +
                                              (first[first_position - 1] != second[second_position - 1]);
-            current[second_position] = std::min(
-                {previous[second_position] + 1, current[second_position - 1] + 1, substitution});
+            current[second_position] = min_of(min_of(previous[second_position] + 1, current[second_position - 1] + 1),
+                                              substitution);
         }
         std::swap(previous, current);
     }
@@ -3816,7 +3816,7 @@ inline std::vector<std::pair<sz_u64_t, sz_u64_t>> overlap_misses_(std::vector<sz
                 std::size_t const candidate_windows = width <= candidates[candidate].size()
                                                           ? candidates[candidate].size() - width + 1
                                                           : 0;
-                longer += std::max(query_windows, candidate_windows);
+                longer += max_of(query_windows, candidate_windows);
                 found += matches[(query * candidates.size() + candidate) * widths.size() + width_index];
             }
             misses.emplace_back(longer - found, longer);
@@ -4197,7 +4197,7 @@ inline void check_bm25_(substrings_tier_t const &tier, sz_substrings_engine_t *e
             verify(tier.bm25_scores(engine, haystack_strings, lengths.empty() ? nullptr : lengths.data(), &parameters,
                                     weights.data(), scores.data(), 1, nullptr) == sz_success_k);
             for (std::size_t index = 0; index != haystacks.size(); ++index)
-                verify(std::fabs(scores[index] - expected[index]) <= 1e-5 * std::max(1.0, std::fabs(expected[index])));
+                verify(std::fabs(scores[index] - expected[index]) <= 1e-5 * max_of(1.0, std::fabs(expected[index])));
         }
     }
 }
@@ -4958,10 +4958,10 @@ inline void check_regex_unit_(regex_tier_t const &tier, regex_rewriting_t const 
             verify(tier.find(&engine, &haystack_strings, capacity ? output.data() : nullptr, capacity, offsets.data(),
                              nullptr) == sz_success_k);
             verify(offsets == std::vector<sz_size_t>({0, 50, 50, 51, 82}));
-            for (std::size_t index = 0; index != std::min(capacity, all.size()); ++index)
+            for (std::size_t index = 0; index != min_of(capacity, all.size()); ++index)
                 verify(output[index].byte_offset == all[index].byte_offset &&
                        output[index].haystack_index == all[index].haystack_index);
-            for (std::size_t index = std::min(capacity, all.size()); index <= capacity; ++index)
+            for (std::size_t index = min_of(capacity, all.size()); index <= capacity; ++index)
                 verify(output[index].haystack_index == 12345);
         }
         sz_regex_engine_free(&engine, nullptr);
@@ -8015,7 +8015,7 @@ inline void check_uncased_find_fuzz_(std::mt19937 &generator, sz_kernel_utf8_unc
         // 4. Calculate needles for this haystack
         std::size_t const needles_in_this_haystack =
             max_needles_per_haystack == 0 ? ((runes_in_folded_haystack * (runes_in_folded_haystack + 1)) / 2)
-                                          : std::min(max_needles_per_haystack, queries_remaining);
+                                          : min_of(max_needles_per_haystack, queries_remaining);
 
         // Helper to extract needle from folded haystack and test both implementations
         auto test_needle = [&](sz_size_t start, sz_size_t rune_count) -> bool {
@@ -8044,9 +8044,9 @@ inline void check_uncased_find_fuzz_(std::mt19937 &generator, sz_kernel_utf8_unc
                 sz_size_t simd_off = simd_result ? (sz_size_t)(simd_result - haystack.data()) : STRINGZILLA_SIZE_MAX;
                 sz_size_t print_start = (serial_off != STRINGZILLA_SIZE_MAX && serial_off > 20) ? serial_off - 20 : 0;
                 sz_size_t print_end = (serial_off != STRINGZILLA_SIZE_MAX)
-                                          ? std::min(serial_off + needle_bytes + 20, haystack.size())
-                                          : std::min((sz_size_t)50, haystack.size());
-                std::string_view const needle_shown(needle_start, std::min(needle_bytes, (sz_size_t)50));
+                                          ? min_of(serial_off + needle_bytes + 20, haystack.size())
+                                          : min_of((sz_size_t)50, haystack.size());
+                std::string_view const needle_shown(needle_start, min_of(needle_bytes, (sz_size_t)50));
                 std::string_view const haystack_shown(haystack.data() + print_start, print_end - print_start);
                 fmt::print(stderr, R"(FUZZ FAIL haystack={haystacks} start={start} rune_count={runes}
   Haystack len={haystack_length}, needle len={needle_length}
@@ -8501,7 +8501,7 @@ inline void check_uncased_fold_equivalence_(test_context_t &context, sz_kernel_u
             fmt::println(stderr, "Case fold length mismatch: base={}, simd={}, input_length={}", //
                          base_length, simd_length, text.size());
             // Print first divergence
-            for (std::size_t i = 0; i < std::min(base_length, simd_length); ++i) {
+            for (std::size_t i = 0; i < min_of(base_length, simd_length); ++i) {
                 if (output_base[i] != output_simd[i]) {
                     fmt::println(stderr, "First byte diff at output[{}]: base=0x{:02X}, simd=0x{:02X}", //
                                  i, (unsigned char)output_base[i], (unsigned char)output_simd[i]);
@@ -8517,7 +8517,7 @@ inline void check_uncased_fold_equivalence_(test_context_t &context, sz_kernel_u
                              i, (unsigned char)output_base[i], (unsigned char)output_simd[i]);
                 // Show context around the mismatch
                 std::size_t start = i > 10 ? i - 10 : 0;
-                std::size_t end = std::min(i + 10, (std::size_t)base_length);
+                std::size_t end = min_of(i + 10, (std::size_t)base_length);
                 std::string_view const base_shown(output_base.data() + start, end - start);
                 std::string_view const simd_shown(output_simd.data() + start, end - start);
                 fmt::println(stderr, "Base output[{0}..{1}]: {2:02X}\nSIMD output[{0}..{1}]: {3:02X}", start, end,

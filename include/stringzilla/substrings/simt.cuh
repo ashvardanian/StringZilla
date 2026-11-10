@@ -800,7 +800,7 @@ STRINGZILLA_DEVICE sz_size_t sz_substrings_walk_chunk_uncased_simt_(sz_substring
             if (lead < 0x80)
                 image.bytes = sz_ascii_fold_(lead), image.length = 1, image.rune_ends = 1, source_bytes = 1;
             else source_bytes = sz_utf8_fold_next_simt_(haystack_bytes + position, haystack_bytes + length, &image);
-            breaks_boundary = (sz_bool_t)(__popc(image.rune_ends) != 1 || image.length != source_bytes);
+            breaks_boundary = (sz_bool_t)(sz_u32_popcount_simt_(image.rune_ends) != 1 || image.length != source_bytes);
             position += source_bytes;
             step.codepoint_end = position - walk_begin;
             image_index = 0, previous_rune_end = 0;

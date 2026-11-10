@@ -6,12 +6,6 @@
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
-/** The Visual C++ run-time library detects incorrect iterator use, and asserts and displays a
- *  dialog box at run time on Windows. */
-#if !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
-#define _ITERATOR_DEBUG_LEVEL 1
-#endif
-
 #if defined(STRINGZILLA_DEBUG)
 #undef STRINGZILLA_DEBUG
 #endif
@@ -120,7 +114,7 @@ void test_sort_unit() {
 
         std::vector<std::string> const first = {"apple", "banana", "cherry"};
         std::vector<std::string> const second = {"cherry", "date", "banana"};
-        std::size_t const capacity = (std::min)(first.size(), second.size());
+        std::size_t const capacity = min_of(first.size(), second.size());
         order_t first_positions(capacity), second_positions(capacity);
         auto const [matched, status] = sz::intersect( //
             first, as_view, second, as_view, /*seed*/ 0u, {first_positions.data(), first_positions.size()},

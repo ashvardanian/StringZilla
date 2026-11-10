@@ -367,12 +367,12 @@ STRINGZILLA_DEVICE sz_u32_t sz_lanes_ballot_rocm_(int predicate) {
  *  from its half of the ballot. */
 STRINGZILLA_DEVICE unsigned sz_lanes_first_rocm_(int predicate) {
     sz_u32_t const half = sz_lanes_ballot_rocm_(predicate);
-    return half ? (unsigned)__ffs((int)half) - 1u : 32u;
+    return half ? (unsigned)sz_u32_ctz_simt_(half) : 32u;
 }
 
 /** How many of this thread's 32 lanes below it @p predicate holds on, from its ballot half. */
 STRINGZILLA_DEVICE unsigned sz_lanes_below_rocm_(int predicate) {
-    return (unsigned)__popc(sz_lanes_ballot_rocm_(predicate) & ((1u << (__lane_id() & 31u)) - 1u));
+    return (unsigned)sz_u32_popcount_simt_(sz_lanes_ballot_rocm_(predicate) & ((1u << (__lane_id() & 31u)) - 1u));
 }
 
 /** Orders this thread's lanes and their memory at this point: a wavefront runs in lockstep, so only

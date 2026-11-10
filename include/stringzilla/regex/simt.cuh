@@ -758,11 +758,6 @@ STRINGZILLA_DEVICE sz_u32_t sz_regex_lower_bound_simt_(sz_u32_t const *slots, sz
     return high;
 }
 
-/** The index of the lowest set bit of @p bits, which is not zero. */
-STRINGZILLA_DEVICE sz_u32_t sz_regex_lowest_simt_(sz_u64_t bits) {
-    return 63 - (sz_u32_t)__clzll((long long)(bits & (0 - bits)));
-}
-
 /** Index of @p state among the first @p count of @p states, or 0xFF. */
 STRINGZILLA_DEVICE sz_u8_t sz_regex_index_of_simt_(sz_u32_t const *states, sz_u32_t count, sz_u32_t state) {
     sz_u32_t index;
@@ -789,10 +784,10 @@ STRINGZILLA_DEVICE sz_u32_t sz_regex_prime_simt_(sz_regex_engine_t const *engine
     sz_u8_t const *const text = haystack->text;
     sz_size_t distance;
     for (distance = 32;; distance *= 2) {
-        sz_size_t const far = length - edge > distance ? edge + distance : length;
-        sz_size_t position = far;
+        sz_size_t const farthest = length - edge > distance ? edge + distance : length;
+        sz_size_t position = farthest;
         *count = 0;
-        if (far == length) set[0] = engine->reverse_starts[0], *count = 1;
+        if (farthest == length) set[0] = engine->reverse_starts[0], *count = 1;
         while (*count == 0 && position > edge) {
             sz_u32_t const column = sz_regex_block_at_simt_(table, haystack->first + position) +
                                     table->classes[text[position - 1]];
@@ -966,13 +961,13 @@ STRINGZILLA_DEVICE sz_u32_t sz_regex_prime_folded_simt_(sz_regex_engine_t const 
     sz_u8_t const *const text = haystack->text;
     sz_size_t distance;
     for (distance = 32;; distance *= 2) {
-        sz_size_t const far = length - edge > distance ? sz_regex_boundary_simt_(text, length, edge + distance)
-                                                       : length;
-        sz_size_t position = far;
+        sz_size_t const farthest = length - edge > distance ? sz_regex_boundary_simt_(text, length, edge + distance)
+                                                            : length;
+        sz_size_t position = farthest;
         sz_utf8_folded_image_t image;
         sz_u32_t byte = 0, block = 0, index, state;
         *count = 0;
-        if (far == length) set[0] = engine->reverse_starts[0], *count = 1;
+        if (farthest == length) set[0] = engine->reverse_starts[0], *count = 1;
         // Folded bytes step right to left, `byte` counting those of the unit at `position` to go.
         while (*count != 1 && (byte || position > edge)) {
             sz_u32_t column, kept = 0;
@@ -1570,7 +1565,7 @@ STRINGZILLA_DEVICE sz_u32_t sz_regex_looks_step_simt_(sz_regex_engine_t const *e
     pike->count = 0;
     for (word = 0; word != words; ++word)
         for (bits = state[word]; bits; bits &= bits - 1) {
-            index = word * 64 + sz_regex_lowest_simt_(bits);
+            index = word * 64 + sz_u64_ctz_simt_(bits);
             if (index < count)
                 sz_regex_pike_close_simt_(engine, pike, (sz_u32_t)(bodies + index), STRINGZILLA_NULL, have, 0, 0);
         }
@@ -1703,8 +1698,7 @@ STRINGZILLA_DEVICE sz_bool_t sz_regex_body_step_simt_(sz_regex_table_simt_t cons
 #pragma unroll
     for (word = 0; word != sz_regex_body_states_simt_k / 64; ++word)
         for (bits = held[word]; bits; bits &= bits - 1) {
-            sz_u32_t const target = sz_regex_move_simt_(table, (word * 64 + sz_regex_lowest_simt_(bits)) * columns,
-                                                        column);
+            sz_u32_t const target = sz_regex_move_simt_(table, (word * 64 + sz_u64_ctz_simt_(bits)) * columns, column);
             sz_u32_t const index = target / columns;
 #pragma unroll
             for (other = 0; other != sz_regex_body_states_simt_k / 64; ++other)
@@ -1884,7 +1878,7 @@ STRINGZILLA_DEVICE sz_u64_t sz_regex_decided_simt_(sz_regex_undecided_simt_t con
 /** The rows of @p rows that the bits of @p bits pick, united. */
 STRINGZILLA_DEVICE sz_u64_t sz_regex_apply_simt_(sz_u64_t const *rows, sz_u64_t bits) {
     sz_u64_t united = 0;
-    for (; bits; bits &= bits - 1) united |= rows[sz_regex_lowest_simt_(bits)];
+    for (; bits; bits &= bits - 1) united |= rows[sz_u64_ctz_simt_(bits)];
     return united;
 }
 

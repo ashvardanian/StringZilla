@@ -380,7 +380,7 @@ STRINGZILLA_DEVICE sz_ssize_t sz_levenshtein_group_distance_simt_(
     for (sz_size_t word = 0; word != words_per_lane; ++word) {
         sz_size_t const index = first_word + word;
         sz_u64_t const live = index + 1 < words ? ~(sz_u64_t)0 : index + 1 == words ? last_word_live : 0;
-        deltas += __popcll(positive[word] & live) - __popcll(negative[word] & live);
+        deltas += sz_u64_popcount_simt_(positive[word] & live) - sz_u64_popcount_simt_(negative[word] & live);
     }
     if (lanes == sz_levenshtein_group_thread_k) return (sz_ssize_t)symbols + deltas;
     // An inclusive scan up the group leaves the sum on its last lane.
@@ -683,7 +683,8 @@ STRINGZILLA_DEVICE sz_size_t sz_levenshtein_lane_distance_simt_(sz_u32_t positiv
                                                                 sz_size_t lane_shift, sz_u32_t live, sz_size_t length) {
     sz_u32_t const lane_positive = (positive >> lane_shift) & live;
     sz_u32_t const lane_negative = (negative >> lane_shift) & live;
-    return (sz_size_t)((sz_ssize_t)length + __popc(lane_positive) - __popc(lane_negative));
+    return (sz_size_t)((sz_ssize_t)length + sz_u32_popcount_simt_(lane_positive) -
+                       sz_u32_popcount_simt_(lane_negative));
 }
 
 /**
@@ -1102,15 +1103,16 @@ STRINGZILLA_DEVICE void sz_levenshtein_query_prepare_simt_(sz_cptr_t text, sz_si
         if (lane_present[word]) atomicOr(present + word, lane_present[word]);
     __syncwarp();
     sz_size_t distinct = 0;
-    for (word = 0; word != 8; ++word) lane_present[word] = present[word], distinct += __popc(lane_present[word]);
+    for (word = 0; word != 8; ++word)
+        lane_present[word] = present[word], distinct += sz_u32_popcount_simt_(lane_present[word]);
     __syncwarp();
     sz_size_t const classes = sz_min_of_two(distinct + 1, (sz_size_t)sz_levenshtein_byte_classes_k);
     // Byte `word * 32 + lane` ranks among the present bytes below it.
     sz_size_t below = 0;
     for (word = 0; word != 8; ++word) {
-        sz_u32_t const rank = (sz_u32_t)below + __popc(lane_present[word] & ((1u << lane) - 1u));
+        sz_u32_t const rank = (sz_u32_t)below + sz_u32_popcount_simt_(lane_present[word] & ((1u << lane) - 1u));
         byte_to_class[word * 32 + lane] = (lane_present[word] >> lane) & 1u ? (sz_u8_t)rank : (sz_u8_t)(classes - 1);
-        below += __popc(lane_present[word]);
+        below += sz_u32_popcount_simt_(lane_present[word]);
     }
     for (entry = lane; entry < classes * stride; entry += 32) masks[entry] = 0;
     __syncwarp();
@@ -1255,7 +1257,7 @@ enum { sz_levenshtein_length_keys_simt_k = 256 };
 STRINGZILLA_DEVICE sz_size_t sz_levenshtein_length_key_simt_(sz_size_t length) {
     sz_size_t ascending = length;
     if (length >= 4) {
-        sz_size_t const octave = sz_size_log2i_nonzero(length);
+        sz_size_t const octave = sz_size_log2i_nonzero_simt_(length);
         ascending = octave * 4 + ((length >> (octave - 2)) & 3);
     }
     return sz_levenshtein_length_keys_simt_k - 1 - ascending;
@@ -1650,7 +1652,9 @@ static __global__ void __launch_bounds__(sz_levenshtein_long_threads_simt_k)
                                       sz_size_t *cursors, sz_size_t *order) {
     for (sz_size_t index = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; index < candidates.count;
          index += (sz_size_t)gridDim.x * blockDim.x) {
-        sz_size_t const bucket = sz_levenshtein_length_bucket_(sz_strings_length_simt_(candidates, index));
+        sz_size_t const length = sz_strings_length_simt_(candidates, index);
+        // As `sz_levenshtein_length_bucket_` maps it, through the device's own leading-zero count.
+        sz_size_t const bucket = length <= 1 ? length : sz_size_log2i_nonzero_simt_(length - 1) + 2;
         sz_size_t const position = (sz_size_t)atomicAdd((unsigned long long *)(cursors + bucket), 1ull);
         order[buckets.offsets[bucket] + position] = index;
     }

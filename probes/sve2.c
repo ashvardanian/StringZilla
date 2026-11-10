@@ -17,7 +17,8 @@ __attribute__((target("+sve+sve2"))) static int sz_probe_passes_vectors_(void) {
 }
 
 int main(void) {
-    char haystack[64] = {'x'};
+    // From four vectors on, the search takes `svmatch_u8`; 1024 bytes are four of the widest ones.
+    char haystack[1024] = {'x'};
     sz_byteset_t set;
     sz_cptr_t match = 0;
     sz_byteset_init(&set);

@@ -920,7 +920,7 @@ STRINGZILLA_OUTLINED_ void sz_sha256_state_update_serial_(sz_sha256_state_t *sta
     // Process tail (remaining bytes into block buffer)
     for (sz_size_t byte_index = 0; byte_index < tail_length; ++byte_index)
         state_ptr->block[byte_index] = input[byte_index];
-    state_ptr->block_length = tail_length;
+    state_ptr->block_length = (sz_u8_t)tail_length;
 
     // Copy hash back
     state_ptr->hash[0] = hash[0], state_ptr->hash[1] = hash[1], state_ptr->hash[2] = hash[2],

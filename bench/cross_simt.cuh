@@ -46,7 +46,7 @@
 
 #include <cmath> // `std::ceil`, `std::log2`
 
-#include <algorithm>        // `std::min`, `std::stable_sort`
+#include <algorithm>        // `std::stable_sort`
 #include <initializer_list> // `std::initializer_list`
 #include <numeric>          // `std::iota`
 #include <optional>         // `std::optional`
@@ -111,12 +111,12 @@ inline std::vector<sz_string_view_t> simt_skewed_views(char const *text, std::si
         double const middle = (low + high) / 2.0;
         ((middle - 1.0) / std::log(middle) < mean_bytes ? low : high) = middle;
     }
-    double const ceiling = std::min(high, (double)bytes);
+    double const ceiling = min_of(high, (double)bytes);
     std::mt19937_64 generator(seed);
     std::uniform_real_distribution<double> exponent(0.0, std::log(ceiling));
     std::vector<sz_string_view_t> views(count);
     for (sz_string_view_t &view : views) {
-        std::size_t const length = std::min((std::size_t)std::exp(exponent(generator)), bytes);
+        std::size_t const length = min_of((std::size_t)std::exp(exponent(generator)), bytes);
         view = {text + generator() % (bytes - length + 1), length};
     }
     return views;
@@ -163,8 +163,8 @@ struct levenshtein_simt_corpus_t {
     std::vector<sz_string_view_t> host_skewed_views;
 
     levenshtein_simt_corpus_t(simt_backend_t const &backend, environment_t const &env, corpus_t const &corpus) {
-        std::size_t const count = std::min<std::size_t>(corpus.tokens.size(),
-                                                        resident_candidates_per_call(env, backend.runtime));
+        std::size_t const count = min_of<std::size_t>(corpus.tokens.size(),
+                                                      resident_candidates_per_call(env, backend.runtime));
         std::size_t bytes = 0;
         for (std::size_t index = 0; index != count; ++index) bytes += corpus.tokens[index].size();
         host_views.resize(count), host_sorted_views.resize(count);
@@ -185,7 +185,7 @@ struct levenshtein_simt_corpus_t {
         });
         for (std::size_t index = 0; index != count; ++index) host_sorted_views[index] = host_views[order[index]];
 
-        double const mean_bytes = (double)bytes / (double)std::max<std::size_t>(count, 1);
+        double const mean_bytes = (double)bytes / (double)max_of<std::size_t>(count, 1);
         host_skewed_views = simt_skewed_views(host_tape.data(), bytes, count, mean_bytes, env.settings.seed.value);
 
         shuffled_tape = resident_strings(backend.runtime, host_candidates(levenshtein_simt_order_t::shuffled_k));
@@ -239,7 +239,7 @@ inline std::vector<sz_string_view_t> levenshtein_simt_queries(corpus_t const &co
     for (std::size_t query = 0; query != views.size(); ++query) {
         token_view_t const whole = corpus.tokens[(query * 7 + 1) % corpus.tokens.size()];
         std::size_t const reachable = (std::size_t)(corpus.dataset.data() + corpus.dataset.size() - whole.data());
-        views[query] = {whole.data(), std::min(query_bytes, reachable)};
+        views[query] = {whole.data(), min_of(query_bytes, reachable)};
     }
     return views;
 }
@@ -379,8 +379,8 @@ inline void bench_levenshtein_simt(simt_backend_t const &backend, environment_t 
 /** The leading tokens of @p corpus, one per resident thread of the bound device. */
 inline std::vector<sz_string_view_t> overlap_token_views(simt_backend_t const &backend, environment_t const &env,
                                                          corpus_t const &corpus) {
-    std::size_t const count = std::min<std::size_t>(corpus.tokens.size(),
-                                                    resident_candidates_per_call(env, backend.runtime));
+    std::size_t const count = min_of<std::size_t>(corpus.tokens.size(),
+                                                  resident_candidates_per_call(env, backend.runtime));
     std::vector<sz_string_view_t> views(count);
     for (std::size_t index = 0; index != count; ++index)
         views[index] = {corpus.tokens[index].data(), corpus.tokens[index].size()};
@@ -441,9 +441,9 @@ inline void bench_overlap_simt(simt_backend_t const &backend, environment_t cons
 inline bool substrings_fills_a_wave(sz_substrings_engine_t const &engine, substrings_corpus_t const &resident,
                                     std::size_t resident_threads) {
     std::size_t const budget = engine.chunk_budget ? engine.chunk_budget : 1;
-    std::size_t const floor_bytes = std::max<std::size_t>(4 * engine.max_source_match_bytes, 1);
+    std::size_t const floor_bytes = max_of<std::size_t>(4 * engine.max_source_match_bytes, 1);
     std::size_t const bytes = resident.bytes();
-    std::size_t const chunk = std::max(sz::divide_round_up(bytes, budget), floor_bytes);
+    std::size_t const chunk = max_of(sz::divide_round_up(bytes, budget), floor_bytes);
     std::size_t chunks = 0;
     for (sz_string_view_t const &view : resident.views)
         chunks += view.length == 0 ? 1 : sz::divide_round_up(view.length, chunk);

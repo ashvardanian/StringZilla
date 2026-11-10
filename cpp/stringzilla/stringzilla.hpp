@@ -242,29 +242,19 @@ class byteset_t {
   public:
     using char_type = char;
 
-    constexpr byteset_t() noexcept {
-        // ! Instead of relying on the `sz_byteset_init`, we have to reimplement it to support `constexpr`.
-        bitset_._u64s[0] = 0, bitset_._u64s[1] = 0, bitset_._u64s[2] = 0, bitset_._u64s[3] = 0;
-    }
+    constexpr byteset_t() noexcept { sz_byteset_init(&bitset_); }
     explicit constexpr byteset_t(std::initializer_list<char_type> chars) noexcept : byteset_t() {
-        // ! Instead of relying on the `sz_byteset_add(&bitset_, c)`, we have to reimplement it to support `constexpr`.
-        for (auto c : chars) bitset_._u64s[sz_bitcast_(sz_u8_t, c) >> 6] |= (1ull << (sz_bitcast_(sz_u8_t, c) & 63u));
+        for (auto c : chars) sz_byteset_add_u8(&bitset_, sz_bitcast_(sz_u8_t, c));
     }
 
     explicit constexpr byteset_t(char_type const *chars, std::size_t count_characters) noexcept : byteset_t() {
-        for (std::size_t i = 0; i < count_characters; ++i) {
-            char_type c = chars[i];
-            bitset_._u64s[sz_bitcast_(sz_u8_t, c) >> 6] |= (1ull << (sz_bitcast_(sz_u8_t, c) & 63u));
-        }
+        for (std::size_t i = 0; i < count_characters; ++i) sz_byteset_add_u8(&bitset_, sz_bitcast_(sz_u8_t, chars[i]));
     }
 
     template <std::size_t count_characters>
     explicit constexpr byteset_t(std::array<char_type, count_characters> const &chars) noexcept : byteset_t() {
         static_assert(count_characters > 0, "Character array cannot be empty");
-        for (std::size_t i = 0; i < count_characters; ++i) {
-            char_type c = chars[i];
-            bitset_._u64s[sz_bitcast_(sz_u8_t, c) >> 6] |= (1ull << (sz_bitcast_(sz_u8_t, c) & 63u));
-        }
+        for (std::size_t i = 0; i < count_characters; ++i) sz_byteset_add_u8(&bitset_, sz_bitcast_(sz_u8_t, chars[i]));
     }
 
     constexpr byteset_t(byteset_t const &other) noexcept : bitset_(other.bitset_) {}
@@ -1912,8 +1902,8 @@ struct concatenation {
     }
 
     size_type copy(pointer destination, size_type length) const noexcept {
-        auto first_length = std::min(first.length(), length);
-        auto second_length = std::min(second.length(), length - first_length);
+        auto first_length = min_of(first.length(), length);
+        auto second_length = min_of(second.length(), length - first_length);
         first.copy(destination, first_length);
         second.copy(destination + first_length, second_length);
         return first_length + second_length;

@@ -6,10 +6,6 @@
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
-#if !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
-#define _ITERATOR_DEBUG_LEVEL 1
-#endif
-
 #if defined(STRINGZILLA_DEBUG)
 #undef STRINGZILLA_DEBUG
 #endif

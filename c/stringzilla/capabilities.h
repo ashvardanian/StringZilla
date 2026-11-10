@@ -52,7 +52,9 @@
 
 /* On Windows Arm, we use IsProcessorFeaturePresent API for capability detection */
 #if STRINGZILLA_OS_WINDOWS_ && STRINGZILLA_ARCH_ARM64_
-#define NOMINMAX
+#if !defined(_WINSOCKAPI_)
+#include <winsock2.h> // First, so `<windows.h>` leaves out Winsock 1.1, which a later `<winsock2.h>` collides with
+#endif
 #include <windows.h>
 #endif
 

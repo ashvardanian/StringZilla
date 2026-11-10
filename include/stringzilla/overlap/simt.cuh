@@ -653,8 +653,8 @@ STRINGZILLA_DEVICE void sz_overlap_query_prepare_simt_(sz_cptr_t text, sz_size_t
         int const kept = position < windows && (position == 0 || key != (lane ? below : carried));
         sz_u32_t const survivors = ballot(kept);
         __syncwarp();
-        if (kept) keys[distinct + __popc(survivors & ((1u << lane) - 1u))] = key;
-        distinct += __popc(survivors);
+        if (kept) keys[distinct + sz_u32_popcount_simt_(survivors & ((1u << lane) - 1u))] = key;
+        distinct += sz_u32_popcount_simt_(survivors);
         carried = shuffle_index(key, 31);
     }
     __syncwarp();

@@ -248,10 +248,26 @@
 
 #if defined(_MSC_VER)
 #define STRINGZILLA_INLINE __forceinline static
-#define STRINGZILLA_OUTLINED_ __declspec(noinline) static
-#else
-#define STRINGZILLA_INLINE __attribute__((always_inline)) STRINGZILLA_C_INLINE_
+#define STRINGZILLA_OUTLINED_ __declspec(noinline) STRINGZILLA_C_INLINE_
+#elif defined(__clang__)
+#define STRINGZILLA_INLINE STRINGZILLA_MAYBE_UNUSED_ __attribute__((always_inline)) STRINGZILLA_C_INLINE_
 #define STRINGZILLA_OUTLINED_ STRINGZILLA_MAYBE_UNUSED_ static __attribute__((noinline))
+#else
+
+/** GCC checks @c always_inline at the call as written, so a generic caller outside a target region
+ *  needs plain inline. */
+#define STRINGZILLA_INLINE STRINGZILLA_MAYBE_UNUSED_ STRINGZILLA_C_INLINE_
+#define STRINGZILLA_OUTLINED_ STRINGZILLA_MAYBE_UNUSED_ static __attribute__((noinline))
+#endif
+
+/** The C++ standard in effect, or zero in C. MSVC reports it in @c _MSVC_LANG and leaves
+ *  @c __cplusplus at C++98. */
+#if defined(_MSVC_LANG)
+#define STRINGZILLA_CXX_STANDARD_ _MSVC_LANG
+#elif defined(__cplusplus)
+#define STRINGZILLA_CXX_STANDARD_ __cplusplus
+#else
+#define STRINGZILLA_CXX_STANDARD_ 0
 #endif
 
 /**
@@ -272,14 +288,8 @@
  *  The qualifier waits for C++20 because these helpers declare their locals before filling them,
  *  which only C++20 permits in a @c constexpr function. C, and an older C++ dialect reaching the C
  *  API, get the plain helper.
- *
- *  MSVC is the one front end that gets the plain helper: its bit-scan and byte-swap intrinsics are
- *  not constant-evaluable, so @c sz_u64_ctz and every helper that reaches one -
- *  @c sz_size_bit_ceil, the folded rune iterators, the uncased search - is rejected with C3615, an
- *  error no @c /wd can silence. The qualifier buys compile-time folding and @c nvcc reach, and MSVC
- *  hosts neither, so nothing is lost by dropping it.
  */
-#if defined(__cplusplus) && __cplusplus >= 202002L && !(defined(_MSC_VER) && !defined(__clang__))
+#if STRINGZILLA_CXX_STANDARD_ >= 202002L
 #define STRINGZILLA_CONSTEXPR STRINGZILLA_MAYBE_UNUSED_ STRINGZILLA_C_INLINE_ constexpr
 #else
 #define STRINGZILLA_CONSTEXPR STRINGZILLA_MAYBE_UNUSED_ STRINGZILLA_C_INLINE_
@@ -289,8 +299,12 @@
  *  library. Windows DLLs export every symbol through CMake, so no import or export spelling. */
 #if STRINGZILLA_HEADER_ONLY
 #define STRINGZILLA_API STRINGZILLA_MAYBE_UNUSED_ STRINGZILLA_C_INLINE_
-#elif defined(__GNUC__) || defined(__clang__)
+#elif defined(__clang__)
 #define STRINGZILLA_API __attribute__((visibility("default")))
+#elif defined(__GNUC__)
+
+/** GCC inlines the plain-inline helpers into an exported kernel only when told to. */
+#define STRINGZILLA_API __attribute__((visibility("default"), flatten))
 #else
 #define STRINGZILLA_API
 #endif
@@ -907,7 +921,7 @@ enum { sz_default_alignment_k = STRINGZILLA_DEFAULT_ALIGNMENT };
 /** Compile-time assert akin to C++ @c static_assert. Uses the native assertion where available
  *  (C++11 @c static_assert, C11 @c _Static_assert); the older-C typedef fallback must sit at file
  *  scope to stay clear of @c -Wunused-local-typedef. */
-#if defined(__cplusplus) && __cplusplus >= 201103L
+#if STRINGZILLA_CXX_STANDARD_ >= 201103L
 #define sz_static_assert_(condition, name) static_assert(condition, #name)
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 #define sz_static_assert_(condition, name) _Static_assert(condition, #name)
@@ -1953,36 +1967,36 @@ STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_batch_consistent_(sz_size_t length, sz_s
  *  @see Bit-scan with De Bruijn: https://gist.github.com/resilar/e722d4600dbec9752771ab4c9d47044f
  */
 #if !STRINGZILLA_ARCH_X8664_
-STRINGZILLA_CONSTEXPR int sz_u64_ctz(sz_u64_t x) {
+STRINGZILLA_INLINE int sz_u64_ctz(sz_u64_t x) {
     sz_assert_(x != 0);
     int n = 0;
     while ((x & 1) == 0) { n++, x >>= 1; }
     return n;
 }
-STRINGZILLA_CONSTEXPR int sz_u64_clz(sz_u64_t x) {
+STRINGZILLA_INLINE int sz_u64_clz(sz_u64_t x) {
     sz_assert_(x != 0);
     int n = 0;
     while ((x & 0x8000000000000000ull) == 0) { n++, x <<= 1; }
     return n;
 }
-STRINGZILLA_CONSTEXPR int sz_u64_popcount(sz_u64_t x) {
+STRINGZILLA_INLINE int sz_u64_popcount(sz_u64_t x) {
     x = x - ((x >> 1) & 0x5555555555555555ull);
     x = (x & 0x3333333333333333ull) + ((x >> 2) & 0x3333333333333333ull);
     return (((x + (x >> 4)) & 0x0F0F0F0F0F0F0F0Full) * 0x0101010101010101ull) >> 56;
 }
-STRINGZILLA_CONSTEXPR int sz_u32_ctz(sz_u32_t x) {
+STRINGZILLA_INLINE int sz_u32_ctz(sz_u32_t x) {
     sz_assert_(x != 0);
     int n = 0;
     while ((x & 1) == 0) { n++, x >>= 1; }
     return n;
 }
-STRINGZILLA_CONSTEXPR int sz_u32_clz(sz_u32_t x) {
+STRINGZILLA_INLINE int sz_u32_clz(sz_u32_t x) {
     sz_assert_(x != 0);
     int n = 0;
     while ((x & 0x80000000u) == 0) { n++, x <<= 1; }
     return n;
 }
-STRINGZILLA_CONSTEXPR int sz_u32_popcount(sz_u32_t x) {
+STRINGZILLA_INLINE int sz_u32_popcount(sz_u32_t x) {
     x = x - ((x >> 1) & 0x55555555);
     x = (x & 0x33333333) + ((x >> 2) & 0x33333333);
     return (((x + (x >> 4)) & 0x0F0F0F0F) * 0x01010101) >> 24;
@@ -2002,14 +2016,14 @@ STRINGZILLA_INLINE sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return _byteswa
 #pragma intrinsic(_byteswap_ulong)
 STRINGZILLA_INLINE sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return _byteswap_ulong(val); }
 #else
-STRINGZILLA_CONSTEXPR int sz_u64_popcount(sz_u64_t x) { return __builtin_popcountll(x); }
-STRINGZILLA_CONSTEXPR int sz_u32_popcount(sz_u32_t x) { return __builtin_popcount(x); }
-STRINGZILLA_CONSTEXPR int sz_u64_ctz(sz_u64_t x) { return __builtin_ctzll(x); }
-STRINGZILLA_CONSTEXPR int sz_u64_clz(sz_u64_t x) { return __builtin_clzll(x); }
-STRINGZILLA_CONSTEXPR int sz_u32_ctz(sz_u32_t x) { return __builtin_ctz(x); } // ! Undefined if `x == 0`
-STRINGZILLA_CONSTEXPR int sz_u32_clz(sz_u32_t x) { return __builtin_clz(x); } // ! Undefined if `x == 0`
-STRINGZILLA_CONSTEXPR sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return __builtin_bswap64(val); }
-STRINGZILLA_CONSTEXPR sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return __builtin_bswap32(val); }
+STRINGZILLA_INLINE int sz_u64_popcount(sz_u64_t x) { return __builtin_popcountll(x); }
+STRINGZILLA_INLINE int sz_u32_popcount(sz_u32_t x) { return __builtin_popcount(x); }
+STRINGZILLA_INLINE int sz_u64_ctz(sz_u64_t x) { return __builtin_ctzll(x); }
+STRINGZILLA_INLINE int sz_u64_clz(sz_u64_t x) { return __builtin_clzll(x); }
+STRINGZILLA_INLINE int sz_u32_ctz(sz_u32_t x) { return __builtin_ctz(x); } // ! Undefined if `x == 0`
+STRINGZILLA_INLINE int sz_u32_clz(sz_u32_t x) { return __builtin_clz(x); } // ! Undefined if `x == 0`
+STRINGZILLA_INLINE sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return __builtin_bswap64(val); }
+STRINGZILLA_INLINE sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return __builtin_bswap32(val); }
 #endif
 
 /*  Arm NEON kernel files call these directly instead of @c sz_u32_ctz, @c sz_u32_clz, and
@@ -2052,7 +2066,7 @@ STRINGZILLA_INLINE void const *sz_x86_hide_pointer_origin_(void const *pointer) 
 /** Reverse the 64 bits of @p value, so bit i moves to bit 63 - i: swap adjacent bits, then
  *  bit-pairs within nibbles, then nibbles within bytes, then the bytes. Lets an ascending-only
  *  byte-compress, like @c vpcompressb, pack lanes in descending order. */
-STRINGZILLA_CONSTEXPR sz_u64_t sz_u64_bits_reverse(sz_u64_t value) {
+STRINGZILLA_INLINE sz_u64_t sz_u64_bits_reverse(sz_u64_t value) {
     value = ((value & 0x5555555555555555ull) << 1) | ((value >> 1) & 0x5555555555555555ull);
     value = ((value & 0x3333333333333333ull) << 2) | ((value >> 2) & 0x3333333333333333ull);
     value = ((value & 0x0F0F0F0F0F0F0F0Full) << 4) | ((value >> 4) & 0x0F0F0F0F0F0F0F0Full);
@@ -2062,11 +2076,11 @@ STRINGZILLA_CONSTEXPR sz_u64_t sz_u64_bits_reverse(sz_u64_t value) {
 /** Bit index of the n-th (0-based) set bit of @p bits; clears the @p n lowest set bits, then
  *  @c ctz. @p bits must hold more than @p n set bits. One tested home for the per-ISA SIMD
  *  "n-th lane" locate. */
-STRINGZILLA_CONSTEXPR int sz_u64_nth_set_bit(sz_u64_t bits, sz_size_t n) {
+STRINGZILLA_INLINE int sz_u64_nth_set_bit(sz_u64_t bits, sz_size_t n) {
     while (n--) bits &= bits - 1;
     return sz_u64_ctz(bits);
 }
-STRINGZILLA_CONSTEXPR int sz_u32_nth_set_bit(sz_u32_t bits, sz_size_t n) {
+STRINGZILLA_INLINE int sz_u32_nth_set_bit(sz_u32_t bits, sz_size_t n) {
     while (n--) bits &= bits - 1;
     return sz_u32_ctz(bits);
 }
@@ -2232,7 +2246,7 @@ STRINGZILLA_CONSTEXPR void sz_ssize_clamp_interval( //
  *  @brief Compute the logarithm base 2 of a positive integer, rounding down.
  *  @pre Input must be a positive number, as the logarithm of zero is undefined.
  */
-STRINGZILLA_CONSTEXPR sz_size_t sz_size_log2i_nonzero(sz_size_t x) {
+STRINGZILLA_INLINE sz_size_t sz_size_log2i_nonzero(sz_size_t x) {
     sz_assert_(x > 0 && "Non-positive numbers have no defined logarithm");
     int leading_zeros = sz_u64_clz(x);
     return (sz_size_t)(63 - leading_zeros);
@@ -2255,7 +2269,7 @@ STRINGZILLA_CONSTEXPR sz_u32_t sz_u32_divide_round_up(sz_u32_t x, sz_u32_t divis
  *      bit_ceil(1) = 1.
  *  @see Rounding up to a power of two: https://stackoverflow.com/a/10143264
  */
-STRINGZILLA_CONSTEXPR sz_size_t sz_size_bit_ceil(sz_size_t x) {
+STRINGZILLA_INLINE sz_size_t sz_size_bit_ceil(sz_size_t x) {
 #if defined(__LZCNT__) || defined(__BMI__)
     // Edge cases: 0 and 1 return themselves, avoids undefined clz(0).
     if (x <= 1) return x;
@@ -2450,7 +2464,7 @@ STRINGZILLA_CONSTEXPR void *sz_allocate_arena_(sz_size_t bytes, void *handle, sz
     sz_arena_t_ *metadata = (sz_arena_t_ *)handle;
     sz_size_t const capacity = metadata->capacity, consumed = metadata->consumed, alignment = metadata->alignment;
     if (consumed > capacity) return STRINGZILLA_NULL;
-    sz_size_t const padding = (-((sz_size_t)handle + consumed)) & (alignment - 1);
+    sz_size_t const padding = (0 - ((sz_size_t)handle + consumed)) & (alignment - 1);
     if (padding > capacity - consumed || bytes > capacity - consumed - padding) return STRINGZILLA_NULL;
     metadata->consumed = consumed + padding + bytes;
     return (sz_ptr_t)handle + consumed + padding;
@@ -2530,7 +2544,7 @@ STRINGZILLA_INLINE sz_status_t sz_allocator_init_arena(sz_allocator_t *allocator
     if (!alignment || (alignment & (alignment - 1))) return sz_unexpected_dimensions_k;
     if (!buffer) return sz_bad_alloc_k;
     if (bytes > STRINGZILLA_SIZE_MAX - (sz_size_t)buffer) return sz_overflow_risk_k;
-    sz_size_t const padding = (-(sz_size_t)buffer) & (sizeof(sz_size_t) - 1);
+    sz_size_t const padding = (0 - (sz_size_t)buffer) & (sizeof(sz_size_t) - 1);
     if (padding > bytes || bytes - padding < sizeof(sz_arena_t_)) return sz_bad_alloc_k;
     sz_arena_t_ *metadata = (sz_arena_t_ *)((sz_ptr_t)buffer + padding);
     metadata->capacity = bytes - padding;

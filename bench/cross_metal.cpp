@@ -21,7 +21,6 @@
 #include "cross.hpp"
 
 #if STRINGZILLA_ARCH_METAL_
-#include <algorithm> // `std::min`
 #include <optional>  // `std::optional`
 #include <stdexcept> // `std::runtime_error`
 #include <string>    // `std::string`, `std::to_string`
@@ -73,7 +72,7 @@ int bench_cross_metal(environment_t &env, std::size_t ordinal) {
     fmt::println("Device: metal:{}", ordinal);
 #if STRINGZILLA_TARGET_METAL
     corpus_t const &corpus = env.corpora.multilingual_lines();
-    std::size_t const count = std::min(corpus.tokens.size(), resident_candidates_per_call(env, runtime));
+    std::size_t const count = min_of(corpus.tokens.size(), resident_candidates_per_call(env, runtime));
     std::vector<sz_string_view_t> views(count);
     for (std::size_t index = 0; index != count; ++index)
         views[index] = {corpus.tokens[index].data(), corpus.tokens[index].size()};
