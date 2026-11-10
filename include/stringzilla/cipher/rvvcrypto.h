@@ -18,11 +18,10 @@
 extern "C" {
 #endif
 
-/*  @c STRINGZILLA_TARGET_RVVCRYPTO turns on for @c Zvkned and @c Zvknhb, the pair @c sz_hash needs,
- *  and says nothing about @c Zvkg. A target carrying AES but not the Galois hash therefore reaches
- *  this file, and every hash step below is written against one pair of helpers that resolve to
- *  `vghsh.vv` and `vgmul.vv` where the extension is present and to the constant-time serial
- *  reduction where it is not. The AES side is vectorized either way. */
+/*  @c STRINGZILLA_TARGET_RVVCRYPTO covers @c Zvkned, @c Zvknhb and @c Zvkg together, and
+ *  @c sz_capabilities probes all three, so the hash steps below reach for `vghsh.vv` and `vgmul.vv`
+ *  unconditionally. RVA23 sells the NIST algorithms only as @c Zvkng, which bundles GHASH in, so no
+ *  conformant part reaches this file without it. */
 #if STRINGZILLA_ARCH_RISCV64_
 #if STRINGZILLA_TARGET_RVVCRYPTO
 
@@ -344,16 +343,7 @@ STRINGZILLA_INLINE vuint32m4_t sz_aes256_counters_build_rvvcrypto_(sz_u8_t const
  */
 STRINGZILLA_INLINE vuint32m1_t sz_ghash_absorb_rvvcrypto_(vuint32m1_t accumulator_u32m1, vuint32m1_t block_u32m1,
                                                           vuint32m1_t subkey_u32m1) {
-#if defined(__riscv_zvkg)
     return __riscv_vghsh_vv_u32m1(accumulator_u32m1, subkey_u32m1, block_u32m1, 4);
-#else
-    sz_u128_vec_t staged_accumulator_vec, staged_block_vec, staged_subkey_vec;
-    sz_aes256_block_store_rvvcrypto_(staged_accumulator_vec.u8s, accumulator_u32m1);
-    sz_aes256_block_store_rvvcrypto_(staged_block_vec.u8s, block_u32m1);
-    sz_aes256_block_store_rvvcrypto_(staged_subkey_vec.u8s, subkey_u32m1);
-    sz_ghash_absorb_serial_(staged_accumulator_vec.u8s, staged_block_vec.u8s, staged_subkey_vec.u8s);
-    return sz_aes256_block_load_rvvcrypto_(staged_accumulator_vec.u8s);
-#endif
 }
 
 /**
@@ -363,15 +353,7 @@ STRINGZILLA_INLINE vuint32m1_t sz_ghash_absorb_rvvcrypto_(vuint32m1_t accumulato
  *  @return The product.
  */
 STRINGZILLA_INLINE vuint32m1_t sz_ghash_multiply_rvvcrypto_(vuint32m1_t accumulator_u32m1, vuint32m1_t subkey_u32m1) {
-#if defined(__riscv_zvkg)
     return __riscv_vgmul_vv_u32m1(accumulator_u32m1, subkey_u32m1, 4);
-#else
-    sz_u128_vec_t staged_accumulator_vec, staged_subkey_vec;
-    sz_aes256_block_store_rvvcrypto_(staged_accumulator_vec.u8s, accumulator_u32m1);
-    sz_aes256_block_store_rvvcrypto_(staged_subkey_vec.u8s, subkey_u32m1);
-    sz_ghash_multiply_serial_(staged_accumulator_vec.u8s, staged_subkey_vec.u8s);
-    return sz_aes256_block_load_rvvcrypto_(staged_accumulator_vec.u8s);
-#endif
 }
 
 STRINGZILLA_API sz_status_t sz_aes256_gcm_key_init_rvvcrypto(sz_aes256_gcm_key_t *key,

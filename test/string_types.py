@@ -647,7 +647,7 @@ def test_string_lengths():
 @pytest.mark.parametrize("length", range(1, 300))
 def test_translations(length: int, rng: Random):
     """`sz.translate` on `str` and `bytes` input matches `bytes.translate` for the identity,
-    inversion, and threshold lookup tables, both copying and in place on a `bytearray`."""
+    inversion, and threshold lookup tables, allocating, in place, and into caller-owned buffers."""
     map_identity = np.arange(256, dtype=np.uint8)
     map_invert = np.arange(255, -1, -1, dtype=np.uint8)
     map_threshold = np.where(np.arange(256) > 127, 255, 0).astype(np.uint8)
@@ -665,6 +665,12 @@ def test_translations(length: int, rng: Random):
     assert sz.translate(body_bytes, view_invert) == body_bytes.translate(view_invert)
     assert sz.translate(body_bytes, view_threshold) == body_bytes.translate(view_threshold)
 
+    out = np.full((1, len(body_bytes) + 1), 0xA5, dtype=np.uint8)
+    for table in (view_identity, view_invert, view_threshold):
+        assert sz.translate(body_bytes, table, out=out) is out
+        assert out[0, :-1].tobytes() == body_bytes.translate(table)
+        assert out[0, -1] == 0xA5
+
     # Check in-place translations on mutable byte-arrays - all of them return nothing
     # Compare against the byte-level oracle `bytes.translate`; a str `.translate` would re-encode any
     # byte >= 128 as a multi-byte UTF-8 codepoint, which is not what an in-place byte translation produces.
@@ -677,6 +683,63 @@ def test_translations(length: int, rng: Random):
     after_threshold = bytearray(body_bytes)
     assert sz.translate(after_threshold, view_threshold, inplace=True) is None
     assert sz.equal(after_threshold, body_bytes.translate(view_threshold))
+
+
+def test_translation_out_buffers():
+    """`translate(out=...)` writes into an exactly aliased slice, rejects partial overlap, and
+    leaves an oversized buffer's tail untouched."""
+    source = bytearray(b"_abc_")
+    out = memoryview(source)[1:-1]
+    assert String(source).translate({"a": "A"}, start=1, end=-1, out=out) is out
+    assert source == b"_Abc_"
+    for start in (0, 2):
+        with pytest.raises(ValueError, match="overlap"):
+            sz.translate(out, {}, out=memoryview(source)[start : start + 3])
+    assert String().translate({}, out=bytearray(b"!")) == b"!"
+    assert sz.translate("abc", {}, out=None) == "abc"
+
+
+def test_translation_out_errors():
+    """`translate(out=...)` rejects read-only, strided, wide, short, and in-place outputs before writing."""
+    source = bytearray(b"abc")
+    for out, error in (
+        (b"...", BufferError),
+        (memoryview(bytearray(6))[::2], BufferError),
+        (memoryview(bytearray(12)).cast("I"), TypeError),
+        (bytearray(2), ValueError),
+    ):
+        with pytest.raises(error):
+            sz.translate(source, {}, out=out)
+    with pytest.raises(ValueError):
+        sz.translate(source, {}, inplace=True, out=bytearray(3))
+    with pytest.raises(TypeError):
+        sz.translate(source, {}, inplace=True, unexpected=True)
+    with pytest.raises(TypeError):
+        String(source).translate({}, True, inplace=True)
+    assert source == b"abc"
+
+
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="Python buffer exporters require 3.12")
+@pytest.mark.parametrize("kind", ["view", "string", "bytearray"])
+def test_translation_out_callback(kind: str):
+    """An `out` whose export releases or shrinks the source is refused instead of read past."""
+    backing = bytearray(b"abc")
+    view = memoryview(backing)
+    source = String(backing) if kind == "bytearray" else view
+    if kind == "string":
+        source = String(source)
+    out = bytearray(b"...")
+
+    class ResizeOnExport:
+        def __buffer__(self, flags):
+            view.release()
+            backing.clear()
+            return memoryview(out)
+
+    with pytest.raises(ValueError):
+        sz.translate(source, {}, out=ResizeOnExport())
+    assert out == b"..."
+    out.extend(b"!")
 
 
 @pytest.mark.parametrize("length", list(range(0, 300)) + [1024, 4096, 100000])
@@ -844,6 +907,27 @@ def test_unit_translate_non_ascii():
 
 
 @pytest.mark.parametrize(
+    "call",
+    [
+        lambda: String("a b").split(" ", bogus=1),
+        lambda: String("a\nb").splitlines(bogus=1),
+        lambda: String(" a ").lstrip(bogus=1),
+        lambda: String(" a ").rstrip(bogus=1),
+        lambda: String(" a ").strip(bogus=1),
+        lambda: String("a", bogus=1),
+        lambda: String(b"a").decode(bogus=1),
+        lambda: String("a,b").split(",").shuffled(bogus=1),
+        lambda: String("a,b").split(",").sample(1, bogus=1),
+    ],
+    ids=["split", "splitlines", "lstrip", "rstrip", "strip", "init", "decode", "shuffled", "sample"],
+)
+def test_unit_unexpected_keyword_raises_type_error(call):
+    """An unknown keyword raises TypeError naming it, not a SystemError."""
+    with pytest.raises(TypeError, match="bogus"):
+        call()
+
+
+@pytest.mark.parametrize(
     "operation, expected",
     [
         (lambda strings: list(strings.shuffled()), []),
@@ -924,6 +1008,31 @@ def test_unit_strings_reinit_rebinds():
     assert [str(x) for x in ss] == ["p", "q"]
 
 
+def _file_mapping_available() -> bool:
+    """Whether this platform maps files at all, which Emscripten and other wasm hosts do not.
+
+    Probed by mapping rather than by naming platforms: `sz.File` imports everywhere and only fails
+    once a mapping is attempted.
+    """
+    import gc
+
+    with tempfile.NamedTemporaryFile(delete=False) as probe_file:
+        probe_file.write(b"probe")
+        probe_filename = probe_file.name
+    try:
+        sz.File(probe_filename)
+        return True
+    except OSError:
+        return False
+    finally:
+        gc.collect()
+        os.remove(probe_filename)
+
+
+file_mapping_available = _file_mapping_available()
+
+
+@pytest.mark.skipif(not file_mapping_available, reason="Platform maps no files")
 def test_unit_file_reinit_rebinds():
     """Calling `File.__init__` again, even on the same path, must not corrupt the mapping or raise."""
     import gc

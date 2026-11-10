@@ -9,6 +9,7 @@ permissions:
 env:
   PYTHONUTF8: 1
   PYTHONFAULTHANDLER: 1
+  PYTHONMALLOC: debug
 
 jobs:
   test_python:

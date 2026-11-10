@@ -205,10 +205,10 @@ STRINGZILLA_INLINE sz_status_t sz_sort_pgrams_skylake_(sz_pgram_t *pgrams, sz_si
 }
 
 /**
- *  @brief Recursive Quick-Sort adaptation for strings, processing them a few N-grams at a time.
+ *  @brief Quick-Sort adaptation for strings, processing them a few N-grams at a time.
  *
- *  Combines @c sz_sort_export_byte_window_serial_ with
- *  @c sz_sort_quicksort_pgrams_skylake_, then recurses into each group of equal pgrams.
+ *  Combines @c sz_sort_export_byte_window_serial_ with @c sz_sort_quicksort_pgrams_skylake_,
+ *  then walks every group of equal pgrams one window deeper.
  *
  *  @param[in] strings The collection of strings to sort.
  *  @param[in,out] global_pgrams Working pgram array, length at least @c strings->count.
@@ -220,58 +220,62 @@ STRINGZILLA_INLINE sz_status_t sz_sort_pgrams_skylake_(sz_pgram_t *pgrams, sz_si
  *  @param[in] start_character Byte offset into each string for the current pgram window.
  *  @param[in] top_count Global top-K cut-off forwarded to the partitioner; 0 fully sorts the range.
  *  @param[in] reverse Whether to export complemented keys for descending order.
+ *  @param[in,out] frames Scratch stack of <tt>end_in_strings - start_in_strings</tt> pending windows.
  */
 STRINGZILLA_OUTLINED_ void sz_sort_byte_windows_skylake_(                 //
     sz_strings_view_t const *const strings,                               //
     sz_pgram_t *const global_pgrams, sz_size_t *const global_order,       //
     sz_pgram_t *const temporary_pgrams, sz_size_t *const temporary_order, //
     sz_size_t const start_in_strings, sz_size_t const end_in_strings,     //
-    sz_size_t const start_character, sz_size_t const top_count, sz_bool_t const reverse) {
-
-    // Prepare the new range of pgrams
-    sz_sort_export_byte_window_serial_( //
-        strings, global_pgrams, global_order, start_in_strings, end_in_strings, start_character, reverse);
-
-    // Sort current pgrams with a quicksort
-    sz_sort_quicksort_pgrams_skylake_( //
-        global_pgrams, global_order, temporary_pgrams, temporary_order, start_in_strings, end_in_strings, top_count);
+    sz_size_t const start_character, sz_size_t const top_count, sz_bool_t const reverse,
+    sz_sort_window_t *const frames) {
 
     // Depending on the architecture, we will export a different number of bytes.
     // On 32-bit architectures, we will export 3 bytes, and on 64-bit architectures - 7 bytes.
     sz_size_t const pgram_capacity = sizeof(sz_pgram_t) - 1;
 
-    // Repeat the procedure for the identical pgrams
-    sz_size_t nested_start = start_in_strings;
-    sz_size_t nested_end = start_in_strings;
-    while (nested_end != end_in_strings) {
-        // Everything from `top_count` onwards needs no ordering - the wanted elements are already in front.
-        if (top_count != 0 && nested_start >= top_count) break;
+    // Export and sort each window, then queue every group of identical pgrams one window deeper.
+    sz_size_t frames_count = 1;
+    frames[0].start = start_in_strings, frames[0].end = end_in_strings, frames[0].start_character = start_character;
+    while (frames_count) {
+        sz_sort_window_t const window = frames[--frames_count];
+        sz_sort_export_byte_window_serial_( //
+            strings, global_pgrams, global_order, window.start, window.end, window.start_character, reverse);
+        sz_sort_quicksort_pgrams_skylake_( //
+            global_pgrams, global_order, temporary_pgrams, temporary_order, window.start, window.end, top_count);
 
-        // Find the end of the identical pgrams
-        sz_pgram_t current_pgram = global_pgrams[nested_start];
-        while (nested_end != end_in_strings && current_pgram == global_pgrams[nested_end]) ++nested_end;
+        sz_size_t nested_start = window.start;
+        sz_size_t nested_end = window.start;
+        while (nested_end != window.end) {
+            // Everything from `top_count` onwards needs no ordering, as the wanted elements lead.
+            if (top_count != 0 && nested_start >= top_count) break;
 
-        // The packed length byte lives in the low byte after the byte-reversal; under `reverse` the
-        // whole key was complemented, so we complement back before reading it.
-        sz_pgram_t const length_source = reverse ? ~current_pgram : current_pgram;
-        sz_cptr_t const length_str = (sz_cptr_t)&length_source;
+            // Find the end of the identical pgrams
+            sz_pgram_t current_pgram = global_pgrams[nested_start];
+            while (nested_end != window.end && current_pgram == global_pgrams[nested_end]) ++nested_end;
+
+            // The packed length byte lives in the low byte after the byte-reversal; under `reverse`
+            // the whole key was complemented, so we complement back before reading it.
+            sz_pgram_t const length_source = reverse ? ~current_pgram : current_pgram;
+            sz_cptr_t const length_str = (sz_cptr_t)&length_source;
 #if !STRINGZILLA_ARCH_BIG_ENDIAN_
-        sz_size_t current_pgram_length = (sz_size_t)(sz_u8_t)length_str[0]; //! The byte order was swapped
+            sz_size_t current_pgram_length = (sz_size_t)(sz_u8_t)length_str[0]; //! The byte order was swapped
 #else
-        sz_size_t current_pgram_length = (sz_size_t)(sz_u8_t)length_str[pgram_capacity]; //! No swaps on big-endian
+            sz_size_t current_pgram_length = (sz_size_t)(sz_u8_t)length_str[pgram_capacity]; //! No swaps on big-endian
 #endif
-        int has_multiple_strings = nested_end - nested_start > 1;
-        int has_more_characters_in_each = current_pgram_length == pgram_capacity;
-        if (has_multiple_strings && has_more_characters_in_each)
-            sz_sort_byte_windows_skylake_( //
-                strings, global_pgrams, global_order, temporary_pgrams, temporary_order, nested_start, nested_end,
-                start_character + pgram_capacity, top_count, reverse);
-        else if (has_multiple_strings)
-            // Terminal run of byte-identical strings: restore stable order by original index.
-            sz_order_indices_ascending_(global_order + nested_start, nested_end - nested_start);
+            int has_multiple_strings = nested_end - nested_start > 1;
+            int has_more_characters_in_each = current_pgram_length == pgram_capacity;
+            if (has_multiple_strings && has_more_characters_in_each) {
+                sz_sort_window_t const nested = {nested_start, nested_end, window.start_character + pgram_capacity};
+                frames[frames_count++] = nested;
+            }
+            else if (has_multiple_strings)
+                // Terminal run of byte-identical strings: restore stable order by original index.
+                sz_order_indices_ascending_(global_order + nested_start, nested_end - nested_start);
 
-        // Move to the next
-        nested_start = nested_end;
+            // Move to the next
+            nested_start = nested_end;
+        }
     }
 }
 
@@ -282,35 +286,41 @@ STRINGZILLA_OUTLINED_ void sz_sort_casefold_windows_skylake_(
     sz_strings_view_t const *const strings, sz_pgram_t *const global_pgrams, sz_size_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_size_t *const temporary_order, sz_size_t const start_in_strings,
     sz_size_t const end_in_strings, sz_size_t const folded_skip_count, sz_size_t const top_count,
-    sz_bool_t const reverse) {
+    sz_bool_t const reverse, sz_sort_window_t *const frames) {
 
-    sz_sort_export_casefold_window_serial_(strings, global_pgrams, global_order, start_in_strings, end_in_strings,
-                                           folded_skip_count, reverse);
-    sz_sort_quicksort_pgrams_skylake_(global_pgrams, global_order, temporary_pgrams, temporary_order, start_in_strings,
-                                      end_in_strings, top_count);
-
-    // A window's lowest 21-bit field is non-zero only when it was filled to capacity, so the equal group may
-    // still carry more folded code-points and must recurse one window deeper (mirrors the serial folded sort).
+    // A window's lowest 21-bit field is non-zero only when it was filled to capacity, so the equal
+    // group may still carry more folded code-points and must walk one window deeper, as the serial
+    // folded sort does.
     sz_size_t const fields_per_pgram = sz_argsort_casefold_fields_(sz_pgram_t);
     sz_pgram_t const lowest_field_mask = ((sz_pgram_t)1 << sz_argsort_casefold_field_bits_) - 1;
-    sz_size_t nested_start = start_in_strings;
-    sz_size_t nested_end = start_in_strings;
-    while (nested_end != end_in_strings) {
-        if (top_count != 0 && nested_start >= top_count) break;
+    sz_size_t frames_count = 1;
+    frames[0].start = start_in_strings, frames[0].end = end_in_strings, frames[0].start_character = folded_skip_count;
+    while (frames_count) {
+        sz_sort_window_t const window = frames[--frames_count];
+        sz_sort_export_casefold_window_serial_(strings, global_pgrams, global_order, window.start, window.end,
+                                               window.start_character, reverse);
+        sz_sort_quicksort_pgrams_skylake_(global_pgrams, global_order, temporary_pgrams, temporary_order, window.start,
+                                          window.end, top_count);
 
-        sz_pgram_t current_pgram = global_pgrams[nested_start];
-        while (nested_end != end_in_strings && current_pgram == global_pgrams[nested_end]) ++nested_end;
+        sz_size_t nested_start = window.start;
+        sz_size_t nested_end = window.start;
+        while (nested_end != window.end) {
+            if (top_count != 0 && nested_start >= top_count) break;
 
-        sz_pgram_t const decoded_pgram = reverse ? ~current_pgram : current_pgram;
-        int has_multiple_strings = nested_end - nested_start > 1;
-        int has_more_characters_in_each = (decoded_pgram & lowest_field_mask) != 0;
-        if (has_multiple_strings && has_more_characters_in_each)
-            sz_sort_casefold_windows_skylake_(strings, global_pgrams, global_order, temporary_pgrams, temporary_order,
-                                              nested_start, nested_end, folded_skip_count + fields_per_pgram, top_count,
-                                              reverse);
-        else if (has_multiple_strings)
-            sz_order_indices_ascending_(global_order + nested_start, nested_end - nested_start);
-        nested_start = nested_end;
+            sz_pgram_t current_pgram = global_pgrams[nested_start];
+            while (nested_end != window.end && current_pgram == global_pgrams[nested_end]) ++nested_end;
+
+            sz_pgram_t const decoded_pgram = reverse ? ~current_pgram : current_pgram;
+            int has_multiple_strings = nested_end - nested_start > 1;
+            int has_more_characters_in_each = (decoded_pgram & lowest_field_mask) != 0;
+            if (has_multiple_strings && has_more_characters_in_each) {
+                sz_sort_window_t const nested = {nested_start, nested_end, window.start_character + fields_per_pgram};
+                frames[frames_count++] = nested;
+            }
+            else if (has_multiple_strings)
+                sz_order_indices_ascending_(global_order + nested_start, nested_end - nested_start);
+            nested_start = nested_end;
+        }
     }
 }
 
@@ -342,15 +352,16 @@ STRINGZILLA_API sz_status_t sz_sort_order_skylake(sz_strings_view_t const *strin
     }
 
     // Allocate memory for partitioning the elements around the pivot.
-    sz_size_t memory_usage = sizeof(sz_pgram_t) * count * 2 + sizeof(sz_size_t) * count;
+    sz_size_t memory_usage = sizeof(sz_pgram_t) * count * 2 + sizeof(sz_size_t) * count +
+                             sizeof(sz_sort_window_t) * count;
     sz_pgram_t *global_pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle, STRINGZILLA_NULL);
+    if (!global_pgrams) return sz_bad_alloc_k;
     sz_pgram_t *temporary_pgrams = global_pgrams + count;
     sz_size_t *temporary_order = (sz_size_t *)(temporary_pgrams + count);
-    if (!global_pgrams) return sz_bad_alloc_k;
+    sz_sort_window_t *frames = (sz_sort_window_t *)(temporary_order + count);
 
-    // Recursively sort the whole collection.
     sz_sort_byte_windows_skylake_(strings, global_pgrams, order, temporary_pgrams, temporary_order, //
-                                  0, count, 0, top_count, reverse);
+                                  0, count, 0, top_count, reverse, frames);
 
     // Free temporary storage.
     allocator->free(global_pgrams, memory_usage, allocator->handle, STRINGZILLA_NULL);
@@ -376,14 +387,16 @@ STRINGZILLA_API sz_status_t sz_sort_uncased_order_skylake(                    //
     // Same layout as the byte arg-sort - working pgrams (count) + the partition's two scratch regions. The
     // AVX-512 compress-store is exact, so no slack is needed. The folded export is stateless (re-folds the
     // prefix on demand), so unlike the earlier design there is no per-string cursor array.
-    sz_size_t const memory_usage = sizeof(sz_pgram_t) * count * 2 + sizeof(sz_size_t) * count;
+    sz_size_t const memory_usage = sizeof(sz_pgram_t) * count * 2 + sizeof(sz_size_t) * count +
+                                   sizeof(sz_sort_window_t) * count;
     sz_pgram_t *global_pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle, STRINGZILLA_NULL);
     if (!global_pgrams) return sz_bad_alloc_k;
     sz_pgram_t *temporary_pgrams = global_pgrams + count;
     sz_size_t *temporary_order = (sz_size_t *)(temporary_pgrams + count);
+    sz_sort_window_t *frames = (sz_sort_window_t *)(temporary_order + count);
 
     sz_sort_casefold_windows_skylake_(strings, global_pgrams, order, temporary_pgrams, temporary_order, 0, count, 0,
-                                      top_count, reverse);
+                                      top_count, reverse, frames);
 
     allocator->free(global_pgrams, memory_usage, allocator->handle, STRINGZILLA_NULL);
     return sz_success_k;

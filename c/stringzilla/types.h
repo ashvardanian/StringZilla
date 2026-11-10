@@ -688,10 +688,10 @@
 #endif
 #endif
 
-/*  RISC-V Vector Crypto (Zvk: Zvkned AES + Zvknhb SHA) — `-march=rv64gcv_zvkned_zvknhb`. */
+/*  RISC-V Vector Crypto (Zvkned, Zvknhb, Zvkg) — `-march=rv64gcv_zvkned_zvknhb_zvkg`. */
 #if !defined(STRINGZILLA_TARGET_RVVCRYPTO) || (STRINGZILLA_TARGET_RVVCRYPTO && !STRINGZILLA_ARCH_RISCV64_)
 #undef STRINGZILLA_TARGET_RVVCRYPTO
-#if STRINGZILLA_TARGET_RVV && defined(__riscv_zvkned) && defined(__riscv_zvknhb)
+#if STRINGZILLA_TARGET_RVV && defined(__riscv_zvkned) && defined(__riscv_zvknhb) && defined(__riscv_zvkg)
 #define STRINGZILLA_TARGET_RVVCRYPTO (1)
 #else
 #define STRINGZILLA_TARGET_RVVCRYPTO (0)

@@ -14,6 +14,7 @@ permissions:
 env:
   PYTHONUTF8: 1
   PYTHONFAULTHANDLER: 1
+  PYTHONMALLOC: debug
 
 jobs:
   build_wheels_native:
@@ -86,6 +87,44 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: cibw-wheels-linux-${{ matrix.arch }}
+          path: wheelhouse/*.whl
+          overwrite: true
+
+  # WebAssembly under Pyodide, the only wheel that runs in a browser. Each Pyodide release pins one CPython, so this
+  # tracks the identifiers `cibuildwheel` offers rather than the range the other jobs span.
+  build_wheels_pyodide:
+    name: Build Python Wheels for Pyodide cp${{ matrix.python-version }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJSON(inputs.smoke && '["314"]' || '["313", "314"]') }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Set Up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: 3.x
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==4.3.5
+      - name: Build Wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: cp${{ matrix.python-version }}-pyodide_wasm32
+          CIBW_PLATFORM: pyodide
+      # PyPI accepts only the PEP 783 spelling and rejects a wheel part-way through the upload, so catching the older
+      # tag here keeps a release from half-publishing.
+      - name: Require the PEP 783 Platform Tag
+        shell: bash
+        run: |
+          compgen -G "wheelhouse/*pyemscripten_*_wasm32.whl" > /dev/null \
+            || { echo "::error::not tagged pyemscripten_*_wasm32, PyPI will reject it"; exit 1; }
+      - name: Upload Wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: cibw-wheels-pyodide-cp${{ matrix.python-version }}
           path: wheelhouse/*.whl
           overwrite: true
 

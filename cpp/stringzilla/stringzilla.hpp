@@ -2410,6 +2410,7 @@ class string_slice {
      */
     size_type find(string_view_t other, size_type skip = 0) const noexcept {
         if (skip > length_) return npos;
+        if (other.empty()) return skip;
         auto ptr = best_result_<sz_find_best, sz_find_serial, sz_cptr_t>(start_ + skip, length_ - skip, other.data(),
                                                                          other.size());
         return ptr ? ptr - start_ : npos;
@@ -2443,6 +2444,7 @@ class string_slice {
      *  @return <tt>size()</tt> for an @b empty @p other.
      */
     size_type rfind(string_view_t other) const noexcept {
+        if (other.empty()) return length_;
         auto ptr = best_result_<sz_rfind_best, sz_rfind_serial, sz_cptr_t>(start_, length_, other.data(), other.size());
         return ptr ? ptr - start_ : npos;
     }
@@ -2453,7 +2455,8 @@ class string_slice {
      *  @return For an @b empty @p other, <tt>min(until, size())</tt>.
      */
     size_type rfind(string_view_t other, size_type until) const noexcept {
-        return until + other.size() < length_ ? substr(0, until + other.size()).rfind(other) : rfind(other);
+        return other.size() < length_ && until < length_ - other.size() ? substr(0, until + other.size()).rfind(other)
+                                                                        : rfind(other);
     }
 
     /**
@@ -2578,7 +2581,7 @@ class string_slice {
      *  @param[in] until The offset of the last character to be considered.
      */
     size_type find_last_of(byteset_t set, size_type until) const noexcept {
-        auto len = sz_min_of_two(until + 1, length_);
+        auto len = until < length_ ? until + 1 : length_;
         auto ptr = best_result_<sz_rfind_byteset_best, sz_rfind_byteset_serial, sz_cptr_t>(start_, len, &set.raw());
         return ptr ? ptr - start_ : npos;
     }

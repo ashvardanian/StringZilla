@@ -21,11 +21,8 @@
 #include <cstdio> // `stderr`
 #include <cstring> // `std::memcpy`
 
-#include <algorithm> // `std::transform`
-#include <iterator>  // `std::distance`
-#include <random>    // `std::random_device`
-#include <string>    // Baseline
-#include <vector>    // `std::vector`
+#include <string> // Baseline
+#include <vector> // `std::vector`
 
 #include <fmt/format.h>
 

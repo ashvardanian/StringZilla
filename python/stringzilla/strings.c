@@ -406,7 +406,10 @@ static PyObject *Strings_shuffled(Strings *self, PyObject *const *args, Py_ssize
             PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
             PyObject *value = args[positional_args_count + i];
             if (PyUnicode_CompareWithASCIIString(key, "seed") == 0 && !seed_object) { seed_object = value; }
-            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) { return NULL; }
+            else {
+                PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
+                return NULL;
+            }
         }
     }
 
@@ -552,7 +555,10 @@ static PyObject *Strings_sample(Strings *self, PyObject *const *args, Py_ssize_t
             PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
             PyObject *value = args[positional_args_count + i];
             if (PyUnicode_CompareWithASCIIString(key, "seed") == 0 && !seed_object) { seed_object = value; }
-            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) { return NULL; }
+            else {
+                PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
+                return NULL;
+            }
         }
     }
 
@@ -1316,28 +1322,87 @@ static sz_ptr_t sz_py_append_(sz_ptr_t target, sz_string_view_t string) {
 
 #pragma region Translation
 
-char const doc_translate[] =                                                                              //
-    "Perform transformation of a string using a look-up table.\n"                                         //
-    "\n"                                                                                                  //
-    "Args:\n"                                                                                             //
-    "  text (String or str or bytes): The string object.\n"                                               //
-    "  table (str or dict): A 256-byte string, or a dict mapping characters below U+0100 to such.\n"      //
-    "  inplace (bool, optional): If True, the string is modified in place, defaulting to False.\n"        //
-    "\n"                                                                                                  //
-    "  start (int, optional): The starting index for translation, defaulting to 0.\n"                     //
-    "  end (int, optional): The ending index for translation, defaulting to the string length.\n"         //
-    "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
-    "Returns:\n"                                                                                          //
-    "  Union[None, str, bytes]: If inplace is False, a translated copy of the [start, end) slice is\n"    //
-    "    returned, otherwise None.\n"                                                                     //
-    "Raises:\n"                                                                                           //
-    "  ValueError: If the table is not 256 bytes long, or a dict names a character above U+00FF.\n"       //
-    "  UnicodeDecodeError: If a str input translates into malformed UTF-8.\n"                             //
-    "  TypeError: If the table is not a string or dictionary.\n"                                          //
-    "\n"                                                                                                  //
-    "Example:\n"                                                                                          //
-    "  >>> sz.String('abc').translate({'a': 'A'}) == b'Abc'\n"                                            //
+char const doc_translate[] =                                                                               //
+    "Perform transformation of a string using a look-up table.\n"                                          //
+    "\n"                                                                                                   //
+    "Args:\n"                                                                                              //
+    "  text (String or str or bytes): The string object.\n"                                                //
+    "  table (str or dict): A 256-byte string, or a dict mapping characters below U+0100 to such.\n"       //
+    "  inplace (bool, optional): If True, the string is modified in place, defaulting to False.\n"         //
+    "\n"                                                                                                   //
+    "  start (int, optional): The starting index for translation, defaulting to 0.\n"                      //
+    "  end (int, optional): The ending index for translation, defaulting to the string length.\n"          //
+    "  out (writable buffer, optional): Byte storage for at least the [start, end) slice, keyword-only.\n" //
+    "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n"  //
+    "Returns:\n"                                                                                           //
+    "  Union[None, str, bytes, object]: The supplied out object, None if inplace is True, or else a\n"     //
+    "    translated copy of the [start, end) slice.\n"                                                     //
+    "Raises:\n"                                                                                            //
+    "  ValueError: If the table is not 256 bytes long, or a dict names a character above U+00FF, or out\n" //
+    "    is too short, partially overlaps the input, or comes with inplace=True.\n"                        //
+    "  UnicodeDecodeError: If a str input translates into malformed UTF-8.\n"                              //
+    "  TypeError: If the table is not a string or dictionary, or out does not hold bytes.\n"               //
+    "  BufferError: If out is read-only or not C-contiguous.\n"                                            //
+    "\n"                                                                                                   //
+    "Example:\n"                                                                                           //
+    "  >>> sz.String('abc').translate({'a': 'A'}) == b'Abc'\n"                                             //
     "  True";
+
+/** Translates the [start, end) slice of @p text_object into the caller-owned @p out_object.
+ *  Exports the source only after the output, as exporting the output may run Python code. */
+static PyObject *String_translate_into_(PyObject *text_object, PyObject *out_object, char const *look_up_table,
+                                        Py_ssize_t start, Py_ssize_t end, sz_capability_t capabilities) {
+    Py_buffer out_view;
+    if (sz_py_export_contiguous_buffer(out_object, "out", PyBUF_CONTIG, 1, 0, &out_view) != 0) return NULL;
+    PyObject *result = NULL;
+
+    // That code may have released a memoryview or resized the buffer a `String` points into.
+    PyObject *owner = text_object;
+    while (PyObject_TypeCheck(owner, &StringType) && ((String *)owner)->parent) owner = ((String *)owner)->parent;
+    if (PyMemoryView_Check(owner)) {
+        Py_buffer owner_view;
+        if (PyObject_GetBuffer(owner, &owner_view, PyBUF_FULL_RO) != 0) goto cleanup;
+        PyBuffer_Release(&owner_view);
+    }
+    sz_string_view_t text, backing;
+    if (!sz_py_export_string_like(text_object, &text.start, &text.length)) goto cleanup;
+    if (owner != text_object) {
+        if (!sz_py_export_string_like(owner, &backing.start, &backing.length)) goto cleanup;
+        sz_size_t const offset = (sz_size_t)text.start - (sz_size_t)backing.start;
+        if (offset > backing.length || text.length > backing.length - offset) {
+            PyErr_SetString(PyExc_ValueError, "input view no longer matches its backing buffer");
+            goto cleanup;
+        }
+    }
+
+    sz_size_t normalized_offset, normalized_length;
+    sz_ssize_clamp_interval(text.length, start, end, &normalized_offset, &normalized_length);
+    text.start += normalized_offset;
+    text.length = normalized_length;
+    if ((sz_size_t)out_view.len < text.length) {
+        PyErr_Format(PyExc_ValueError, "out holds %zd entries, need %zu", out_view.len, text.length);
+        goto cleanup;
+    }
+    sz_size_t const source_address = (sz_size_t)text.start, output_address = (sz_size_t)out_view.buf;
+    sz_size_t const distance = source_address < output_address ? output_address - source_address
+                                                               : source_address - output_address;
+    if (distance != 0 && distance < text.length) {
+        PyErr_SetString(PyExc_ValueError, "out must not partially overlap the input");
+        goto cleanup;
+    }
+
+    sz_status_t const status = sz_py_lookup((sz_ptr_t)out_view.buf, text.start, text.length, look_up_table,
+                                            capabilities);
+    if (status != sz_success_k) {
+        sz_py_raise_status(status, "translate()");
+        goto cleanup;
+    }
+    Py_INCREF(out_object);
+    result = out_object;
+cleanup:
+    PyBuffer_Release(&out_view);
+    return result;
+}
 
 PyObject *String_like_translate(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                 PyObject *args_names_tuple) {
@@ -1352,6 +1417,7 @@ PyObject *String_like_translate(PyObject *self, PyObject *const *args, Py_ssize_
     PyObject *inplace_object = positional_args_count > !is_member + 1 ? args[!is_member + 1] : NULL;
     PyObject *start_object = positional_args_count > !is_member + 2 ? args[!is_member + 2] : NULL;
     PyObject *end_object = positional_args_count > !is_member + 3 ? args[!is_member + 3] : NULL;
+    PyObject *out_object = NULL;
     PyObject *capabilities_object = NULL;
 
     // Optional keyword arguments
@@ -1363,10 +1429,14 @@ PyObject *String_like_translate(PyObject *self, PyObject *const *args, Py_ssize_
             if (PyUnicode_CompareWithASCIIString(key, "inplace") == 0 && !inplace_object) { inplace_object = value; }
             else if (PyUnicode_CompareWithASCIIString(key, "start") == 0 && !start_object) { start_object = value; }
             else if (PyUnicode_CompareWithASCIIString(key, "end") == 0 && !end_object) { end_object = value; }
+            else if (PyUnicode_CompareWithASCIIString(key, "out") == 0 && !out_object) { out_object = value; }
             else if (PyUnicode_CompareWithASCIIString(key, "capabilities") == 0 && !capabilities_object) {
                 capabilities_object = value;
             }
-            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) return NULL;
+            else {
+                PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
+                return NULL;
+            }
         }
     }
     sz_capability_t capabilities;
@@ -1383,20 +1453,26 @@ PyObject *String_like_translate(PyObject *self, PyObject *const *args, Py_ssize_
         return NULL;
     }
 
+    int is_inplace = inplace_object ? PyObject_IsTrue(inplace_object) : 0;
+    if (is_inplace == -1) {
+        PyErr_SetString(PyExc_TypeError, "The inplace argument must be a boolean");
+        return NULL;
+    }
+    int const has_out = out_object && out_object != Py_None;
+    if (has_out && is_inplace) {
+        PyErr_SetString(PyExc_ValueError, "out and inplace=True cannot be combined");
+        return NULL;
+    }
+
     sz_string_view_t text;
-    if (!sz_py_export_string_like(text_object, &text.start, &text.length)) {
+    if (!has_out && !sz_py_export_string_like(text_object, &text.start, &text.length)) {
         wrap_current_exception("First argument must be string-like");
         return NULL;
     }
 
     sz_align_(64) char look_up_table[256];
     if (sz_py_export_lookup_table_(table_object, look_up_table) != 0) return NULL;
-
-    int is_inplace = inplace_object ? PyObject_IsTrue(inplace_object) : 0;
-    if (is_inplace == -1) {
-        PyErr_SetString(PyExc_TypeError, "The inplace argument must be a boolean");
-        return NULL;
-    }
+    if (has_out) return String_translate_into_(text_object, out_object, look_up_table, start, end, capabilities);
 
     // Clamp [start, end) into the string, so negative, out-of-range or inverted windows fit
     sz_size_t normalized_offset, normalized_length;

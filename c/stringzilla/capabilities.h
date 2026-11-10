@@ -117,7 +117,7 @@ typedef sz_u64_t sz_capability_t;
 /** RISC-V Vector extension 1.0, with length-agnostic registers. */
 #define sz_cap_rvv_k ((sz_capability_t)1 << 12)
 
-/** RISC-V Vector Crypto: the Zvkned AES and Zvknhb SHA extensions. */
+/** RISC-V Vector Crypto: the Zvkned AES, Zvknhb SHA-2 and Zvkg GHASH extensions. */
 #define sz_cap_rvvcrypto_k ((sz_capability_t)1 << 13)
 
 /** WebAssembly 128-bit SIMD. */
@@ -970,7 +970,7 @@ STRINGZILLA_CONSTEXPR sz_capability_t sz_capabilities_implied_cpu_(void) {
 #if defined(__riscv_vector)
     capabilities |= sz_cap_rvv_k;
 #endif
-#if defined(__riscv_vector) && defined(__riscv_zvkned) && defined(__riscv_zvknhb)
+#if defined(__riscv_vector) && defined(__riscv_zvkned) && defined(__riscv_zvknhb) && defined(__riscv_zvkg)
     capabilities |= sz_cap_rvvcrypto_k;
 #endif
 #if defined(__loongarch_asx)
@@ -1167,6 +1167,7 @@ STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_riscv64_(void) {
     unsigned long const hwcap_isa_v = 1ul << ('V' - 'A'); // COMPAT_HWCAP_ISA_V, RVV 1.0
     long const riscv_hwprobe = 258;                       // __NR_riscv_hwprobe
     long const hwprobe_extensions_key = 4;                // RISCV_HWPROBE_KEY_IMA_EXT_0
+    unsigned long long const hwprobe_zvkg = 1ull << 20;   // RISCV_HWPROBE_EXT_ZVKG, vector GHASH
     unsigned long long const hwprobe_zvkned = 1ull << 21; // RISCV_HWPROBE_EXT_ZVKNED, vector AES
     unsigned long long const hwprobe_zvknhb = 1ull << 23; // RISCV_HWPROBE_EXT_ZVKNHB, vector SHA-2
     unsigned long hwcap = getauxval(AT_HWCAP);
@@ -1182,7 +1183,10 @@ STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_riscv64_(void) {
         // `long syscall(SYS_riscv_hwprobe, pairs, pair_count, cpu_count, cpus, flags)`.
         long const probed = syscall(riscv_hwprobe, pairs, (unsigned long)1, (unsigned long)0, (void *)0,
                                     (unsigned long)0);
-        if (probed == 0 && (pairs[0].value & hwprobe_zvkned) && (pairs[0].value & hwprobe_zvknhb))
+        // RVA23 sells AES and SHA-2 only inside `Zvkng`, which bundles GHASH, so one capability
+        // covers all three.
+        if (probed == 0 && (pairs[0].value & hwprobe_zvkned) && (pairs[0].value & hwprobe_zvknhb) &&
+            (pairs[0].value & hwprobe_zvkg))
             caps = (sz_capability_t)(caps | sz_cap_rvvcrypto_k);
     }
     return caps;

@@ -280,37 +280,41 @@ STRINGZILLA_INLINE sz_status_t sz_sort_pgrams_haswell_(sz_pgram_t *pgrams, sz_si
 STRINGZILLA_OUTLINED_ void sz_sort_byte_windows_haswell_(
     sz_strings_view_t const *const strings, sz_pgram_t *const global_pgrams, sz_size_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_size_t *const temporary_order, sz_size_t const start_in_strings,
-    sz_size_t const end_in_strings, sz_size_t const start_character, sz_size_t const top_count,
-    sz_bool_t const reverse) {
-
-    sz_sort_export_byte_window_serial_(strings, global_pgrams, global_order, start_in_strings, end_in_strings,
-                                       start_character, reverse);
-
-    sz_sort_quicksort_pgrams_haswell_(global_pgrams, global_order, temporary_pgrams, temporary_order, start_in_strings,
-                                      end_in_strings, top_count);
+    sz_size_t const end_in_strings, sz_size_t const start_character, sz_size_t const top_count, sz_bool_t const reverse,
+    sz_sort_window_t *const frames) {
 
     sz_size_t const pgram_capacity = sizeof(sz_pgram_t) - 1;
-    sz_size_t nested_start = start_in_strings;
-    sz_size_t nested_end = start_in_strings;
-    while (nested_end != end_in_strings) {
-        if (top_count != 0 && nested_start >= top_count) break;
+    sz_size_t frames_count = 1;
+    frames[0].start = start_in_strings, frames[0].end = end_in_strings, frames[0].start_character = start_character;
+    while (frames_count) {
+        sz_sort_window_t const window = frames[--frames_count];
+        sz_sort_export_byte_window_serial_(strings, global_pgrams, global_order, window.start, window.end,
+                                           window.start_character, reverse);
+        sz_sort_quicksort_pgrams_haswell_(global_pgrams, global_order, temporary_pgrams, temporary_order, window.start,
+                                          window.end, top_count);
 
-        sz_pgram_t current_pgram = global_pgrams[nested_start];
-        while (nested_end != end_in_strings && current_pgram == global_pgrams[nested_end]) ++nested_end;
+        sz_size_t nested_start = window.start;
+        sz_size_t nested_end = window.start;
+        while (nested_end != window.end) {
+            if (top_count != 0 && nested_start >= top_count) break;
 
-        // x86 is always little-endian, so the packed length byte is the least-significant byte of the
-        // (byte-reversed) pgram - a plain cast reads it with no endianness branch.
-        sz_pgram_t const length_source = reverse ? ~current_pgram : current_pgram;
-        sz_size_t current_pgram_length = (sz_size_t)(sz_u8_t)length_source;
-        int has_multiple_strings = nested_end - nested_start > 1;
-        int has_more_characters_in_each = current_pgram_length == pgram_capacity;
-        if (has_multiple_strings && has_more_characters_in_each)
-            sz_sort_byte_windows_haswell_(strings, global_pgrams, global_order, temporary_pgrams, temporary_order,
-                                          nested_start, nested_end, start_character + pgram_capacity, top_count,
-                                          reverse);
-        else if (has_multiple_strings)
-            sz_order_indices_ascending_(global_order + nested_start, nested_end - nested_start);
-        nested_start = nested_end;
+            sz_pgram_t current_pgram = global_pgrams[nested_start];
+            while (nested_end != window.end && current_pgram == global_pgrams[nested_end]) ++nested_end;
+
+            // x86 is always little-endian, so the packed length byte is the least-significant byte
+            // of the (byte-reversed) pgram - a plain cast reads it with no endianness branch.
+            sz_pgram_t const length_source = reverse ? ~current_pgram : current_pgram;
+            sz_size_t current_pgram_length = (sz_size_t)(sz_u8_t)length_source;
+            int has_multiple_strings = nested_end - nested_start > 1;
+            int has_more_characters_in_each = current_pgram_length == pgram_capacity;
+            if (has_multiple_strings && has_more_characters_in_each) {
+                sz_sort_window_t const nested = {nested_start, nested_end, window.start_character + pgram_capacity};
+                frames[frames_count++] = nested;
+            }
+            else if (has_multiple_strings)
+                sz_order_indices_ascending_(global_order + nested_start, nested_end - nested_start);
+            nested_start = nested_end;
+        }
     }
 }
 
@@ -321,35 +325,41 @@ STRINGZILLA_OUTLINED_ void sz_sort_casefold_windows_haswell_(
     sz_strings_view_t const *const strings, sz_pgram_t *const global_pgrams, sz_size_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_size_t *const temporary_order, sz_size_t const start_in_strings,
     sz_size_t const end_in_strings, sz_size_t const folded_skip_count, sz_size_t const top_count,
-    sz_bool_t const reverse) {
+    sz_bool_t const reverse, sz_sort_window_t *const frames) {
 
-    sz_sort_export_casefold_window_serial_(strings, global_pgrams, global_order, start_in_strings, end_in_strings,
-                                           folded_skip_count, reverse);
-    sz_sort_quicksort_pgrams_haswell_(global_pgrams, global_order, temporary_pgrams, temporary_order, start_in_strings,
-                                      end_in_strings, top_count);
-
-    // A window's lowest 21-bit field is non-zero only when it was filled to capacity, so the equal group may
-    // still carry more folded code-points and must recurse one window deeper (mirrors the serial folded sort).
+    // A window's lowest 21-bit field is non-zero only when it was filled to capacity, so the equal
+    // group may still carry more folded code-points and must walk one window deeper, as the serial
+    // folded sort does.
     sz_size_t const fields_per_pgram = sz_argsort_casefold_fields_(sz_pgram_t);
     sz_pgram_t const lowest_field_mask = ((sz_pgram_t)1 << sz_argsort_casefold_field_bits_) - 1;
-    sz_size_t nested_start = start_in_strings;
-    sz_size_t nested_end = start_in_strings;
-    while (nested_end != end_in_strings) {
-        if (top_count != 0 && nested_start >= top_count) break;
+    sz_size_t frames_count = 1;
+    frames[0].start = start_in_strings, frames[0].end = end_in_strings, frames[0].start_character = folded_skip_count;
+    while (frames_count) {
+        sz_sort_window_t const window = frames[--frames_count];
+        sz_sort_export_casefold_window_serial_(strings, global_pgrams, global_order, window.start, window.end,
+                                               window.start_character, reverse);
+        sz_sort_quicksort_pgrams_haswell_(global_pgrams, global_order, temporary_pgrams, temporary_order, window.start,
+                                          window.end, top_count);
 
-        sz_pgram_t current_pgram = global_pgrams[nested_start];
-        while (nested_end != end_in_strings && current_pgram == global_pgrams[nested_end]) ++nested_end;
+        sz_size_t nested_start = window.start;
+        sz_size_t nested_end = window.start;
+        while (nested_end != window.end) {
+            if (top_count != 0 && nested_start >= top_count) break;
 
-        sz_pgram_t const decoded_pgram = reverse ? ~current_pgram : current_pgram;
-        int has_multiple_strings = nested_end - nested_start > 1;
-        int has_more_characters_in_each = (decoded_pgram & lowest_field_mask) != 0;
-        if (has_multiple_strings && has_more_characters_in_each)
-            sz_sort_casefold_windows_haswell_(strings, global_pgrams, global_order, temporary_pgrams, temporary_order,
-                                              nested_start, nested_end, folded_skip_count + fields_per_pgram, top_count,
-                                              reverse);
-        else if (has_multiple_strings)
-            sz_order_indices_ascending_(global_order + nested_start, nested_end - nested_start);
-        nested_start = nested_end;
+            sz_pgram_t current_pgram = global_pgrams[nested_start];
+            while (nested_end != window.end && current_pgram == global_pgrams[nested_end]) ++nested_end;
+
+            sz_pgram_t const decoded_pgram = reverse ? ~current_pgram : current_pgram;
+            int has_multiple_strings = nested_end - nested_start > 1;
+            int has_more_characters_in_each = (decoded_pgram & lowest_field_mask) != 0;
+            if (has_multiple_strings && has_more_characters_in_each) {
+                sz_sort_window_t const nested = {nested_start, nested_end, window.start_character + fields_per_pgram};
+                frames[frames_count++] = nested;
+            }
+            else if (has_multiple_strings)
+                sz_order_indices_ascending_(global_order + nested_start, nested_end - nested_start);
+            nested_start = nested_end;
+        }
     }
 }
 
@@ -361,6 +371,7 @@ STRINGZILLA_API sz_status_t sz_sort_order_haswell(sz_strings_view_t const *strin
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_size_t count = strings->count;
     for (sz_size_t strings_index = 0; strings_index != count; ++strings_index) order[strings_index] = strings_index;
+    if (count < 2) return sz_success_k;
 
     if (count <= 32 && !reverse) {
         sz_sort_insertion_(strings, order);
@@ -380,14 +391,16 @@ STRINGZILLA_API sz_status_t sz_sort_order_haswell(sz_strings_view_t const *strin
     //   - `temporary_order`  : the matching order scratch                       → `count + slack`
     sz_size_t const slack = sz_sort_partition_slack_haswell_;
     sz_size_t const memory_usage = sizeof(sz_pgram_t) * (count + (count + slack)) // global + pgram scratch
-                                   + sizeof(sz_size_t) * (count + slack);         // order scratch
+                                   + sizeof(sz_size_t) * (count + slack)          // order scratch
+                                   + sizeof(sz_sort_window_t) * count;            // window frames
     sz_pgram_t *global_pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle, STRINGZILLA_NULL);
+    if (!global_pgrams) return sz_bad_alloc_k;
     sz_pgram_t *temporary_pgrams = global_pgrams + count;
     sz_size_t *temporary_order = (sz_size_t *)(temporary_pgrams + count + slack);
-    if (!global_pgrams) return sz_bad_alloc_k;
+    sz_sort_window_t *frames = (sz_sort_window_t *)(temporary_order + count + slack);
 
     sz_sort_byte_windows_haswell_(strings, global_pgrams, order, temporary_pgrams, temporary_order, 0, count, 0,
-                                  top_count, reverse);
+                                  top_count, reverse, frames);
 
     allocator->free(global_pgrams, memory_usage, allocator->handle, STRINGZILLA_NULL);
     return sz_success_k;
@@ -414,14 +427,16 @@ STRINGZILLA_API sz_status_t sz_sort_uncased_order_haswell(                    //
     // earlier design there is no per-string cursor array.
     sz_size_t const slack = sz_sort_partition_slack_haswell_;
     sz_size_t const memory_usage = sizeof(sz_pgram_t) * (count + (count + slack)) // global + pgram scratch
-                                   + sizeof(sz_size_t) * (count + slack);         // order scratch
+                                   + sizeof(sz_size_t) * (count + slack)          // order scratch
+                                   + sizeof(sz_sort_window_t) * count;            // window frames
     sz_pgram_t *global_pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle, STRINGZILLA_NULL);
     if (!global_pgrams) return sz_bad_alloc_k;
     sz_pgram_t *temporary_pgrams = global_pgrams + count;
     sz_size_t *temporary_order = (sz_size_t *)(temporary_pgrams + count + slack);
+    sz_sort_window_t *frames = (sz_sort_window_t *)(temporary_order + count + slack);
 
     sz_sort_casefold_windows_haswell_(strings, global_pgrams, order, temporary_pgrams, temporary_order, 0, count, 0,
-                                      top_count, reverse);
+                                      top_count, reverse, frames);
 
     allocator->free(global_pgrams, memory_usage, allocator->handle, STRINGZILLA_NULL);
     return sz_success_k;

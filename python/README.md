@@ -271,11 +271,15 @@ assert sz.String("hi!!").rstrip("!") == "hi"
 
 ### Translating
 
-`translate(table, inplace=False, start=0, end=len)` applies a byte-to-byte mapping in a single pass.
+`translate(table, inplace=False, start=0, end=len, *, out=None)` applies a byte-to-byte mapping in a single pass.
 `table` is either a 256-byte string/bytes lookup table or a `dict` mapping bytes to bytes, spelled as characters below U+0100.
 A `str` input is translated as its UTF-8 bytes and decoded back, so a table that breaks the encoding raises `UnicodeDecodeError`.
-With `inplace=True` the buffer is rewritten in place and `None` is returned; otherwise a new `bytes`/`str` is returned.
 A non-256-byte table raises `ValueError`; a non-string, non-dict table raises `TypeError`.
+
+Without `out`, the call returns a new `bytes`/`str`, or rewrites the input and returns `None` with `inplace=True`.
+Pass a writable, C-contiguous byte buffer as `out` to write into caller-owned storage and return that same object.
+It must hold at least the selected input length; extra bytes remain untouched.
+Exact aliasing is supported, but partial overlap and combining `out` with `inplace=True` raise `ValueError`.
 
 ```python
 import stringzilla as sz
@@ -284,6 +288,10 @@ assert sz.String("abc").translate({"a": "A"}) == b"Abc"
 
 table = bytes(range(256)).translate(bytes.maketrans(b"abc", b"ABC"))
 assert sz.String("cabbage").translate(table) == b"CABBAge"
+
+out = bytearray(7)
+assert sz.translate(b"cabbage", table, out=out) is out
+assert out == b"CABBAge"
 ```
 
 `Strings.translate(table)` takes the same tables and maps every string of a collection in one call, returning a new `Strings`, as [Escaping and Normalizing Collections](#escaping-and-normalizing-collections) describes.

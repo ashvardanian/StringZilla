@@ -585,7 +585,10 @@ static PyObject *String_partition_implementation_(PyObject *self, PyObject *cons
         return NULL;
     }
 
-    // If separator is not found, return a tuple (self, "", "")
+    // Module-level functions receive the module as `self`, so parts reference the text argument.
+    PyObject *owner = self != NULL && PyObject_TypeCheck(self, &StringType) ? self : args[0];
+
+    // Put the unmatched text first for partition and last for rpartition.
     if (separator_index == -1) {
         PyObject *empty_str1 = String_new(&StringType, Py_None, Py_None);
         PyObject *empty_str2 = String_new(&StringType, Py_None, Py_None);
@@ -601,10 +604,10 @@ static PyObject *String_partition_implementation_(PyObject *self, PyObject *cons
             Py_DECREF(empty_str2);
             return NULL;
         }
-        Py_INCREF(self);
-        PyTuple_SET_ITEM(result_tuple, 0, self);
+        Py_INCREF(owner);
+        PyTuple_SET_ITEM(result_tuple, is_reverse ? 2 : 0, owner);
         PyTuple_SET_ITEM(result_tuple, 1, empty_str1);
-        PyTuple_SET_ITEM(result_tuple, 2, empty_str2);
+        PyTuple_SET_ITEM(result_tuple, is_reverse ? 0 : 2, empty_str2);
         return result_tuple;
     }
 
@@ -619,16 +622,16 @@ static PyObject *String_partition_implementation_(PyObject *self, PyObject *cons
         return NULL;
     }
 
-    before->parent = self, before->memory.start = text.start, before->memory.length = separator_index;
-    middle->parent = self, middle->memory.start = text.start + separator_index,
+    before->parent = owner, before->memory.start = text.start, before->memory.length = separator_index;
+    middle->parent = owner, middle->memory.start = text.start + separator_index,
     middle->memory.length = separator.length;
-    after->parent = self, after->memory.start = text.start + separator_index + separator.length,
+    after->parent = owner, after->memory.start = text.start + separator_index + separator.length,
     after->memory.length = text.length - separator_index - separator.length;
 
     // All parts reference the same parent
-    Py_INCREF(self);
-    Py_INCREF(self);
-    Py_INCREF(self);
+    Py_INCREF(owner);
+    Py_INCREF(owner);
+    Py_INCREF(owner);
 
     // Build the result tuple
     result_tuple = PyTuple_New(3);
@@ -1464,7 +1467,10 @@ static PyObject *String_split_with_known_callback(PyObject *self, PyObject *cons
             else if (PyUnicode_CompareWithASCIIString(key, "capabilities") == 0 && !capabilities_object) {
                 capabilities_object = value;
             }
-            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) return NULL;
+            else {
+                PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
+                return NULL;
+            }
         }
     }
     sz_capability_t capabilities;
@@ -1786,7 +1792,10 @@ PyObject *String_like_splitlines(PyObject *self, PyObject *const *args, Py_ssize
             else if (PyUnicode_CompareWithASCIIString(key, "capabilities") == 0 && !capabilities_object) {
                 capabilities_object = value;
             }
-            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) { return NULL; }
+            else {
+                PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
+                return NULL;
+            }
         }
     }
     sz_capability_t capabilities;
@@ -1887,7 +1896,10 @@ PyObject *String_like_lstrip(PyObject *self, PyObject *const *args, Py_ssize_t p
             else if (PyUnicode_CompareWithASCIIString(key, "capabilities") == 0 && !capabilities_object) {
                 capabilities_object = value;
             }
-            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) return NULL;
+            else {
+                PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
+                return NULL;
+            }
         }
     }
     sz_capability_t capabilities;
@@ -1987,7 +1999,10 @@ PyObject *String_like_rstrip(PyObject *self, PyObject *const *args, Py_ssize_t p
             else if (PyUnicode_CompareWithASCIIString(key, "capabilities") == 0 && !capabilities_object) {
                 capabilities_object = value;
             }
-            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) return NULL;
+            else {
+                PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
+                return NULL;
+            }
         }
     }
     sz_capability_t capabilities;
@@ -2087,7 +2102,10 @@ PyObject *String_like_strip(PyObject *self, PyObject *const *args, Py_ssize_t po
             else if (PyUnicode_CompareWithASCIIString(key, "capabilities") == 0 && !capabilities_object) {
                 capabilities_object = value;
             }
-            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) return NULL;
+            else {
+                PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
+                return NULL;
+            }
         }
     }
     sz_capability_t capabilities;

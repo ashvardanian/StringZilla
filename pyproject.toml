@@ -3,7 +3,8 @@
 #
 #   stringzilla        CPython 3.12-3.15, 3.14t and 3.15t (free-threaded)
 #                      Linux `manylinux` + `musllinux` on x86_64, aarch64, i686, ppc64le, s390x,
-#                      armv7l, riscv64; macOS x86_64 + arm64; Windows AMD64, x86, ARM64.
+#                      armv7l, riscv64; macOS x86_64 + arm64; Windows AMD64, x86, ARM64;
+#                      Pyodide wasm32 for CPython 3.13 and 3.14.
 #
 # Every wheel runs the full suite on the interpreter it was built for.
 [build-system]
@@ -118,6 +119,8 @@ CMAKE_BUILD_PARALLEL_LEVEL = "2"
 
 [tool.cibuildwheel.linux]
 before-build = ["rm -rf {project}/build_python"]
+# The jobs set `CIBW_ENVIRONMENT_LINUX`, so the allocator checks are forwarded into the containers by name.
+environment-pass = ["PYTHONMALLOC"]
 repair-wheel-command = "auditwheel repair --lib-sdir . -w {dest_dir} {wheel}"
 
 # Use more recent images for the most popular SIMD-capable CPU architectures, to have access to newer compilers.
@@ -134,6 +137,11 @@ musllinux-i686-image = "musllinux_1_2"
 musllinux-ppc64le-image = "musllinux_1_2"
 musllinux-s390x-image = "musllinux_1_2"
 musllinux-x86_64-image = "musllinux_1_2"
+# The riscv64 images `cibuildwheel` pins carry `patchelf` 0.17, which corrupts an extension while rewriting its RPATH:
+# the entry point lands below `.text` and the import dies with SIGILL, and `auditwheel repair` above rewrites RPATHs.
+# Dated tags hold the glibc 2.39 floor and the wheel tags, and only move `patchelf` to 0.19.
+manylinux-riscv64-image = "quay.io/pypa/manylinux_2_39_riscv64:2026.09.01-1"
+musllinux-riscv64-image = "quay.io/pypa/musllinux_1_2_riscv64:2026.09.01-1"
 
 # Different manylinux images use different package managers.
 # Try yum (CentOS/RHEL), dnf (Fedora), or apt-get (Debian/Ubuntu).
@@ -149,6 +157,23 @@ before-all = ["""
 [[tool.cibuildwheel.overrides]]
 before-all = "apk add --update wget python3-dev"
 select = "*-musllinux*"
+
+# The RVV probe compiles only where the toolchain scopes `target("arch=+v")` per function, which GCC ignores on
+# RISC-V and Clang honours, so the glibc leg builds with Clang to ship vector kernels. Config settings, unlike the
+# environment, survive the `CIBW_ENVIRONMENT_LINUX` the emulated job sets. The musl leg keeps GCC and ships scalar.
+[[tool.cibuildwheel.overrides]]
+before-all = "dnf install -y glibc-devel wget python3-devel clang lld"
+select = "*-manylinux*_riscv64"
+[tool.cibuildwheel.overrides.config-settings]
+"cmake.define.CMAKE_C_COMPILER" = "clang"
+"cmake.define.CMAKE_CXX_COMPILER" = "clang++"
+"cmake.define.CMAKE_LINKER_TYPE" = "LLD"
+
+# Pyodide's Emscripten toolchain names the processor `x86` unless told otherwise, which the platform detection takes
+# for no known architecture, rather than for the WebAssembly whose SIMD floor `types.h` reads off the predefined macros.
+[[tool.cibuildwheel.overrides]]
+config-settings = { "cmake.define.EMSCRIPTEN_SYSTEM_PROCESSOR" = "wasm32" }
+select = "*-pyodide*"
 
 [tool.cibuildwheel.macos]
 archs = ["x86_64", "arm64"]

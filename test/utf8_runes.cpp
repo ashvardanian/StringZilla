@@ -22,11 +22,8 @@
 
 #include <cstring> // `std::memcpy`
 
-#include <algorithm> // `std::transform`
-#include <iterator>  // `std::distance`
-#include <random>    // `std::random_device`
-#include <string>    // Baseline
-#include <vector>    // `std::vector`
+#include <string> // Baseline
+#include <vector> // `std::vector`
 
 #include "cross.hpp" // `check_utf8_runes_unit_`, `utf8_runes_backend_t`, `random_valid_utf8_`
 

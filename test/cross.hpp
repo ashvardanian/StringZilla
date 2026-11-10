@@ -3278,6 +3278,11 @@ inline void check_sort_equivalence_(test_context_t &context, sort_backend_t cons
             std::shuffle(mixed.begin(), mixed.end(), generator);
             datasets.push_back(mixed);
         }
+        { // A shared prefix spanning dozens of pgram windows, decided only at the tail.
+            strs_t shared_prefix;
+            for (std::size_t i = 0; i < 33; ++i) shared_prefix.push_back(std::string(400, 'a') + std::to_string(i));
+            datasets.push_back(shared_prefix);
+        }
 
         for (std::size_t dataset_index = 0; dataset_index != datasets.size(); ++dataset_index) {
             strs_t const &dataset = datasets[dataset_index];

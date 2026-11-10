@@ -20,21 +20,15 @@
 #include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
 #endif
 
-#include <cstdint> // `std::uintptr_t`
 #include <cstdio>  // `stderr`
 #include <cstring> // `std::memcpy`
 
 #include <algorithm>     // `std::transform`
-#include <iterator>      // `std::distance`
-#include <map>           // `std::map`
-#include <memory>        // `std::allocator`
 #include <numeric>       // `std::accumulate`
 #include <random>        // `std::random_device`
 #include <set>           // `std::set`
-#include <sstream>       // `std::ostringstream`
 #include <string>        // `std::string`
 #include <string_view>   // `std::string_view`
-#include <unordered_map> // `std::unordered_map`
 #include <unordered_set> // `std::unordered_set`
 #include <vector>        // `std::vector`
 
@@ -140,6 +134,20 @@ void test_sort_unit() {
     let_verify(
         auto result = sz::argsort(strs_t({"test", "t", "testing", "te", "tests", "testify", "tea", "team"})).value,
         result == order_t({1u, 3u, 6u, 7u, 0u, 5u, 2u, 4u}));
+
+    // A prefix spanning dozens of pgram windows, so only the numeric tail decides the order.
+    {
+        strs_t shared_prefix;
+        for (std::size_t i = 0; i < 33; ++i) shared_prefix.push_back(std::string(400, 'a') + std::to_string(i));
+        order_t expected(shared_prefix.size());
+        std::iota(expected.begin(), expected.end(), 0u);
+        std::sort(expected.begin(), expected.end(),
+                  [&](sz_size_t first, sz_size_t second) { return shared_prefix[first] < shared_prefix[second]; });
+        verify(sz::argsort(shared_prefix).value == expected);
+        verify(sz::argsort_utf8_uncased(shared_prefix).value == expected);
+        std::reverse(expected.begin(), expected.end());
+        verify(sz::argsort(shared_prefix, 0, true).value == expected);
+    }
 
     // Single character vs multi-character strings with varied patterns
     let_verify(auto result = sz::argsort(strs_t({"zebra", "z", "zoo", "zip", "zap", "a", "apple", "ant", "ark", "mango",

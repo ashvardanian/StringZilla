@@ -1212,8 +1212,9 @@ def translate(
     start: int = 0,
     end: int | None = None,
     *,
+    out: _Buffer | None = None,
     capabilities: Capability | None = None,
-) -> None | str | bytes:
+) -> None | str | bytes | _Buffer:
     """Perform transformation of a string using a look-up table.
 
     Args:
@@ -1223,14 +1224,17 @@ def translate(
 
       start (int, optional): The starting index for translation, defaulting to 0.
       end (int, optional): The ending index for translation, defaulting to the string length.
+      out (writable buffer, optional): Byte storage for at least the [start, end) slice, keyword-only.
       capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.
     Returns:
-      Union[None, str, bytes]: If inplace is False, a translated copy of the [start, end) slice is
-        returned, otherwise None.
+      Union[None, str, bytes, object]: The supplied out object, None if inplace is True, or else a
+        translated copy of the [start, end) slice.
     Raises:
-      ValueError: If the table is not 256 bytes long, or a dict names a character above U+00FF.
+      ValueError: If the table is not 256 bytes long, or a dict names a character above U+00FF, or out
+        is too short, partially overlaps the input, or comes with inplace=True.
       UnicodeDecodeError: If a str input translates into malformed UTF-8.
-      TypeError: If the table is not a string or dictionary.
+      TypeError: If the table is not a string or dictionary, or out does not hold bytes.
+      BufferError: If out is read-only or not C-contiguous.
 
     Example:
       >>> sz.String('abc').translate({'a': 'A'}) == b'Abc'
@@ -4358,8 +4362,9 @@ class String:
         start: int = 0,
         end: int | None = None,
         *,
+        out: _Buffer | None = None,
         capabilities: Capability | None = None,
-    ) -> None | str | bytes:
+    ) -> None | str | bytes | _Buffer:
         """Perform transformation of a string using a look-up table.
 
         Args:
@@ -4368,14 +4373,17 @@ class String:
 
           start (int, optional): The starting index for translation, defaulting to 0.
           end (int, optional): The ending index for translation, defaulting to the string length.
+          out (writable buffer, optional): Byte storage for at least the [start, end) slice, keyword-only.
           capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.
         Returns:
-          Union[None, str, bytes]: If inplace is False, a translated copy of the [start, end) slice is
-            returned, otherwise None.
+          Union[None, str, bytes, object]: The supplied out object, None if inplace is True, or else a
+            translated copy of the [start, end) slice.
         Raises:
-          ValueError: If the table is not 256 bytes long, or a dict names a character above U+00FF.
+          ValueError: If the table is not 256 bytes long, or a dict names a character above U+00FF, or out
+            is too short, partially overlaps the input, or comes with inplace=True.
           UnicodeDecodeError: If a str input translates into malformed UTF-8.
-          TypeError: If the table is not a string or dictionary.
+          TypeError: If the table is not a string or dictionary, or out does not hold bytes.
+          BufferError: If out is read-only or not C-contiguous.
 
         Example:
           >>> sz.String('abc').translate({'a': 'A'}) == b'Abc'

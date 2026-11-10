@@ -31,11 +31,9 @@
 #include <memory>        // `std::allocator`
 #include <numeric>       // `std::accumulate`
 #include <random>        // `std::random_device`
-#include <set>           // `std::set`
 #include <span>          // `std::span`
 #include <sstream>       // `std::ostringstream`
 #include <unordered_map> // `std::unordered_map`
-#include <unordered_set> // `std::unordered_set`
 #include <vector>        // `std::vector`
 
 #include <string>      // Baseline
@@ -647,6 +645,8 @@ void test_stl_reads_unit() {
     verify(str("hello").rfind('l', 1) == str::npos);
 
     // Substring search in normal and reverse directions.
+    verify(str().find("") == 0);
+    verify(str().rfind("") == 0);
     verify(str("hello").find("ell") == 1);
     verify(str("hello").find("ell", 1) == 1);
     verify(str("hello").find("ell", 2) == str::npos);
@@ -755,6 +755,8 @@ void test_stl_reads_unit() {
     }
 
     // Boundary conditions.
+    verify(str("hello").rfind("ell", str::npos) == 1);
+    verify(str("hello").find_last_of("le", str::npos) == 3);
     verify(str("hello").find_first_of("ox", 4) == 4);
     verify(str("hello").find_first_of("ox", 5) == str::npos);
     verify(str("hello").find_last_of("ox", 4) == 4);
