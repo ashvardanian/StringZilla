@@ -55,11 +55,17 @@ std::size_t test_cross_ppc64(environment_t const &env) {
         .update_kernel = sz_sha256_state_update_powervsx,
         .digest_kernel = sz_sha256_state_digest_powervsx,
     };
+    constexpr sha256_multistate_backend_t sha256_multistate_powervsx {
+        .update_kernel = sz_sha256_multistate_update_powervsx,
+        .digest_kernel = sz_sha256_multistate_digest_powervsx,
+    };
+    check("test_hash_unit_powervsx", [&] { check_sha256_unit_(sha256_powervsx); });
     check("test_hash_equivalence_powervsx", [&](test_context_t &context) {
         check_bytesum_equivalence_(context, sz_bytesum_powervsx);
         check_hash_equivalence_(context, hash_powervsx);
         check_fill_random_equivalence_(context, sz_fill_random_powervsx);
         check_sha256_equivalence_(context, sha256_powervsx);
+        check_sha256_multistate_equivalence_(context, sha256_multistate_powervsx);
     });
 
     check("test_hash_multiseed_equivalence_powervsx", [](test_context_t &context) {
@@ -85,6 +91,19 @@ std::size_t test_cross_ppc64(environment_t const &env) {
     check("test_cipher_equivalence_powervsx",
           [&](test_context_t &context) { check_cipher_equivalence_(context, ctr_powervsx, gcm_powervsx); });
 
+    constexpr levenshtein_backend_t levenshtein_powervsx {"powervsx", sz_levenshtein_engine_init_powervsx,
+                                                          sz_levenshtein_distances_powervsx};
+    check("test_levenshtein_unit_powervsx", [&] { check_levenshtein_unit_(levenshtein_powervsx); });
+    check("test_levenshtein_equivalence_powervsx",
+          [&](test_context_t &context) { check_levenshtein_equivalence_(context, levenshtein_powervsx); });
+    check("test_levenshtein_safety_powervsx", [&] { check_levenshtein_safety_(levenshtein_powervsx); });
+
+    constexpr overlap_backend_t overlap_powervsx {"powervsx", sz_overlap_engine_init_powervsx,
+                                                  sz_overlap_scores_powervsx};
+    check("test_overlap_equivalence_powervsx",
+          [&](test_context_t &context) { check_overlap_equivalence_(context, overlap_powervsx); });
+    check("test_overlap_safety_powervsx", [&] { check_overlap_safety_(overlap_powervsx); });
+
     constexpr substrings_tier_t substrings_powervsx {
         .init = sz_substrings_engine_init_powervsx,
         .counts = sz_substrings_counts_powervsx,
@@ -95,6 +114,17 @@ std::size_t test_cross_ppc64(environment_t const &env) {
     check("test_substrings_unit_powervsx", [&] { check_substrings_unit_(substrings_powervsx); });
     check("test_substrings_equivalence_powervsx",
           [&](test_context_t &context) { check_substrings_equivalence_(context, substrings_powervsx); });
+
+    constexpr regex_tier_t regex_powervsx {
+        .init = sz_regex_engine_init_powervsx,
+        .counts = sz_regex_counts_powervsx,
+        .find = sz_regex_find_powervsx,
+    };
+    constexpr regex_rewriting_t regex_rewriting_powervsx {sz_regex_replace_powervsx, sz_regex_extract_powervsx};
+    check("test_regex_unit_powervsx", [&] { check_regex_unit_(regex_powervsx, regex_rewriting_powervsx); });
+    check("test_regex_equivalence_powervsx", [&](test_context_t &context) {
+        check_regex_equivalence_(context, regex_powervsx, regex_rewriting_powervsx);
+    });
 
     constexpr subdocuments_tier_t subdocuments_powervsx {
         .init = sz_subdocuments_engine_init_powervsx,

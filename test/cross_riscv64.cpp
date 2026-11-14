@@ -64,6 +64,13 @@ std::size_t test_cross_riscv64(environment_t const &env) {
     check("test_sort_equivalence_rvv", [&](test_context_t &context) { check_sort_equivalence_(context, sort_rvv); });
     check("test_sort_safety_rvv", [&] { check_sort_safety_(sort_rvv); });
 
+    constexpr levenshtein_backend_t levenshtein_rvv {"rvv", sz_levenshtein_engine_init_rvv,
+                                                     sz_levenshtein_distances_rvv};
+    check("test_levenshtein_unit_rvv", [&] { check_levenshtein_unit_(levenshtein_rvv); });
+    check("test_levenshtein_equivalence_rvv",
+          [&](test_context_t &context) { check_levenshtein_equivalence_(context, levenshtein_rvv); });
+    check("test_levenshtein_safety_rvv", [&] { check_levenshtein_safety_(levenshtein_rvv); });
+
     constexpr substrings_tier_t substrings_rvv {
         .init = sz_substrings_engine_init_rvv,
         .counts = sz_substrings_counts_rvv,

@@ -15,7 +15,8 @@ static sz_capability_kernels_t const *sz_levenshtein_engine_init_capabilities(vo
     enum {
         above_k = (sz_cap_serial_k | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
                    sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL | sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE |
-                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE) *
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
                   !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
@@ -36,6 +37,13 @@ static sz_capability_kernels_t const *sz_levenshtein_engine_init_capabilities(vo
 #endif
 #if STRINGZILLA_TARGET_NEON
         above_k & ~(sz_cap_neon_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_levenshtein_engine_init_neon,
+#endif
+#if STRINGZILLA_TARGET_RVV
+        above_k & ~(sz_cap_rvv_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_levenshtein_engine_init_rvv,
+#endif
+#if STRINGZILLA_TARGET_POWERVSX
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL
+                                               : (sz_kernel_punned_t)&sz_levenshtein_engine_init_powervsx,
 #endif
     };
     enum {
@@ -73,7 +81,8 @@ static sz_capability_kernels_t const *sz_levenshtein_engine_init_capabilities(vo
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {sz_cap_serial_k | sz_cap_neon_k * STRINGZILLA_TARGET_NEON | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
-             sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE | sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE,
+             sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE | sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE |
+             sz_cap_rvv_k * STRINGZILLA_TARGET_RVV | sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
         {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_blackwell_k * STRINGZILLA_TARGET_BLACKWELL, cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
@@ -86,7 +95,8 @@ static sz_capability_kernels_t const *sz_levenshtein_distances_capabilities(void
     enum {
         above_k = (sz_cap_serial_k | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
                    sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL | sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE |
-                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE) *
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
                   !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
@@ -106,6 +116,13 @@ static sz_capability_kernels_t const *sz_levenshtein_distances_capabilities(void
 #endif
 #if STRINGZILLA_TARGET_NEON
         above_k & ~(sz_cap_neon_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_levenshtein_distances_neon,
+#endif
+#if STRINGZILLA_TARGET_RVV
+        above_k & ~(sz_cap_rvv_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_levenshtein_distances_rvv,
+#endif
+#if STRINGZILLA_TARGET_POWERVSX
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL
+                                               : (sz_kernel_punned_t)&sz_levenshtein_distances_powervsx,
 #endif
     };
     enum {
@@ -142,7 +159,8 @@ static sz_capability_kernels_t const *sz_levenshtein_distances_capabilities(void
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {sz_cap_serial_k | sz_cap_neon_k * STRINGZILLA_TARGET_NEON | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
-             sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE | sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE,
+             sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE | sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE |
+             sz_cap_rvv_k * STRINGZILLA_TARGET_RVV | sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
         {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_blackwell_k * STRINGZILLA_TARGET_BLACKWELL, cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},

@@ -3,6 +3,7 @@
 This directory holds the digest kernels behind `sz_bytesum_best`, `sz_hash_best`, the multi-seed `sz_hash_multiseed_best` fan-out, the streaming `sz_sha256_state_init_best` / `sz_sha256_state_update_best` / `sz_sha256_state_digest_best` trio, the batched `sz_sha256_multistate_update_best` / `sz_sha256_multistate_digest_best` pair, and the column hash `sz_hash_strings_best`, which hashes every string of a collection under one seed in one call.
 Each operation has a serial baseline plus per-ISA SIMD backends — `westmere`, `haswell`, `skylake`, `icelake` on x86, with a dedicated `goldmont` SHA-NI path for SHA-256.
 SHA-256 has no Ice Lake form: SHA-NI is 128-bit only and has no VEX or EVEX encoding, so `goldmont` is the widest single-message kernel there will be.
+On Power, `powervsx` compresses with POWER8's `vshasigmaw`, which computes the SHA-256 sigma functions of every lane but no round, so each working variable sits splatted across its own register.
 Each `_best` dispatch point runs the best kernel among the capabilities its caller passes.
 
 ## Multi-state SHA-256
@@ -46,6 +47,7 @@ An empty cell is genuinely-missing data.
 | Ice Lake @ 1× Intel Xeon6 | 2.02 GB/s · 424 Mhash/s | 1.62 GB/s · 341 Mhash/s | 3.37 GB/s · 707 Mhash/s |                      ↑ |                       ↑ |
 | NEON @ 1× AWS Graviton4   |                       … |                       … |                       … |                      … |                       … |
 | SVE @ 1× AWS Graviton3    |                       … |                       … |                       … |                      … |                       … |
+| Power VSX @ 1× IBM POWER9 |                       … |                       … |                       … |                      … |                       … |
 | CUDA @ 18× Nvidia SM103   |                       … |                       … |                       … |                      … | 2.36 GB/s · 496 Mhash/s |
 
 ## Long Lines
@@ -61,6 +63,7 @@ An empty cell is genuinely-missing data.
 | Ice Lake @ 1× Intel Xeon6 |  8.72 GB/s · 73 Mhash/s | 8.16 GB/s · 68 Mhash/s | 16.16 GB/s · 135 Mhash/s |                     ↑ |                        ↑ |
 | NEON @ 1× AWS Graviton4   |                       … |                      … |                        … |                     … |                        … |
 | SVE @ 1× AWS Graviton3    |                       … |                      … |                        … |                     … |                        … |
+| Power VSX @ 1× IBM POWER9 |                       … |                      … |                        … |                     … |                        … |
 | CUDA @ 18× Nvidia SM103   |                       … |                      … |                        … |                     … | 17.87 GB/s · 149 Mhash/s |
 
 ## Columns

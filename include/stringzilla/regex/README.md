@@ -59,9 +59,9 @@ The check stays at checkpoints, as searching after every escape loses where esca
 ## Tiers
 
 Every CPU tier shares the serial walks and brings its byte-set searches: the reverse one for the start pass's skips, and the forward one for end walks.
-NEON, AVX2 and AVX-512 search 16, 32 and 64 bytes per compare; the serial tier skips the start pass with a byte loop, which still pays for position walks, and does not search ahead in end walks, where a byte loop is no faster than stepping.
+NEON and VSX, AVX2 and AVX-512 search 16, 32 and 64 bytes per compare; the serial tier skips the start pass with a byte loop, which still pays for position walks, and does not search ahead in end walks, where a byte loop is no faster than stepping.
 Each tier also brings its search for literal prefixes: the serial one reads a bucket table per offset, a byte at a time, and the vector ones test both nibbles of every byte at every offset with one table lookup each, a superset of the buckets' bytes that the end walk settles.
-And each brings its fill of the lookaround table's one-byte lookarounds: AVX-512 narrows both 256-entry tables to bytes and looks up 64 positions per step with two byte permutations and a blend, NEON 16 with four four-register lookups, where every lookaround written is among the first eight; serial and AVX2, which has no 256-entry byte lookup cheaper than two scalar loads, read the tables a byte at a time.
+And each brings its fill of the lookaround table's one-byte lookarounds: AVX-512 narrows both 256-entry tables to bytes and looks up 64 positions per step with two byte permutations and a blend, NEON 16 with four four-register lookups, VSX 16 with eight two-register permutes and seven selects, where every lookaround written is among the first eight; serial and AVX2, which has no 256-entry byte lookup cheaper than two scalar loads, read the tables a byte at a time.
 The batch marking is compiled once outside every tier's target, as an AVX-512 target otherwise widens the eight chains into gathers, several times slower than the chains.
 
 After a match the search resumes at its end, and an empty match there is refused in favour of the search one byte further, so matches share no bytes and none repeats.
@@ -170,6 +170,8 @@ Leftmost-first matches per haystack, one count each.
 | Haswell @ 1× Intel Xeon5      |  1,100.8 |    559.8 |       12.8 |
 | Skylake @ 1× Intel Xeon5      |        ↑ |        ↑ |          ↑ |
 | Ice Lake @ 1× Intel Xeon5     |  1,032.2 |    558.9 |       13.2 |
+| Serial @ 1× IBM POWER9        |        … |        … |          … |
+| Power VSX @ 1× IBM POWER9     |        … |        … |          … |
 | CUDA @ 148× Nvidia SM100      | 32,716.8 | 19,384.3 |      425.3 |
 | Hopper @ 148× Nvidia SM100    |        ↑ |        ↑ |          ↑ |
 | Blackwell @ 148× Nvidia SM100 |        ↑ |        ↑ |          ↑ |
@@ -184,6 +186,8 @@ Every match, by haystack, pattern and byte span.
 | Haswell @ 1× Intel Xeon5      |  1,073.2 |    548.8 |       12.6 |
 | Skylake @ 1× Intel Xeon5      |        ↑ |        ↑ |          ↑ |
 | Ice Lake @ 1× Intel Xeon5     |  1,042.4 |    562.3 |       13.0 |
+| Serial @ 1× IBM POWER9        |        … |        … |          … |
+| Power VSX @ 1× IBM POWER9     |        … |        … |          … |
 | CUDA @ 148× Nvidia SM100      | 30,617.6 | 17,469.4 |      421.1 |
 | Hopper @ 148× Nvidia SM100    |        ↑ |        ↑ |          ↑ |
 | Blackwell @ 148× Nvidia SM100 |        ↑ |        ↑ |          ↑ |
@@ -198,6 +202,8 @@ Every match substituted with its pattern's replacement, `<0>` for the first patt
 | Haswell @ 1× Intel Xeon5      |  1,114.1 |    528.4 |       12.1 |
 | Skylake @ 1× Intel Xeon5      |        ↑ |        ↑ |          ↑ |
 | Ice Lake @ 1× Intel Xeon5     |  1,010.0 |    543.4 |       12.6 |
+| Serial @ 1× IBM POWER9        |        … |        … |          … |
+| Power VSX @ 1× IBM POWER9     |        … |        … |          … |
 | CUDA @ 148× Nvidia SM100      | 22,190.1 | 11,939.8 |      419.8 |
 | Hopper @ 148× Nvidia SM100    |        ↑ |        ↑ |          ↑ |
 | Blackwell @ 148× Nvidia SM100 |        ↑ |        ↑ |          ↑ |
@@ -212,6 +218,8 @@ The year, month and day of every line's first ISO date, as `([0-9]{4})-([0-9]{2}
 | Haswell @ 1× Intel Xeon5      |  7,653.4 |
 | Skylake @ 1× Intel Xeon5      |        ↑ |
 | Ice Lake @ 1× Intel Xeon5     |  8,676.4 |
+| Serial @ 1× IBM POWER9        |        … |
+| Power VSX @ 1× IBM POWER9     |        … |
 | CUDA @ 148× Nvidia SM100      | 27,166.7 |
 | Hopper @ 148× Nvidia SM100    |        ↑ |
 | Blackwell @ 148× Nvidia SM100 |        ↑ |

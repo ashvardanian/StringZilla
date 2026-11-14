@@ -2,7 +2,7 @@
 
 This directory holds the kernels behind `sz_levenshtein_distances`, which scores a prepared batch of queries against a batch of candidates into a strided `[queries, candidates]` matrix, on the host or enqueued on a device's stream.
 A batch is prepared by `sz_levenshtein_engine_init` for the best capability of a mask and the device its stream names, over bytes or over UTF-8 runes as `sz_levenshtein_symbol_t` spells it, and released by `sz_levenshtein_engine_free`.
-The operation has a serial baseline plus per-ISA SIMD backends — `haswell`, `skylake`, `icelake` on x86 and `neon` on Arm — and `cuda`, `rocm` and `metal` backends on the device.
+The operation has a serial baseline plus per-ISA SIMD backends — `haswell`, `skylake`, `icelake` on x86, `neon` on Arm, `rvv` on RISC-V and `powervsx` on Power — and `cuda`, `rocm` and `metal` backends on the device.
 The CUDA and ROCm kernels share `simt.cuh`, each vendor launches them from its own host code in `cuda.cuh` and `rocm.cuh`, which `src/capabilities/cuda.cu` and `src/capabilities/rocm.hip` compile into the library, and the Metal ones live in `metal.h` with the `metal.metal` shaders, which `src/capabilities/metal.c` compiles.
 Each capability has its own init kernel, which records that capability in the engine, and every round runs the same capability's kernel on the device of its own stream; Ice Lake has no rune arm, so its kernel scores a rune batch with Skylake's.
 The `cuda`, `rocm` and `metal` collection backends use an internal tiled wavefront for long byte pairs and dynamic Myers state for long rune queries.
@@ -11,7 +11,7 @@ Long queries and candidates are grouped by length, and each bucket cross-product
 Temporary workspace belongs to each queued round, so independent streams can score one engine concurrently.
 
 The batched kernels run Myers' bit-parallel algorithm: every query is a pattern, packed 64 symbols per machine word, and every candidate streams one symbol per step.
-The engine prepares the whole batch's match masks once and advances several candidates per step — one per scalar state on `serial`, two per NEON register on `neon`, four per YMM on `haswell`, eight per ZMM on `skylake`, and sixty-four byte lanes per ZMM on `icelake` when the query is eight symbols or fewer.
+The engine prepares the whole batch's match masks once and advances several candidates per step — one per scalar state on `serial`, two per NEON register on `neon`, one per 64-bit lane of an LMUL-2 register group on `rvv`, two per VSX register on `powervsx`, four per YMM on `haswell`, eight per ZMM on `skylake`, and sixty-four byte lanes per ZMM on `icelake` when the query is eight symbols or fewer.
 A byte is its own mask class and a rune takes the class the query assigned it through a two-level page table over Unicode, so the rune alphabet only swaps the query preparation and the candidate transpose.
 Each backend also exports its building blocks: a `state` per register of candidates, a `vertical` per query word, the `init`, `step`, `any_active` and `score` verbs over them, and the `transpose` that feeds a step its class ids.
 
@@ -40,6 +40,9 @@ UTF-8 rows use the harness's byte-based cell-update count, rather than a count o
 | Serial @ 1× Apple M5 Pro      |  1.25 GCUPS |  39.88 GCUPS |
 | NEON @ 1× Apple M5 Pro        |  1.78 GCUPS |  44.55 GCUPS |
 | Metal @ Apple M5 Pro          | 50.01 GCUPS |  1,309 GCUPS |
+| Serial @ 1× IBM POWER9        |           … |            … |
+| Power VSX @ 1× IBM POWER9     |           … |            … |
+| RVV @ …                       |           … |            … |
 | CUDA @ Nvidia SM90            |           … |            … |
 | CUDA @ 148× Nvidia SM100      | 56.36 GCUPS | 26,170 GCUPS |
 | Hopper @ 148× Nvidia SM100    |           ↑ |            ↑ |
@@ -64,6 +67,9 @@ UTF-8 rows use the harness's byte-based cell-update count, rather than a count o
 | Serial @ 1× Apple M5 Pro      |  0.37 GCUPS |  73.66 GCUPS |
 | NEON @ 1× Apple M5 Pro        |  0.40 GCUPS |  92.13 GCUPS |
 | Metal @ Apple M5 Pro          | 44.05 GCUPS | 915.15 GCUPS |
+| Serial @ 1× IBM POWER9        |           … |            … |
+| Power VSX @ 1× IBM POWER9     |           … |            … |
+| RVV @ …                       |           … |            … |
 | CUDA @ Nvidia SM90            |           … |            … |
 | CUDA @ 148× Nvidia SM100      | 53.46 GCUPS | 30,000 GCUPS |
 | Hopper @ 148× Nvidia SM100    |           ↑ |            ↑ |

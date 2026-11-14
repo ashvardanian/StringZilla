@@ -655,7 +655,8 @@ static sz_capability_kernels_t const *sz_sha256_multistate_update_capabilities(v
     enum {
         above_k = (sz_cap_serial_k | sz_cap_goldmont_k * STRINGZILLA_TARGET_GOLDMONT |
                    sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL | sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE |
-                   sz_cap_neonsha_k * STRINGZILLA_TARGET_NEONSHA | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO) *
+                   sz_cap_neonsha_k * STRINGZILLA_TARGET_NEONSHA | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
                   !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
@@ -682,6 +683,10 @@ static sz_capability_kernels_t const *sz_sha256_multistate_update_capabilities(v
         above_k & ~(sz_cap_rvvcrypto_k * 2 - 1) ? STRINGZILLA_NULL
                                                 : (sz_kernel_punned_t)&sz_sha256_multistate_update_rvvcrypto,
 #endif
+#if STRINGZILLA_TARGET_POWERVSX
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL
+                                               : (sz_kernel_punned_t)&sz_sha256_multistate_update_powervsx,
+#endif
     };
     enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
     static sz_kernel_punned_t const cuda[] = {
@@ -702,7 +707,8 @@ static sz_capability_kernels_t const *sz_sha256_multistate_update_capabilities(v
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {sz_cap_serial_k | sz_cap_goldmont_k * STRINGZILLA_TARGET_GOLDMONT |
              sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL | sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE |
-             sz_cap_neonsha_k * STRINGZILLA_TARGET_NEONSHA | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO,
+             sz_cap_neonsha_k * STRINGZILLA_TARGET_NEONSHA | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO |
+             sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
         {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
@@ -715,7 +721,8 @@ static sz_capability_kernels_t const *sz_sha256_multistate_digest_capabilities(v
     enum {
         above_k = (sz_cap_serial_k | sz_cap_goldmont_k * STRINGZILLA_TARGET_GOLDMONT |
                    sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL | sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE |
-                   sz_cap_neonsha_k * STRINGZILLA_TARGET_NEONSHA | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO) *
+                   sz_cap_neonsha_k * STRINGZILLA_TARGET_NEONSHA | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
                   !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
@@ -742,6 +749,10 @@ static sz_capability_kernels_t const *sz_sha256_multistate_digest_capabilities(v
         above_k & ~(sz_cap_rvvcrypto_k * 2 - 1) ? STRINGZILLA_NULL
                                                 : (sz_kernel_punned_t)&sz_sha256_multistate_digest_rvvcrypto,
 #endif
+#if STRINGZILLA_TARGET_POWERVSX
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL
+                                               : (sz_kernel_punned_t)&sz_sha256_multistate_digest_powervsx,
+#endif
     };
     enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
     static sz_kernel_punned_t const cuda[] = {
@@ -762,7 +773,8 @@ static sz_capability_kernels_t const *sz_sha256_multistate_digest_capabilities(v
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {sz_cap_serial_k | sz_cap_goldmont_k * STRINGZILLA_TARGET_GOLDMONT |
              sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL | sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE |
-             sz_cap_neonsha_k * STRINGZILLA_TARGET_NEONSHA | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO,
+             sz_cap_neonsha_k * STRINGZILLA_TARGET_NEONSHA | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO |
+             sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
         {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},

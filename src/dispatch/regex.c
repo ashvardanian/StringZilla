@@ -14,7 +14,8 @@
 static sz_capability_kernels_t const *sz_regex_engine_init_capabilities(void) {
     enum {
         above_k = (sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
-                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON) *
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
                   !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
@@ -28,6 +29,9 @@ static sz_capability_kernels_t const *sz_regex_engine_init_capabilities(void) {
 #endif
 #if STRINGZILLA_TARGET_NEON
         above_k & ~(sz_cap_neon_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_engine_init_neon,
+#endif
+#if STRINGZILLA_TARGET_POWERVSX
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_engine_init_powervsx,
 #endif
     };
     enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
@@ -56,7 +60,8 @@ static sz_capability_kernels_t const *sz_regex_engine_init_capabilities(void) {
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
-             sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON,
+             sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
+             sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
         {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
@@ -68,7 +73,8 @@ static sz_capability_kernels_t const *sz_regex_engine_init_capabilities(void) {
 static sz_capability_kernels_t const *sz_regex_contains_capabilities(void) {
     enum {
         above_k = (sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
-                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON) *
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
                   !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
@@ -82,6 +88,9 @@ static sz_capability_kernels_t const *sz_regex_contains_capabilities(void) {
 #endif
 #if STRINGZILLA_TARGET_NEON
         above_k & ~(sz_cap_neon_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_contains_neon,
+#endif
+#if STRINGZILLA_TARGET_POWERVSX
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_contains_powervsx,
 #endif
     };
     enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
@@ -102,7 +111,8 @@ static sz_capability_kernels_t const *sz_regex_contains_capabilities(void) {
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
-             sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON,
+             sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
+             sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
         {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
@@ -114,7 +124,8 @@ static sz_capability_kernels_t const *sz_regex_contains_capabilities(void) {
 static sz_capability_kernels_t const *sz_regex_counts_capabilities(void) {
     enum {
         above_k = (sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
-                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON) *
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
                   !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
@@ -128,6 +139,9 @@ static sz_capability_kernels_t const *sz_regex_counts_capabilities(void) {
 #endif
 #if STRINGZILLA_TARGET_NEON
         above_k & ~(sz_cap_neon_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_counts_neon,
+#endif
+#if STRINGZILLA_TARGET_POWERVSX
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_counts_powervsx,
 #endif
     };
     enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
@@ -154,7 +168,8 @@ static sz_capability_kernels_t const *sz_regex_counts_capabilities(void) {
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
-             sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON,
+             sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
+             sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
         {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
@@ -166,7 +181,8 @@ static sz_capability_kernels_t const *sz_regex_counts_capabilities(void) {
 static sz_capability_kernels_t const *sz_regex_find_capabilities(void) {
     enum {
         above_k = (sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
-                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON) *
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
                   !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
@@ -180,6 +196,9 @@ static sz_capability_kernels_t const *sz_regex_find_capabilities(void) {
 #endif
 #if STRINGZILLA_TARGET_NEON
         above_k & ~(sz_cap_neon_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_find_neon,
+#endif
+#if STRINGZILLA_TARGET_POWERVSX
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_find_powervsx,
 #endif
     };
     enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
@@ -205,7 +224,8 @@ static sz_capability_kernels_t const *sz_regex_find_capabilities(void) {
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
-             sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON,
+             sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
+             sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
         {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
@@ -217,7 +237,8 @@ static sz_capability_kernels_t const *sz_regex_find_capabilities(void) {
 static sz_capability_kernels_t const *sz_regex_replace_capabilities(void) {
     enum {
         above_k = (sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
-                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON) *
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
                   !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
@@ -231,6 +252,9 @@ static sz_capability_kernels_t const *sz_regex_replace_capabilities(void) {
 #endif
 #if STRINGZILLA_TARGET_NEON
         above_k & ~(sz_cap_neon_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_replace_neon,
+#endif
+#if STRINGZILLA_TARGET_POWERVSX
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_replace_powervsx,
 #endif
     };
     enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
@@ -257,7 +281,8 @@ static sz_capability_kernels_t const *sz_regex_replace_capabilities(void) {
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
-             sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON,
+             sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
+             sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
         {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
@@ -269,7 +294,8 @@ static sz_capability_kernels_t const *sz_regex_replace_capabilities(void) {
 static sz_capability_kernels_t const *sz_regex_extract_capabilities(void) {
     enum {
         above_k = (sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
-                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON) *
+                   sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
+                   sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
                   !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
@@ -283,6 +309,9 @@ static sz_capability_kernels_t const *sz_regex_extract_capabilities(void) {
 #endif
 #if STRINGZILLA_TARGET_NEON
         above_k & ~(sz_cap_neon_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_extract_neon,
+#endif
+#if STRINGZILLA_TARGET_POWERVSX
+        above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_extract_powervsx,
 #endif
     };
     enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
@@ -309,7 +338,8 @@ static sz_capability_kernels_t const *sz_regex_extract_capabilities(void) {
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
-             sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON,
+             sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
+             sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
         {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},

@@ -1,7 +1,7 @@
 # Overlap: Window Hashing and Prepared-Query Match Counting
 
 This directory holds the kernels behind `sz_overlap_engine_init` and `sz_overlap_scores`, which prepare query windows and score candidate strings.
-Each operation has a serial baseline plus `haswell` and `skylake` SIMD backends on x86 and `neon` on Arm, and `cuda`, `rocm` and `metal` backends on the device.
+Each operation has a serial baseline plus `haswell` and `skylake` SIMD backends on x86, `neon` on Arm and `powervsx` on Power, and `cuda`, `rocm` and `metal` backends on the device.
 The CUDA and ROCm kernels share `simt.cuh`, each vendor launches them from its own host code in `cuda.cuh` and `rocm.cuh`, which `src/capabilities/cuda.cu` and `src/capabilities/rocm.hip` compile into the library, and the Metal ones live in `metal.h` with the `metal.metal` shaders, which `src/capabilities/metal.c` compiles.
 The init picks the best capability of a mask once, when the batch of queries is prepared on one device, and every later round scores with that capability's kernel alone.
 A device engine keeps no stream: on CUDA it keeps no per-round state either, so any number of streams may score it at once, while on Metal `candidates_budget` sizes one round block at init and a round past it is refused with `sz_unexpected_dimensions_k`.
@@ -28,6 +28,8 @@ That slice averages 8.55 bytes per word and 4,976.32 bytes per line, with scored
 | Serial @ 1× Apple M5 Pro      |               180.8 |
 | NEON @ 1× Apple M5 Pro        |               201.7 |
 | Metal @ Apple M5 Pro          |               1,051 |
+| Serial @ 1× IBM POWER9        |                   … |
+| Power VSX @ 1× IBM POWER9     |                   … |
 | CUDA @ Nvidia SM90            |                   … |
 | CUDA @ 148× Nvidia SM100      |               3,064 |
 | Hopper @ 148× Nvidia SM100    |                   ↑ |
@@ -50,6 +52,8 @@ That slice averages 8.55 bytes per word and 4,976.32 bytes per line, with scored
 | Serial @ 1× Apple M5 Pro      |               133.1 |
 | NEON @ 1× Apple M5 Pro        |               201.7 |
 | Metal @ Apple M5 Pro          |              25,020 |
+| Serial @ 1× IBM POWER9        |                   … |
+| Power VSX @ 1× IBM POWER9     |                   … |
 | CUDA @ Nvidia SM90            |                   … |
 | CUDA @ 148× Nvidia SM100      |              22,190 |
 | Hopper @ 148× Nvidia SM100    |                   ↑ |
