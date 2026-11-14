@@ -648,27 +648,282 @@ STRINGZILLA_API sz_status_t sz_fill_random_powervsx(sz_ptr_t target, sz_size_t l
 
 #pragma endregion AES based hashing
 
-/*  No VSX SHA extension is targeted, so the SHA-256 family delegates to the serial reference. */
+/*  POWER8 added @c vshasigmaw, which computes all four SHA-256 sigma functions over every lane at
+ *  once, but no round instruction. Each working variable therefore lives splatted across its own
+ *  register, so the rounds need no lane bookkeeping, and the schedule grows four words at once. */
 #pragma region SHA256
+
+/** Loads four big-endian SHA-256 message words, byte-swapping each on little-endian Power. */
+STRINGZILLA_INLINE __vector unsigned int sz_sha256_load_words_powervsx_(sz_u8_t const *bytes) {
+    __vector unsigned int words_u32x4 = (__vector unsigned int)vec_xl(0, (unsigned char const *)bytes);
+#if !STRINGZILLA_ARCH_BIG_ENDIAN_
+    words_u32x4 = vec_revb(words_u32x4);
+#endif
+    return words_u32x4;
+}
+
+/** Runs one SHA-256 round over splatted working variables, updating @p d_u32x4 and @p h_u32x4. */
+STRINGZILLA_INLINE void sz_sha256_round_powervsx_(                                                //
+    __vector unsigned int a_u32x4, __vector unsigned int b_u32x4, __vector unsigned int c_u32x4,  //
+    __vector unsigned int *d_u32x4, __vector unsigned int e_u32x4, __vector unsigned int f_u32x4, //
+    __vector unsigned int g_u32x4, __vector unsigned int *h_u32x4, __vector unsigned int word_u32x4) {
+    __vector unsigned int const choice_u32x4 = vec_sel(g_u32x4, f_u32x4, e_u32x4);
+    // Where `a` and `b` differ, `c` breaks the tie; elsewhere they agree.
+    __vector unsigned int const majority_u32x4 = vec_sel(b_u32x4, c_u32x4, vec_xor(a_u32x4, b_u32x4));
+    __vector unsigned int const first_u32x4 = vec_add(vec_add(*h_u32x4, word_u32x4),
+                                                      vec_add(vec_shasigma_be(e_u32x4, 1, 0xF), choice_u32x4));
+    __vector unsigned int const second_u32x4 = vec_add(vec_shasigma_be(a_u32x4, 1, 0), majority_u32x4);
+    *d_u32x4 = vec_add(*d_u32x4, first_u32x4);
+    *h_u32x4 = vec_add(first_u32x4, second_u32x4);
+}
+
+/** Runs four SHA-256 rounds over the next four schedule words, summed with round constants. */
+STRINGZILLA_INLINE void sz_sha256_quad_round_powervsx_(                                             //
+    __vector unsigned int *a_u32x4, __vector unsigned int *b_u32x4, __vector unsigned int *c_u32x4, //
+    __vector unsigned int *d_u32x4, __vector unsigned int *e_u32x4, __vector unsigned int *f_u32x4, //
+    __vector unsigned int *g_u32x4, __vector unsigned int *h_u32x4, __vector unsigned int words_u32x4) {
+    sz_sha256_round_powervsx_(*a_u32x4, *b_u32x4, *c_u32x4, d_u32x4, *e_u32x4, *f_u32x4, *g_u32x4, h_u32x4,
+                              vec_splat(words_u32x4, 0));
+    sz_sha256_round_powervsx_(*h_u32x4, *a_u32x4, *b_u32x4, c_u32x4, *d_u32x4, *e_u32x4, *f_u32x4, g_u32x4,
+                              vec_splat(words_u32x4, 1));
+    sz_sha256_round_powervsx_(*g_u32x4, *h_u32x4, *a_u32x4, b_u32x4, *c_u32x4, *d_u32x4, *e_u32x4, f_u32x4,
+                              vec_splat(words_u32x4, 2));
+    sz_sha256_round_powervsx_(*f_u32x4, *g_u32x4, *h_u32x4, a_u32x4, *b_u32x4, *c_u32x4, *d_u32x4, e_u32x4,
+                              vec_splat(words_u32x4, 3));
+}
+
+/** Derives the next four message schedule words from the previous sixteen, oldest quarter first. */
+STRINGZILLA_INLINE __vector unsigned int sz_sha256_extend_powervsx_(                  //
+    __vector unsigned int oldest_words_u32x4, __vector unsigned int next_words_u32x4, //
+    __vector unsigned int ninth_words_u32x4, __vector unsigned int newest_words_u32x4) {
+    __vector unsigned char const second_to_fifth_u8x16 = {4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19};
+    __vector unsigned char const upper_half_down_u8x16 = {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23};
+    __vector unsigned char const lower_half_up_u8x16 = {0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23};
+    __vector unsigned int const zeros_u32x4 = vec_splats((unsigned int)0);
+    __vector unsigned int const fifteenth_words_u32x4 = vec_perm(oldest_words_u32x4, next_words_u32x4,
+                                                                 second_to_fifth_u8x16);
+    __vector unsigned int const seventh_words_u32x4 = vec_perm(ninth_words_u32x4, newest_words_u32x4,
+                                                               second_to_fifth_u8x16);
+    __vector unsigned int words_u32x4 = vec_add(vec_add(oldest_words_u32x4, seventh_words_u32x4),
+                                                vec_shasigma_be(fifteenth_words_u32x4, 0, 0));
+    // The first two words take `sigma1` of the two newest ones, the last two of the two just made.
+    words_u32x4 = vec_add(words_u32x4,
+                          vec_perm(vec_shasigma_be(newest_words_u32x4, 0, 0xF), zeros_u32x4, upper_half_down_u8x16));
+    words_u32x4 = vec_add(words_u32x4,
+                          vec_perm(zeros_u32x4, vec_shasigma_be(words_u32x4, 0, 0xF), lower_half_up_u8x16));
+    return words_u32x4;
+}
+
+/**
+ *  @brief Processes a single 512-bit (64-byte) block using SHA256 with the POWER8 @c vshasigmaw.
+ *  @param[in,out] hash Pointer to 8x 32-bit hash values, modified in place.
+ *  @param[in] block Pointer to 64-byte message block.
+ */
+STRINGZILLA_INLINE void sz_sha256_process_block_powervsx_(
+    sz_u32_t hash[sz_at_least_(8)], sz_u8_t const block[sz_at_least_(STRINGZILLA_SHA256_BLOCK_LENGTH)]) {
+    sz_u32_t const *round_constants = sz_sha256_round_constants_();
+    __vector unsigned int const abcd_saved_u32x4 = vec_xl(0, &hash[0]);
+    __vector unsigned int const efgh_saved_u32x4 = vec_xl(0, &hash[4]);
+    __vector unsigned int a_u32x4 = vec_splat(abcd_saved_u32x4, 0), b_u32x4 = vec_splat(abcd_saved_u32x4, 1);
+    __vector unsigned int c_u32x4 = vec_splat(abcd_saved_u32x4, 2), d_u32x4 = vec_splat(abcd_saved_u32x4, 3);
+    __vector unsigned int e_u32x4 = vec_splat(efgh_saved_u32x4, 0), f_u32x4 = vec_splat(efgh_saved_u32x4, 1);
+    __vector unsigned int g_u32x4 = vec_splat(efgh_saved_u32x4, 2), h_u32x4 = vec_splat(efgh_saved_u32x4, 3);
+
+    __vector unsigned int schedule0_u32x4 = sz_sha256_load_words_powervsx_(block + 0);
+    __vector unsigned int schedule1_u32x4 = sz_sha256_load_words_powervsx_(block + 16);
+    __vector unsigned int schedule2_u32x4 = sz_sha256_load_words_powervsx_(block + 32);
+    __vector unsigned int schedule3_u32x4 = sz_sha256_load_words_powervsx_(block + 48);
+
+    // Rounds 0-15, straight from the block; every four rounds the roles of `a..d` and `e..h` swap.
+    sz_sha256_quad_round_powervsx_(&a_u32x4, &b_u32x4, &c_u32x4, &d_u32x4, &e_u32x4, &f_u32x4, &g_u32x4, &h_u32x4,
+                                   vec_add(schedule0_u32x4, vec_xl(0, round_constants + 0)));
+    sz_sha256_quad_round_powervsx_(&e_u32x4, &f_u32x4, &g_u32x4, &h_u32x4, &a_u32x4, &b_u32x4, &c_u32x4, &d_u32x4,
+                                   vec_add(schedule1_u32x4, vec_xl(0, round_constants + 4)));
+    sz_sha256_quad_round_powervsx_(&a_u32x4, &b_u32x4, &c_u32x4, &d_u32x4, &e_u32x4, &f_u32x4, &g_u32x4, &h_u32x4,
+                                   vec_add(schedule2_u32x4, vec_xl(0, round_constants + 8)));
+    sz_sha256_quad_round_powervsx_(&e_u32x4, &f_u32x4, &g_u32x4, &h_u32x4, &a_u32x4, &b_u32x4, &c_u32x4, &d_u32x4,
+                                   vec_add(schedule3_u32x4, vec_xl(0, round_constants + 12)));
+
+    // Rounds 16-63, sixteen per turn, so each turn starts with the roles where the first one did.
+    for (sz_size_t turn_index = 1; turn_index != 4; ++turn_index) {
+        sz_u32_t const *turn_constants = round_constants + turn_index * 16;
+        schedule0_u32x4 = sz_sha256_extend_powervsx_(schedule0_u32x4, schedule1_u32x4, schedule2_u32x4,
+                                                     schedule3_u32x4);
+        sz_sha256_quad_round_powervsx_(&a_u32x4, &b_u32x4, &c_u32x4, &d_u32x4, &e_u32x4, &f_u32x4, &g_u32x4, &h_u32x4,
+                                       vec_add(schedule0_u32x4, vec_xl(0, turn_constants + 0)));
+        schedule1_u32x4 = sz_sha256_extend_powervsx_(schedule1_u32x4, schedule2_u32x4, schedule3_u32x4,
+                                                     schedule0_u32x4);
+        sz_sha256_quad_round_powervsx_(&e_u32x4, &f_u32x4, &g_u32x4, &h_u32x4, &a_u32x4, &b_u32x4, &c_u32x4, &d_u32x4,
+                                       vec_add(schedule1_u32x4, vec_xl(0, turn_constants + 4)));
+        schedule2_u32x4 = sz_sha256_extend_powervsx_(schedule2_u32x4, schedule3_u32x4, schedule0_u32x4,
+                                                     schedule1_u32x4);
+        sz_sha256_quad_round_powervsx_(&a_u32x4, &b_u32x4, &c_u32x4, &d_u32x4, &e_u32x4, &f_u32x4, &g_u32x4, &h_u32x4,
+                                       vec_add(schedule2_u32x4, vec_xl(0, turn_constants + 8)));
+        schedule3_u32x4 = sz_sha256_extend_powervsx_(schedule3_u32x4, schedule0_u32x4, schedule1_u32x4,
+                                                     schedule2_u32x4);
+        sz_sha256_quad_round_powervsx_(&e_u32x4, &f_u32x4, &g_u32x4, &h_u32x4, &a_u32x4, &b_u32x4, &c_u32x4, &d_u32x4,
+                                       vec_add(schedule3_u32x4, vec_xl(0, turn_constants + 12)));
+    }
+
+    // Gather the splatted variables back into `abcd` and `efgh`, then add the compressed chunk.
+    __vector unsigned int const abcd_u32x4 = (__vector unsigned int)vec_mergeh(
+        (__vector unsigned long long)vec_mergeh(a_u32x4, b_u32x4),
+        (__vector unsigned long long)vec_mergeh(c_u32x4, d_u32x4));
+    __vector unsigned int const efgh_u32x4 = (__vector unsigned int)vec_mergeh(
+        (__vector unsigned long long)vec_mergeh(e_u32x4, f_u32x4),
+        (__vector unsigned long long)vec_mergeh(g_u32x4, h_u32x4));
+    vec_xst(vec_add(abcd_u32x4, abcd_saved_u32x4), 0, &hash[0]);
+    vec_xst(vec_add(efgh_u32x4, efgh_saved_u32x4), 0, &hash[4]);
+}
 
 STRINGZILLA_API sz_status_t sz_sha256_state_init_powervsx(sz_sha256_state_t *state, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    sz_sha256_state_init_serial_(state);
+    sz_u32_t const *initial_hash = sz_sha256_initial_hash_();
+    vec_xst(vec_xl(0, &initial_hash[0]), 0, &state->hash[0]);
+    vec_xst(vec_xl(0, &initial_hash[4]), 0, &state->hash[4]);
+    state->block_length = 0, state->total_length = 0;
     return sz_success_k;
+}
+
+STRINGZILLA_INLINE void sz_sha256_state_update_powervsx_(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length) {
+    sz_u8_t const *input = (sz_u8_t const *)data;
+    sz_size_t const current_block_index = state->block_length / STRINGZILLA_SHA256_BLOCK_LENGTH;
+    sz_size_t const final_block_index = (state->block_length + length) / STRINGZILLA_SHA256_BLOCK_LENGTH;
+    int const stays_in_the_block = current_block_index == final_block_index;
+    int const fills_the_block = (state->block_length + length) % STRINGZILLA_SHA256_BLOCK_LENGTH == 0;
+
+    state->total_length += length;
+
+    // Fast path: stays in same block and doesn't fill it
+    if (stays_in_the_block && !fills_the_block) {
+        for (; length; --length, ++state->block_length, ++input) state->block[state->block_length] = *input;
+        return;
+    }
+
+    // Calculate head, body, and tail lengths
+    sz_size_t const head_length = (STRINGZILLA_SHA256_BLOCK_LENGTH - state->block_length) %
+                                  STRINGZILLA_SHA256_BLOCK_LENGTH;
+    sz_size_t const tail_length = (state->block_length + length) % STRINGZILLA_SHA256_BLOCK_LENGTH;
+    sz_size_t const body_length = length - head_length - tail_length;
+
+    // Copy hash to aligned local buffer
+    sz_align_(16) sz_u32_t hash[8];
+    vec_xst(vec_xl(0, &state->hash[0]), 0, &hash[0]);
+    vec_xst(vec_xl(0, &state->hash[4]), 0, &hash[4]);
+
+    // Process head to complete the current block
+    if (head_length) {
+        for (sz_size_t byte_index = 0; byte_index < head_length; ++byte_index)
+            state->block[state->block_length++] = input[byte_index];
+        sz_sha256_process_block_powervsx_(hash, state->block);
+        state->block_length = 0;
+        input += head_length;
+    }
+
+    // Process body (complete aligned blocks)
+    for (sz_size_t processed = 0; processed < body_length;
+         processed += STRINGZILLA_SHA256_BLOCK_LENGTH, input += STRINGZILLA_SHA256_BLOCK_LENGTH)
+        sz_sha256_process_block_powervsx_(hash, input);
+
+    // Process tail (remaining bytes into block buffer)
+    for (sz_size_t byte_index = 0; byte_index < tail_length; ++byte_index) state->block[byte_index] = input[byte_index];
+    state->block_length = (sz_u8_t)tail_length;
+
+    // Copy hash back
+    vec_xst(vec_xl(0, &hash[0]), 0, &state->hash[0]);
+    vec_xst(vec_xl(0, &hash[4]), 0, &state->hash[4]);
 }
 
 STRINGZILLA_API sz_status_t sz_sha256_state_update_powervsx(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length,
                                                             sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    sz_sha256_state_update_serial_(state, text, length);
+    sz_sha256_state_update_powervsx_(state, text, length);
     return sz_success_k;
+}
+
+STRINGZILLA_INLINE void sz_sha256_state_digest_powervsx_(
+    sz_sha256_state_t const *state_ptr, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)]) {
+    // Create a copy of the state for padding
+    sz_sha256_state_t state = *state_ptr;
+    __vector unsigned char const zeros_u8x16 = vec_splats((unsigned char)0);
+
+    // Append the '1' bit (0x80 byte) after the message
+    state.block[state.block_length++] = 0x80;
+
+    // If there's not enough room for the 64-bit length, pad this block and process it
+    if (state.block_length > 56) {
+        sz_size_t remaining = STRINGZILLA_SHA256_BLOCK_LENGTH - state.block_length;
+        sz_size_t vector_bytes = (remaining / 16) * 16;
+        for (sz_size_t byte_index = 0; byte_index < vector_bytes; byte_index += 16)
+            vec_xst(zeros_u8x16, 0, &state.block[state.block_length + byte_index]);
+        for (sz_size_t byte_index = vector_bytes; byte_index < remaining; ++byte_index)
+            state.block[state.block_length + byte_index] = 0;
+        sz_sha256_process_block_powervsx_(state.hash, state.block);
+        state.block_length = 0;
+    }
+
+    // Pad with zeros until we have 56 bytes
+    sz_size_t remaining = 56 - state.block_length;
+    sz_size_t vector_bytes = (remaining / 16) * 16;
+    for (sz_size_t byte_index = 0; byte_index < vector_bytes; byte_index += 16)
+        vec_xst(zeros_u8x16, 0, &state.block[state.block_length + byte_index]);
+    for (sz_size_t byte_index = vector_bytes; byte_index < remaining; ++byte_index)
+        state.block[state.block_length + byte_index] = 0;
+    state.block_length = 56;
+
+    // Append the message length in bits as a 64-bit big-endian integer
+    sz_u64_t bit_length = state.total_length * 8;
+    state.block[56] = (sz_u8_t)(bit_length >> 56);
+    state.block[57] = (sz_u8_t)(bit_length >> 48);
+    state.block[58] = (sz_u8_t)(bit_length >> 40);
+    state.block[59] = (sz_u8_t)(bit_length >> 32);
+    state.block[60] = (sz_u8_t)(bit_length >> 24);
+    state.block[61] = (sz_u8_t)(bit_length >> 16);
+    state.block[62] = (sz_u8_t)(bit_length >> 8);
+    state.block[63] = (sz_u8_t)(bit_length >> 0);
+
+    // Process the final block
+    sz_sha256_process_block_powervsx_(state.hash, state.block);
+
+    // Produce the final hash digest in big-endian format
+    for (sz_size_t lane_index = 0; lane_index < 8; ++lane_index) {
+        digest[lane_index * 4 + 0] = (sz_u8_t)(state.hash[lane_index] >> 24);
+        digest[lane_index * 4 + 1] = (sz_u8_t)(state.hash[lane_index] >> 16);
+        digest[lane_index * 4 + 2] = (sz_u8_t)(state.hash[lane_index] >> 8);
+        digest[lane_index * 4 + 3] = (sz_u8_t)(state.hash[lane_index] >> 0);
+    }
 }
 
 STRINGZILLA_API sz_status_t sz_sha256_state_digest_powervsx(
     sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)],
     sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    sz_sha256_state_digest_serial_(state, digest);
+    sz_sha256_state_digest_powervsx_(state, digest);
+    return sz_success_k;
+}
+
+/*  Each round waits on the one before it, so lanes share no work; the batched kernels walk the
+ *  states one by one, reaching the vector compressor instead of the serial one. */
+
+STRINGZILLA_API sz_status_t sz_sha256_multistate_update_powervsx(sz_sha256_state_t *states,
+                                                                 sz_strings_view_t const *texts, sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_string_view_t views[64];
+    for (sz_size_t block_start = 0; block_start < texts->count; block_start += 64) {
+        sz_size_t const block_count = sz_strings_get_block_(texts, block_start, views);
+        for (sz_size_t position = 0; position != block_count; ++position)
+            sz_sha256_state_update_powervsx_(&states[block_start + position], views[position].start,
+                                             views[position].length);
+    }
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_powervsx(sz_sha256_state_t const *states,
+                                                                 sz_size_t states_count, sz_u8_t *digests,
+                                                                 sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    for (sz_size_t lane_index = 0; lane_index != states_count; ++lane_index)
+        sz_sha256_state_digest_powervsx_(&states[lane_index], &digests[lane_index * STRINGZILLA_SHA256_DIGEST_LENGTH]);
     return sz_success_k;
 }
 

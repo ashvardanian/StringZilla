@@ -21,6 +21,8 @@ extern "C" {
 #pragma GCC target("+simd")
 #endif
 
+enum { sz_levenshtein_u64x2_candidates_per_step_neon_k = 2, sz_levenshtein_u64x2_registers_per_position_neon_k = 4 };
+
 typedef struct sz_levenshtein_u64x2_state_neon_t {
     sz_u128_vec_t scores_vec;
 } sz_levenshtein_u64x2_state_neon_t;
@@ -42,7 +44,8 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x2_steps_neon_(sz_levenshtein_u64x2_st
                                                          sz_levenshtein_u64x2_vertical_neon_t *verticals,
                                                          sz_size_t words, sz_levenshtein_query_t const *query,
                                                          sz_u64_t const *const *rows, sz_size_t registers) {
-    uint64x2_t positive_carry_u64x2[4], negative_carry_u64x2[4];
+    uint64x2_t positive_carry_u64x2[sz_levenshtein_u64x2_registers_per_position_neon_k],
+        negative_carry_u64x2[sz_levenshtein_u64x2_registers_per_position_neon_k];
     for (sz_size_t reg = 0; reg != registers; ++reg) {
         positive_carry_u64x2[reg] = vdupq_n_u64(1);
         negative_carry_u64x2[reg] = vdupq_n_u64(0);
@@ -242,8 +245,6 @@ STRINGZILLA_INLINE sz_size_t sz_levenshtein_u8x8_transpose_neon(sz_levenshtein_q
     return sz_levenshtein_u8x8_transpose_neon_(query, texts, byte_counts, candidates, cursors, symbol_counts,
                                                transpose_start, positions, transpose_classes);
 }
-
-enum { sz_levenshtein_u64x2_candidates_per_step_neon_k = 2, sz_levenshtein_u64x2_registers_per_position_neon_k = 4 };
 
 /** Sweeps eight candidates, two per register, through every transpose; @p words and @p width are
  *  constants, keeping short queries' verticals in registers and the class loads unbranched. Each

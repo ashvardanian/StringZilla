@@ -415,7 +415,8 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_best(sz_sha256_state_t const 
  *  @note Every lane is correct whatever its length, but throughput is best sorted by length.
  *  @sa sz_sha256_multistate_update_serial, sz_sha256_multistate_update_goldmont,
  *      sz_sha256_multistate_update_haswell, sz_sha256_multistate_update_skylake,
- *      sz_sha256_multistate_update_neonsha, sz_sha256_multistate_update_rvvcrypto
+ *      sz_sha256_multistate_update_neonsha, sz_sha256_multistate_update_rvvcrypto,
+ *      sz_sha256_multistate_update_powervsx
  *
  *  Lanes are grouped by vector width and a group advances in lockstep, so it costs as much as its
  *  longest member. Inputs sorted by length put similar lengths in the same group, and
@@ -1010,6 +1011,15 @@ STRINGZILLA_API sz_status_t sz_sha256_state_update_powervsx(sz_sha256_state_t *s
 /** @copydoc sz_sha256_state_digest_best */
 STRINGZILLA_API sz_status_t sz_sha256_state_digest_powervsx(
     sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], sz_stream_t stream);
+
+/** @copydoc sz_sha256_multistate_update_best */
+STRINGZILLA_API sz_status_t sz_sha256_multistate_update_powervsx(sz_sha256_state_t *states,
+                                                                 sz_strings_view_t const *texts, sz_stream_t stream);
+
+/** @copydoc sz_sha256_multistate_digest_best */
+STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_powervsx(sz_sha256_state_t const *states,
+                                                                 sz_size_t states_count, sz_u8_t *digests,
+                                                                 sz_stream_t stream);
 
 #endif
 

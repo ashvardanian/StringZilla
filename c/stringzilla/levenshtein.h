@@ -195,6 +195,34 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_neon(sz_levenshtein_engine_
                                                           sz_size_t distances_stride, sz_stream_t stream);
 #endif
 
+#if STRINGZILLA_TARGET_RVV
+/** @copydoc sz_levenshtein_engine_init */
+STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_rvv(sz_levenshtein_engine_t *engine,
+                                                           sz_strings_view_t const *queries,
+                                                           sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
+                                                           sz_stream_t stream);
+/** @copydoc sz_levenshtein_distances */
+STRINGZILLA_API sz_status_t sz_levenshtein_distances_rvv(sz_levenshtein_engine_t *engine,
+                                                         sz_strings_view_t const *candidates,
+                                                         sz_size_t const *symbol_counts, sz_size_t const *order,
+                                                         sz_size_t bound, sz_size_t *distances,
+                                                         sz_size_t distances_stride, sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_POWERVSX
+/** @copydoc sz_levenshtein_engine_init */
+STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_powervsx(sz_levenshtein_engine_t *engine,
+                                                                sz_strings_view_t const *queries,
+                                                                sz_levenshtein_symbol_t symbol,
+                                                                sz_allocator_t *allocator, sz_stream_t stream);
+/** @copydoc sz_levenshtein_distances */
+STRINGZILLA_API sz_status_t sz_levenshtein_distances_powervsx(sz_levenshtein_engine_t *engine,
+                                                              sz_strings_view_t const *candidates,
+                                                              sz_size_t const *symbol_counts, sz_size_t const *order,
+                                                              sz_size_t bound, sz_size_t *distances,
+                                                              sz_size_t distances_stride, sz_stream_t stream);
+#endif
+
 #if STRINGZILLA_TARGET_CUDA
 /** @copydoc sz_levenshtein_engine_init */
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_cuda(sz_levenshtein_engine_t *engine,
@@ -272,6 +300,8 @@ STRINGZILLA_API sz_status_t sz_levenshtein_find_kernel(sz_kernel_kind_t kind, sz
 #include "stringzilla/levenshtein/skylake.h"
 #include "stringzilla/levenshtein/icelake.h"
 #include "stringzilla/levenshtein/neon.h"
+#include "stringzilla/levenshtein/rvv.h"
+#include "stringzilla/levenshtein/powervsx.h"
 #include "stringzilla/levenshtein/cuda.cuh"
 #include "stringzilla/levenshtein/blackwell.cuh"
 #include "stringzilla/levenshtein/rocm.cuh"

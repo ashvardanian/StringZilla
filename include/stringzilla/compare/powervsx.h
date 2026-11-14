@@ -26,32 +26,13 @@ extern "C" {
 #endif
 
 STRINGZILLA_INLINE sz_bool_t sz_equal_vec16_powervsx_(__vector unsigned char a_u8x16, __vector unsigned char b_u8x16) {
-    // On Power10 `vec_first_mismatch_index` reports the first differing lane (16 if none) in a
-    // single instruction, replacing the `vec_all_eq` compare + branch reduction. The Power9
-    // fallback keeps the byte-for-byte identical `vec_all_eq` semantics.
-#if defined(_ARCH_PWR10)
     return (sz_bool_t)(vec_first_mismatch_index(a_u8x16, b_u8x16) == 16);
-#else
-    return (sz_bool_t)vec_all_eq(a_u8x16, b_u8x16); // True only when every byte matched.
-#endif
 }
 
 STRINGZILLA_INLINE sz_bool_t sz_equal_powervsx_(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
-
-    if (length < 8) {
-        sz_cptr_t const a_end = a + length;
-        while (a != a_end && *a == *b) a++, b++;
-        return (sz_bool_t)(a_end == a);
-    }
-    // Two overlapping 64-bit loads cover the whole [8,16) window with one branch, mirroring the
-    // x86 sibling (`compare/haswell.h`) and the GLibC `memcmp-avx2` tiering.
-    else if (length <= 16) {
-        sz_u64_t a_first_word = sz_u64_load(a).u64;
-        sz_u64_t b_first_word = sz_u64_load(b).u64;
-        sz_u64_t a_second_word = sz_u64_load(a + length - 8).u64;
-        sz_u64_t b_second_word = sz_u64_load(b + length - 8).u64;
-        return (sz_bool_t)((a_first_word == b_first_word) & (a_second_word == b_second_word));
-    }
+    // `lxvl` reads exactly `length` bytes and zeroes the rest of the register.
+    if (length <= 16)
+        return sz_equal_vec16_powervsx_(vec_xl_len((unsigned char *)a, length), vec_xl_len((unsigned char *)b, length));
     // Two overlapping 128-bit loads cover the whole [16,32) window with one branch.
     else if (length <= 32) {
         __vector unsigned char a_first_u8x16 = vec_xl(0, (unsigned char const *)(a));
@@ -119,9 +100,31 @@ STRINGZILLA_API sz_status_t sz_equal_powervsx(sz_cptr_t a, sz_cptr_t b, sz_size_
 }
 
 STRINGZILLA_INLINE sz_ordering_t sz_order_powervsx_(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
-    //! Lexicographic ordering is endian-sensitive and not worth vectorizing — see the
-    //! "Operations Not Worth Optimizing" note in the Contributions Guide, mirroring NEON.
-    return sz_order_serial_(a, a_length, b, b_length);
+    sz_u8_t const *a_u8 = (sz_u8_t const *)a;
+    sz_u8_t const *b_u8 = (sz_u8_t const *)b;
+    sz_size_t const shared_length = sz_min_of_two(a_length, b_length);
+    sz_size_t offset = 0;
+
+    // `vctzlsbb` reports 16 for an equal first half, so its fifth bit admits the second half index.
+    for (; offset + 32 <= shared_length; offset += 32) {
+        sz_size_t const first_index = vec_first_mismatch_index(vec_xl(0, a_u8 + offset), vec_xl(0, b_u8 + offset));
+        sz_size_t const second_index = vec_first_mismatch_index(vec_xl(16, a_u8 + offset), vec_xl(16, b_u8 + offset));
+        sz_size_t const mismatch_index = first_index + (first_index >> 4) * second_index;
+        if (mismatch_index < 32) return sz_order_scalars_(a_u8[offset + mismatch_index], b_u8[offset + mismatch_index]);
+    }
+
+    // Two `lxvl` read the bytes left, padding both sides with the same zeros.
+    sz_size_t const tail_length = shared_length - offset;
+    sz_size_t const first_length = sz_min_of_two(tail_length, (sz_size_t)16);
+    sz_size_t const first_index = vec_first_mismatch_index(vec_xl_len((unsigned char *)(a_u8 + offset), first_length),
+                                                           vec_xl_len((unsigned char *)(b_u8 + offset), first_length));
+    sz_size_t const second_index = vec_first_mismatch_index(
+        vec_xl_len((unsigned char *)(a_u8 + offset + first_length), tail_length - first_length),
+        vec_xl_len((unsigned char *)(b_u8 + offset + first_length), tail_length - first_length));
+    sz_size_t const mismatch_index = first_index + (first_index >> 4) * second_index;
+    if (mismatch_index < tail_length)
+        return sz_order_scalars_(a_u8[offset + mismatch_index], b_u8[offset + mismatch_index]);
+    return sz_order_scalars_(a_length, b_length);
 }
 
 STRINGZILLA_API sz_status_t sz_order_powervsx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,

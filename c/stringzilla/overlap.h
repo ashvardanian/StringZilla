@@ -196,6 +196,20 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_neon(sz_overlap_engine_t *engine, 
                                                    sz_size_t matches_candidate_stride, sz_stream_t stream);
 #endif
 
+#if STRINGZILLA_TARGET_POWERVSX
+/** @copydoc sz_overlap_engine_init */
+STRINGZILLA_API sz_status_t sz_overlap_engine_init_powervsx(sz_overlap_engine_t *engine,
+                                                            sz_strings_view_t const *queries,
+                                                            sz_size_t const *window_widths,
+                                                            sz_size_t window_widths_count, sz_size_t candidates_budget,
+                                                            sz_allocator_t *allocator, sz_stream_t stream);
+/** @copydoc sz_overlap_scores */
+STRINGZILLA_API sz_status_t sz_overlap_scores_powervsx(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
+                                                       sz_f32_t radius, sz_u32_t *matches,
+                                                       sz_size_t matches_query_stride,
+                                                       sz_size_t matches_candidate_stride, sz_stream_t stream);
+#endif
+
 #if STRINGZILLA_TARGET_CUDA
 /** @copydoc sz_overlap_engine_init */
 STRINGZILLA_API sz_status_t sz_overlap_engine_init_cuda(sz_overlap_engine_t *engine, sz_strings_view_t const *queries,
@@ -266,6 +280,7 @@ STRINGZILLA_API sz_status_t sz_overlap_find_kernel(sz_kernel_kind_t kind, sz_cap
 #include "stringzilla/overlap/haswell.h"
 #include "stringzilla/overlap/skylake.h"
 #include "stringzilla/overlap/neon.h"
+#include "stringzilla/overlap/powervsx.h"
 #include "stringzilla/overlap/cuda.cuh"
 #include "stringzilla/overlap/blackwell.cuh"
 #include "stringzilla/overlap/rocm.cuh"

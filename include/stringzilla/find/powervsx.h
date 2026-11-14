@@ -52,20 +52,14 @@ STRINGZILLA_INLINE sz_cptr_t sz_find_byte_powervsx_(sz_cptr_t haystack, sz_size_
     __vector unsigned char needle_u8x16 = vec_splats(*(unsigned char const *)needle);
     while (haystack_length >= 16) {
         __vector unsigned char haystack_u8x16 = vec_xl(0, (unsigned char const *)haystack);
-        // On Power10 `vec_first_match_index` returns the (little-endian) index of the first equal
-        // byte directly — 16 when none match — fusing the compare, the bit-gather movemask, and the
-        // trailing-zero count into one instruction. The Power9 fallback keeps the movemask + ctz path.
-#if defined(_ARCH_PWR10)
         unsigned int match_index = vec_first_match_index(haystack_u8x16, needle_u8x16);
         if (match_index != 16) return haystack + match_index;
-#else
-        __vector unsigned char cmp_u8x16 = (__vector unsigned char)vec_cmpeq(haystack_u8x16, needle_u8x16);
-        sz_u64_t matches = sz_movemask_powervsx_(cmp_u8x16);
-        if (matches) return haystack + sz_u64_ctz(matches);
-#endif
         haystack += 16, haystack_length -= 16;
     }
-    return sz_find_byte_serial_(haystack, haystack_length, needle);
+    // `lxvl` zeroes the lanes past the tail, which may match a zero needle, so only earlier count.
+    unsigned int match_index = vec_first_match_index(vec_xl_len((unsigned char *)haystack, haystack_length),
+                                                     needle_u8x16);
+    return match_index < haystack_length ? haystack + match_index : STRINGZILLA_NULL_CHAR;
 }
 
 STRINGZILLA_API sz_status_t sz_find_byte_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
@@ -79,22 +73,15 @@ STRINGZILLA_INLINE sz_cptr_t sz_rfind_byte_powervsx_(sz_cptr_t haystack, sz_size
     __vector unsigned char needle_u8x16 = vec_splats(*(unsigned char const *)needle);
     while (haystack_length >= 16) {
         __vector unsigned char haystack_u8x16 = vec_xl(0, (unsigned char const *)(haystack + haystack_length - 16));
-        // On Power10 we mirror the forward kernel's `vec_first_match_index`: reversing the window
-        // turns the last-match query into a first-match one, fusing compare + movemask + count into
-        // one instruction (after the byte-reverse permute). The Power9 fallback keeps movemask + clz.
-#if defined(_ARCH_PWR10)
-        __vector unsigned char reversed_u8x16 = vec_reve(haystack_u8x16);
-        unsigned int match_index = vec_first_match_index(reversed_u8x16, needle_u8x16);
+        // Reversing the window turns the last match into the first one.
+        unsigned int match_index = vec_first_match_index(vec_reve(haystack_u8x16), needle_u8x16);
         if (match_index != 16) return haystack + haystack_length - 1 - match_index;
-#else
-        __vector unsigned char cmp_u8x16 = (__vector unsigned char)vec_cmpeq(haystack_u8x16, needle_u8x16);
-        sz_u64_t matches = sz_movemask_powervsx_(cmp_u8x16);
-        // The mask occupies the low 16 bits; the highest set bit is the last match in the window.
-        if (matches) return haystack + haystack_length - 1 - (sz_u64_clz(matches) - 48);
-#endif
         haystack_length -= 16;
     }
-    return sz_rfind_byte_serial_(haystack, haystack_length, needle);
+    __vector unsigned char haystack_u8x16 = vec_xl_len((unsigned char *)haystack, haystack_length);
+    sz_u64_t matches = sz_movemask_powervsx_((__vector unsigned char)vec_cmpeq(haystack_u8x16, needle_u8x16)) &
+                       sz_u64_mask_until_serial_(haystack_length);
+    return matches ? haystack + 63 - sz_u64_clz(matches) : STRINGZILLA_NULL_CHAR;
 }
 
 STRINGZILLA_API sz_status_t sz_rfind_byte_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
@@ -176,7 +163,22 @@ STRINGZILLA_INLINE sz_cptr_t sz_find_powervsx_(sz_cptr_t haystack, sz_size_t hay
         }
     }
 
-    return sz_find_serial_(haystack, haystack_length, needle, needle_length);
+    // Fewer than 16 starts remain, and each probe's `lxvl` reads exactly the bytes they cover.
+    sz_size_t const starts_count = haystack_length - needle_length + 1;
+    __vector unsigned char haystack_first_u8x16 = vec_xl_len((unsigned char *)(haystack + offset_first), starts_count);
+    __vector unsigned char haystack_mid_u8x16 = vec_xl_len((unsigned char *)(haystack + offset_mid), starts_count);
+    __vector unsigned char haystack_last_u8x16 = vec_xl_len((unsigned char *)(haystack + offset_last), starts_count);
+    __vector unsigned char cmp_u8x16 = vec_and( //
+        vec_and((__vector unsigned char)vec_cmpeq(haystack_first_u8x16, needle_first_u8x16),
+                (__vector unsigned char)vec_cmpeq(haystack_mid_u8x16, needle_mid_u8x16)),
+        (__vector unsigned char)vec_cmpeq(haystack_last_u8x16, needle_last_u8x16));
+    sz_u64_t matches = sz_movemask_powervsx_(cmp_u8x16) & sz_u64_mask_until_serial_(starts_count);
+    while (matches) {
+        int potential_offset = sz_u64_ctz(matches);
+        if (sz_equal_powervsx_(haystack + potential_offset, needle, needle_length)) return haystack + potential_offset;
+        matches &= matches - 1;
+    }
+    return STRINGZILLA_NULL_CHAR;
 }
 
 STRINGZILLA_API sz_status_t sz_find_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
@@ -264,7 +266,22 @@ STRINGZILLA_INLINE sz_cptr_t sz_rfind_powervsx_(sz_cptr_t haystack, sz_size_t ha
         }
     }
 
-    return sz_rfind_serial_(haystack, haystack_length, needle, needle_length);
+    // Under 16 starts remain at the front, so each `lxvl` probe reads just the bytes they cover.
+    sz_size_t const starts_count = haystack_length - needle_length + 1;
+    __vector unsigned char haystack_first_u8x16 = vec_xl_len((unsigned char *)(haystack + offset_first), starts_count);
+    __vector unsigned char haystack_mid_u8x16 = vec_xl_len((unsigned char *)(haystack + offset_mid), starts_count);
+    __vector unsigned char haystack_last_u8x16 = vec_xl_len((unsigned char *)(haystack + offset_last), starts_count);
+    __vector unsigned char cmp_u8x16 = vec_and( //
+        vec_and((__vector unsigned char)vec_cmpeq(haystack_first_u8x16, needle_first_u8x16),
+                (__vector unsigned char)vec_cmpeq(haystack_mid_u8x16, needle_mid_u8x16)),
+        (__vector unsigned char)vec_cmpeq(haystack_last_u8x16, needle_last_u8x16));
+    sz_u64_t matches = sz_movemask_powervsx_(cmp_u8x16) & sz_u64_mask_until_serial_(starts_count);
+    while (matches) {
+        int potential_offset = (int)(63 - sz_u64_clz(matches));
+        if (sz_equal_powervsx_(haystack + potential_offset, needle, needle_length)) return haystack + potential_offset;
+        matches &= ~(1ull << potential_offset);
+    }
+    return STRINGZILLA_NULL_CHAR;
 }
 
 STRINGZILLA_API sz_status_t sz_rfind_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
@@ -289,34 +306,39 @@ STRINGZILLA_INLINE __vector unsigned char sz_byteset_load_powervsx_(sz_u8_t cons
     return set_u8x16;
 }
 
+/** Lanes of @p haystack_u8x16 whose byte is in the set come out non-zero, the rest zero. */
+STRINGZILLA_INLINE __vector unsigned char sz_byteset_members_powervsx_(__vector unsigned char haystack_u8x16,
+                                                                       __vector unsigned char set_low_u8x16,
+                                                                       __vector unsigned char set_high_u8x16) {
+    __vector unsigned char byte_index_u8x16 = vec_sr(haystack_u8x16,
+                                                     vec_splats((unsigned char)3)); // c >> 3, in [0,32)
+    __vector unsigned char bit_position_u8x16 = vec_and(haystack_u8x16, vec_splats((unsigned char)7));
+    __vector unsigned char byte_mask_u8x16 = vec_sl(vec_splats((unsigned char)1), bit_position_u8x16);
+    // `vec_perm` with two distinct registers indexes the full 32-byte set using the low 5 bits.
+    __vector unsigned char looked_up_u8x16 = vec_perm(set_low_u8x16, set_high_u8x16, byte_index_u8x16);
+    return vec_and(looked_up_u8x16, byte_mask_u8x16);
+}
+
 STRINGZILLA_INLINE sz_cptr_t sz_find_byteset_powervsx_(sz_cptr_t haystack, sz_size_t haystack_length,
                                                        sz_byteset_t const *set) {
     // Two halves of the 256-bit set, each 16 bytes, covering byte indices [0,16) and [16,32).
     __vector unsigned char set_low_u8x16 = sz_byteset_load_powervsx_(&set->_u8s[0]);
     __vector unsigned char set_high_u8x16 = sz_byteset_load_powervsx_(&set->_u8s[16]);
+    __vector unsigned char const zero_u8x16 = vec_splats((unsigned char)0);
 
     for (; haystack_length >= 16; haystack += 16, haystack_length -= 16) {
         __vector unsigned char haystack_u8x16 = vec_xl(0, (unsigned char const *)haystack);
-        __vector unsigned char byte_index_u8x16 = vec_sr(haystack_u8x16,
-                                                         vec_splats((unsigned char)3)); // c >> 3, in [0,32)
-        __vector unsigned char bit_position_u8x16 = vec_and(haystack_u8x16, vec_splats((unsigned char)7));
-        __vector unsigned char byte_mask_u8x16 = vec_sl(vec_splats((unsigned char)1), bit_position_u8x16);
-        // `vec_perm` with two distinct registers indexes the full 32-byte set using the low 5 bits.
-        __vector unsigned char looked_up_u8x16 = vec_perm(set_low_u8x16, set_high_u8x16, byte_index_u8x16);
-        __vector unsigned char anded_u8x16 = vec_and(looked_up_u8x16, byte_mask_u8x16);
-        __vector unsigned char matched_u8x16 = (__vector unsigned char)vec_cmpne(anded_u8x16,
-                                                                                 vec_splats((unsigned char)0));
-#if defined(_ARCH_PWR10)
-        // `matched_u8x16` is 0xFF in matched lanes; the first such lane is the first set member.
-        unsigned int match_index = vec_first_match_index(matched_u8x16, vec_splats((unsigned char)0xFF));
+        __vector unsigned char members_u8x16 = sz_byteset_members_powervsx_(haystack_u8x16, set_low_u8x16,
+                                                                            set_high_u8x16);
+        unsigned int match_index = vec_first_mismatch_index(members_u8x16, zero_u8x16);
         if (match_index != 16) return haystack + match_index;
-#else
-        sz_u64_t matches = sz_movemask_powervsx_(matched_u8x16);
-        if (matches) return haystack + sz_u64_ctz(matches);
-#endif
     }
 
-    return sz_find_byteset_serial_(haystack, haystack_length, set);
+    // `lxvl` zeroes lanes past the tail, and byte zero may be in the set, so only earlier count.
+    __vector unsigned char haystack_u8x16 = vec_xl_len((unsigned char *)haystack, haystack_length);
+    __vector unsigned char members_u8x16 = sz_byteset_members_powervsx_(haystack_u8x16, set_low_u8x16, set_high_u8x16);
+    unsigned int match_index = vec_first_mismatch_index(members_u8x16, zero_u8x16);
+    return match_index < haystack_length ? haystack + match_index : STRINGZILLA_NULL_CHAR;
 }
 
 STRINGZILLA_API sz_status_t sz_find_byteset_powervsx(sz_cptr_t haystack, sz_size_t haystack_length,
@@ -330,21 +352,22 @@ STRINGZILLA_INLINE sz_cptr_t sz_rfind_byteset_powervsx_(sz_cptr_t haystack, sz_s
                                                         sz_byteset_t const *set) {
     __vector unsigned char set_low_u8x16 = sz_byteset_load_powervsx_(&set->_u8s[0]);
     __vector unsigned char set_high_u8x16 = sz_byteset_load_powervsx_(&set->_u8s[16]);
+    __vector unsigned char const zero_u8x16 = vec_splats((unsigned char)0);
 
     for (; haystack_length >= 16; haystack_length -= 16) {
         __vector unsigned char haystack_u8x16 = vec_xl(0, (unsigned char const *)(haystack + haystack_length - 16));
-        __vector unsigned char byte_index_u8x16 = vec_sr(haystack_u8x16, vec_splats((unsigned char)3));
-        __vector unsigned char bit_position_u8x16 = vec_and(haystack_u8x16, vec_splats((unsigned char)7));
-        __vector unsigned char byte_mask_u8x16 = vec_sl(vec_splats((unsigned char)1), bit_position_u8x16);
-        __vector unsigned char looked_up_u8x16 = vec_perm(set_low_u8x16, set_high_u8x16, byte_index_u8x16);
-        __vector unsigned char anded_u8x16 = vec_and(looked_up_u8x16, byte_mask_u8x16);
-        __vector unsigned char matched_u8x16 = (__vector unsigned char)vec_cmpne(anded_u8x16,
-                                                                                 vec_splats((unsigned char)0));
-        sz_u64_t matches = sz_movemask_powervsx_(matched_u8x16);
-        if (matches) return haystack + haystack_length - 1 - (sz_u64_clz(matches) - 48);
+        __vector unsigned char members_u8x16 = sz_byteset_members_powervsx_(haystack_u8x16, set_low_u8x16,
+                                                                            set_high_u8x16);
+        // Reversing the window turns the last member into the first one.
+        unsigned int match_index = vec_first_mismatch_index(vec_reve(members_u8x16), zero_u8x16);
+        if (match_index != 16) return haystack + haystack_length - 1 - match_index;
     }
 
-    return sz_rfind_byteset_serial_(haystack, haystack_length, set);
+    __vector unsigned char haystack_u8x16 = vec_xl_len((unsigned char *)haystack, haystack_length);
+    __vector unsigned char matched_u8x16 = (__vector unsigned char)vec_cmpne(
+        sz_byteset_members_powervsx_(haystack_u8x16, set_low_u8x16, set_high_u8x16), zero_u8x16);
+    sz_u64_t matches = sz_movemask_powervsx_(matched_u8x16) & sz_u64_mask_until_serial_(haystack_length);
+    return matches ? haystack + 63 - sz_u64_clz(matches) : STRINGZILLA_NULL_CHAR;
 }
 
 STRINGZILLA_API sz_status_t sz_rfind_byteset_powervsx(sz_cptr_t haystack, sz_size_t haystack_length,

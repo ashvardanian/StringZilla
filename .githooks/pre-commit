@@ -38,7 +38,7 @@ project_include_prefix="stringzilla"
 sibling_projects='numkong|usearch|forkunion|smashtable|ucall|ustore|uform'
 abbreviations_refused="hi lo bot acc accum tmp temp res bcast ext idx cnt buf len str val obj elem iter"
 # Name prefixes of third-party APIs the code calls, whose abbreviations are not this project's to spell out.
-third_party_identifier_prefixes=''
+third_party_identifier_prefixes='vec_'
 rustfmt_command="cargo fmt"
 std_collections_baseline_paths=''
 # Uppercase non-cache CMake names this project publishes, and the third-party and toolchain inputs it sets.
@@ -3636,7 +3636,7 @@ check_cpython_format_shortcuts_absent() {
         "            build tuples with PyTuple_Pack and PyLong_From*, and call with PyObject_CallOneArg:"
 }
 
-# Every CPU capability c/stringzilla/types.h detects, as `<capability> <ARCH> [<closure>]` lines: its
+# Every capability c/stringzilla/types.h detects, as `<capability> <ARCH> [<closure>]` lines: its
 # force-off clause names the architecture, and a `STRINGZILLA_ARCH_<ARCH>_<CAPABILITY>_` closure marks a base
 # capability. Read from the staged copy, else the one beside this hook, as fixtures have none.
 capability_architectures=$({ { [ $# -eq 0 ] && git show :c/stringzilla/types.h 2> /dev/null; } || cat "$(dirname "$0")/../c/stringzilla/types.h"; } |
@@ -3652,7 +3652,7 @@ capability_architectures=$({ { [ $# -eq 0 ] && git show :c/stringzilla/types.h 2
         }
         END { for (capability in architecture) print capability, architecture[capability], closure[capability] }')
 
-# Rejects a CPU capability header whose platform guards break its shape, because they decide where its helpers and
+# Rejects a capability header whose platform guards break its shape, because they decide where its helpers and
 # kernels compile. Before any code but its includes, a base capability opens its architecture and then its closure,
 # and a leaf its architecture and then its target. A base keeps its kernels in one `#if STRINGZILLA_TARGET_` block,
 # each guard's #endif names it, and no other condition tests an architecture or target.
