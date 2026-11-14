@@ -766,6 +766,9 @@
 #endif
 #if STRINGZILLA_ARCH_X8664_WESTMERE_ || STRINGZILLA_TARGET_GOLDMONT
 #include <immintrin.h>
+#if !defined(_MSC_VER) || defined(__clang__)
+#include <x86intrin.h> // `_bit_scan_forward`, `_bit_scan_reverse`
+#endif
 #endif // STRINGZILLA_ARCH_X8664_WESTMERE_ || STRINGZILLA_TARGET_GOLDMONT
 #if STRINGZILLA_ARCH_ARM64_NEON_
 #if !defined(_MSC_VER)
@@ -2002,11 +2005,20 @@ STRINGZILLA_INLINE int sz_u32_popcount(sz_u32_t x) {
     return (((x + (x >> 4)) & 0x0F0F0F0F) * 0x01010101) >> 24;
 }
 #else
+/*  Before Haswell @c lzcnt decodes as @c bsr and miscounts, so leading zeros go through @c bsr. */
 STRINGZILLA_INLINE int sz_u64_ctz(sz_u64_t x) { return (int)_tzcnt_u64(x); }
-STRINGZILLA_INLINE int sz_u64_clz(sz_u64_t x) { return (int)_lzcnt_u64(x); }
+STRINGZILLA_INLINE int sz_u64_clz(sz_u64_t x) {
+    unsigned long index;
+    _BitScanReverse64(&index, x);
+    return 63 - (int)index;
+}
 STRINGZILLA_INLINE int sz_u64_popcount(sz_u64_t x) { return (int)__popcnt64(x); }
 STRINGZILLA_INLINE int sz_u32_ctz(sz_u32_t x) { return (int)_tzcnt_u32(x); }
-STRINGZILLA_INLINE int sz_u32_clz(sz_u32_t x) { return (int)_lzcnt_u32(x); }
+STRINGZILLA_INLINE int sz_u32_clz(sz_u32_t x) {
+    unsigned long index;
+    _BitScanReverse(&index, x);
+    return 31 - (int)index;
+}
 STRINGZILLA_INLINE int sz_u32_popcount(sz_u32_t x) { return (int)__popcnt(x); }
 #endif
 /*  Force the byteswap functions to be intrinsics, because when @c /Oi- is given, these will turn

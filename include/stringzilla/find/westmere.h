@@ -20,16 +20,38 @@ extern "C" {
 /*  SSE implementation of the string search algorithms for Westmere processors and newer.
  *  Very minimalistic compared to AVX-512, but still faster than the serial implementation.
  *
- *  `bmi,lzcnt` are added only so GCC accepts @c _tzcnt_u32 and @c _lzcnt_u32; without those flags
- *  both compile down to the legacy @c bsf and @c bsr, which keeps the tier honest. */
+ *  Bit scans are @c bsf and @c bsr: before Haswell @c lzcnt decodes as @c bsr and miscounts, and a
+ *  @c bmi target would let the compiler emit @c blsr or @c andn, which these parts lack. */
 #if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_ARCH_X8664_WESTMERE_
 #if defined(__clang__)
-#pragma clang attribute push(__attribute__((target("sse4.2,bmi,lzcnt"))), apply_to = function)
+#pragma clang attribute push(__attribute__((target("sse4.2"))), apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("sse4.2", "bmi", "lzcnt")
+#pragma GCC target("sse4.2")
 #endif
+
+/** Trailing zeros of a nonzero @p x through @c bsf. */
+STRINGZILLA_INLINE int sz_u32_ctz_westmere_(sz_u32_t x) {
+#if defined(_MSC_VER) && !defined(__clang__)
+    unsigned long index;
+    _BitScanForward(&index, x);
+    return (int)index;
+#else
+    return _bit_scan_forward((int)x);
+#endif
+}
+
+/** Leading zeros of a nonzero @p x through @c bsr. */
+STRINGZILLA_INLINE int sz_u32_clz_westmere_(sz_u32_t x) {
+#if defined(_MSC_VER) && !defined(__clang__)
+    unsigned long index;
+    _BitScanReverse(&index, x);
+    return 31 - (int)index;
+#else
+    return 31 - _bit_scan_reverse((int)x);
+#endif
+}
 
 STRINGZILLA_INLINE sz_cptr_t sz_find_byte_westmere_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     int matches_mask;
@@ -39,7 +61,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_find_byte_westmere_(sz_cptr_t haystack, sz_size_
     while (haystack_length >= 16) {
         haystack_vec.xmm = _mm_lddqu_si128((__m128i const *)haystack);
         matches_mask = _mm_movemask_epi8(_mm_cmpeq_epi8(haystack_vec.xmm, needle_vec.xmm));
-        if (matches_mask) return haystack + (int)_tzcnt_u32(matches_mask);
+        if (matches_mask) return haystack + sz_u32_ctz_westmere_(matches_mask);
         haystack += 16, haystack_length -= 16;
     }
 
@@ -54,7 +76,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_rfind_byte_westmere_(sz_cptr_t haystack, sz_size
     while (haystack_length >= 16) {
         haystack_vec.xmm = _mm_lddqu_si128((__m128i const *)(haystack + haystack_length - 16));
         matches_mask = _mm_movemask_epi8(_mm_cmpeq_epi8(haystack_vec.xmm, needle_vec.xmm));
-        if (matches_mask) return haystack + haystack_length - 1 - ((int)_lzcnt_u32(matches_mask) - 16);
+        if (matches_mask) return haystack + haystack_length - 1 - (sz_u32_clz_westmere_(matches_mask) - 16);
         haystack_length -= 16;
     }
 
@@ -90,7 +112,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_find_westmere_(sz_cptr_t haystack, sz_size_t hay
             _mm_movemask_epi8(_mm_cmpeq_epi8(h_mid_vec.xmm, n_mid_vec.xmm)) &
             _mm_movemask_epi8(_mm_cmpeq_epi8(h_last_vec.xmm, n_last_vec.xmm));
         while (matches_vec.u32) {
-            int potential_offset = (int)_tzcnt_u32(matches_vec.u32);
+            int potential_offset = sz_u32_ctz_westmere_(matches_vec.u32);
             if (sz_equal_westmere_(haystack + potential_offset, needle, needle_length))
                 return haystack + potential_offset;
             matches_vec.u32 &= matches_vec.u32 - 1;
@@ -130,7 +152,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_rfind_westmere_(sz_cptr_t haystack, sz_size_t ha
             _mm_movemask_epi8(_mm_cmpeq_epi8(h_mid_vec.xmm, n_mid_vec.xmm)) &
             _mm_movemask_epi8(_mm_cmpeq_epi8(h_last_vec.xmm, n_last_vec.xmm));
         while (matches_vec.u32) {
-            int potential_offset = (int)_lzcnt_u32(matches_vec.u32) - 16;
+            int potential_offset = sz_u32_clz_westmere_(matches_vec.u32) - 16;
             if (sz_equal_westmere_(haystack + haystack_length - needle_length - potential_offset, needle,
                                    needle_length))
                 return haystack + haystack_length - needle_length - potential_offset;

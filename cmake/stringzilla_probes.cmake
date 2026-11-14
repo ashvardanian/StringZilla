@@ -126,11 +126,17 @@ endfunction ()
 # opens `lasxintrin.h` and `altivec.h` inside their target regions; Clang never does, so its builds leave both off.
 # WebAssembly carries the one capability `STRINGZILLA_MARCH` names, so it probes none.
 if (stringzilla_arch_x8664_)
-    stringzilla_add_cpu_capability(westmere STRINGZILLA_TARGET_WESTMERE GCC_FLAGS -msse4.2 -maes -mpclmul -mbmi -mlzcnt)
+    stringzilla_add_cpu_capability(westmere STRINGZILLA_TARGET_WESTMERE GCC_FLAGS -msse4.2 -maes -mpclmul)
     stringzilla_add_cpu_capability(goldmont STRINGZILLA_TARGET_GOLDMONT GCC_FLAGS -msse3 -mssse3 -msse4.1 -msha)
     stringzilla_add_cpu_capability(
         haswell STRINGZILLA_TARGET_HASWELL
-        GCC_FLAGS -mavx2 -mfma -mbmi -mbmi2 -mpopcnt -mlzcnt
+        GCC_FLAGS -mavx2
+                  -mfma
+                  -mbmi
+                  -mbmi2
+                  -mpopcnt
+                  -mlzcnt
+                  -mpclmul
         MSVC_FLAGS /arch:AVX2
     )
     stringzilla_add_cpu_capability(

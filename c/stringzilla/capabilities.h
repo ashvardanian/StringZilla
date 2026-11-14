@@ -87,7 +87,7 @@ typedef sz_u64_t sz_capability_t;
 /** x86 SSSE3 and SSE4.1 with the SHA extensions, as on Goldmont. */
 #define sz_cap_goldmont_k ((sz_capability_t)1 << 2)
 
-/** x86 AVX2 with FMA, BMI2, POPCNT and LZCNT, as on Haswell. */
+/** x86 AVX2 with FMA, BMI2, POPCNT, LZCNT and carry-less multiplication, as on Haswell. */
 #define sz_cap_haswell_k ((sz_capability_t)1 << 3)
 
 /** x86 AVX-512 F, VL, BW and DQ with AES-NI, as on Skylake servers. */
@@ -99,10 +99,10 @@ typedef sz_u64_t sz_capability_t;
 /** Arm NEON, the Advanced SIMD of every Armv8.0-A core. */
 #define sz_cap_neon_k ((sz_capability_t)1 << 6)
 
-/** Arm NEON with the AES instructions, optional since Armv8.0-A. */
+/** Arm NEON with the AES instructions, and the SHA2 ones its <tt>+crypto</tt> target brings. */
 #define sz_cap_neonaes_k ((sz_capability_t)1 << 7)
 
-/** Arm NEON with the SHA2 instructions, optional since Armv8.0-A. */
+/** Arm NEON with the SHA2 instructions, and the AES ones its <tt>+crypto</tt> target brings. */
 #define sz_cap_neonsha_k ((sz_capability_t)1 << 8)
 
 /** Arm SVE, the Scalable Vector Extension, optional since Armv8.2-A. */
@@ -111,7 +111,7 @@ typedef sz_u64_t sz_capability_t;
 /** Arm SVE2, optional since Armv9.0-A. */
 #define sz_cap_sve2_k ((sz_capability_t)1 << 10)
 
-/** Arm SVE2 with its AES instructions. */
+/** Arm SVE2 with its AES instructions, and the NEON AES and SHA2 its <tt>+crypto</tt> brings. */
 #define sz_cap_sve2aes_k ((sz_capability_t)1 << 11)
 
 /** RISC-V Vector extension 1.0, with length-agnostic registers. */
@@ -1010,10 +1010,11 @@ STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_arm64_(void) {
     if (sysctlbyname("hw.optional.arm.FEAT_AES", &supports_neonaes, &size, NULL, 0) != 0) supports_neonaes = 0;
     if (sysctlbyname("hw.optional.arm.FEAT_SHA256", &supports_neonsha, &size, NULL, 0) != 0) supports_neonsha = 0;
 
-    return (sz_capability_t)(                     //
-        (sz_cap_neon_k * (supports_neon)) |       //
-        (sz_cap_neonaes_k * (supports_neonaes)) | //
-        (sz_cap_neonsha_k * (supports_neonsha)) | //
+    // The `+crypto` in both tiers' targets enables AES and SHA2 together.
+    return (sz_capability_t)(                                         //
+        (sz_cap_neon_k * (supports_neon)) |                           //
+        (sz_cap_neonaes_k * (supports_neonaes && supports_neonsha)) | //
+        (sz_cap_neonsha_k * (supports_neonaes && supports_neonsha)) | //
         (sz_cap_serial_k));
 
 #elif (STRINGZILLA_OS_LINUX_ || STRINGZILLA_OS_FREEBSD_) && STRINGZILLA_WITH_LIBC
@@ -1044,13 +1045,15 @@ STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_arm64_(void) {
     unsigned supports_sve2 = ((id_aa64zfr0_el1) & 0xF) >= 1;
     unsigned supports_sve2aes = ((id_aa64zfr0_el1 >> 4) & 0xF) >= 1;
 
-    return (sz_capability_t)(                     //
-        (sz_cap_neon_k * (supports_neon)) |       //
-        (sz_cap_neonaes_k * (supports_neonaes)) | //
-        (sz_cap_neonsha_k * (supports_neonsha)) | //
-        (sz_cap_sve_k * (supports_sve)) |         //
-        (sz_cap_sve2_k * (supports_sve2)) |       //
-        (sz_cap_sve2aes_k * (supports_sve2aes)) | //
+    // The `+crypto` in the NEON and SVE2 AES tiers' targets enables AES and SHA2 together.
+    unsigned supports_crypto = supports_neonaes && supports_neonsha;
+    return (sz_capability_t)(                                                         //
+        (sz_cap_neon_k * (supports_neon)) |                                           //
+        (sz_cap_neonaes_k * (supports_crypto)) |                                      //
+        (sz_cap_neonsha_k * (supports_crypto)) |                                      //
+        (sz_cap_sve_k * (supports_sve)) |                                             //
+        (sz_cap_sve2_k * (supports_sve2)) |                                           //
+        (sz_cap_sve2aes_k * (supports_sve2 && supports_sve2aes && supports_crypto)) | //
         (sz_cap_serial_k));
 
 #elif STRINGZILLA_OS_WINDOWS_
@@ -1084,12 +1087,14 @@ STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_x8664_(void) {
         struct separate_t {
             unsigned eax, ebx, ecx, edx;
         } named;
-    } info0, info1, info7;
+    } info0, info1, info7, info_extended;
 
+    // Every x86-64 CPU has leaf 0x80000001, as it reports long mode itself.
 #if defined(_MSC_VER) && !defined(__clang__)
     __cpuidex(info0.array, 0, 0);
     __cpuidex(info1.array, 1, 0);
     __cpuidex(info7.array, 7, 0);
+    __cpuidex(info_extended.array, 0x80000001, 0);
 #else
     __asm__ __volatile__( //
         "cpuid"
@@ -1103,12 +1108,17 @@ STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_x8664_(void) {
         "cpuid"
         : "=a"(info7.named.eax), "=b"(info7.named.ebx), "=c"(info7.named.ecx), "=d"(info7.named.edx)
         : "a"(7), "c"(0));
+    __asm__ __volatile__( //
+        "cpuid"
+        : "=a"(info_extended.named.eax), "=b"(info_extended.named.ebx), "=c"(info_extended.named.ecx),
+          "=d"(info_extended.named.edx)
+        : "a"(0x80000001), "c"(0));
 #endif
 
     // Querying a leaf above the highest supported one returns the highest leaf's data, not zeros,
     // so on early x86-64 parts (max basic leaf below 7) the "leaf 7" registers would hold unrelated
-    // bits. The AVX family is already masked by the XGETBV/OSXSAVE chain below, but SHA-NI is read
-    // from leaf 7 unmasked, so the whole leaf is zeroed when it does not exist.
+    // bits. The AVX family is already masked by the XGETBV/OSXSAVE chain below, but SHA-NI and BMI
+    // are read from leaf 7 unmasked, so the whole leaf is zeroed when it does not exist.
     if (info0.named.eax < 7) info7.named.eax = info7.named.ebx = info7.named.ecx = info7.named.edx = 0;
 
     // Gate AVX/AVX-512 on OS-enabled extended state (XGETBV)
@@ -1132,24 +1142,48 @@ STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_x8664_(void) {
     // Check for AVX2/AVX-512 (Function ID 7), masked by OS state
     // https://github.com/llvm/llvm-project/blob/50598f0ff44f3a4e75706f8c53f3380fe7faa896/clang/lib/Headers/cpuid.h#L148
     unsigned supports_avx2 = os_avx_enabled && ((info7.named.ebx & 0x00000020u) != 0);
+    unsigned supports_fma = os_avx_enabled && ((info1.named.ecx & 0x00001000u) != 0);
     unsigned supports_avx512f = os_avx512_enabled && ((info7.named.ebx & 0x00010000u) != 0);
+    unsigned supports_avx512dq = os_avx512_enabled && ((info7.named.ebx & 0x00020000u) != 0);
     unsigned supports_avx512bw = os_avx512_enabled && ((info7.named.ebx & 0x40000000u) != 0);
     unsigned supports_avx512vl = os_avx512_enabled && ((info7.named.ebx & 0x80000000u) != 0);
     unsigned supports_avx512vbmi = os_avx512_enabled && ((info7.named.ecx & 0x00000002u) != 0);
     unsigned supports_avx512vbmi2 = os_avx512_enabled && ((info7.named.ecx & 0x00000040u) != 0);
+    unsigned supports_avx512vnni = os_avx512_enabled && ((info7.named.ecx & 0x00000800u) != 0);
     unsigned supports_vaes = os_avx512_enabled && ((info7.named.ecx & 0x00000200u) != 0);
+    unsigned supports_vpclmulqdq = os_avx512_enabled && ((info7.named.ecx & 0x00000400u) != 0);
 
-    // Check for SSE4.2, AES-NI, and SHA-NI (Function ID 1 and 7)
+    // SSE, AES-NI, CLMUL, SHA-NI and the bit-manipulation sets, from leaves 1, 7 and 0x80000001
+    unsigned supports_sse3 = ((info1.named.ecx & 0x00000001u) != 0);
+    unsigned supports_ssse3 = ((info1.named.ecx & 0x00000200u) != 0);
+    unsigned supports_sse41 = ((info1.named.ecx & 0x00080000u) != 0);
     unsigned supports_sse42 = ((info1.named.ecx & 0x00100000u) != 0);
+    unsigned supports_popcnt = ((info1.named.ecx & 0x00800000u) != 0);
     unsigned supports_aesni = ((info1.named.ecx & 0x02000000u) != 0);
+    unsigned supports_pclmul = ((info1.named.ecx & 0x00000002u) != 0);
     unsigned supports_shani = ((info7.named.ebx & 0x20000000u) != 0); // SHA-NI bit 29 in EBX from CPUID(7,0)
+    unsigned supports_bmi1 = ((info7.named.ebx & 0x00000008u) != 0);
+    unsigned supports_bmi2 = ((info7.named.ebx & 0x00000100u) != 0);
+    unsigned supports_lzcnt = ((info_extended.named.ecx & 0x00000020u) != 0);
 
-    return (sz_capability_t)(                                                                 //
-        (sz_cap_westmere_k * (supports_sse42 && supports_aesni)) |                            //
-        (sz_cap_goldmont_k * (supports_shani)) |                                              //
-        (sz_cap_haswell_k * (supports_avx2)) |                                                //
-        (sz_cap_skylake_k * (supports_avx512f && supports_avx512vl && supports_avx512bw)) |   //
-        (sz_cap_icelake_k * (supports_avx512vbmi && supports_avx512vbmi2 && supports_vaes)) | //
+    // A tier needs every feature its target pragmas and flags enable, even beyond its namesake CPU.
+    unsigned supports_westmere = supports_sse42 && supports_aesni && supports_pclmul;
+    unsigned supports_goldmont = supports_sse3 && supports_ssse3 && supports_sse41 && supports_shani;
+    unsigned supports_haswell = supports_avx2 && supports_fma && supports_bmi1 && supports_bmi2 && supports_popcnt &&
+                                supports_lzcnt && supports_pclmul;
+    unsigned supports_skylake = supports_avx2 && supports_avx512f && supports_avx512vl && supports_avx512bw &&
+                                supports_avx512dq && supports_bmi1 && supports_bmi2 && supports_popcnt &&
+                                supports_lzcnt && supports_aesni;
+    unsigned supports_icelake = supports_skylake && supports_avx512vbmi && supports_avx512vbmi2 &&
+                                supports_avx512vnni && supports_vaes && supports_pclmul && supports_vpclmulqdq &&
+                                supports_shani;
+
+    return (sz_capability_t)(                       //
+        (sz_cap_westmere_k * (supports_westmere)) | //
+        (sz_cap_goldmont_k * (supports_goldmont)) | //
+        (sz_cap_haswell_k * (supports_haswell)) |   //
+        (sz_cap_skylake_k * (supports_skylake)) |   //
+        (sz_cap_icelake_k * (supports_icelake)) |   //
         (sz_cap_serial_k));
 }
 
