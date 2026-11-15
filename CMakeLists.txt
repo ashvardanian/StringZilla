@@ -237,6 +237,10 @@ endfunction ()
 add_library(stringzilla_header INTERFACE)
 add_library(${PROJECT_NAME}::header ALIAS stringzilla_header)
 set_target_properties(stringzilla_header PROPERTIES EXPORT_NAME header)
+# MSVC reads BOM-less UTF-8 in the system code page, so consumers of these Unicode-commented headers need `/utf-8`.
+target_compile_options(
+    stringzilla_header INTERFACE "$<$<OR:$<COMPILE_LANG_AND_ID:C,MSVC>,$<COMPILE_LANG_AND_ID:CXX,MSVC>>:/utf-8>"
+)
 target_include_directories(
     stringzilla_header
     INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/c> $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
@@ -308,6 +312,9 @@ function (stringzilla_add_library target_ public_name_ library_type_)
     # `stringzilla_shared` is published as `stringzilla::shared`, in-tree and installed alike.
     add_library(${PROJECT_NAME}::${public_name_} ALIAS ${target_})
     set_target_properties(${target_} PROPERTIES EXPORT_NAME ${public_name_})
+    target_compile_options(
+        ${target_} INTERFACE "$<$<OR:$<COMPILE_LANG_AND_ID:C,MSVC>,$<COMPILE_LANG_AND_ID:CXX,MSVC>>:/utf-8>"
+    )
 
     # `SOVERSION` carries the major alone - the only break the C ABI admits - so it tracks the project rather than
     # sitting at a literal that stopped matching four majors ago.
