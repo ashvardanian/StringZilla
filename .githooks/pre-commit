@@ -48,6 +48,7 @@ codegen_macro_prefix=''
 # Its macro prefix, the headers that alone read the operating-system predefines, and the predefines beyond
 # the operating systems that its identity also answers.
 macro_prefix="STRINGZILLA"
+include_root="include/stringzilla"
 identity_headers="c/stringzilla/types.h"
 platform_predefines_refused=''
 # The helpers that replace `std::min` and `std::max`, which spell no name `<windows.h>` takes as a macro.
@@ -2216,13 +2217,13 @@ check_type_suffixes() {
         }' "$staged_code_path" || true)
     [ -z "$templates" ] || reject_with_reason "$templates" \
         "$staged_path suffixes a class template with '_t' - the template stays bare and the alias that materializes it carries the suffix:"
-    variables=$(printf '%s\n' "$staged_added_text" | "$fastest_awk" '
+    variables=$(scan_staged_file_marking_added_lines '
         function suffixed(line) { return line ~ /constexpr[[:space:]][^=(]*[[:space:]][A-Za-z0-9_]*_[kt][[:space:]]*=/ }
-        /^\+[[:space:]]*template[[:space:]]*</ { if (suffixed($0)) print; else pending = 1; next }
-        pending && suffixed($0) { print; pending = 0; next }
+        /^[[:space:]]*template[[:space:]]*</ { opened = FNR in added; if (suffixed($0)) { if (opened) printf "line %d: %s\n", FNR, $0 } else pending = 1; next }
+        pending && suffixed($0) { if (opened || FNR in added) printf "line %d: %s\n", FNR, $0; pending = 0; next }
         pending && /\{[[:space:]]*$/ { pending = 0; next }
-        pending && /^\+[[:space:]]*(typename|class |std::|requires|[A-Za-z_]+ [A-Za-z_]+_|>)/ { next }
-        { pending = 0 }')
+        pending && /^[[:space:]]*(typename|class |std::|requires|[A-Za-z_]+ [A-Za-z_]+_|>)/ { next }
+        { pending = 0 }' "$staged_code_path")
     [ -z "$variables" ] || reject_with_reason "$variables" \
         "$staged_path suffixes a variable template with '_k' or '_t' - the template stays bare, like \`template <typename type_> constexpr bool bounded\`:"
 }
@@ -3418,28 +3419,53 @@ check_generations_split_into_tiers() {
         "            and unit, like levenshtein/blackwell.cuh and src/capabilities/blackwell.cu:"
 }
 
-# Rejects a GPU capability's kernel declared or defined under its vendor's `STRINGZILLA_ARCH_` alone, because every
-# unit of a vendor switches off each of the vendor's capabilities but its own, so only `STRINGZILLA_TARGET_` says
-# where the kernel exists; runtime services, which every unit of the vendor shares, are exempt.
-check_gpu_kernels_under_targets() {
+# Rejects a capability's GPU entry point, a function named for a GPU capability, under its vendor's guard alone, because
+# a device keeps every kernel a unit defines, so one under its vendor ships in every unit including its header; it sits
+# under its capability's target. Runtime services, which every unit of the vendor shares, are exempt. The kernels and
+# tables themselves are `check_gpu_kernels_under_their_own_target`'s.
+check_gpu_entry_points_under_targets() {
     local gpu_capabilities misguarded
     gpu_capabilities=$(printf '%s\n' "$capability_architectures" |
         "$fastest_awk" '$2 ~ /^(CUDA|ROCM|METAL)$/ { printf "%s%s", separator, $1; separator = "|" }')
     misguarded=$(printf '%s\n' "$staged_file_text" | blank_c_comments_preserving_columns |
-        added_list="$staged_added_line_numbers_list" gpu_capabilities=$gpu_capabilities "$fastest_awk" '
-        BEGIN { count = split(ENVIRON["added_list"], numbers, "\n"); for (index_ = 1; index_ <= count; ++index_) added[numbers[index_] + 0] = 1 }
-        /^[[:space:]]*#[[:space:]]*if/ { guard[++depth] = $0; guard_line[depth] = NR; next }
-        /^[[:space:]]*#[[:space:]]*elif/ { guard[depth] = $0; guard_line[depth] = NR; next }
-        /^[[:space:]]*#[[:space:]]*endif/ { --depth; next }
-        depth > 0 && match($0, /^(STRINGZILLA_[A-Z_]+|static|inline)[[:space:]][^(=;]*[^A-Za-z0-9_]sz_[a-z0-9_]+[[:space:]]*\(/) {
-            if (!((NR in added) || (guard_line[depth] in added))) next
-            name = substr($0, RSTART, RLENGTH); sub(/[[:space:]]*\($/, "", name); sub(/.*[^a-z0-9_]/, "", name)
-            if (name ~ /allocator|memory_|stream_|sequence_realloc|device_count|capabilities_/) next
-            if (name ~ "_(" ENVIRON["gpu_capabilities"] ")$" && guard[depth] ~ /STRINGZILLA_ARCH_(CUDA|ROCM|METAL)_/)
-                printf "line %d: kernel %s under %s\n", NR, name, guard[depth]
+        gpu_capabilities=$gpu_capabilities "$fastest_awk" '
+        function condition(text) {
+            sub(/^[[:space:]]*#[[:space:]]*[a-z]+[[:space:]]*/, "", text); gsub(/[[:space:]]+/, " ", text); sub(/ $/, "", text)
+            return text
+        }
+        function innermost(    level) {
+            for (level = depth; level > 0; --level) if (guard[level] ~ /STRINGZILLA_(TARGET|ARCH)_/) return guard[level]
+            return ""
+        }
+        {
+            line = NR; text = $0
+            while (text ~ /^[[:space:]]*#.*\\[[:space:]]*$/ && (getline continuation) > 0) {
+                sub(/\\[[:space:]]*$/, " ", text); text = text continuation
+            }
+        }
+        text ~ /^[[:space:]]*#[[:space:]]*if/ { guard[++depth] = condition(text); next }
+        text ~ /^[[:space:]]*#[[:space:]]*el(if|se)/ { guard[depth] = "#else of " guard[depth]; next }
+        text ~ /^[[:space:]]*#[[:space:]]*endif/ { --depth; next }
+        depth > 0 && match(text, /^(STRINGZILLA_[A-Z_]+|static|inline)[[:space:]][^(=;]*[^A-Za-z0-9_]sz_[a-z0-9_]+[[:space:]]*\(/) {
+            name = substr(text, RSTART, RLENGTH); sub(/[[:space:]]*\($/, "", name); sub(/.*[^a-z0-9_]/, "", name)
+            if (name ~ /allocator|memory_|stream_|sequence_realloc|count_devices|capabilities_/) next
+            if (name ~ "_(" ENVIRON["gpu_capabilities"] ")$" && innermost() ~ /STRINGZILLA_ARCH_(CUDA|ROCM|METAL)_/)
+                printf "line %d: kernel %s under %s\n", line, name, innermost()
         }' || true)
     [ -z "$misguarded" ] || reject_with_reason "$misguarded" \
-        "$staged_path guards a GPU kernel by its vendor; open #if STRINGZILLA_TARGET_<CAPABILITY> inside the vendor's guard:"
+        "$staged_path guards a GPU kernel by its vendor; put it under #if STRINGZILLA_TARGET_<CAPABILITY>, inside the" \
+        "            vendor's guard:"
+}
+
+# Rejects `__reduce_<operation>_sync`, which CUDA declares only from compute capability 8.0, so a building block
+# calling it breaks the floor unit at `compute_75` even where nothing calls the block; `redux.sync` in inline PTX
+# assembles only where a kernel uses it.
+check_warp_reductions_through_ptx() {
+    local reductions
+    reductions=$(printf '%s\n' "$staged_file_text" | blank_c_comments_preserving_columns |
+        grep -nE '(^|[^A-Za-z0-9_])__reduce_[a-z]+_sync[[:space:]]*\(' || true)
+    [ -z "$reductions" ] || reject_with_reason "$reductions" \
+        "$staged_path reduces across a warp with a CUDA 8.0 intrinsic; spell it as redux.sync in inline PTX:"
 }
 
 # Rejects a GPU runtime service, like a stream, an allocator or a device query, declared, defined or dispatched under a
@@ -3455,31 +3481,12 @@ check_gpu_services_under_architectures() {
         /^[[:space:]]*#[[:space:]]*endif/ { --depth; next }
         depth > 0 && guard[depth] ~ /STRINGZILLA_TARGET_/ &&
             ($0 ~ /^(STRINGZILLA_[A-Z_]+|static|inline)[[:space:]]/ || $0 ~ /^[[:space:]]*case[[:space:]]/) &&
-            match($0, /sz_(allocator_init_[a-z]+|stream_(init|free|synchronize)|device_count|capabilities_detected)_(cuda|rocm|metal)[[:space:]]*\(/) {
+            match($0, /sz_(allocator_init_[a-z]+|stream_(init|free|synchronize)|count_devices|capabilities_detected)_(cuda|rocm|metal)[[:space:]]*\(/) {
             if ((NR in added) || (guard_line[depth] in added))
                 printf "line %d: %s under %s\n", NR, substr($0, RSTART, RLENGTH - 1), guard[depth]
         }' || true)
     [ -z "$misguarded" ] || reject_with_reason "$misguarded" \
         "$staged_path guards a GPU runtime service by a capability; open #if STRINGZILLA_ARCH_<VENDOR>_ instead:"
-}
-
-# Rejects a vendor header opening a capability's `STRINGZILLA_TARGET_` outside its vendor's `STRINGZILLA_ARCH_`, so
-# every CUDA, ROCm and Metal header reads alike: the runtime's guard, then the kernels' one inside it.
-check_gpu_headers_shaped() {
-    local unguarded
-    unguarded=$(printf '%s\n' "$staged_file_text" | blank_c_comments_preserving_columns |
-        added_list="$staged_added_line_numbers_list" "$fastest_awk" '
-        BEGIN { count = split(ENVIRON["added_list"], numbers, "\n"); for (index_ = 1; index_ <= count; ++index_) added[numbers[index_] + 0] = 1 }
-        /^[[:space:]]*#[[:space:]]*if/ {
-            vendor[depth + 1] = vendor[depth] || $0 ~ /STRINGZILLA_ARCH_(CUDA|ROCM|METAL)_/
-            ++depth
-            if ($0 ~ /STRINGZILLA_TARGET_/ && !vendor[depth - 1] && (NR in added))
-                printf "line %d: %s outside the vendor guard\n", NR, $0
-            next
-        }
-        /^[[:space:]]*#[[:space:]]*endif/ { --depth; next }' || true)
-    [ -z "$unguarded" ] || reject_with_reason "$unguarded" \
-        "$staged_path opens a capability before its vendor; wrap #if STRINGZILLA_TARGET_ in #if STRINGZILLA_ARCH_<VENDOR>_:"
 }
 
 # Rejects an export macro on a binding definition, because the binding declares its helpers plain `extern`
@@ -3636,9 +3643,10 @@ check_cpython_format_shortcuts_absent() {
         "            build tuples with PyTuple_Pack and PyLong_From*, and call with PyObject_CallOneArg:"
 }
 
-# Every capability c/stringzilla/types.h detects, as `<capability> <ARCH> [<closure>]` lines: its
-# force-off clause names the architecture, and a `STRINGZILLA_ARCH_<ARCH>_<CAPABILITY>_` closure marks a base
-# capability. Read from the staged copy, else the one beside this hook, as fixtures have none.
+# Every capability c/stringzilla/types.h detects, as `<capability> <ARCH> [<flag>]` lines: its target's force-off
+# clause names the architecture, and its `STRINGZILLA_ARCH_<ARCH>_<CAPABILITY>_` flag, which every capability but a
+# vendor's floor has, says where its code compiles. Read from the staged copy, else the one beside this hook, as
+# fixtures have none.
 capability_architectures=$({ { [ $# -eq 0 ] && git show :c/stringzilla/types.h 2> /dev/null; } || cat "$(dirname "$0")/../c/stringzilla/types.h"; } |
     "$fastest_awk" '
         match($0, /STRINGZILLA_TARGET_[A-Z0-9]+ && !\(?STRINGZILLA_ARCH_[A-Z0-9]+_/) {
@@ -3652,39 +3660,60 @@ capability_architectures=$({ { [ $# -eq 0 ] && git show :c/stringzilla/types.h 2
         }
         END { for (capability in architecture) print capability, architecture[capability], closure[capability] }')
 
-# Rejects a capability header whose platform guards break its shape, because they decide where its helpers and
-# kernels compile. Before any code but its includes, a base capability opens its architecture and then its closure,
-# and a leaf its architecture and then its target. A base keeps its kernels in one `#if STRINGZILLA_TARGET_` block,
-# each guard's #endif names it, and no other condition tests an architecture or target.
+# Rejects a capability header whose platform guards break its shape, because they decide where its building blocks and
+# kernels compile. Right after the include guard a capability, CPU or GPU, opens its architecture and its
+# `<PREFIX>_ARCH_<ARCH>_<CAPABILITY>_` flag and a vendor floor its vendor; portable simt.cuh and kernels.cuh test no
+# platform but both GPU vendors at once, wherever their device code starts.
+# Each keeps public kernels, stamps of kernel-emitting macros included, in one `#if <PREFIX>_TARGET_<CAPABILITY>` after
+# its building blocks, serial.h in `#if <PREFIX>_TARGET_SERIAL`, and no other condition tests a platform but serial.h's
+# compiler fixes; each guard's #endif names it, in full or as a prefix and `...`. `extern "C"` opens before the pragma
+# push and the target region and closes after both; the push wraps the building blocks and the target region, or, in a
+# header of kernels only, sits first inside it, as an empty push region fails under -Werror, with a comment on that
+# `#if` saying so. A GPU header ends in its target region.
 check_capability_guards_shaped() {
-    local capability upper architecture closure shape opening violations
+    local capability upper architecture shape opening="" inner="" layout violations
     capability=${staged_path##*/}
     capability=${capability%.*}
     upper=$(printf '%s' "$capability" | tr '[:lower:]' '[:upper:]')
-    read -r architecture closure <<< "$(printf '%s\n' "$capability_architectures" |
-        "$fastest_awk" -v name="$capability" '$1 == name { print $2, $3 }')"
-    if [ -z "$architecture" ]; then
-        reject_with_reason "$staged_path" "$staged_path is named after no capability c/stringzilla/types.h detects:"
-        return
-    fi
-    if [ -n "$closure" ]; then
-        shape=base opening=STRINGZILLA_ARCH_${architecture}_$'\n'$closure
-    else
-        shape=leaf opening=STRINGZILLA_ARCH_${architecture}_$'\n'STRINGZILLA_TARGET_$upper
-    fi
-    violations=$(blank_c_comments_preserving_columns < "$staged_text_path" |
-        opening=$opening inner=STRINGZILLA_TARGET_$upper raw_path=$staged_text_path "$fastest_awk" '
-        BEGIN { opening_count = split(ENVIRON["opening"], opening, "\n"); inner = ENVIRON["inner"] }
+    case "$capability" in
+    serial) shape=serial inner=${macro_prefix}_TARGET_SERIAL ;;
+    simt | kernels) shape=portable ;;
+    *)
+        architecture=$(printf '%s\n' "$capability_architectures" |
+            "$fastest_awk" -v name="$capability" '$1 == name { print $2 }')
+        if [ -z "$architecture" ]; then
+            reject_with_reason "$staged_path" \
+                "$staged_path is named after no capability c/${include_root#include/}/types.h detects:"
+            return
+        elif [ "$architecture" = "$upper" ]; then
+            shape=floor opening=${macro_prefix}_ARCH_${upper}_ inner=${macro_prefix}_TARGET_$upper
+        else
+            shape=capability inner=${macro_prefix}_TARGET_$upper
+            [ "$architecture" != CUDA ] && [ "$architecture" != ROCM ] || shape=gpu
+            opening=${macro_prefix}_ARCH_${architecture}_$'\n'${macro_prefix}_ARCH_${architecture}_${upper}_
+        fi
+        ;;
+    esac
+    layout="opens #if ${opening//$'\n'/, then #if } right after its include guard"
+    [ -n "$opening" ] || layout="opens no guard"
+    [ -z "$inner" ] || layout="$layout, with its public kernels in #if $inner"
+    violations=$(shape=$shape opening=$opening inner=$inner prefix=$macro_prefix raw_path=$staged_text_path \
+        kernel_macros=${kernel_codegen_macros:-} "$fastest_awk" '
+        BEGIN {
+            opening_count = split(ENVIRON["opening"], opening, "\n"); inner = ENVIRON["inner"]; shape = ENVIRON["shape"]
+            prefix = ENVIRON["prefix"]
+            count = split(ENVIRON["kernel_macros"], names, "\n"); for (index_ = 1; index_ <= count; ++index_) kernel_macros[names[index_]]
+        }
+        function stamped_macro(text) { return match(text, /^[a-z]+_define_[A-Za-z0-9_]*\(/) ? substr(text, 1, RLENGTH - 1) : "" }
         function condition(text) {
             sub(/^[[:space:]]*#[[:space:]]*[a-z]+[[:space:]]*/, "", text); gsub(/[[:space:]]+/, " ", text); sub(/ $/, "", text)
             return text
         }
-        function allowed(text, alternatives,    count, index_, names) {
-            count = split(alternatives, names, "|")
-            for (index_ = 1; index_ <= count; ++index_) if (text == names[index_]) return 1
-            return 0
-        }
         function report(problem) { printf "line %d: %s\n", line, problem }
+        function closes(comment, condition_) {
+            return comment == condition_ ||
+                (comment ~ / \.\.\.$/ && index(condition_, substr(comment, 1, length(comment) - 3)) == 1)
+        }
         {
             line = FNR; text = $0
             getline raw < ENVIRON["raw_path"]
@@ -3695,53 +3724,167 @@ check_capability_guards_shaped() {
             if (text ~ /^[[:space:]]*$/) next
             directive = ""
             if (match(text, /^[[:space:]]*#[[:space:]]*[a-z]+/)) { directive = substr(text, RSTART, RLENGTH); gsub(/[[:space:]#]/, "", directive) }
-            platform = directive ~ /^(if|ifdef|ifndef|elif)$/ && text ~ /STRINGZILLA_(TARGET_|ARCH_(X8664|ARM64|RISCV64|LOONGARCH64|PPC64|WASM)_)/
+            platform = directive ~ /^(if|ifdef|ifndef|elif)$/ && text ~ (prefix "_(ARCH|TARGET)_") &&
+                text !~ (prefix "_ARCH_(BIG_ENDIAN|64BIT)_")
         }
         stage == 0 && directive == "ifndef" && !platform { kind[++depth] = "include"; outer_depth = depth; stage = 1; next }
         stage == 0 && directive == "pragma" && text ~ /once/ { stage = 2; next }
         stage == 1 && directive == "define" { stage = 2; next }
         { stage = 2 }
-        directive == "if" && opened < opening_count && depth == outer_depth + opened && allowed(condition(text), opening[opened + 1]) {
-            kind[++depth] = "open"; guard[depth] = condition(text); ++opened; ++open_alive
+        directive == "if" && opened < opening_count && depth == outer_depth + opened && condition(text) == opening[opened + 1] {
+            kind[++depth] = "open"; guard[depth] = opening[++opened]; ++open_alive; group[depth] = ++groups
             next
         }
         directive ~ /^if(def|ndef)?$/ {
-            guard[++depth] = condition(text); kind[depth] = "plain"
+            guard[++depth] = condition(text); kind[depth] = "plain"; group[depth] = ++groups
             if (!platform) next
-            directly_inside = opened == opening_count && open_alive == opening_count && kind[depth - 1] == "open"
-            if (directive == "if" && guard[depth] == inner && directly_inside) {
-                kind[depth] = "inner"
-                if (++inner_count > 1) report("repeats #if " inner "; group the helpers ahead of one block of kernels")
+            directly_inside = open_alive == opening_count &&
+                (opening_count ? kind[depth - 1] == "open" : kind[depth - 1] ~ /^(include)?$/)
+            if (directive == "if" && inner != "" && guard[depth] == inner && directly_inside) {
+                kind[depth] = "inner"; inner_open = 1; targets_seen = 1; inner_code = 0; inner_raw = raw
+                if (++inner_count > 1 && shape != "serial")
+                    report("repeats #if " inner "; group the helpers ahead of one block of kernels")
+                if (shape != "serial" && push_open && !push_in_inner && !code_since_push)
+                    report("pushes its pragma over no building block; a header of kernels only pushes it first inside #if " inner)
                 next
             }
+            if (shape == "portable" && guard[depth] == prefix "_ARCH_CUDA_ || " prefix "_ARCH_ROCM_") next
+            compiler_workaround = guard[depth] !~ (prefix "_TARGET_") && guard[depth] ~ /defined\((__GNUC__|__clang__|_MSC_VER)\)/
+            if (shape == "serial" && compiler_workaround) next
             report("tests " guard[depth] ", which its shape does not allow")
             next
         }
         directive ~ /^el(if|se)$/ {
             if (platform) report("tests " condition(text) ", which its shape does not allow")
-            else if (kind[depth] == "open" || kind[depth] == "inner") report("branches its guard " guard[depth] " with #" directive)
+            else if (kind[depth] ~ /^(open|inner)$/) report("branches its guard " guard[depth] " with #" directive)
             next
         }
         directive == "endif" {
-            if (kind[depth] == "open" || kind[depth] == "inner") {
+            if (kind[depth] ~ /^(open|inner)$/) {
                 comment = raw
                 if (!sub(/^[^\/]*\/\/[[:space:]]*/, "", comment)) comment = ""
                 gsub(/[[:space:]]+/, " ", comment); sub(/ $/, "", comment)
-                if (comment != guard[depth]) report("closes " guard[depth] " without naming it in a // comment")
+                if (!closes(comment, guard[depth])) report("closes " guard[depth] " without naming it in a // comment")
                 if (kind[depth] == "open") --open_alive
+                else inner_open = 0
             }
             kind[depth--] = ""
             next
         }
-        opened == 1 && open_alive == 1 && !between_reported { report("holds code between its architecture and its second guard"); between_reported = 1 }
-        opened == opening_count && open_alive < opening_count && text !~ /^[[:space:]]*}/ && !outside_reported {
-            report("sits outside its guards, which hold everything after the includes"); outside_reported = 1
+        shape != "serial" && directive == "pragma" && text ~ /attribute[[:space:]]+push|GCC[[:space:]]+push_options/ && !pushed[group[depth]]++ {
+            push_open = 1; push_in_inner = inner_open; code_since_push = 0; ++pushes
+            if (inner_open && inner_code) report("pushes its pragma after code in #if " inner "; a header of kernels only pushes it first")
+            if (inner_open && inner_raw !~ /\/\//) report("opens #if " inner " over its pragma without the one-line comment saying why")
         }
-        END { if (opened < opening_count) { line = FNR; report("never opens its guards, " ENVIRON["opening"]) } }
-        ')
+        shape != "serial" && directive == "pragma" && text ~ /attribute[[:space:]]+pop|GCC[[:space:]]+pop_options/ && !popped[group[depth]]++ {
+            if (push_in_inner != inner_open) report("pops its pragma on the other side of #endif " inner " from its push")
+            push_open = 0
+        }
+        directive == "" && text ~ /^[[:space:]]*extern[[:space:]]+"C"[[:space:]]*\{/ {
+            extern_open = 1
+            if (open_alive < opening_count) report("opens extern \"C\" outside its guards, which enclose it")
+            if (targets_seen) report("opens extern \"C\" in or after #if " inner ", which it encloses")
+            if (pushes) report("opens extern \"C\" after its pragma push, which it encloses")
+            next
+        }
+        directive == "" && extern_open && text ~ /^[[:space:]]*}[[:space:]]*$/ && raw ~ /extern "C"/ {
+            extern_open = 0
+            if (inner_open || push_open) report("closes extern \"C\" before #endif " inner " and its pragma pop, which it encloses")
+            if (open_alive < opening_count) report("closes extern \"C\" outside its guards, which enclose it")
+            next
+        }
+        directive == "" && text !~ /^[[:space:]]*$/ { code_since_push = 1; if (inner_open) inner_code = 1 }
+        open_alive < opening_count && directive != "include" && !outside_reported {
+            report("sits outside its guards, which open right after the include guard and hold everything")
+            outside_reported = 1
+        }
+        shape == "gpu" && targets_seen && !inner_open && directive == "" && text !~ /^[[:space:]]*}[[:space:]]*$/ &&
+            !after_reported {
+            report("follows the kernels; building blocks sit above the first #if " prefix "_TARGET_ region")
+            after_reported = 1
+        }
+        inner != "" && !inner_open && (text ~ ("^(" prefix "_API|" prefix "_PUBLIC)[[:space:]]") || (stamped_macro(text) in kernel_macros)) {
+            report("defines a public kernel outside #if " inner)
+        }
+        END { if (opened < opening_count) { line = FNR; report("never opens #if " opening[opened + 1]) } }
+        ' "$staged_code_path")
     [ -z "$violations" ] || reject_with_reason "$violations" \
-        "$staged_path breaks the guards of a $shape capability header, which opens #if ${opening//$'\n'/, then #if } before its code;" \
-        "            no other condition tests STRINGZILLA_ARCH_ or STRINGZILLA_TARGET_, and each #endif names its guard:"
+        "$staged_path breaks the guards of a $shape capability header, which $layout;" \
+        "            extern \"C\" encloses the pragma, which encloses the building blocks and the target region or opens" \
+        "            first inside it; no other condition tests ${macro_prefix}_ARCH_ or ${macro_prefix}_TARGET_, and each" \
+        "            guard's #endif names it:"
+}
+
+# Rejects a `#define <PREFIX>_ARCH_` in c/<project>/types.h that reads, or sits under a condition that reads, a
+# `<PREFIX>_TARGET_`, because an ARCH flag says what compiles and a target only what the unit keeps: a flag following
+# a target opens a base's building blocks only where its kernels are kept.
+check_architecture_flags_read_no_target() {
+    local readers
+    readers=$(prefix=$macro_prefix raw_path=$staged_text_path "$fastest_awk" '
+        BEGIN { prefix = ENVIRON["prefix"] }
+        {
+            line = FNR; text = $0
+            getline raw < ENVIRON["raw_path"]
+            while (raw ~ /\\[[:space:]]*$/ && (getline continuation) > 0) {
+                getline raw < ENVIRON["raw_path"]
+                sub(/\\[[:space:]]*$/, " ", text); text = text " " continuation
+            }
+        }
+        text ~ /^[[:space:]]*#[[:space:]]*if/ { guard[++depth] = text; next }
+        text ~ /^[[:space:]]*#[[:space:]]*el(if|se)/ { guard[depth] = guard[depth] " " text; next }
+        text ~ /^[[:space:]]*#[[:space:]]*endif/ { --depth; next }
+        text ~ ("^[[:space:]]*#[[:space:]]*define[[:space:]]+" prefix "_ARCH_") {
+            read = text ~ (prefix "_TARGET_")
+            for (level = 1; level <= depth; ++level) if (guard[level] ~ (prefix "_TARGET_")) read = 1
+            if (read) printf "line %d: %s\n", line, text
+        }' "$staged_code_path")
+    [ -z "$readers" ] || reject_with_reason "$readers" \
+        "$staged_path defines a ${macro_prefix}_ARCH_ flag from a ${macro_prefix}_TARGET_; detect it from the unit's" \
+        "            flags or its vendor, and raise a base's flag from the flags built on it:"
+}
+
+# Rejects a GPU kernel or `__device__` table outside every target, because a device keeps every kernel a unit defines:
+# one under its vendor alone ships in every unit including its header. Each generation's file wraps the shared device
+# bodies in its own kernels and tables under its own target, which `check_capability_guards_shaped` holds it to; a
+# header beside the families takes at most one target, never an `||` of them. Bodies of `#define` generators are their
+# stamps' business.
+check_gpu_kernels_under_their_own_target() {
+    local own="" misplaced
+    case "$staged_path" in "$include_root"/*/*)
+        own=${staged_path##*/}
+        own=${macro_prefix}_TARGET_$(printf '%s' "${own%.*}" | tr '[:lower:]' '[:upper:]') ;;
+    esac
+    misplaced=$(own=$own prefix=$macro_prefix raw_path=$staged_text_path "$fastest_awk" '
+        BEGIN { own = ENVIRON["own"]; prefix = ENVIRON["prefix"] }
+        {
+            line = FNR; text = $0
+            getline raw < ENVIRON["raw_path"]
+            while (raw ~ /\\[[:space:]]*$/ && (getline continuation) > 0) {
+                getline raw < ENVIRON["raw_path"]
+                sub(/\\[[:space:]]*$/, " ", text); text = text " " continuation
+            }
+        }
+        text ~ /^[[:space:]]*#[[:space:]]*define/ { next }
+        text ~ /^[[:space:]]*#[[:space:]]*if/ { sub(/^[[:space:]]*#[[:space:]]*if(n?def)?[[:space:]]*/, "", text); guard[++depth] = text; next }
+        text ~ /^[[:space:]]*#[[:space:]]*elif/ { sub(/^[[:space:]]*#[[:space:]]*elif[[:space:]]*/, "", text); guard[depth] = text; next }
+        text ~ /^[[:space:]]*#[[:space:]]*else/ { guard[depth] = "!(" guard[depth] ")"; next }
+        text ~ /^[[:space:]]*#[[:space:]]*endif/ { --depth; next }
+        text ~ /^[[:space:]]*#/ { next }
+        text ~ /(^|[^A-Za-z0-9_])__global__([^A-Za-z0-9_]|$)/ ||
+            (text ~ /(^|[^A-Za-z0-9_])(__device__|__constant__)([^A-Za-z0-9_]|$)/ && text !~ /__(force|no)inline__/ &&
+             text ~ /^[^(]*(\[|=)/) {
+            targets = 0; target = ""
+            for (level = 1; level <= depth; ++level) {
+                if (guard[level] !~ (prefix "_TARGET_")) continue
+                ++targets
+                target = guard[level]; gsub(/[[:space:]]+/, " ", target); sub(/ $/, "", target)
+            }
+            misplaced = own != "" ? !targets : targets > 1 || (targets && target !~ ("^" prefix "_TARGET_[A-Z0-9]+$"))
+            if (misplaced) printf "line %d: under %s: %s\n", line, (targets ? target : "no target"), text
+        }' "$staged_code_path")
+    [ -z "$misplaced" ] || reject_with_reason "$misplaced" \
+        "$staged_path defines a GPU kernel or table outside its own #if ${own:-${macro_prefix}_TARGET_<CAPABILITY>};" \
+        "            each generation file wraps the shared device bodies in its own kernels and tables, under its target alone:"
 }
 
 # Routes one staged file through the checks only StringZilla has.
@@ -3855,8 +3998,8 @@ run_project_checks() {
     esac
     case "${staged_path##*/}" in
     serial.* | westmere.* | goldmont.* | haswell.* | skylake.* | icelake.* | neon.* | neonaes.* | neonsha.* | \
-        sve.* | sve2.* | sve2aes.* | simt.* | metal.* | blackwell.* | rocm.* | cdna.* | \
-        loongsonasx.* | powervsx.* | rvv.* | rvvcrypto.* | v128.* | v128relaxed.*)
+        sve.* | sve2.* | sve2aes.* | simt.* | metal.* | ampere.* | blackwell.* | rocm.* | cdna3.* | cdna4.* | \
+        cdna5.* | loongsonasx.* | powervsx.* | rvv.* | rvvcrypto.* | v128.* | v128relaxed.*)
         case "$staged_path" in include/stringzilla/*/*) check_copydoc_absent_in_backends ;; esac
         ;;
     esac
@@ -3864,7 +4007,10 @@ run_project_checks() {
     include/stringzilla/*/westmere.h | include/stringzilla/*/goldmont.h | include/stringzilla/*/haswell.h | \
         include/stringzilla/*/skylake.h | include/stringzilla/*/icelake.h | include/stringzilla/*/neon*.h | \
         include/stringzilla/*/sve*.h | include/stringzilla/*/rvv*.h | include/stringzilla/*/v128*.h | \
-        include/stringzilla/*/loongsonasx.h | include/stringzilla/*/powervsx.h)
+        include/stringzilla/*/loongsonasx.h | include/stringzilla/*/powervsx.h | include/stringzilla/*/ampere.cuh | \
+        include/stringzilla/*/hopper.cuh | include/stringzilla/*/blackwell.cuh | include/stringzilla/*/cdna3.cuh | \
+        include/stringzilla/*/cdna4.cuh | include/stringzilla/*/cdna5.cuh | include/stringzilla/*/*.cuh | \
+        include/stringzilla/*/metal.h)
         check_capability_guards_shaped
         ;;
     esac
@@ -3883,12 +4029,16 @@ run_project_checks() {
         ;;
     esac
     case "$staged_path" in
-    include/stringzilla/*/*.cuh | include/stringzilla/*/metal.h) check_gpu_headers_shaped ;;
+    include/stringzilla/*.cuh | include/stringzilla/*/*.cuh) check_gpu_kernels_under_their_own_target ;;
+    esac
+    case "$staged_path" in
+    include/stringzilla/*.cuh | include/stringzilla/*/*.cuh) check_warp_reductions_through_ptx ;;
+    c/stringzilla/types.h) check_architecture_flags_read_no_target ;;
     esac
     case "$staged_path" in
     c/stringzilla/*.h | include/stringzilla/*.h | include/stringzilla/*.cuh | include/stringzilla/*/*.cuh | \
         include/stringzilla/*/metal.h)
-        check_gpu_kernels_under_targets
+        check_gpu_entry_points_under_targets
         ;;
     src/*.cu | src/*.hip) check_launches_report_status ;;
     python/*.c | python/*/*.c | javascript/*.c) check_binding_exports_absent ;;

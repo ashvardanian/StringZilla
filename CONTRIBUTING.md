@@ -18,9 +18,13 @@ src/capabilities/*.c           Library units, one per CPU capability, each defin
 src/dispatch/                  Library units, one per kernel family, with its capability lists, dispatch points and finder
 src/dispatch.h                 The capability lists' shape and the kernel pick the dispatch units share, internal to the library
 src/capabilities/cuda.cu       The engines' cuda kernels and the CUDA device exports, under STRINGZILLA_CUDA_ARCH
+src/capabilities/ampere.cu     The engines' ampere kernels, for the codes the build carries from compute capability 8.0
 src/capabilities/hopper.cu     The engines' hopper kernels, for the codes the build carries from compute capability 9.0
 src/capabilities/blackwell.cu  The engines' blackwell kernels, for the codes the build carries from compute capability 10.0
 src/capabilities/rocm.hip      The engines' rocm kernels and the ROCm device exports, under STRINGZILLA_ROCM_ARCH
+src/capabilities/cdna3.hip     The engines' cdna3 kernels, for gfx942 where the build carries it
+src/capabilities/cdna4.hip     The engines' cdna4 kernels, for gfx950 where the build carries it
+src/capabilities/cdna5.hip     The engines' cdna5 kernels, for the targets the build carries among gfx1250 and gfx1251
 src/capabilities/metal.c       The engines' metal kernels and the Metal device exports, under STRINGZILLA_METAL_ARCH
 src/parallel.h, .c             Tile-parallel runs on each platform's thread pool, compiled into the Python and Node extensions only
 probes/                        ISA probe sources, one per capability mirroring src/capabilities/, each calling one of its kernels as the library compiles it
@@ -111,6 +115,7 @@ A name without it is a public contract, either a switch you may set or a value y
 | Optional facility                           | `STRINGZILLA_WITH_[<OS>_]<FACILITY>` | `STRINGZILLA_WITH_LIBC`              |
 | Permission for a liberty                    | `STRINGZILLA_ALLOW_<LIBERTY>`        | `STRINGZILLA_ALLOW_MISALIGNED_LOADS` |
 | Architecture fact                           | `STRINGZILLA_ARCH_<ARCH>_`           | `STRINGZILLA_ARCH_X8664_`            |
+| Capability whose code compiles here         | `STRINGZILLA_ARCH_<ARCH>_<TIER>_`    | `STRINGZILLA_ARCH_X8664_HASWELL_`    |
 | Operating-system fact                       | `STRINGZILLA_OS_<OS>_`               | `STRINGZILLA_OS_LINUX_`              |
 | Toolchain fact                              | `STRINGZILLA_HAS_<FEATURE>_`         | `STRINGZILLA_HAS_CLANG_EVEX512_`     |
 
@@ -135,13 +140,28 @@ Code that several capabilities share belongs to one of three layers, named in th
 A constant identical across the GPU layers is defined once in `serial.h` with the adjective `gpu`, like `sz_levenshtein_gpu_warp_lanes_k`.
 One whose value differs per layer takes its layer instead, like `sz_substrings_tally_slot_bits_simt_k` and `sz_substrings_tally_slot_bits_metal_k`.
 
+Every capability has two flags, CPU and GPU alike.
+`STRINGZILLA_ARCH_<ARCH>_<CAPABILITY>_` says the capability's code compiles in this unit, and never reads a target.
+`c/stringzilla/types.h` detects it: for a CPU capability from the unit's own flags, and for a GPU generation from compiling as its vendor; only this library's build raises or zeroes a CPU flag, with its probe's verdict.
+A base's flag also holds wherever a flag built on it holds, so Haswell's building blocks compile wherever Skylake's do.
+`STRINGZILLA_TARGET_<CAPABILITY>` says this unit has the capability's kernels, by default a literal from the same detection on the CPU, the vendor flag for `cuda` and `rocm`, and 0 for a GPU generation.
+Every capability header has one shape: its architecture or vendor guard, its `STRINGZILLA_ARCH_<ARCH>_<CAPABILITY>_` guard, its building blocks, then its kernels under `STRINGZILLA_TARGET_<CAPABILITY>`.
+Building blocks, the `STRINGZILLA_DEVICE` steps other families and products call, are `static __forceinline__` device functions, which a device never emits unless a kernel calls them.
+A table one building block alone reads lives inside it, so only units calling the block emit it, and a table only kernels name sits with them and reaches the steps through a pointer, like `sz_utf8_norm_tables_cuda_`.
+`STRINGZILLA_TARGET_<CAPABILITY>` guards only what a launch reaches, as a device keeps every kernel a unit defines: kernels, tables only kernels read, entry-point tables, host launchers and `STRINGZILLA_API` entries, in regions after every building block.
+No kernel sits under an `||` of targets: a body several tiers launch is a `STRINGZILLA_DEVICE` building block, in the oldest of their files or in `simt.cuh` and `kernels.cuh` for both vendors, and each tier's file wraps it in its own kernel, like `sz_regex_bound_ampere_kernel_` over `sz_regex_bound_simt_`, which its entry-point table points at.
+Within the guards, `extern "C"` opens after the includes and before the pragma push, which wraps the building blocks and the target region; a header of kernels alone pushes it first inside the target region instead, with a comment on that `#if`, as an empty push region fails under -Werror.
+The root `cuda.cuh` and `rocm.cuh` hold the runtime services and the baseline lane steps, and `strings/<generation>.cuh`, like `strings/ampere.cuh` and `strings/cdna5.cuh`, the steps a generation added.
+An instruction lives in the lowest family that needs it, in its generation's file, and the families above include that file.
+
 The GPU capability groups are `cuda`, `rocm` and `metal`, beside the CPU's `cpu`.
 A later generation in a group takes its own bit and unit, like `sz_cap_blackwell_k` and `src/capabilities/blackwell.cu`, which every device of that generation and after reports beside the baseline.
+A ROCm generation bit, like `sz_cap_cdna3_k`, is reported only on the targets that have its DPP form.
 Each word names its group's baseline bit, like `sz_cap_cuda_k`, its functions and its library unit, like `src/capabilities/cuda.cu`, and no symbol or source path names a vendor, like `nvidia`, `amd` or `apple`.
 A function that touches a device is either a producer or a consumer:
 
 - A __producer__ reports a device's capabilities or opens a stream on it.
-  Device queries end with their group. Producers are the only functions that take a device's `ordinal`: `sz_device_count_cuda(&count)`, `sz_capabilities_enabled_cuda(ordinal, &capabilities)` and `sz_stream_init_cuda(ordinal, &stream)`.
+  Device queries end with their group. Producers are the only functions that take a device's `ordinal`: `sz_count_devices_cuda(&count)`, `sz_capabilities_enabled_cuda(ordinal, &capabilities)` and `sz_stream_init_cuda(ordinal, &stream)`.
 - A __consumer__ takes the `capabilities` it picks from and, where it queues work, a trailing `sz_stream_t stream`, but never an ordinal, since the stream names its device: `sz_stream_synchronize_best(capabilities, stream)`.
   It ends in `best` like any dispatch point, and its twins end in their capability, like `sz_stream_synchronize_cuda(stream)`.
 
@@ -161,7 +181,7 @@ Each of these words has one meaning across the library:
 | `simt`                                 | The single C source CUDA and HIP both compile                                    | `<family>/simt.cuh`, the suffixes `_simt_`, `_simt_t`, `_simt_k`               |
 | `metal`, as a layer                    | What every Metal tier shares                                                     | `<family>/metal.h`, `<family>/metal.metal`, the suffix `_metal_`               |
 | `gpu`                                  | Adjective for every GPU group                                                    | `sz_cap_gpus_k`, `sz_missing_gpu_k`, `sz_levenshtein_gpu_warp_lanes_k`         |
-| `device`                               | A processor kernels run on, which a stream belongs to                            | `sz_device_count_cuda`, `sz_device_memory_mismatch_k`, `sz_device_enter_simt_` |
+| `device`                               | A processor kernels run on, which a stream belongs to                            | `sz_count_devices_cuda`, `sz_device_memory_mismatch_k`, `sz_device_enter_simt_` |
 | `ordinal`                              | A device's index within its group, as its runtime numbers it                     | Producer parameters only                                                       |
 | `stream`                               | A `cudaStream_t`, `hipStream_t` or `id<MTLCommandQueue>`, which names its device | The trailing `void *stream` of every consumer                                  |
 | `queue`                                | A tile work queue, never a stream                                                | `sz_tile_queue_t`                                                              |
@@ -219,6 +239,23 @@ The `xeon4_hopper`, `xeon6_blackwell`, `venice_mi450`, `grace_hopper` and `vera_
 Units calling capability kernels link `stringzilla::cpu_capabilities_compiled`, the build-tree twin of `sz_capabilities_compiled_cpu()`: every CPU capability the toolchain compiles.
 `stringzilla::header` carries no verdict, so a header-only consumer enables what its own flags name, and the runtime mask picks the compiled capabilities the CPU runs.
 Each capability's flags for a unit compiled whole for it are cached as `stringzilla_target_<capability>_flags`.
+
+Six words name a capability's states, from configure to dispatch:
+
+| Word | Question | When | Scope |
+| --- | --- | --- | --- |
+| __probe__ | Can the toolchain build this capability? | configure: `try_compile` of `probes/<capability>.c`, then compile: `STRINGZILLA_ARCH_<ARCH>_<CAPABILITY>_` | build |
+| __target__ | Is this capability's unit in the build? | compile: `STRINGZILLA_TARGET_<CAPABILITY>` | build |
+| __implied__ | What do the baseline flags already guarantee? | compile, from predefined macros, and at runtime where the OS cannot be asked | build |
+| __compiled__ | Does the binary carry this capability's code for this processor? | runtime: `sz_capabilities_compiled_<group>` | CPU: the build; GPU: each device |
+| __detected__ | Does this processor offer the capability? | runtime: `sz_capabilities_detected_<group>` | processor |
+| __enabled__ | What may dispatch pick? | runtime: `sz_capabilities_enabled_<group>`, detected and compiled | processor |
+
+GPU `compiled` is per device, as only GPU binaries carry code per architecture: each GPU unit exports one of its kernels, and `sz_capabilities_compiled_cuda` or `sz_capabilities_compiled_rocm` asks the runtime whether it loads that kernel on the device, through `cudaFuncGetAttributes` or `hipFuncGetAttributes`.
+A monoversioned build names one machine: one CPU and at most one GPU architecture per vendor, shared by every GPU in it.
+It compiles the best capability for that machine and folds every dispatch row to it, so link-time optimization drops every other kernel.
+On any other machine a call answers `sz_missing_kernel_k`, never a crash and never a slower kernel in silence.
+Sibling GPU capabilities form no chain, so with `STRINGZILLA_MULTIVERSIONED=OFF` a configure listing two CUDA or two ROCm architectures fails.
 
 The baseline is each architecture's floor: `-march=x86-64`, `-march=armv8-a`, `-march=rv64gc`, `-mcpu=power8`, and `-march=loongarch64`.
 WebAssembly is the exception, as an engine validates a module whole, so its one capability, `STRINGZILLA_MARCH`, reaches every unit.
@@ -660,8 +697,8 @@ Shared libraries stay off in both configurations, since WASI has no dynamic load
 
 ## CUDA
 
-`STRINGZILLA_CUDA_ARCH` adds `src/capabilities/cuda.cu` to `stringzilla_static` and `stringzilla_shared`: the engines' `cuda` kernels, compiled from each family's `simt.cuh`, and the CUDA device exports: the producers `sz_device_count_cuda`, `sz_capabilities_detected_cuda` and `sz_stream_init_cuda`, and the twins behind the `_best` dispatch points in `strings.h`, like `sz_allocator_init_unified_cuda` and `sz_strings_to_tape_cuda`.
-`STRINGZILLA_CUDA_ARCH=all` compiles each GPU unit once, as PTX at the lowest code its capability needs: `compute_75` for the CUDA baseline, `compute_90` for Hopper's clusters, and `compute_100` for Blackwell's cluster launch control.
+`STRINGZILLA_CUDA_ARCH` adds `src/capabilities/cuda.cu` to `stringzilla_static` and `stringzilla_shared`: the engines' `cuda` kernels, compiled from each family's `simt.cuh`, and the CUDA device exports: the producers `sz_count_devices_cuda`, `sz_capabilities_detected_cuda` and `sz_stream_init_cuda`, and the twins behind the `_best` dispatch points in `strings.h`, like `sz_allocator_init_unified_cuda` and `sz_strings_to_tape_cuda`.
+`STRINGZILLA_CUDA_ARCH=all` compiles each GPU unit once, as PTX at the lowest code its capability needs: `compute_75` for the CUDA baseline, `compute_80` for Ampere's warp reductions and asynchronous copies, `compute_90` for Hopper's clusters, and `compute_100` for Blackwell's cluster launch control.
 A named code, like `100f`, or `native` compiles as SASS alone.
 `stringzilla_test` includes CUDA checks from `test/cross_cuda.cu` alongside the CPU checks and other enabled vendors:
 
@@ -684,6 +721,7 @@ cuda-memcheck ./build_debug/stringzilla_test
 
 `STRINGZILLA_METAL_ARCH` adds `src/capabilities/metal.c` to the same libraries on Apple platforms: the engines' `metal` kernels, whose `metal.metal` shaders travel as embedded source and compile on the device at first use, and the Metal device exports, the producers and the `_metal` twins behind the `strings.h` dispatch points, like `sz_stream_synchronize_metal`.
 `STRINGZILLA_ROCM_ARCH` adds `src/capabilities/rocm.hip` the same way, with the `rocm` kernels and the `sz_rocm_*` device exports, and every vendor asked for sits side by side in one library.
+`src/capabilities/cdna3.hip` joins it where the targets include gfx942, `src/capabilities/cdna4.hip` where they include gfx950, and `src/capabilities/cdna5.hip` where they include gfx1250 or gfx1251, each compiled for those targets alone.
 
 The Metal backends of all three engine families build into `stringzilla_test` on Apple platforms, which needs `STRINGZILLA_METAL_ARCH` set and checks them against the serial answers:
 
@@ -726,7 +764,7 @@ STRINGZILLA_MARCH=native uv pip install .                                       
 To check the installed version and capabilities, try:
 
 ```bash
-uv run --no-project python -c "import stringzilla as sz; print(sz.__version__, repr(sz.cpu_capabilities_enabled()))"
+uv run --no-project python -c "import stringzilla as sz; print(sz.__version__, repr(sz.capabilities_enabled_cpu()))"
 ```
 
 To clean up code before pushing:

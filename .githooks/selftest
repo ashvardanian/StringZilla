@@ -1700,6 +1700,23 @@ git -C "$fixture_directory" add -- include/probe.hpp
 run_precommit
 expect_rejection "changed template header with unchanged class name" "suffixes a class template"
 
+stage_fixture_with_header include/probe.hpp <<'FIXTURE'
+template <typename type_>
+struct hip_warp {
+    inline static constexpr u32_t width_k = hip_wave_lanes(type_::value);
+};
+FIXTURE
+git -C "$fixture_directory" commit --quiet -m "Chore: Seed the fixture"
+sed -e 's/typename type_/typename value_type_/' -e 's/type_::value/value_type_::value/' -e 's/width_k = /width_k = 1 + /' "$fixture_directory/include/probe.hpp" > "$fixture_directory/edited"
+mv "$fixture_directory/edited" "$fixture_directory/include/probe.hpp"
+git -C "$fixture_directory" add -- include/probe.hpp
+run_precommit
+expect_acceptance "static member edited below an unchanged class template brace"
+
+assert_rejects "new one-line suffixed variable template" "suffixes a variable template" include/probe.hpp <<'FIXTURE'
+template <typename type_> constexpr bool bounded_k = true;
+FIXTURE
+
 assert_accepts "qualified memcpy, and prose naming the bare forms" include/probe.hpp <<'FIXTURE'
 /** Copies eight bytes with @c std::memcpy, never an unqualified memcpy or a pragma mark. */
 inline void probe(char *to, char const *from) { std::memcpy(to, from, 8); }
@@ -2949,11 +2966,18 @@ FIXTURE
 
 # region StringZilla Fixtures
 
-# A Haswell header opening no guard of its own gets its shape's, so only the guard fixtures test the guards.
+# A Haswell header, or a CUDA one defining kernels, opening no guard of its own gets its shape's, so only the guard
+# fixtures test the guards.
 fixture_guards() { # fixture_guards <relative-path> <<< content
     case "$1" in
     include/stringzilla/*/haswell.h)
-        grep -qE '^#if STRINGZILLA_(ARCH|TARGET)_' || printf '%s\n' STRINGZILLA_ARCH_X8664_ STRINGZILLA_ARCH_X8664_HASWELL_
+        grep -qE '^#if STRINGZILLA_(ARCH|TARGET)_' ||
+            printf '%s\n' STRINGZILLA_ARCH_X8664_ STRINGZILLA_ARCH_X8664_HASWELL_ STRINGZILLA_TARGET_HASWELL
+        ;;
+    include/stringzilla/probe.cuh)
+        content=$(cat)
+        grep -qE '^#if STRINGZILLA_(ARCH|TARGET)_' <<< "$content" || ! grep -q '__global__' <<< "$content" ||
+            printf '%s\n' STRINGZILLA_ARCH_CUDA_ STRINGZILLA_TARGET_CUDA
         ;;
     esac
 }
@@ -3017,9 +3041,9 @@ FIXTURE
 
 assert_rejects "portable mask helper on Ice Lake" "builds a bit mask by hand" include/stringzilla/probe/icelake.h <<'FIXTURE'
 #if STRINGZILLA_ARCH_X8664_
-#if STRINGZILLA_TARGET_ICELAKE
+#if STRINGZILLA_ARCH_X8664_ICELAKE_
 static sz_u64_t probe(sz_size_t count) { return sz_u64_mask_until_serial_(count); }
-#endif // STRINGZILLA_TARGET_ICELAKE
+#endif // STRINGZILLA_ARCH_X8664_ICELAKE_
 #endif // STRINGZILLA_ARCH_X8664_
 FIXTURE
 
@@ -3074,8 +3098,8 @@ static __global__ void __launch_bounds__(sz_probe_warps_k * 32) sz_probe_simt_ke
 FIXTURE
 
 assert_accepts "kernels bounded by named widths, and prose naming __global__" include/stringzilla/probe.cuh <<'FIXTURE'
-/* Every __global__ here declares its width. */
 static __global__ void __launch_bounds__(sz_probe_threads_simt_k) sz_probe_simt_kernel_(sz_size_t count) {}
+/* Every __global__ here declares its width. */
 static __global__ void __launch_bounds__(sz_probe_threads_simt_k, sz_probe_blocks_cuda_k)
     sz_probe_resident_cuda_kernel_(sz_size_t count) {}
 static __global__ void __launch_bounds__(sz_probe_threads_simt_k, 1) sz_probe_single_cuda_kernel_(void) {}
@@ -3101,7 +3125,7 @@ void probe(void) { hipFree(0); }
 #endif // STRINGZILLA_ARCH_CUDA_
 FIXTURE
 
-assert_rejects "compiler test in a vendor guard" "tests the GPU compiler" include/stringzilla/probe/rocm.cuh <<'FIXTURE'
+assert_rejects "compiler test in a vendor guard" "tests the GPU compiler" include/stringzilla/rocm.cuh <<'FIXTURE'
 #if STRINGZILLA_ARCH_ROCM_
 #if STRINGZILLA_TARGET_ROCM && defined(__HIP__)
 void probe(void) { hipFree(0); }
@@ -3117,9 +3141,11 @@ FIXTURE
 
 assert_accepts "architecture then capability in a tier file" include/stringzilla/probe/blackwell.cuh <<'FIXTURE'
 #if STRINGZILLA_ARCH_CUDA_
+#if STRINGZILLA_ARCH_CUDA_BLACKWELL_
 #if STRINGZILLA_TARGET_BLACKWELL
 void probe(void) { __nanosleep(64); }
 #endif // STRINGZILLA_TARGET_BLACKWELL
+#endif // STRINGZILLA_ARCH_CUDA_BLACKWELL_
 #endif // STRINGZILLA_ARCH_CUDA_
 FIXTURE
 
@@ -3132,22 +3158,13 @@ void probe(void) { __nanosleep(64); }
 #endif // STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
 FIXTURE
 
-assert_rejects "GPU kernel under its vendor alone" "guards a GPU kernel by its vendor" include/stringzilla/probe/cuda.cuh <<'FIXTURE'
+assert_rejects "GPU kernel under its vendor alone" "guards a GPU kernel by its vendor" include/stringzilla/cuda.cuh <<'FIXTURE'
 #if STRINGZILLA_ARCH_CUDA_
 STRINGZILLA_API sz_status_t sz_probe_cuda(sz_stream_t stream) { return sz_success_k; }
 #endif // STRINGZILLA_ARCH_CUDA_
 FIXTURE
 
-assert_accepts "GPU kernel under its capability, runtime under its vendor" include/stringzilla/probe/cuda.cuh <<'FIXTURE'
-#if STRINGZILLA_ARCH_CUDA_
-STRINGZILLA_INLINE sz_status_t sz_stream_probe_cuda(sz_stream_t stream) { return sz_success_k; }
-#if STRINGZILLA_TARGET_CUDA
-STRINGZILLA_API sz_status_t sz_probe_cuda(sz_stream_t stream) { return sz_success_k; }
-#endif // STRINGZILLA_TARGET_CUDA
-#endif // STRINGZILLA_ARCH_CUDA_
-FIXTURE
-
-assert_rejects "Metal kernel under its vendor alone" "guards a GPU kernel by its vendor" include/stringzilla/probe/metal.h <<'FIXTURE'
+assert_rejects "Metal kernel under its vendor alone" "guards a GPU kernel by its vendor" include/stringzilla/metal.h <<'FIXTURE'
 #if STRINGZILLA_ARCH_METAL_
 STRINGZILLA_API sz_status_t sz_probe_metal(sz_stream_t stream) { return sz_success_k; }
 #endif // STRINGZILLA_ARCH_METAL_
@@ -3170,13 +3187,7 @@ STRINGZILLA_API sz_status_t sz_probe_best(sz_capability_t capabilities, sz_strea
 }
 FIXTURE
 
-assert_rejects "capability opened before its vendor" "opens a capability before its vendor" include/stringzilla/probe/metal.h <<'FIXTURE'
-#if STRINGZILLA_TARGET_METAL
-STRINGZILLA_API sz_status_t sz_probe_metal(sz_stream_t stream) { return sz_success_k; }
-#endif // STRINGZILLA_TARGET_METAL
-FIXTURE
-
-assert_accepts "Metal runtime under its vendor, kernel under its capability" include/stringzilla/probe/metal.h <<'FIXTURE'
+assert_accepts "Metal runtime under its vendor, kernel under its capability" include/stringzilla/metal.h <<'FIXTURE'
 #if STRINGZILLA_ARCH_METAL_
 STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(sz_stream_t stream);
 #if STRINGZILLA_TARGET_METAL
@@ -3396,28 +3407,29 @@ assert_accepts "CPython tuple packed by hand, and prose naming Py_BuildValue" py
 static PyObject *probe(PyObject *type, PyObject *width) { return PyObject_CallFunctionObjArgs(type, width, NULL); }
 FIXTURE
 
-assert_accepts "leaf and base capability guards" include/stringzilla/probe/powervsx.h <<'FIXTURE'
-#include "stringzilla/types.h"
-
-#if STRINGZILLA_ARCH_PPC64_
-#if STRINGZILLA_TARGET_POWERVSX
-STRINGZILLA_PUBLIC int sz_probe_powervsx(int value) { return value; }
-#endif // STRINGZILLA_TARGET_POWERVSX
-#endif // STRINGZILLA_ARCH_PPC64_
+assert_rejects "warp reduction through the CUDA 8.0 intrinsic" "reduces across a warp with a CUDA 8.0 intrinsic" \
+    include/stringzilla/probe/cuda.cuh <<'FIXTURE'
+#if STRINGZILLA_ARCH_CUDA_
+STRINGZILLA_DEVICE sz_u32_t sz_probe_cuda_(sz_u32_t value) { return __reduce_add_sync(0xFFFFFFFFu, value); }
+#endif // STRINGZILLA_ARCH_CUDA_
 FIXTURE
 
-assert_rejects "capability without its architecture" "breaks the guards of a leaf" include/stringzilla/probe/powervsx.h <<'FIXTURE'
-#if STRINGZILLA_TARGET_POWERVSX
-STRINGZILLA_PUBLIC int sz_probe_powervsx(int value) { return value; }
-#endif // STRINGZILLA_TARGET_POWERVSX
+assert_accepts "warp reduction through PTX, and prose naming __reduce_add_sync" include/stringzilla/probe/cuda.cuh <<'FIXTURE'
+/* Spelled in PTX, never __reduce_add_sync(mask, value). */
+#if STRINGZILLA_ARCH_CUDA_
+STRINGZILLA_DEVICE sz_u32_t sz_probe_cuda_(sz_u32_t value) {
+    sz_u32_t sum;
+    asm volatile("redux.sync.add.u32 %0, %1, 0xFFFFFFFF;" : "=r"(sum) : "r"(value));
+    return sum;
+}
+#endif // STRINGZILLA_ARCH_CUDA_
 FIXTURE
 
-assert_rejects "guard closed without its name" "breaks the guards of a base" include/stringzilla/probe/haswell.h <<'FIXTURE'
-#if STRINGZILLA_ARCH_X8664_
-#if STRINGZILLA_ARCH_X8664_HASWELL_
-STRINGZILLA_PUBLIC int sz_probe_haswell(int value) { return value; }
+assert_accepts "flag raised by the flag built on it" c/stringzilla/types.h <<'FIXTURE'
+#if STRINGZILLA_ARCH_X8664_SKYLAKE_
+#undef STRINGZILLA_ARCH_X8664_HASWELL_
+#define STRINGZILLA_ARCH_X8664_HASWELL_ (1)
 #endif
-#endif // STRINGZILLA_ARCH_X8664_
 FIXTURE
 
 assert_rejects "unnamed namespace at file scope" "opens an unnamed namespace" include/probe.cpp <<'FIXTURE'
@@ -3533,6 +3545,326 @@ assert_verbatim_accepts "Swift docblock header with its tags in order" swift/Pro
  */
 public struct Probe {}
 FIXTURE
+
+assert_accepts "GPU entry point under its capability, runtime under its vendor" include/stringzilla/cuda.cuh <<'FIXTURE'
+#if STRINGZILLA_ARCH_CUDA_
+STRINGZILLA_INLINE sz_status_t sz_stream_probe_cuda(sz_stream_t stream) { return sz_success_k; }
+#if STRINGZILLA_TARGET_CUDA
+STRINGZILLA_API sz_status_t sz_probe_cuda(sz_stream_t stream) { return sz_success_k; }
+#endif // STRINGZILLA_TARGET_CUDA
+#endif // STRINGZILLA_ARCH_CUDA_
+FIXTURE
+
+# region Shared Guard Fixtures
+
+assert_accepts "GPU building blocks above the own target region" include/stringzilla/probe/ampere.cuh <<'FIXTURE'
+#if STRINGZILLA_ARCH_CUDA_
+#if STRINGZILLA_ARCH_CUDA_AMPERE_
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
+STRINGZILLA_DEVICE int sz_probe_ampere_(int value) { return value; }
+
+#if STRINGZILLA_TARGET_AMPERE
+static __global__ void __launch_bounds__(sz_probe_threads_ampere_k, 1) sz_probe_ampere_kernel_(int *value) {
+    *value = sz_probe_ampere_(*value);
+}
+#endif // STRINGZILLA_TARGET_AMPERE
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
+#endif // STRINGZILLA_ARCH_CUDA_AMPERE_
+#endif // STRINGZILLA_ARCH_CUDA_
+FIXTURE
+
+assert_accepts "CPU building blocks inside the pragma, ahead of the target" include/stringzilla/probe/haswell.h <<'FIXTURE'
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_HASWELL_
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("avx2"))), apply_to = function)
+#endif
+
+STRINGZILLA_INLINE int sz_probe_haswell_(int value) { return value; }
+
+#if STRINGZILLA_TARGET_HASWELL
+STRINGZILLA_INLINE int sz_probe_twice_haswell_(int value) { return sz_probe_haswell_(value) * 2; }
+#endif // STRINGZILLA_TARGET_HASWELL
+
+#if defined(__clang__)
+#pragma clang attribute pop
+#endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
+#endif // STRINGZILLA_ARCH_X8664_HASWELL_
+#endif // STRINGZILLA_ARCH_X8664_
+FIXTURE
+
+assert_accepts "CPU kernels only, the pragma inside the target" include/stringzilla/probe/haswell.h <<'FIXTURE'
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_HASWELL_
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
+#if STRINGZILLA_TARGET_HASWELL // Kernels only: an empty pragma region would fail under -Werror
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("avx2"))), apply_to = function)
+#endif
+
+STRINGZILLA_INLINE int sz_probe_haswell_(int value) { return value; }
+
+#if defined(__clang__)
+#pragma clang attribute pop
+#endif
+#endif // STRINGZILLA_TARGET_HASWELL
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
+#endif // STRINGZILLA_ARCH_X8664_HASWELL_
+#endif // STRINGZILLA_ARCH_X8664_
+FIXTURE
+
+assert_rejects "CPU pragma pushed before extern C" "breaks the guards of a capability" include/stringzilla/probe/haswell.h <<'FIXTURE'
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_HASWELL_
+
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("avx2"))), apply_to = function)
+#endif
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
+STRINGZILLA_INLINE int sz_probe_haswell_(int value) { return value; }
+
+#if STRINGZILLA_TARGET_HASWELL
+STRINGZILLA_INLINE int sz_probe_twice_haswell_(int value) { return sz_probe_haswell_(value) * 2; }
+#endif // STRINGZILLA_TARGET_HASWELL
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
+#if defined(__clang__)
+#pragma clang attribute pop
+#endif
+
+#endif // STRINGZILLA_ARCH_X8664_HASWELL_
+#endif // STRINGZILLA_ARCH_X8664_
+FIXTURE
+
+assert_rejects "CPU kernels only under a pragma pushed outside the target" "breaks the guards of a capability" \
+    include/stringzilla/probe/haswell.h <<'FIXTURE'
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_HASWELL_
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("avx2"))), apply_to = function)
+#endif
+
+#if STRINGZILLA_TARGET_HASWELL
+STRINGZILLA_INLINE int sz_probe_haswell_(int value) { return value; }
+#endif // STRINGZILLA_TARGET_HASWELL
+
+#if defined(__clang__)
+#pragma clang attribute pop
+#endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
+#endif // STRINGZILLA_ARCH_X8664_HASWELL_
+#endif // STRINGZILLA_ARCH_X8664_
+FIXTURE
+
+assert_rejects "CPU extern C opened outside the guards" "breaks the guards of a capability" include/stringzilla/probe/haswell.h <<'FIXTURE'
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_HASWELL_
+
+#if STRINGZILLA_TARGET_HASWELL
+STRINGZILLA_INLINE int sz_probe_haswell_(int value) { return value; }
+#endif // STRINGZILLA_TARGET_HASWELL
+
+#endif // STRINGZILLA_ARCH_X8664_HASWELL_
+#endif // STRINGZILLA_ARCH_X8664_
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+FIXTURE
+
+assert_rejects "capability without its flag" "breaks the guards of a capability" include/stringzilla/probe/haswell.h <<'FIXTURE'
+#if STRINGZILLA_ARCH_X8664_
+#include "stringzilla/types.h"
+#endif // STRINGZILLA_ARCH_X8664_
+FIXTURE
+
+assert_rejects "kernel outside its target" "breaks the guards of a capability" include/stringzilla/probe/haswell.h <<'FIXTURE'
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_HASWELL_
+STRINGZILLA_API int sz_probe_haswell(int value) { return value; }
+#endif // STRINGZILLA_ARCH_X8664_HASWELL_
+#endif // STRINGZILLA_ARCH_X8664_
+FIXTURE
+
+assert_rejects "capability under its base's flag" "breaks the guards of a capability" include/stringzilla/probe/skylake.h <<'FIXTURE'
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_HASWELL_
+STRINGZILLA_INLINE int sz_probe_skylake_(int value) { return value; }
+#endif // STRINGZILLA_ARCH_X8664_HASWELL_
+#endif // STRINGZILLA_ARCH_X8664_
+FIXTURE
+
+assert_rejects "extra platform condition in a capability header" "breaks the guards of a gpu" include/stringzilla/probe/hopper.cuh <<'FIXTURE'
+#if STRINGZILLA_ARCH_CUDA_
+#if STRINGZILLA_ARCH_CUDA_HOPPER_
+#if STRINGZILLA_TARGET_HOPPER
+#if STRINGZILLA_TARGET_BLACKWELL
+STRINGZILLA_INLINE int sz_probe_hopper_(int value) { return value; }
+#endif // STRINGZILLA_TARGET_BLACKWELL
+#endif // STRINGZILLA_TARGET_HOPPER
+#endif // STRINGZILLA_ARCH_CUDA_HOPPER_
+#endif // STRINGZILLA_ARCH_CUDA_
+FIXTURE
+
+assert_rejects "capability under another architecture" "breaks the guards of a capability" include/stringzilla/probe/haswell.h <<'FIXTURE'
+#if STRINGZILLA_ARCH_ARM64_
+#if STRINGZILLA_ARCH_ARM64_HASWELL_
+#if STRINGZILLA_TARGET_HASWELL
+STRINGZILLA_INLINE int sz_probe_haswell_(int value) { return value; }
+#endif // STRINGZILLA_TARGET_HASWELL
+#endif // STRINGZILLA_ARCH_ARM64_HASWELL_
+#endif // STRINGZILLA_ARCH_ARM64_
+FIXTURE
+
+assert_rejects "GPU kernel under an OR of targets" "breaks the guards of a gpu" include/stringzilla/probe/ampere.cuh <<'FIXTURE'
+#if STRINGZILLA_ARCH_CUDA_
+#if STRINGZILLA_ARCH_CUDA_AMPERE_
+
+#if STRINGZILLA_TARGET_AMPERE || STRINGZILLA_TARGET_HOPPER
+static __global__ void __launch_bounds__(sz_probe_threads_ampere_k, 1) sz_probe_ampere_kernel_(int *value) {}
+#endif // STRINGZILLA_TARGET_AMPERE || STRINGZILLA_TARGET_HOPPER
+
+#endif // STRINGZILLA_ARCH_CUDA_AMPERE_
+#endif // STRINGZILLA_ARCH_CUDA_
+FIXTURE
+
+assert_rejects "GPU kernel under a foreign target" "breaks the guards of a gpu" include/stringzilla/probe/ampere.cuh <<'FIXTURE'
+#if STRINGZILLA_ARCH_CUDA_
+#if STRINGZILLA_ARCH_CUDA_AMPERE_
+
+#if STRINGZILLA_TARGET_HOPPER
+static __global__ void __launch_bounds__(sz_probe_threads_ampere_k, 1) sz_probe_ampere_kernel_(int *value) {}
+#endif // STRINGZILLA_TARGET_HOPPER
+
+#endif // STRINGZILLA_ARCH_CUDA_AMPERE_
+#endif // STRINGZILLA_ARCH_CUDA_
+FIXTURE
+
+assert_rejects "GPU building block after the kernels" "breaks the guards of a gpu" include/stringzilla/probe/cdna3.cuh <<'FIXTURE'
+#if STRINGZILLA_ARCH_ROCM_
+#if STRINGZILLA_ARCH_ROCM_CDNA3_
+
+#if STRINGZILLA_TARGET_CDNA3
+static __global__ void __launch_bounds__(sz_probe_threads_cdna3_k, 1) sz_probe_cdna3_kernel_(int *value) {}
+#endif // STRINGZILLA_TARGET_CDNA3
+
+STRINGZILLA_DEVICE int sz_probe_cdna3_(int value) { return value; }
+
+#endif // STRINGZILLA_ARCH_ROCM_CDNA3_
+#endif // STRINGZILLA_ARCH_ROCM_
+FIXTURE
+
+assert_rejects "guard closed without its name" "breaks the guards of a floor" include/stringzilla/probe/rocm.cuh <<'FIXTURE'
+#if STRINGZILLA_ARCH_ROCM_
+#if STRINGZILLA_TARGET_ROCM
+static __global__ void __launch_bounds__(sz_probe_threads_rocm_k, 1) sz_probe_rocm_kernel_(int *value) {}
+#endif // STRINGZILLA_TARGET_CUDA
+#endif
+FIXTURE
+
+assert_rejects "portable header testing a target" "breaks the guards of a portable" include/stringzilla/probe/simt.cuh <<'FIXTURE'
+#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
+#if STRINGZILLA_TARGET_CUDA
+STRINGZILLA_INLINE int sz_probe_simt_(int value) { return value; }
+#endif // STRINGZILLA_TARGET_CUDA
+#endif // STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
+FIXTURE
+
+assert_rejects "shared kernel under the vendors alone" "defines a GPU kernel or table outside its own" \
+    include/stringzilla/probe/simt.cuh <<'FIXTURE'
+#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
+static __global__ void __launch_bounds__(sz_probe_threads_simt_k, 1) sz_probe_simt_kernel_(int *value) {}
+#endif // STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
+FIXTURE
+
+assert_rejects "vendor-wide kernel under an OR of targets" "defines a GPU kernel or table outside its own" \
+    include/stringzilla/cuda.cuh <<'FIXTURE'
+#if STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_AMPERE
+static __global__ void __launch_bounds__(sz_probe_threads_cuda_k, 1) sz_probe_cuda_kernel_(int *value) {}
+#endif // STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_AMPERE
+FIXTURE
+
+assert_rejects "vendor-wide table under two targets" "defines a GPU kernel or table outside its own" \
+    include/stringzilla/cuda.cuh <<'FIXTURE'
+#if STRINGZILLA_TARGET_CUDA
+#if STRINGZILLA_TARGET_AMPERE
+static __device__ int sz_probe_table_cuda_[4] = {1, 2, 3, 4};
+#endif // STRINGZILLA_TARGET_AMPERE
+#endif // STRINGZILLA_TARGET_CUDA
+FIXTURE
+
+assert_accepts "vendor-wide kernel and table under the own target" include/stringzilla/cuda.cuh <<'FIXTURE'
+#if STRINGZILLA_TARGET_CUDA
+static __device__ int sz_probe_table_cuda_[4] = {1, 2, 3, 4};
+static __global__ void __launch_bounds__(sz_probe_threads_cuda_k, 1) sz_probe_cuda_kernel_(int *value) {}
+#endif // STRINGZILLA_TARGET_CUDA
+FIXTURE
+
+assert_rejects "ARCH flag read from a target" "defines a STRINGZILLA_ARCH_ flag from a STRINGZILLA_TARGET_" c/stringzilla/types.h <<'FIXTURE'
+#define STRINGZILLA_ARCH_CUDA_AMPERE_ (STRINGZILLA_TARGET_AMPERE || STRINGZILLA_TARGET_HOPPER)
+FIXTURE
+
+assert_rejects "ARCH flag raised under a target" "defines a STRINGZILLA_ARCH_ flag from a STRINGZILLA_TARGET_" c/stringzilla/types.h <<'FIXTURE'
+#if STRINGZILLA_TARGET_SKYLAKE
+#undef STRINGZILLA_ARCH_X8664_HASWELL_
+#define STRINGZILLA_ARCH_X8664_HASWELL_ 1
+#endif
+FIXTURE
+
+assert_accepts "ARCH flag raised by the flags built on it" c/stringzilla/types.h <<'FIXTURE'
+#if STRINGZILLA_ARCH_X8664_SKYLAKE_
+#undef STRINGZILLA_ARCH_X8664_HASWELL_
+#define STRINGZILLA_ARCH_X8664_HASWELL_ 1
+#endif
+FIXTURE
+
+# endregion Shared Guard Fixtures
 
 # endregion StringZilla Fixtures
 
