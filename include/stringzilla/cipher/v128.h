@@ -12,9 +12,13 @@
 #define STRINGZILLA_CIPHER_V128_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_WASM_
+#if STRINGZILLA_ARCH_WASM_V128_
+
 #include "stringzilla/cipher/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -32,8 +36,6 @@ extern "C" {
  *  substituting a word at a time, and is kept vectorized anyway - it runs once per key on no
  *  throughput path, and it is what keeps the secret out of a memory index on the one tier with
  *  no hardware fallback. */
-#if STRINGZILLA_ARCH_WASM_
-#if STRINGZILLA_ARCH_WASM_V128_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
@@ -889,11 +891,12 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_v128(sz_aes256_gcm_key_t const
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_WASM_V128_
 #endif // STRINGZILLA_ARCH_WASM_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_CIPHER_V128_H_

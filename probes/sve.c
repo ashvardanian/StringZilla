@@ -5,7 +5,7 @@
  *  @brief Whether the toolchain builds the SVE kernels, the Armv8.2-A scalable vectors kit.
  */
 #define STRINGZILLA_HEADER_ONLY 1
-#define STRINGZILLA_TARGET_SVE 1
+#define STRINGZILLA_ARCH_ARM64_SVE_ 1
 #include <stringzilla/find/sve.h>
 
 int main(void) {

@@ -15,13 +15,15 @@
 #ifndef STRINGZILLA_OVERLAP_CDNA3_CUH_
 #define STRINGZILLA_OVERLAP_CDNA3_CUH_
 
-#include "stringzilla/overlap/rocm.cuh"
-#include "stringzilla/levenshtein/cdna3.cuh" // `sz_shuffle_up_cdna3_`
+#include "stringzilla/types.h"
 
 #if STRINGZILLA_ARCH_ROCM_
 #if STRINGZILLA_ARCH_ROCM_CDNA3_
 
-#ifdef __cplusplus
+#include "stringzilla/overlap/rocm.cuh"
+#include "stringzilla/levenshtein/cdna3.cuh" // `sz_shuffle_up_cdna3_`
+
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -65,8 +67,8 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_cdna3(sz_overlap_engine_t *engine,
 
 #endif // STRINGZILLA_TARGET_CDNA3
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
 #endif // STRINGZILLA_ARCH_ROCM_CDNA3_
 #endif // STRINGZILLA_ARCH_ROCM_

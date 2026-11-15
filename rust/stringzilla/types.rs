@@ -4,11 +4,11 @@
 //! The producers report the [`Capabilities`] of the CPU or of one GPU, by its runtime's ordinal,
 //! along two axes that have nothing to do with each other, plus the set dispatch uses:
 //!
-//! - [`Capabilities::cpu_detected`], [`Capabilities::cuda_detected`]: what the device can
+//! - [`Capabilities::detected_cpu`], [`Capabilities::detected_cuda`]: what the device can
 //!   execute, from CPUID / `getauxval` / HWCAP on the CPU and from the runtime on a GPU
-//! - [`Capabilities::cpu_compiled`], [`Capabilities::cuda_compiled`]: what this binary contains,
+//! - [`Capabilities::compiled_cpu`], [`Capabilities::compiled_cuda`]: what this binary contains,
 //!   from the build's probes
-//! - [`Capabilities::cpu_enabled`], [`Capabilities::cuda_enabled`]: what dispatch uses — both axes
+//! - [`Capabilities::enabled_cpu`], [`Capabilities::enabled_cuda`]: what dispatch uses — both axes
 //!   at once, which the library clamps every CPU mask to
 //!
 //! ROCm and Metal have the same three. Reach for the enabled set unless you specifically mean one
@@ -398,18 +398,26 @@ pub enum Capability {
     PowerVsx = 1 << 17,
     /// NVIDIA: every CUDA device.
     Cuda = 1 << 48,
+    /// NVIDIA: warp reductions and asynchronous shared-memory copies, from compute capability 8.0.
+    Ampere = 1 << 49,
     /// NVIDIA: clusters, from compute capability 9.0.
     Hopper = 1 << 51,
     /// NVIDIA: cluster launch control, from compute capability 10.0.
     Blackwell = 1 << 52,
     /// AMD: every ROCm device.
     Rocm = 1 << 56,
+    /// AMD: DPP wavefront shifts, on gfx942.
+    Cdna3 = 1 << 57,
+    /// AMD: the DPP wavefront shifts of `Cdna3`, on gfx950.
+    Cdna4 = 1 << 58,
+    /// AMD: DPP row shifts bridged by `v_permlanex16`, on gfx1250 and gfx1251.
+    Cdna5 = 1 << 59,
     /// Apple: every Metal device.
     Metal = 1 << 60,
 }
 
 /// Every [`Capability`], in bit order.
-const CAPABILITIES: [Capability; 23] = [
+const CAPABILITIES: [Capability; 27] = [
     Capability::Serial,
     Capability::Westmere,
     Capability::Goldmont,
@@ -429,9 +437,13 @@ const CAPABILITIES: [Capability; 23] = [
     Capability::LoongsonAsx,
     Capability::PowerVsx,
     Capability::Cuda,
+    Capability::Ampere,
     Capability::Hopper,
     Capability::Blackwell,
     Capability::Rocm,
+    Capability::Cdna3,
+    Capability::Cdna4,
+    Capability::Cdna5,
     Capability::Metal,
 ];
 
@@ -442,16 +454,16 @@ const CAPABILITIES: [Capability; 23] = [
 /// ```
 /// use stringzilla::{Capabilities, Capability};
 ///
-/// let enabled = Capabilities::cpu_enabled();
-/// enabled.configure_thread()?;
+/// let enabled = Capabilities::enabled_cpu();
+/// enabled.configure_thread_cpu()?;
 /// println!("dispatching to {enabled}");
 /// assert!(enabled.contains(Capability::Serial));
 /// let narrowed = enabled.without(Capability::Haswell);
 /// assert!(!narrowed.contains(Capability::Haswell));
 ///
 /// // Counting a vendor with no devices fails with `Status::MissingGpu`.
-/// for ordinal in 0..Capabilities::cuda_count_devices().unwrap_or(0) {
-///     println!("CUDA device {ordinal} runs {}", Capabilities::cuda_enabled(ordinal)?);
+/// for ordinal in 0..Capabilities::count_devices_cuda().unwrap_or(0) {
+///     println!("CUDA device {ordinal} runs {}", Capabilities::enabled_cuda(ordinal)?);
 /// }
 /// # Ok::<(), stringzilla::Status>(())
 /// ```
@@ -469,9 +481,13 @@ impl Capabilities {
     /// Every GPU capability, which the CPU never detects or enables, C's `sz_cap_gpus_k`.
     pub const GPUS: Self = Capabilities(
         Capability::Cuda as sz_capability_t
+            | Capability::Ampere as sz_capability_t
             | Capability::Hopper as sz_capability_t
             | Capability::Blackwell as sz_capability_t
             | Capability::Rocm as sz_capability_t
+            | Capability::Cdna3 as sz_capability_t
+            | Capability::Cdna4 as sz_capability_t
+            | Capability::Cdna5 as sz_capability_t
             | Capability::Metal as sz_capability_t,
     );
 
@@ -530,117 +546,118 @@ fn stream_producers(capabilities: Capabilities) -> Option<StreamProducers> {
 
 impl Capabilities {
     /// Capabilities this CPU supports, whether or not their kernels were compiled in.
-    pub fn cpu_detected() -> Self {
+    pub fn detected_cpu() -> Self {
         let mut capabilities: sz_capability_t = 0;
         unsafe { sz_capabilities_detected_cpu(&mut capabilities) }.infallible();
         Capabilities(capabilities)
     }
 
     /// CPU capabilities whose kernels were compiled in, whether or not this CPU supports them.
-    pub fn cpu_compiled() -> Self {
+    pub fn compiled_cpu() -> Self {
         let mut capabilities: sz_capability_t = 0;
         unsafe { sz_capabilities_compiled_cpu(&mut capabilities) }.infallible();
         Capabilities(capabilities)
     }
 
-    /// CPU capabilities dispatch runs: [`Capabilities::cpu_detected`] &
-    /// [`Capabilities::cpu_compiled`], always with [`Capability::Serial`]. The library clamps every
+    /// CPU capabilities dispatch runs: [`Capabilities::detected_cpu`] &
+    /// [`Capabilities::compiled_cpu`], always with [`Capability::Serial`]. The library clamps every
     /// CPU mask to this set itself, so calls without a mask pass [`Capabilities::CPUS`].
-    pub fn cpu_enabled() -> Self {
+    pub fn enabled_cpu() -> Self {
         let mut capabilities: sz_capability_t = 0;
         unsafe { sz_capabilities_enabled_cpu(&mut capabilities) }.infallible();
         Capabilities(capabilities)
     }
 
     /// Sets up the calling thread for the CPU kernels in this set, usually
-    /// [`Capabilities::cpu_enabled`]. Call it once per thread before using those kernels; it is
+    /// [`Capabilities::enabled_cpu`]. Call it once per thread before using those kernels; it is
     /// idempotent.
-    pub fn configure_thread(self) -> Result<(), Status> {
-        unsafe { sz_thread_configure_cpu(self.0) }.check()
+    pub fn configure_thread_cpu(self) -> Result<(), Status> {
+        unsafe { sz_configure_thread_cpu(self.0) }.check()
     }
 
     /// How many CUDA devices this process sees, failing with [`Status::MissingGpu`] where the
     /// runtime finds none or this build lacks its kernels.
-    pub fn cuda_count_devices() -> Result<usize, Status> {
+    pub fn count_devices_cuda() -> Result<usize, Status> {
         let mut count: sz_size_t = 0;
-        unsafe { sz_device_count_cuda(&mut count) }.check()?;
+        unsafe { sz_count_devices_cuda(&mut count) }.check()?;
         Ok(count)
     }
 
     /// Capabilities CUDA device `ordinal` supports, as its runtime numbers them, whether or not
     /// their kernels were compiled in; fails with [`Status::MissingGpu`] past the last device.
-    pub fn cuda_detected(ordinal: usize) -> Result<Self, Status> {
+    pub fn detected_cuda(ordinal: usize) -> Result<Self, Status> {
         let mut capabilities: sz_capability_t = 0;
         unsafe { sz_capabilities_detected_cuda(ordinal, &mut capabilities) }.check()?;
         Ok(Capabilities(capabilities))
     }
 
-    /// CUDA capabilities whose kernels were compiled in, whether or not any device supports them.
-    pub fn cuda_compiled() -> Self {
+    /// CUDA capabilities whose kernels this binary holds code for that device `ordinal` runs,
+    /// whether or not it supports them; fails with [`Status::MissingGpu`] past the last device.
+    pub fn compiled_cuda(ordinal: usize) -> Result<Self, Status> {
         let mut capabilities: sz_capability_t = 0;
-        unsafe { sz_capabilities_compiled_cuda(&mut capabilities) }.infallible();
-        Capabilities(capabilities)
+        unsafe { sz_capabilities_compiled_cuda(ordinal, &mut capabilities) }.check()?;
+        Ok(Capabilities(capabilities))
     }
 
-    /// Capabilities kernels run with on CUDA device `ordinal`: [`Capabilities::cuda_detected`] &
-    /// [`Capabilities::cuda_compiled`]. The mask names the vendor, and a stream the device.
-    pub fn cuda_enabled(ordinal: usize) -> Result<Self, Status> {
+    /// Capabilities kernels run with on CUDA device `ordinal`: [`Capabilities::detected_cuda`] &
+    /// [`Capabilities::compiled_cuda`]. The mask names the vendor, and a stream the device.
+    pub fn enabled_cuda(ordinal: usize) -> Result<Self, Status> {
         let mut capabilities: sz_capability_t = 0;
         unsafe { sz_capabilities_enabled_cuda(ordinal, &mut capabilities) }.check()?;
         Ok(Capabilities(capabilities))
     }
 
-    /// [`Capabilities::cuda_count_devices`], for ROCm.
-    pub fn rocm_count_devices() -> Result<usize, Status> {
+    /// [`Capabilities::count_devices_cuda`], for ROCm.
+    pub fn count_devices_rocm() -> Result<usize, Status> {
         let mut count: sz_size_t = 0;
-        unsafe { sz_device_count_rocm(&mut count) }.check()?;
+        unsafe { sz_count_devices_rocm(&mut count) }.check()?;
         Ok(count)
     }
 
-    /// [`Capabilities::cuda_detected`], for ROCm.
-    pub fn rocm_detected(ordinal: usize) -> Result<Self, Status> {
+    /// [`Capabilities::detected_cuda`], for ROCm.
+    pub fn detected_rocm(ordinal: usize) -> Result<Self, Status> {
         let mut capabilities: sz_capability_t = 0;
         unsafe { sz_capabilities_detected_rocm(ordinal, &mut capabilities) }.check()?;
         Ok(Capabilities(capabilities))
     }
 
-    /// [`Capabilities::cuda_compiled`], for ROCm.
-    pub fn rocm_compiled() -> Self {
+    /// [`Capabilities::compiled_cuda`], for ROCm.
+    pub fn compiled_rocm(ordinal: usize) -> Result<Self, Status> {
         let mut capabilities: sz_capability_t = 0;
-        unsafe { sz_capabilities_compiled_rocm(&mut capabilities) }.infallible();
-        Capabilities(capabilities)
+        unsafe { sz_capabilities_compiled_rocm(ordinal, &mut capabilities) }.check()?;
+        Ok(Capabilities(capabilities))
     }
 
-    /// [`Capabilities::cuda_enabled`], for ROCm.
-    pub fn rocm_enabled(ordinal: usize) -> Result<Self, Status> {
+    /// [`Capabilities::enabled_cuda`], for ROCm.
+    pub fn enabled_rocm(ordinal: usize) -> Result<Self, Status> {
         let mut capabilities: sz_capability_t = 0;
         unsafe { sz_capabilities_enabled_rocm(ordinal, &mut capabilities) }.check()?;
         Ok(Capabilities(capabilities))
     }
 
-    /// [`Capabilities::cuda_count_devices`], for Metal.
-    pub fn metal_count_devices() -> Result<usize, Status> {
+    /// [`Capabilities::count_devices_cuda`], for Metal.
+    pub fn count_devices_metal() -> Result<usize, Status> {
         let mut count: sz_size_t = 0;
-        unsafe { sz_device_count_metal(&mut count) }.check()?;
+        unsafe { sz_count_devices_metal(&mut count) }.check()?;
         Ok(count)
     }
 
-    /// [`Capabilities::cuda_detected`], for Metal.
-    pub fn metal_detected(ordinal: usize) -> Result<Self, Status> {
+    /// [`Capabilities::detected_cuda`], for Metal.
+    pub fn detected_metal(ordinal: usize) -> Result<Self, Status> {
         let mut capabilities: sz_capability_t = 0;
         unsafe { sz_capabilities_detected_metal(ordinal, &mut capabilities) }.check()?;
         Ok(Capabilities(capabilities))
     }
 
-    /// [`Capabilities::cuda_compiled`], for Metal.
-    pub fn metal_compiled() -> Self {
+    /// [`Capabilities::compiled_cuda`], for Metal.
+    pub fn compiled_metal(ordinal: usize) -> Result<Self, Status> {
         let mut capabilities: sz_capability_t = 0;
-        unsafe { sz_capabilities_compiled_metal(&mut capabilities) }.infallible();
-        Capabilities(capabilities)
+        unsafe { sz_capabilities_compiled_metal(ordinal, &mut capabilities) }.check()?;
+        Ok(Capabilities(capabilities))
     }
 
-    /// [`Capabilities::cuda_enabled`], for Metal.
-    pub fn metal_enabled(ordinal: usize) -> Result<Self, Status> {
+    /// [`Capabilities::enabled_cuda`], for Metal.
+    pub fn enabled_metal(ordinal: usize) -> Result<Self, Status> {
         let mut capabilities: sz_capability_t = 0;
         unsafe { sz_capabilities_enabled_metal(ordinal, &mut capabilities) }.check()?;
         Ok(Capabilities(capabilities))
@@ -655,12 +672,12 @@ impl Capabilities {
 /// ```
 /// use stringzilla::{Capabilities, Stream};
 ///
-/// let cpu = Stream::default(Capabilities::cpu_enabled());
+/// let cpu = Stream::default(Capabilities::enabled_cpu());
 /// assert!(cpu.as_raw().is_null());
 ///
 /// // A vendor with no devices fails with `Status::MissingGpu`.
-/// for ordinal in 0..Capabilities::cuda_count_devices().unwrap_or(0) {
-///     let stream = Stream::new(Capabilities::cuda_enabled(ordinal)?, ordinal)?;
+/// for ordinal in 0..Capabilities::count_devices_cuda().unwrap_or(0) {
+///     let stream = Stream::new(Capabilities::enabled_cuda(ordinal)?, ordinal)?;
 ///     stream.synchronize()?;
 /// }
 /// # Ok::<(), stringzilla::Status>(())
@@ -740,7 +757,7 @@ impl Stream {
     /// ```
     /// use stringzilla::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, StringsView};
     ///
-    /// let stream = Stream::default(Capabilities::cpu_enabled());
+    /// let stream = Stream::default(Capabilities::enabled_cpu());
     /// let mut engine = LevenshteinEngine::new(&["kitten"], LevenshteinSymbol::Bytes, &stream)?;
     /// let mut distances = [0usize; 1];
     /// let candidates = StringsView::from_slices(&["sitting"]);
@@ -815,8 +832,8 @@ impl Scope<'_, '_> {
 /// ```no_run
 /// use stringzilla::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, Strings, StringsView, UnifiedAllocator};
 ///
-/// let cpu = Stream::default(Capabilities::cpu_enabled());
-/// let stream = Stream::new(Capabilities::cuda_enabled(0)?, 0)?;
+/// let cpu = Stream::default(Capabilities::enabled_cpu());
+/// let stream = Stream::new(Capabilities::enabled_cuda(0)?, 0)?;
 /// let unified = UnifiedAllocator::new(&stream);
 /// // The host gathers the slices, which a GPU cannot read, into memory the GPU reaches.
 /// let candidates = Strings::copy_in(StringsView::from_slices(&["sitting", "kitten"]), unified, &cpu)?;
@@ -992,7 +1009,7 @@ mod tests {
 
     #[test]
     fn metadata() {
-        let names = Capabilities::cpu_enabled().to_string();
+        let names = Capabilities::enabled_cpu().to_string();
         assert!(names.split(',').any(|name| name == "serial"), "{names}");
     }
 
@@ -1018,9 +1035,13 @@ mod tests {
             "loongsonasx",
             "powervsx",
             "cuda",
+            "ampere",
             "hopper",
             "blackwell",
             "rocm",
+            "cdna3",
+            "cdna4",
+            "cdna5",
             "metal",
         ];
         let mut previous = 0;
@@ -1038,41 +1059,41 @@ mod tests {
 
     #[test]
     fn producers_report_clamped_capabilities() {
-        let enabled = Capabilities::cpu_enabled();
+        let enabled = Capabilities::enabled_cpu();
         assert!(enabled.contains(Capability::Serial));
-        let detected = Capabilities::cpu_detected();
+        let detected = Capabilities::detected_cpu();
         assert_eq!(enabled.bits() & !(detected.bits() | Capability::Serial as u64), 0);
-        assert_eq!(enabled.bits() & !Capabilities::cpu_compiled().bits(), 0);
-        assert_eq!(enabled.configure_thread(), Ok(()));
+        assert_eq!(enabled.bits() & !Capabilities::compiled_cpu().bits(), 0);
+        assert_eq!(enabled.configure_thread_cpu(), Ok(()));
         assert!(Stream::new(enabled, 1).unwrap().as_raw().is_null());
 
         type Producers = (
             fn() -> Result<usize, Status>,
             fn(usize) -> Result<Capabilities, Status>,
-            fn() -> Capabilities,
+            fn(usize) -> Result<Capabilities, Status>,
             fn(usize) -> Result<Capabilities, Status>,
             Capability,
         );
         let vendors: [Producers; 3] = [
             (
-                Capabilities::cuda_count_devices,
-                Capabilities::cuda_detected,
-                Capabilities::cuda_compiled,
-                Capabilities::cuda_enabled,
+                Capabilities::count_devices_cuda,
+                Capabilities::detected_cuda,
+                Capabilities::compiled_cuda,
+                Capabilities::enabled_cuda,
                 Capability::Cuda,
             ),
             (
-                Capabilities::rocm_count_devices,
-                Capabilities::rocm_detected,
-                Capabilities::rocm_compiled,
-                Capabilities::rocm_enabled,
+                Capabilities::count_devices_rocm,
+                Capabilities::detected_rocm,
+                Capabilities::compiled_rocm,
+                Capabilities::enabled_rocm,
                 Capability::Rocm,
             ),
             (
-                Capabilities::metal_count_devices,
-                Capabilities::metal_detected,
-                Capabilities::metal_compiled,
-                Capabilities::metal_enabled,
+                Capabilities::count_devices_metal,
+                Capabilities::detected_metal,
+                Capabilities::compiled_metal,
+                Capabilities::enabled_metal,
                 Capability::Metal,
             ),
         ];
@@ -1092,7 +1113,10 @@ mod tests {
             for ordinal in 0..count {
                 let supported = detected(ordinal).unwrap();
                 assert_eq!(supported.bits() & Capabilities::CPUS.bits(), 0);
-                assert_eq!(enabled(ordinal).unwrap().bits(), supported.bits() & compiled().bits());
+                assert_eq!(
+                    enabled(ordinal).unwrap().bits(),
+                    supported.bits() & compiled(ordinal).unwrap().bits()
+                );
                 let stream = Stream::new(enabled(ordinal).unwrap(), ordinal).unwrap();
                 assert!(!stream.as_raw().is_null());
                 assert_eq!(stream.synchronize(), Ok(()));
@@ -1102,8 +1126,8 @@ mod tests {
 
     #[test]
     fn enabled_is_what_the_library_widened_at_load() {
-        let available = Capabilities::cpu_detected().bits() & Capabilities::cpu_compiled().bits();
-        assert_eq!(Capabilities::cpu_enabled().bits(), available);
+        let available = Capabilities::detected_cpu().bits() & Capabilities::compiled_cpu().bits();
+        assert_eq!(Capabilities::enabled_cpu().bits(), available);
     }
 
     #[test]
@@ -1149,7 +1173,7 @@ mod tests {
     fn unified_allocator_empty_layout() {
         use core::alloc::{Allocator, Layout};
 
-        let cpu = Stream::default(Capabilities::cpu_enabled());
+        let cpu = Stream::default(Capabilities::enabled_cpu());
         let unified = UnifiedAllocator::new(&cpu);
         let empty = unified.allocate(Layout::from_size_align(0, 256).unwrap()).unwrap();
         assert_eq!(empty.as_ptr().cast::<u8>().addr() % 256, 0);
@@ -1161,7 +1185,7 @@ mod tests {
         extern crate alloc;
         use alloc::vec::Vec;
 
-        let cpu = Stream::default(Capabilities::cpu_enabled());
+        let cpu = Stream::default(Capabilities::enabled_cpu());
         let unified = UnifiedAllocator::new(&cpu);
         let words = ["sitting", "sunday", "", "kitten"];
         let slices = sz::StringsView::from_slices(&words);
@@ -1188,7 +1212,7 @@ mod tests {
     /// ahead of its own join, which fails where this build lacks the vendor.
     #[test]
     fn scopes_refuse_engines_of_another_group() {
-        let cpu = Stream::default(Capabilities::cpu_enabled());
+        let cpu = Stream::default(Capabilities::enabled_cpu());
         let mut engine = sz::LevenshteinEngine::new(&["kitten"], sz::LevenshteinSymbol::Bytes, &cpu).unwrap();
         let mut distances = [0usize; 1];
         let gpu = Stream::default(Capability::Metal.into());
@@ -1205,11 +1229,11 @@ mod tests {
         extern crate alloc;
         use alloc::vec::Vec;
 
-        let Ok(capabilities) = Capabilities::cuda_enabled(0) else {
+        let Ok(capabilities) = Capabilities::enabled_cuda(0) else {
             return;
         };
         let gpu = Stream::new(capabilities, 0).unwrap();
-        let cpu = Stream::default(Capabilities::cpu_enabled());
+        let cpu = Stream::default(Capabilities::enabled_cpu());
         let unified = UnifiedAllocator::new(&gpu);
         let queries = ["kitten", "saturday", "Straße"];
         let words = sz::StringsView::from_slices(&["sitting", "sunday", "strasse", "", "kitten"]);

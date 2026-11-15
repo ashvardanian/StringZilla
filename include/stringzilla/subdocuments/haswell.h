@@ -16,15 +16,16 @@
 
 #include "stringzilla/types.h"
 
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_HASWELL_
+
 #include "stringzilla/find/haswell.h" // `sz_find_byte_haswell_`
 #include "stringzilla/subdocuments/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_X8664_
-#if STRINGZILLA_ARCH_X8664_HASWELL_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,lzcnt,pclmul"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -156,11 +157,12 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_haswell(sz_subdocuments_engine_
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_X8664_HASWELL_
 #endif // STRINGZILLA_ARCH_X8664_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_SUBDOCUMENTS_HASWELL_H_

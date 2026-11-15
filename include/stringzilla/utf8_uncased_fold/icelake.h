@@ -10,14 +10,16 @@
 #define STRINGZILLA_UTF8_UNCASED_FOLD_ICELAKE_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_ICELAKE_
+
 #include "stringzilla/utf8_uncased_fold/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_X8664_
-#if STRINGZILLA_TARGET_ICELAKE
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(                                                                                    \
     __attribute__((                                                                                              \
@@ -1606,6 +1608,8 @@ STRINGZILLA_OUTLINED_ sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, 
     return folded_length;
 }
 
+#if STRINGZILLA_TARGET_ICELAKE
+
 STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target,
                                                          sz_size_t *target_length, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
@@ -1619,17 +1623,19 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_si
 #undef sz_fold_ascii_in_prefix_icelake_
 #undef sz_transform_georgian_icelake_
 
+#endif // STRINGZILLA_TARGET_ICELAKE
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
 
-#endif // STRINGZILLA_TARGET_ICELAKE
-#endif // STRINGZILLA_ARCH_X8664_
-
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_X8664_ICELAKE_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #endif // STRINGZILLA_UTF8_UNCASED_FOLD_ICELAKE_H_

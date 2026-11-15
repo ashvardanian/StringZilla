@@ -34,12 +34,25 @@ static sz_capability_kernels_t const *sz_regex_engine_init_capabilities(void) {
         above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_engine_init_powervsx,
 #endif
     };
-    enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
+    enum {
+        cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+                         sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
+                        !STRINGZILLA_MULTIVERSIONED) >>
+                       48
+    };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_CUDA
         cuda_above_k & ~((sz_cap_cuda_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
                                                         : (sz_kernel_punned_t)&sz_regex_engine_init_cuda,
+#endif
+#if STRINGZILLA_TARGET_AMPERE
+        cuda_above_k & ~((sz_cap_ampere_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_regex_engine_init_ampere,
+#endif
+#if STRINGZILLA_TARGET_HOPPER
+        cuda_above_k & ~((sz_cap_hopper_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_regex_engine_init_hopper,
 #endif
     };
     enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
@@ -63,7 +76,9 @@ static sz_capability_kernels_t const *sz_regex_engine_init_capabilities(void) {
              sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
              sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
-        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
+        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+             sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER,
+         cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
         {sz_cap_metal_k * STRINGZILLA_TARGET_METAL, metal},
     };
@@ -93,12 +108,25 @@ static sz_capability_kernels_t const *sz_regex_contains_capabilities(void) {
         above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_contains_powervsx,
 #endif
     };
-    enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
+    enum {
+        cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+                         sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
+                        !STRINGZILLA_MULTIVERSIONED) >>
+                       48
+    };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_CUDA
         cuda_above_k & ~((sz_cap_cuda_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
                                                         : (sz_kernel_punned_t)&sz_regex_contains_cuda,
+#endif
+#if STRINGZILLA_TARGET_AMPERE
+        cuda_above_k & ~((sz_cap_ampere_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_regex_contains_ampere,
+#endif
+#if STRINGZILLA_TARGET_HOPPER
+        cuda_above_k & ~((sz_cap_hopper_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_regex_contains_hopper,
 #endif
     };
     enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
@@ -114,7 +142,9 @@ static sz_capability_kernels_t const *sz_regex_contains_capabilities(void) {
              sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
              sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
-        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
+        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+             sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER,
+         cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
         {0, sz_no_kernels_},
     };
@@ -144,11 +174,24 @@ static sz_capability_kernels_t const *sz_regex_counts_capabilities(void) {
         above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_counts_powervsx,
 #endif
     };
-    enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
+    enum {
+        cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+                         sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
+                        !STRINGZILLA_MULTIVERSIONED) >>
+                       48
+    };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_CUDA
         cuda_above_k & ~((sz_cap_cuda_k >> 48) * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_counts_cuda,
+#endif
+#if STRINGZILLA_TARGET_AMPERE
+        cuda_above_k & ~((sz_cap_ampere_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_regex_counts_ampere,
+#endif
+#if STRINGZILLA_TARGET_HOPPER
+        cuda_above_k & ~((sz_cap_hopper_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_regex_counts_hopper,
 #endif
     };
     enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
@@ -171,7 +214,9 @@ static sz_capability_kernels_t const *sz_regex_counts_capabilities(void) {
              sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
              sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
-        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
+        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+             sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER,
+         cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
         {sz_cap_metal_k * STRINGZILLA_TARGET_METAL, metal},
     };
@@ -201,11 +246,24 @@ static sz_capability_kernels_t const *sz_regex_find_capabilities(void) {
         above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_find_powervsx,
 #endif
     };
-    enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
+    enum {
+        cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+                         sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
+                        !STRINGZILLA_MULTIVERSIONED) >>
+                       48
+    };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_CUDA
         cuda_above_k & ~((sz_cap_cuda_k >> 48) * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_find_cuda,
+#endif
+#if STRINGZILLA_TARGET_AMPERE
+        cuda_above_k & ~((sz_cap_ampere_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_regex_find_ampere,
+#endif
+#if STRINGZILLA_TARGET_HOPPER
+        cuda_above_k & ~((sz_cap_hopper_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_regex_find_hopper,
 #endif
     };
     enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
@@ -227,7 +285,9 @@ static sz_capability_kernels_t const *sz_regex_find_capabilities(void) {
              sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
              sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
-        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
+        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+             sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER,
+         cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
         {sz_cap_metal_k * STRINGZILLA_TARGET_METAL, metal},
     };
@@ -257,11 +317,24 @@ static sz_capability_kernels_t const *sz_regex_replace_capabilities(void) {
         above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_replace_powervsx,
 #endif
     };
-    enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
+    enum {
+        cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+                         sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
+                        !STRINGZILLA_MULTIVERSIONED) >>
+                       48
+    };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_CUDA
         cuda_above_k & ~((sz_cap_cuda_k >> 48) * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_replace_cuda,
+#endif
+#if STRINGZILLA_TARGET_AMPERE
+        cuda_above_k & ~((sz_cap_ampere_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_regex_replace_ampere,
+#endif
+#if STRINGZILLA_TARGET_HOPPER
+        cuda_above_k & ~((sz_cap_hopper_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_regex_replace_hopper,
 #endif
     };
     enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
@@ -284,7 +357,9 @@ static sz_capability_kernels_t const *sz_regex_replace_capabilities(void) {
              sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
              sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
-        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
+        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+             sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER,
+         cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
         {sz_cap_metal_k * STRINGZILLA_TARGET_METAL, metal},
     };
@@ -314,11 +389,24 @@ static sz_capability_kernels_t const *sz_regex_extract_capabilities(void) {
         above_k & ~(sz_cap_powervsx_k * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_extract_powervsx,
 #endif
     };
-    enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
+    enum {
+        cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+                         sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
+                        !STRINGZILLA_MULTIVERSIONED) >>
+                       48
+    };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_CUDA
         cuda_above_k & ~((sz_cap_cuda_k >> 48) * 2 - 1) ? STRINGZILLA_NULL : (sz_kernel_punned_t)&sz_regex_extract_cuda,
+#endif
+#if STRINGZILLA_TARGET_AMPERE
+        cuda_above_k & ~((sz_cap_ampere_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_regex_extract_ampere,
+#endif
+#if STRINGZILLA_TARGET_HOPPER
+        cuda_above_k & ~((sz_cap_hopper_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_regex_extract_hopper,
 #endif
     };
     enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
@@ -341,7 +429,9 @@ static sz_capability_kernels_t const *sz_regex_extract_capabilities(void) {
              sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
              sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
-        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
+        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+             sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER,
+         cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
         {sz_cap_metal_k * STRINGZILLA_TARGET_METAL, metal},
     };

@@ -11,22 +11,25 @@
 #define STRINGZILLA_LEVENSHTEIN_HASWELL_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/levenshtein/serial.h"
-#include "stringzilla/utf8_runes/haswell.h" // `sz_utf8_decode_haswell_`
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_ARCH_X8664_HASWELL_
-#pragma region Haswell Implementation
+
+#include "stringzilla/levenshtein/serial.h"
+#include "stringzilla/utf8_runes/haswell.h" // `sz_utf8_decode_haswell_`
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,lzcnt,popcnt"))), apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("avx2", "bmi", "bmi2", "lzcnt", "popcnt")
 #endif
+
+#pragma region Haswell Implementation
 
 /** Four candidates' running scores, one per 64-bit YMM position. */
 typedef struct sz_levenshtein_u64x4_state_haswell_t {
@@ -626,17 +629,19 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_haswell(sz_levenshtein_engi
 
 #endif // STRINGZILLA_TARGET_HASWELL
 
+#pragma endregion Haswell Implementation
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#pragma endregion Haswell Implementation
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_X8664_HASWELL_
 #endif // STRINGZILLA_ARCH_X8664_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_LEVENSHTEIN_HASWELL_H_

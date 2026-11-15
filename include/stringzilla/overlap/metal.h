@@ -21,12 +21,14 @@
 #ifndef STRINGZILLA_OVERLAP_METAL_H_
 #define STRINGZILLA_OVERLAP_METAL_H_
 
-#include "stringzilla/metal.h"
-#include "stringzilla/overlap/serial.h"
+#include "stringzilla/types.h"
 
 #if STRINGZILLA_ARCH_METAL_
 
-#ifdef __cplusplus
+#include "stringzilla/metal.h"
+#include "stringzilla/overlap/serial.h"
+
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -272,8 +274,8 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_metal(sz_overlap_engine_t *engine,
 
 #endif // STRINGZILLA_TARGET_METAL
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
 
 #endif // STRINGZILLA_ARCH_METAL_

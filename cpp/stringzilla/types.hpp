@@ -268,9 +268,9 @@ class device_t {
         sz_status_t status = sz_success_k;
         switch (kind) {
         case device_kind_t::cpu_k: break;
-        case device_kind_t::cuda_k: status = sz_device_count_cuda(&count); break;
-        case device_kind_t::rocm_k: status = sz_device_count_rocm(&count); break;
-        case device_kind_t::metal_k: status = sz_device_count_metal(&count); break;
+        case device_kind_t::cuda_k: status = sz_count_devices_cuda(&count); break;
+        case device_kind_t::rocm_k: status = sz_count_devices_rocm(&count); break;
+        case device_kind_t::metal_k: status = sz_count_devices_metal(&count); break;
         }
         return {static_cast<std::size_t>(count), static_cast<status_t>(status)};
     }
@@ -298,17 +298,17 @@ class device_t {
         return {capabilities, static_cast<status_t>(status)};
     }
 
-    /** What this binary holds kernels for on devices of this kind, whether or not this one runs. */
-    sz_capability_t capabilities_compiled() const noexcept {
+    /** What this binary holds kernels for that this device runs; zero on failure. */
+    expected<sz_capability_t> capabilities_compiled() const noexcept {
         sz_capability_t capabilities = 0;
-        [[maybe_unused]] sz_status_t status = sz_success_k; // Never fails: the mask is fixed at build time
+        sz_status_t status = sz_success_k;
         switch (kind_) {
         case device_kind_t::cpu_k: status = sz_capabilities_compiled_cpu(&capabilities); break;
-        case device_kind_t::cuda_k: status = sz_capabilities_compiled_cuda(&capabilities); break;
-        case device_kind_t::rocm_k: status = sz_capabilities_compiled_rocm(&capabilities); break;
-        case device_kind_t::metal_k: status = sz_capabilities_compiled_metal(&capabilities); break;
+        case device_kind_t::cuda_k: status = sz_capabilities_compiled_cuda(ordinal_, &capabilities); break;
+        case device_kind_t::rocm_k: status = sz_capabilities_compiled_rocm(ordinal_, &capabilities); break;
+        case device_kind_t::metal_k: status = sz_capabilities_compiled_metal(ordinal_, &capabilities); break;
         }
-        return capabilities;
+        return {capabilities, static_cast<status_t>(status)};
     }
 
     /** Both at once: the mask for this device's dispatch points; zero on failure. */
@@ -328,7 +328,7 @@ class device_t {
      *  kernels, so they report @c missing_kernel_k. */
     status_t configure_thread(sz_capability_t capabilities) const noexcept {
         if (kind_ != device_kind_t::cpu_k) return status_t::missing_kernel_k;
-        return static_cast<status_t>(sz_thread_configure_cpu(capabilities));
+        return static_cast<status_t>(sz_configure_thread_cpu(capabilities));
     }
 };
 

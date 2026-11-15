@@ -56,7 +56,7 @@ void test_device_unit() {
     auto const [enabled, enabled_status] = cpu.capabilities_enabled();
     verify(sz::succeeded(detected_status) && sz::succeeded(enabled_status));
     verify((enabled & sz_cap_serial_k) && !(enabled & ~(detected | sz_cap_serial_k)));
-    verify(!(enabled & ~cpu.capabilities_compiled()));
+    verify(!(enabled & ~cpu.capabilities_compiled().value));
     verify(sz::succeeded(cpu.configure_thread(enabled)));
     for (sz::device_kind_t kind :
          {sz::device_kind_t::cpu_k, sz::device_kind_t::cuda_k, sz::device_kind_t::rocm_k, sz::device_kind_t::metal_k}) {
@@ -66,7 +66,7 @@ void test_device_unit() {
         verify(sz::device_t::make(kind, devices).status == sz::status_t::missing_gpu_k);
         if (kind == sz::device_kind_t::cpu_k) continue;
         auto const [gpu, make_status] = sz::device_t::make(kind, 0);
-        verify(sz::succeeded(make_status) && !(gpu.capabilities_compiled() & sz_cap_cpus_k));
+        verify(sz::succeeded(make_status) && !(gpu.capabilities_compiled().value & sz_cap_cpus_k));
         verify(gpu.configure_thread(sz_cap_any_k) == sz::status_t::missing_kernel_k);
     }
 }

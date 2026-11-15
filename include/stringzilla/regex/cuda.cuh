@@ -26,12 +26,14 @@
 #ifndef STRINGZILLA_REGEX_CUDA_CUH_
 #define STRINGZILLA_REGEX_CUDA_CUH_
 
-#include "stringzilla/cuda.cuh"
-#include "stringzilla/regex/kernels.cuh"
+#include "stringzilla/types.h"
 
 #if STRINGZILLA_ARCH_CUDA_
 
-#ifdef __cplusplus
+#include "stringzilla/cuda.cuh"
+#include "stringzilla/regex/kernels.cuh"
+
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -40,12 +42,12 @@ extern "C" {
 /** Blocks per multiprocessor a grid-strided launch covers the device with. */
 enum { sz_regex_blocks_per_multiprocessor_cuda_k = 8 };
 
-/** The kernels where a tier's rounds differ from the CUDA tier's, and the capability its engines
- *  record; every other launch takes the shared kernels. */
+/** The kernels a tier's rounds launch, the blocks each cluster of its scans spans, and the
+ *  capability its engines record. */
 typedef struct sz_regex_entry_points_cuda_t {
 
     /** Marks every slot where a match starts, staging each tile's text, as
-     *  @ref sz_regex_mark_simt_kernel_ does. */
+     *  @ref sz_regex_mark_cuda_kernel_ does. */
     void const *mark;
 
     /** Scans values in place, as @ref sz_regex_scan_cuda_kernel_ does. */
@@ -54,44 +56,170 @@ typedef struct sz_regex_entry_points_cuda_t {
     /** Scans the starts per chunk in 32 bits, as @ref sz_regex_scan_bounded_cuda_kernel_ does. */
     void const *scan_bounded;
 
+    /** Bounds what each chunk hands on over the pass's NFA or positions, as
+     *  @ref sz_regex_bound_cuda_kernel_ does. */
+    void const *bound;
+
+    /** Bounds what each chunk hands on over a body's DFA, as @ref sz_regex_bound_dfa_cuda_kernel_
+     *  does. */
+    void const *bound_dfa;
+
+    /** Settles the wide chunks over the pass's NFA or positions, as
+     *  @ref sz_regex_bound_pieces_cuda_kernel_ does. */
+    void const *bound_pieces;
+
+    /** Settles the wide chunks over a body's DFA, as @ref sz_regex_bound_pieces_dfa_cuda_kernel_
+     *  does. */
+    void const *bound_pieces_dfa;
+
+    /** Maps the undecided elements each chunk hands on over the pass's NFA or positions, as
+     *  @ref sz_regex_affine_cuda_kernel_ does. */
+    void const *affine;
+
+    /** Maps the undecided elements each chunk hands on over a body's DFA, as
+     *  @ref sz_regex_affine_dfa_cuda_kernel_ does. */
+    void const *affine_dfa;
+
+    /** Doubles the chunks' affine maps for one round, as @ref sz_regex_affine_double_cuda_kernel_
+     *  does. */
+    void const *affine_double;
+
+    /** Records where the pass's lookarounds hold, walking its NFA or positions, as
+     *  @ref sz_regex_looks_cuda_kernel_ does. */
+    void const *looks;
+
+    /** Records where the pass's lookarounds hold, walking a body's DFA, as
+     *  @ref sz_regex_looks_dfa_cuda_kernel_ does. */
+    void const *looks_dfa;
+
+    /** Writes the one-byte lookarounds into the segment's half of the table, as
+     *  @ref sz_regex_singles_cuda_kernel_ does. */
+    void const *singles;
+
+    /** Primes every chunk whose last haystack runs past its right edge, as
+     *  @ref sz_regex_prime_cuda_kernel_ does. */
+    void const *prime;
+
+    /** Settles every wide chunk priming left, as @ref sz_regex_prime_pieces_cuda_kernel_ does. */
+    void const *prime_pieces;
+
+    /** Points every unsettled chunk at what settles it, as @ref sz_regex_compose_cuda_kernel_
+     *  does. */
+    void const *compose;
+
+    /** Doubles over the unsettled chunks for one round, as
+     *  @ref sz_regex_compose_double_cuda_kernel_ does. */
+    void const *compose_double;
+
+    /** Marks every slot the engine's prefixes keep, as @ref sz_regex_mark_prefixes_cuda_kernel_
+     *  does. */
+    void const *mark_prefixes;
+
+    /** Marks every slot where a match of a folded walk starts, as
+     *  @ref sz_regex_mark_folded_cuda_kernel_ does. */
+    void const *mark_folded;
+
+    /** Marks every start by stepping position sets over bytes, as
+     *  @ref sz_regex_mark_positions_cuda_kernel_ does. */
+    void const *mark_positions;
+
+    /** Marks every start by stepping position sets over folded runes, as
+     *  @ref sz_regex_mark_positions_folded_cuda_kernel_ does. */
+    void const *mark_positions_folded;
+
+    /** Lists each chunk's candidates in slot order, as @ref sz_regex_list_cuda_kernel_ does. */
+    void const *list;
+
+    /** Walks every candidate to its end with a PikeVM, linking nothing, as
+     *  @ref sz_regex_ends_pike_cuda_kernel_ does. */
+    void const *ends_pike;
+
+    /** Walks every candidate of a chunk to its end, right to left, as
+     *  @ref sz_regex_ends_cuda_kernel_ does. */
+    void const *ends;
+
+    /** Walks every link on from its chunk's edge, as @ref sz_regex_links_cuda_kernel_ does. */
+    void const *links;
+
+    /** Walks on the links that outlived their first thread, as @ref sz_regex_continue_cuda_kernel_
+     *  does. */
+    void const *continue_cased;
+
+    /** Walks on the folded links that outlived their first thread, as
+     *  @ref sz_regex_continue_folded_cuda_kernel_ does. */
+    void const *continue_folded;
+
+    /** Walks every group the last slide made on from where its walks paused, as
+     *  @ref sz_regex_resume_cuda_kernel_ does. */
+    void const *resume;
+
+    /** Doubles over the links for one round, as @ref sz_regex_links_double_cuda_kernel_ does. */
+    void const *links_double;
+
+    /** Gives each distinct state among the paused walks one group, as
+     *  @ref sz_regex_group_cuda_kernel_ does. */
+    void const *group;
+
+    /** Points every paused walk at its state's group, as @ref sz_regex_point_cuda_kernel_ does. */
+    void const *point;
+
+    /** Doubles over the groups for one round, as @ref sz_regex_groups_double_cuda_kernel_ does. */
+    void const *groups_double;
+
+    /** Gives every paused link its settled group's match, as @ref sz_regex_take_cuda_kernel_
+     *  does. */
+    void const *take;
+
+    /** Tries the later runes of every folded candidate that found no match, as
+     *  @ref sz_regex_retry_folded_cuda_kernel_ does. */
+    void const *retry_folded;
+
+    /** Follows the search through each chunk from every candidate, as
+     *  @ref sz_regex_chain_cuda_kernel_ does. */
+    void const *chain;
+
+    /** Doubles over the chunk exits for one round, as @ref sz_regex_double_cuda_kernel_ does. */
+    void const *chain_double;
+
+    /** Follows the chain through each chunk, counting or storing what it keeps, as
+     *  @ref sz_regex_sweep_cuda_kernel_ does. */
+    void const *sweep;
+
+    /** Hands the next segment its carry, on one thread, as @ref sz_regex_carry_cuda_kernel_
+     *  does. */
+    void const *carry;
+
+    /** Saves the total each thread's range of counts follows, as
+     *  @ref sz_regex_counts_edges_cuda_kernel_ does. */
+    void const *counts_edges;
+
+    /** Turns the sweep's running totals into each haystack's own count, as
+     *  @ref sz_regex_counts_cuda_kernel_ does. */
+    void const *counts;
+
+    /** Measures every kept match's replacement, as @ref sz_regex_expand_cuda_kernel_ does. */
+    void const *expand;
+
+    /** Sums the drift of every chunk's kept matches, as @ref sz_regex_drift_cuda_kernel_ does. */
+    void const *drift;
+
+    /** Writes each chunk's share of the rewritten haystacks, as @ref sz_regex_rewrite_cuda_kernel_
+     *  does. */
+    void const *rewrite;
+
+    /** Finds every haystack's first kept match of the extracted pattern, as
+     *  @ref sz_regex_firsts_cuda_kernel_ does. */
+    void const *firsts;
+
+    /** Writes the rows the firsts kernel counted, as @ref sz_regex_rows_cuda_kernel_ does. */
+    void const *rows;
+
     /** Blocks each cluster of the two scans spans, one where they launch without clusters. */
     sz_size_t cluster_blocks;
 
     /** The capability the tier's engines record. */
     sz_capability_t capability;
 } sz_regex_entry_points_cuda_t;
-
-/** @ref sz_regex_scan_tile_simt_ over CUDA's warps in 32 bits, for the starts per chunk,
- *  of which a step of a tile holds at most 64 per value. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_scan_bounded_cuda_kernel_(sz_size_t *values, sz_size_t count, sz_size_t elements_per_tile,
-                                       sz_size_t *chain, sz_u64_t *states, sz_u64_t *stale) {
-    sz_regex_scan_tile_simt_(values, count, elements_per_tile, chain, states, stale, sz_block_scan_bounded_cuda_,
-                             sz_block_sum_cuda_, sz_chain_tile_simt_, sz_chain_look_back_cuda_);
-}
-
-/** @ref sz_regex_scan_tile_simt_ over CUDA's warps. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_scan_cuda_kernel_(sz_size_t *values, sz_size_t count, sz_size_t elements_per_tile, sz_size_t *chain,
-                               sz_u64_t *states, sz_u64_t *stale) {
-    sz_regex_scan_tile_simt_(values, count, elements_per_tile, chain, states, stale, sz_block_scan_cuda_,
-                             sz_block_sum_cuda_, sz_chain_tile_simt_, sz_chain_look_back_cuda_);
-}
-
-/** The warp walk of the links that outlived their first thread, with CUDA's cross-lane steps. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_continue_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
-    sz_regex_continue_simt_(&engine, haystacks, &round, sz_false_k, sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_,
-                            sz_lanes_any_cuda_);
-}
-
-/** The warp walk of folded links that outlived their first thread, with CUDA's cross-lane steps. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_continue_folded_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                          sz_regex_round_simt_t round) {
-    sz_regex_continue_simt_(&engine, haystacks, &round, sz_true_k, sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_,
-                            sz_lanes_any_cuda_);
-}
 
 /** The segment geometry of an engine's round block, and the byte offsets of everything in it. */
 typedef struct sz_regex_arena_cuda_t {
@@ -311,7 +439,9 @@ STRINGZILLA_INLINE void sz_regex_segment_cuda_(sz_regex_round_simt_t *round, sz_
 STRINGZILLA_INLINE sz_status_t sz_regex_flow_cuda_(sz_regex_engine_t const *engine, sz_strings_view_t const *haystacks,
                                                    sz_regex_round_simt_t *round, sz_regex_arena_cuda_t const *arena,
                                                    sz_regex_flow_simt_t flow, sz_u32_t level, sz_u32_t body,
-                                                   sz_bool_t recording, sz_stream_t stream) {
+                                                   sz_bool_t recording,
+                                                   sz_regex_entry_points_cuda_t const *entry_points,
+                                                   sz_stream_t stream) {
     sz_bool_t const positions = (sz_bool_t)(flow == sz_regex_flow_positions_simt_k);
     sz_bool_t const dfa = (sz_bool_t)(body != sz_regex_none_simt_k);
     sz_u32_t const dfas = sz_regex_body_dfas_simt_(engine);
@@ -347,26 +477,22 @@ STRINGZILLA_INLINE sz_status_t sz_regex_flow_cuda_(sz_regex_engine_t const *engi
     walks_grid = (unsigned)sz_size_divide_round_up(round->walks_count, sz_regex_threads_per_block_simt_k);
     walk_arguments[0] = &launched_engine, walk_arguments[1] = &launched_haystacks, walk_arguments[2] = round;
     round_arguments[0] = round;
-    status = sz_regex_launch_cuda_(
-        dfa ? (void const *)sz_regex_bound_dfa_simt_kernel_ : (void const *)sz_regex_bound_simt_kernel_, walks_grid,
-        walk_arguments, shared_bytes, stream);
+    status = sz_regex_launch_cuda_(dfa ? entry_points->bound_dfa : entry_points->bound, walks_grid, walk_arguments,
+                                   shared_bytes, stream);
     if (status == sz_success_k)
-        status = sz_regex_launch_cuda_(dfa ? (void const *)sz_regex_bound_pieces_dfa_simt_kernel_
-                                           : (void const *)sz_regex_bound_pieces_simt_kernel_,
-                                       walks_grid, walk_arguments, shared_bytes, stream);
+        status = sz_regex_launch_cuda_(dfa ? entry_points->bound_pieces_dfa : entry_points->bound_pieces, walks_grid,
+                                       walk_arguments, shared_bytes, stream);
     if (status == sz_success_k)
-        status = sz_regex_launch_cuda_(
-            dfa ? (void const *)sz_regex_affine_dfa_simt_kernel_ : (void const *)sz_regex_affine_simt_kernel_,
-            walks_grid, walk_arguments, shared_bytes, stream);
+        status = sz_regex_launch_cuda_(dfa ? entry_points->affine_dfa : entry_points->affine, walks_grid,
+                                       walk_arguments, shared_bytes, stream);
     for (step = 0; status == sz_success_k && step != round->rounds; ++step) {
         round->round = step;
-        status = sz_regex_launch_cuda_((void const *)sz_regex_affine_double_simt_kernel_,
-                                       sz_regex_grid_cuda_(round->chunks_count), round_arguments, 0, stream);
+        status = sz_regex_launch_cuda_(entry_points->affine_double, sz_regex_grid_cuda_(round->chunks_count),
+                                       round_arguments, 0, stream);
     }
     if (status == sz_success_k && recording)
-        status = sz_regex_launch_cuda_(
-            dfa ? (void const *)sz_regex_looks_dfa_simt_kernel_ : (void const *)sz_regex_looks_simt_kernel_, walks_grid,
-            walk_arguments, shared_bytes, stream);
+        status = sz_regex_launch_cuda_(dfa ? entry_points->looks_dfa : entry_points->looks, walks_grid, walk_arguments,
+                                       shared_bytes, stream);
     return status;
 }
 
@@ -375,17 +501,20 @@ STRINGZILLA_INLINE sz_status_t sz_regex_flow_cuda_(sz_regex_engine_t const *engi
 STRINGZILLA_INLINE sz_status_t sz_regex_passes_cuda_(sz_regex_engine_t const *engine,
                                                      sz_strings_view_t const *haystacks, sz_regex_round_simt_t *round,
                                                      sz_regex_arena_cuda_t const *arena, sz_u32_t level,
-                                                     sz_bool_t behind, sz_bool_t recording, sz_stream_t stream) {
+                                                     sz_bool_t behind, sz_bool_t recording,
+                                                     sz_regex_entry_points_cuda_t const *entry_points,
+                                                     sz_stream_t stream) {
     sz_regex_flow_simt_t const flow = behind ? sz_regex_flow_behind_simt_k : sz_regex_flow_ahead_simt_k;
     sz_u32_t negated, members = sz_regex_members_simt_(engine, level, behind, &negated), index;
     sz_u32_t const dfas = members & sz_regex_body_dfas_simt_(engine);
     sz_status_t status = sz_success_k;
     if (members & ~dfas & ~sz_regex_singles_simt_(engine))
         status = sz_regex_flow_cuda_(engine, haystacks, round, arena, flow, level, sz_regex_none_simt_k, recording,
-                                     stream);
+                                     entry_points, stream);
     for (index = 0; status == sz_success_k && index != engine->lookarounds_count; ++index)
         if (dfas & (sz_u32_t)sz_regex_look_lookaround_k << index)
-            status = sz_regex_flow_cuda_(engine, haystacks, round, arena, flow, level, index, recording, stream);
+            status = sz_regex_flow_cuda_(engine, haystacks, round, arena, flow, level, index, recording, entry_points,
+                                         stream);
     return status;
 }
 
@@ -396,6 +525,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_passes_cuda_(sz_regex_engine_t const *en
 STRINGZILLA_INLINE sz_status_t sz_regex_looks_cuda_(sz_regex_engine_t const *engine, sz_strings_view_t const *haystacks,
                                                     sz_regex_round_simt_t *round, sz_regex_arena_cuda_t const *arena,
                                                     sz_size_t segment, sz_size_t first, sz_u32_t levels,
+                                                    sz_regex_entry_points_cuda_t const *entry_points,
                                                     sz_stream_t stream) {
     sz_size_t const slots = arena->segment_slots, begin = segment * slots;
     sz_regex_engine_t launched_engine = *engine;
@@ -409,16 +539,18 @@ STRINGZILLA_INLINE sz_status_t sz_regex_looks_cuda_(sz_regex_engine_t const *eng
     arguments[0] = &launched_engine, arguments[1] = &launched_haystacks, arguments[2] = round;
     // The one-byte lookarounds fill the half outright, which the passes then add to.
     if (sz_regex_singles_simt_(engine))
-        status = sz_regex_launch_cuda_((void const *)sz_regex_singles_simt_kernel_,
+        status = sz_regex_launch_cuda_(entry_points->singles,
                                        sz_regex_grid_cuda_(round->segment_end - round->segment_begin), arguments, 0,
                                        stream);
     else
         status = sz_fill_cuda_(round->looks.table + (begin & round->looks.mask),
                                (round->segment_end - round->segment_begin) * sizeof(sz_u32_t), 0, stream);
     for (level = 1; status == sz_success_k && level <= levels; ++level) {
-        status = sz_regex_passes_cuda_(engine, haystacks, round, arena, level, sz_true_k, sz_true_k, stream);
+        status = sz_regex_passes_cuda_(engine, haystacks, round, arena, level, sz_true_k, sz_true_k, entry_points,
+                                       stream);
         if (status == sz_success_k)
-            status = sz_regex_passes_cuda_(engine, haystacks, round, arena, level, sz_false_k, sz_true_k, stream);
+            status = sz_regex_passes_cuda_(engine, haystacks, round, arena, level, sz_false_k, sz_true_k, entry_points,
+                                           stream);
     }
     return status;
 }
@@ -426,10 +558,9 @@ STRINGZILLA_INLINE sz_status_t sz_regex_looks_cuda_(sz_regex_engine_t const *eng
 /** Primes the start-finding walk over the segment @p round points at: a DFA by its frontiers,
  *  positions by their flow; either keeps what the segment's first chunk is handed for the
  *  segment before it. */
-STRINGZILLA_INLINE sz_status_t sz_regex_prime_segment_cuda_(sz_regex_engine_t const *engine,
-                                                            sz_strings_view_t const *haystacks,
-                                                            sz_regex_round_simt_t *round,
-                                                            sz_regex_arena_cuda_t const *arena, sz_stream_t stream) {
+STRINGZILLA_INLINE sz_status_t sz_regex_prime_segment_cuda_(
+    sz_regex_engine_t const *engine, sz_strings_view_t const *haystacks, sz_regex_round_simt_t *round,
+    sz_regex_arena_cuda_t const *arena, sz_regex_entry_points_cuda_t const *entry_points, sz_stream_t stream) {
     sz_regex_engine_t launched_engine = *engine;
     sz_strings_view_t launched_haystacks = *haystacks;
     sz_size_t const shared_bytes = sz_regex_staged_bytes_simt_(engine, round->staged_cells);
@@ -439,21 +570,17 @@ STRINGZILLA_INLINE sz_status_t sz_regex_prime_segment_cuda_(sz_regex_engine_t co
     sz_size_t step;
     if (!engine->reverse_rows)
         return sz_regex_flow_cuda_(engine, haystacks, round, arena, sz_regex_flow_positions_simt_k, 0,
-                                   sz_regex_none_simt_k, sz_false_k, stream);
+                                   sz_regex_none_simt_k, sz_false_k, entry_points, stream);
     walk_arguments[0] = &launched_engine, walk_arguments[1] = &launched_haystacks, walk_arguments[2] = round;
     round_arguments[0] = round;
-    status = sz_regex_launch_cuda_((void const *)sz_regex_prime_simt_kernel_, grid, walk_arguments, shared_bytes,
-                                   stream);
+    status = sz_regex_launch_cuda_(entry_points->prime, grid, walk_arguments, shared_bytes, stream);
     if (status == sz_success_k)
-        status = sz_regex_launch_cuda_((void const *)sz_regex_prime_pieces_simt_kernel_, grid, walk_arguments,
-                                       shared_bytes, stream);
+        status = sz_regex_launch_cuda_(entry_points->prime_pieces, grid, walk_arguments, shared_bytes, stream);
     if (status == sz_success_k)
-        status = sz_regex_launch_cuda_((void const *)sz_regex_compose_simt_kernel_, grid, walk_arguments, shared_bytes,
-                                       stream);
+        status = sz_regex_launch_cuda_(entry_points->compose, grid, walk_arguments, shared_bytes, stream);
     for (step = 0; status == sz_success_k && step != round->rounds; ++step) {
         round->round = step;
-        status = sz_regex_launch_cuda_((void const *)sz_regex_compose_double_simt_kernel_, grid, round_arguments, 0,
-                                       stream);
+        status = sz_regex_launch_cuda_(entry_points->compose_double, grid, round_arguments, 0, stream);
     }
     return status;
 }
@@ -481,6 +608,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_counters_cuda_(sz_regex_round_simt_t con
 STRINGZILLA_INLINE sz_status_t sz_regex_slides_cuda_(sz_regex_engine_t const *engine,
                                                      sz_strings_view_t const *haystacks, sz_regex_round_simt_t *round,
                                                      sz_regex_arena_cuda_t const *arena, sz_u32_t levels,
+                                                     sz_regex_entry_points_cuda_t const *entry_points,
                                                      sz_stream_t stream) {
     sz_regex_engine_t launched_engine = *engine;
     sz_strings_view_t launched_haystacks = *haystacks;
@@ -497,26 +625,25 @@ STRINGZILLA_INLINE sz_status_t sz_regex_slides_cuda_(sz_regex_engine_t const *en
     while (status == sz_success_k && counters[sz_regex_paused_counter_simt_k]) {
         status = sz_fill_cuda_(round->leaders, engine->forward_states_count * sizeof(sz_u32_t), 0xFF, stream);
         if (status == sz_success_k)
-            status = sz_regex_launch_cuda_((void const *)sz_regex_group_simt_kernel_, grid, group_arguments, 0, stream);
+            status = sz_regex_launch_cuda_(entry_points->group, grid, group_arguments, 0, stream);
         if (status == sz_success_k)
-            status = sz_regex_launch_cuda_((void const *)sz_regex_point_simt_kernel_, grid, group_arguments, 0, stream);
+            status = sz_regex_launch_cuda_(entry_points->point, grid, group_arguments, 0, stream);
         if (status == sz_success_k)
             status = sz_fill_cuda_(round->counters + sz_regex_handed_counter_simt_k, 2 * sizeof(sz_u32_t), 0, stream);
         // The window moves two segments on, filling both halves before the groups resume.
         sz_size_t const first = segment + 2 * (ends + 1);
         if (status == sz_success_k)
-            status = sz_regex_looks_cuda_(engine, haystacks, round, arena, first, first, levels, stream);
+            status = sz_regex_looks_cuda_(engine, haystacks, round, arena, first, first, levels, entry_points, stream);
         if (status == sz_success_k)
-            status = sz_regex_looks_cuda_(engine, haystacks, round, arena, first + 1, first, levels, stream);
+            status = sz_regex_looks_cuda_(engine, haystacks, round, arena, first + 1, first, levels, entry_points,
+                                          stream);
         sz_regex_segment_cuda_(round, segment, slots);
         round->groups_begin = counters[sz_regex_groups_counter_simt_k];
         if (status == sz_success_k)
-            status = sz_regex_launch_cuda_((void const *)sz_regex_resume_simt_kernel_, grid, walk_arguments,
-                                           shared_bytes, stream);
+            status = sz_regex_launch_cuda_(entry_points->resume, grid, walk_arguments, shared_bytes, stream);
         if (status == sz_success_k)
-            status = sz_regex_launch_cuda_(folded ? (void const *)sz_regex_continue_folded_cuda_kernel_
-                                                  : (void const *)sz_regex_continue_cuda_kernel_,
-                                           grid, walk_arguments, shared_bytes, stream);
+            status = sz_regex_launch_cuda_(folded ? entry_points->continue_folded : entry_points->continue_cased, grid,
+                                           walk_arguments, shared_bytes, stream);
         if (status == sz_success_k) status = sz_regex_counters_cuda_(round, counters, stream);
         ++ends;
     }
@@ -524,16 +651,15 @@ STRINGZILLA_INLINE sz_status_t sz_regex_slides_cuda_(sz_regex_engine_t const *en
     round->rounds = sz_regex_rounds_count_cuda_(ends);
     for (step = 0; status == sz_success_k && step != round->rounds; ++step) {
         round->round = step;
-        status = sz_regex_launch_cuda_((void const *)sz_regex_groups_double_simt_kernel_, grid, round_arguments, 0,
-                                       stream);
+        status = sz_regex_launch_cuda_(entry_points->groups_double, grid, round_arguments, 0, stream);
     }
     round->rounds = rounds;
+    if (status == sz_success_k) status = sz_regex_launch_cuda_(entry_points->take, grid, round_arguments, 0, stream);
     if (status == sz_success_k)
-        status = sz_regex_launch_cuda_((void const *)sz_regex_take_simt_kernel_, grid, round_arguments, 0, stream);
+        status = sz_regex_looks_cuda_(engine, haystacks, round, arena, segment, segment, levels, entry_points, stream);
     if (status == sz_success_k)
-        status = sz_regex_looks_cuda_(engine, haystacks, round, arena, segment, segment, levels, stream);
-    if (status == sz_success_k)
-        status = sz_regex_looks_cuda_(engine, haystacks, round, arena, segment + 1, segment, levels, stream);
+        status = sz_regex_looks_cuda_(engine, haystacks, round, arena, segment + 1, segment, levels, entry_points,
+                                      stream);
     sz_regex_segment_cuda_(round, segment, slots);
     return status;
 }
@@ -641,19 +767,21 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_cuda_(sz_regex_engine_t const *en
     for (level = 1; status == sz_success_k && segments > 1 && level <= levels; ++level) {
         if (sz_regex_members_simt_(engine, level, sz_true_k, &negated) & ~sz_regex_singles_simt_(engine))
             for (segment = 0; status == sz_success_k && segment != segments; ++segment) {
-                status = sz_regex_looks_cuda_(engine, haystacks, round, &arena, segment, segment, level - 1, stream);
+                status = sz_regex_looks_cuda_(engine, haystacks, round, &arena, segment, segment, level - 1,
+                                              entry_points, stream);
                 sz_regex_segment_cuda_(round, segment, slots);
                 if (status == sz_success_k)
                     status = sz_regex_passes_cuda_(engine, haystacks, round, &arena, level, sz_true_k, sz_false_k,
-                                                   stream);
+                                                   entry_points, stream);
             }
         if (sz_regex_members_simt_(engine, level, sz_false_k, &negated) & ~sz_regex_singles_simt_(engine))
             for (segment = segments; status == sz_success_k && segment-- != 0;) {
-                status = sz_regex_looks_cuda_(engine, haystacks, round, &arena, segment, segment, level - 1, stream);
+                status = sz_regex_looks_cuda_(engine, haystacks, round, &arena, segment, segment, level - 1,
+                                              entry_points, stream);
                 sz_regex_segment_cuda_(round, segment, slots);
                 if (status == sz_success_k)
                     status = sz_regex_passes_cuda_(engine, haystacks, round, &arena, level, sz_false_k, sz_false_k,
-                                                   stream);
+                                                   entry_points, stream);
             }
     }
 
@@ -661,9 +789,12 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_cuda_(sz_regex_engine_t const *en
     // left first, each filling its own half of the table beside the half its neighbour filled;
     // literal prefixes mark candidates without priming.
     for (segment = segments; status == sz_success_k && !engine->prefixes && segment-- > 1;) {
-        if (levels) status = sz_regex_looks_cuda_(engine, haystacks, round, &arena, segment, segment, levels, stream);
+        if (levels)
+            status = sz_regex_looks_cuda_(engine, haystacks, round, &arena, segment, segment, levels, entry_points,
+                                          stream);
         sz_regex_segment_cuda_(round, segment, slots);
-        if (status == sz_success_k) status = sz_regex_prime_segment_cuda_(engine, haystacks, round, &arena, stream);
+        if (status == sz_success_k)
+            status = sz_regex_prime_segment_cuda_(engine, haystacks, round, &arena, entry_points, stream);
     }
     for (segment = 0; status == sz_success_k && segment != segments; ++segment) {
         sz_bool_t past;
@@ -671,17 +802,17 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_cuda_(sz_regex_engine_t const *en
         // The walks read the table up to the next segment, whose half alone is new past the first,
         // unless no priming filled it.
         if (levels && engine->prefixes && !segment)
-            status = sz_regex_looks_cuda_(engine, haystacks, round, &arena, 1, 0, levels, stream);
+            status = sz_regex_looks_cuda_(engine, haystacks, round, &arena, 1, 0, levels, entry_points, stream);
         if (status == sz_success_k && levels)
             status = sz_regex_looks_cuda_(engine, haystacks, round, &arena, segment ? segment + 1 : 0, segment, levels,
-                                          stream);
+                                          entry_points, stream);
         sz_regex_segment_cuda_(round, segment, slots);
         grid = sz_regex_grid_cuda_(round->chunks_count);
         past = (sz_bool_t)(levels && segment + 1 != segments);
         if (status == sz_success_k && segment == 0)
             status = sz_fill_cuda_(round->carry, sizeof(sz_regex_carry_simt_t), 0, stream);
         if (status == sz_success_k && !engine->prefixes)
-            status = sz_regex_prime_segment_cuda_(engine, haystacks, round, &arena, stream);
+            status = sz_regex_prime_segment_cuda_(engine, haystacks, round, &arena, entry_points, stream);
 
         // The links' counters and doubling flags, the two things a segment reads before writing.
         if (status == sz_success_k)
@@ -689,63 +820,57 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_cuda_(sz_regex_engine_t const *en
         if (status == sz_success_k && !engine->reverse_rows) {
             round->walks_count = positions_walks, round->walk_bytes = arena.positions_bytes;
             status = sz_regex_launch_cuda_(
-                folded ? (void const *)sz_regex_mark_positions_folded_simt_kernel_
-                       : (void const *)sz_regex_mark_positions_simt_kernel_,
+                folded ? entry_points->mark_positions_folded : entry_points->mark_positions,
                 (unsigned)sz_size_divide_round_up(positions_walks, sz_regex_threads_per_block_simt_k), walk_arguments,
                 0, stream);
         }
         else if (status == sz_success_k && engine->prefixes)
-            status = sz_regex_launch_cuda_((void const *)sz_regex_mark_prefixes_simt_kernel_, grid, walk_arguments, 0,
-                                           stream);
+            status = sz_regex_launch_cuda_(entry_points->mark_prefixes, grid, walk_arguments, 0, stream);
         else if (status == sz_success_k)
-            status = sz_regex_launch_cuda_(
-                folded ? (void const *)sz_regex_mark_folded_simt_kernel_ : entry_points->mark, grid, walk_arguments,
-                shared_bytes + (folded ? 0 : sz_regex_staged_text_bytes_simt_k), stream);
+            status = sz_regex_launch_cuda_(folded ? entry_points->mark_folded : entry_points->mark, grid,
+                                           walk_arguments,
+                                           shared_bytes + (folded ? 0 : sz_regex_staged_text_bytes_simt_k), stream);
         if (status == sz_success_k)
             status = sz_regex_scan_cuda_(round, chunk_offsets, round->chunks_count + 1, entry_points->scan_bounded,
                                          entry_points->cluster_blocks, stream);
         if (status == sz_success_k && !engine->forward_rows) {
             round->walks_count = pike_walks, round->walk_bytes = arena.pike_bytes;
-            status = sz_regex_launch_cuda_((void const *)sz_regex_list_simt_kernel_, grid, round_arguments, 0, stream);
+            status = sz_regex_launch_cuda_(entry_points->list, grid, round_arguments, 0, stream);
             if (status == sz_success_k)
                 status = sz_regex_launch_cuda_(
-                    (void const *)sz_regex_ends_pike_simt_kernel_,
+                    entry_points->ends_pike,
                     (unsigned)sz_size_divide_round_up(pike_walks, sz_regex_threads_per_block_simt_k), walk_arguments, 0,
                     stream);
         }
         else if (status == sz_success_k) {
-            status = sz_regex_launch_cuda_((void const *)sz_regex_ends_simt_kernel_, grid, walk_arguments, shared_bytes,
-                                           stream);
+            status = sz_regex_launch_cuda_(entry_points->ends, grid, walk_arguments, shared_bytes, stream);
             if (status == sz_success_k)
-                status = sz_regex_launch_cuda_((void const *)sz_regex_links_simt_kernel_, grid, walk_arguments,
-                                               shared_bytes, stream);
+                status = sz_regex_launch_cuda_(entry_points->links, grid, walk_arguments, shared_bytes, stream);
             if (status == sz_success_k)
-                status = sz_regex_launch_cuda_(folded ? (void const *)sz_regex_continue_folded_cuda_kernel_
-                                                      : (void const *)sz_regex_continue_cuda_kernel_,
+                status = sz_regex_launch_cuda_(folded ? entry_points->continue_folded : entry_points->continue_cased,
                                                grid, walk_arguments, shared_bytes, stream);
         }
         // Only a haystack running past the table can leave walks paused or refused there, and
         // only a segment before the last can hold one, so only then is one read.
         if (status == sz_success_k && past)
-            status = sz_regex_slides_cuda_(engine, haystacks, round, &arena, levels, stream);
+            status = sz_regex_slides_cuda_(engine, haystacks, round, &arena, levels, entry_points, stream);
         for (step = 0; status == sz_success_k && engine->forward_rows && step != round->rounds; ++step) {
             round->round = step;
-            status = sz_regex_launch_cuda_((void const *)sz_regex_links_double_simt_kernel_, grid, round_arguments, 0,
-                                           stream);
+            status = sz_regex_launch_cuda_(entry_points->links_double, grid, round_arguments, 0, stream);
         }
         if (status == sz_success_k && engine->forward_rows && folded)
-            status = sz_regex_launch_cuda_((void const *)sz_regex_retry_folded_simt_kernel_, sz_regex_grid_cuda_(slots),
-                                           walk_arguments, shared_bytes, stream);
+            status = sz_regex_launch_cuda_(entry_points->retry_folded, sz_regex_grid_cuda_(slots), walk_arguments,
+                                           shared_bytes, stream);
         if (status == sz_success_k)
-            status = sz_regex_launch_cuda_((void const *)sz_regex_chain_simt_kernel_, grid, chain_arguments, 0, stream);
+            status = sz_regex_launch_cuda_(entry_points->chain, grid, chain_arguments, 0, stream);
         for (step = 0; status == sz_success_k && step != round->rounds; ++step) {
             round->round = step;
-            status = sz_regex_launch_cuda_((void const *)sz_regex_double_simt_kernel_, sz_regex_grid_cuda_(slots),
-                                           round_arguments, 0, stream);
+            status = sz_regex_launch_cuda_(entry_points->chain_double, sz_regex_grid_cuda_(slots), round_arguments, 0,
+                                           stream);
         }
         round->storing = 0;
         if (status == sz_success_k)
-            status = sz_regex_launch_cuda_((void const *)sz_regex_sweep_simt_kernel_, grid, chain_arguments, 0, stream);
+            status = sz_regex_launch_cuda_(entry_points->sweep, grid, chain_arguments, 0, stream);
         if (status == sz_success_k)
             status = sz_regex_scan_cuda_(round, chunk_kept, round->chunks_count + 1, entry_points->scan,
                                          entry_points->cluster_blocks, stream);
@@ -756,18 +881,17 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_cuda_(sz_regex_engine_t const *en
         if (status == sz_success_k && round->offsets) {
             unsigned const walks_grid = (unsigned)sz_size_divide_round_up(pike_walks,
                                                                           sz_regex_threads_per_block_simt_k);
-            status = sz_regex_launch_cuda_((void const *)sz_regex_expand_simt_kernel_, walks_grid, walk_arguments,
+            status = sz_regex_launch_cuda_(entry_points->expand, walks_grid, walk_arguments,
                                            sz_regex_staged_bytes_simt_k, stream);
             if (status == sz_success_k)
                 status = sz_fill_cuda_(chunk_covers, (round->chunks_count + 1) * sizeof(sz_size_t), 0, stream);
             if (status == sz_success_k)
-                status = sz_regex_launch_cuda_((void const *)sz_regex_drift_simt_kernel_, grid, round_arguments, 0,
-                                               stream);
+                status = sz_regex_launch_cuda_(entry_points->drift, grid, round_arguments, 0, stream);
             if (status == sz_success_k)
                 status = sz_regex_scan_cuda_(round, chunk_sums, round->chunks_count + 1, entry_points->scan,
                                              entry_points->cluster_blocks, stream);
             if (status == sz_success_k)
-                status = sz_regex_launch_cuda_((void const *)sz_regex_rewrite_simt_kernel_, walks_grid, walk_arguments,
+                status = sz_regex_launch_cuda_(entry_points->rewrite, walks_grid, walk_arguments,
                                                sz_regex_staged_bytes_simt_k, stream);
         }
         if (status == sz_success_k && round->rows_offsets) {
@@ -776,13 +900,13 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_cuda_(sz_regex_engine_t const *en
             status = sz_regex_scan_cuda_(round, chunk_sums, round->chunks_count + 1, entry_points->scan,
                                          entry_points->cluster_blocks, stream);
             if (status == sz_success_k)
-                status = sz_regex_launch_cuda_((void const *)sz_regex_firsts_simt_kernel_, walks_grid, walk_arguments,
+                status = sz_regex_launch_cuda_(entry_points->firsts, walks_grid, walk_arguments,
                                                sz_regex_staged_bytes_simt_k, stream);
             if (status == sz_success_k)
                 status = sz_regex_scan_cuda_(round, chunk_covers, round->chunks_count + 1, entry_points->scan,
                                              entry_points->cluster_blocks, stream);
             if (status == sz_success_k)
-                status = sz_regex_launch_cuda_((void const *)sz_regex_rows_simt_kernel_, walks_grid, walk_arguments,
+                status = sz_regex_launch_cuda_(entry_points->rows, walks_grid, walk_arguments,
                                                sz_regex_staged_bytes_simt_k, stream);
         }
         // Retries and group walks read the table too, so where walks may run past it
@@ -792,12 +916,12 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_cuda_(sz_regex_engine_t const *en
             status = sz_regex_counters_cuda_(round, counters, stream);
         round->storing = 1;
         if (status == sz_success_k)
-            status = sz_regex_launch_cuda_((void const *)sz_regex_sweep_simt_kernel_, grid, chain_arguments, 0, stream);
+            status = sz_regex_launch_cuda_(entry_points->sweep, grid, chain_arguments, 0, stream);
         if (status == sz_success_k) {
             dim3 one, block;
             one.x = 1, one.y = 1, one.z = 1;
             block.x = sz_regex_carry_threads_per_block_simt_k, block.y = 1, block.z = 1;
-            status = sz_launch_cuda_((void const *)sz_regex_carry_simt_kernel_, one, block, chain_arguments, 0, stream);
+            status = sz_launch_cuda_(entry_points->carry, one, block, chain_arguments, 0, stream);
         }
     }
     return status;
@@ -893,9 +1017,9 @@ STRINGZILLA_INLINE sz_status_t sz_regex_counts_scoped_cuda_(sz_regex_engine_t *e
     // the results being dead by now.
     grid = sz_regex_grid_cuda_(haystacks_count), edges = (sz_size_t *)round.results;
     arguments[0] = &counts, arguments[1] = &counts_stride, arguments[2] = &haystacks_count, arguments[3] = &edges;
-    status = sz_regex_launch_cuda_((void const *)sz_regex_counts_edges_simt_kernel_, grid, arguments, 0, stream);
+    status = sz_regex_launch_cuda_(entry_points->counts_edges, grid, arguments, 0, stream);
     if (status != sz_success_k) return status;
-    return sz_regex_launch_cuda_((void const *)sz_regex_counts_simt_kernel_, grid, arguments, 0, stream);
+    return sz_regex_launch_cuda_(entry_points->counts, grid, arguments, 0, stream);
 }
 
 STRINGZILLA_INLINE sz_status_t sz_regex_find_scoped_cuda_(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
@@ -958,11 +1082,345 @@ STRINGZILLA_INLINE sz_status_t sz_regex_extract_scoped_cuda_(sz_regex_engine_t *
 /*  Each export makes the stream's device current around its helper, and restores the caller's. */
 #if STRINGZILLA_TARGET_CUDA
 
+/** @ref sz_regex_scan_tile_simt_ over CUDA's warps in 32 bits, for the starts per chunk,
+ *  of which a step of a tile holds at most 64 per value. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_scan_bounded_cuda_kernel_(sz_size_t *values, sz_size_t count, sz_size_t elements_per_tile,
+                                       sz_size_t *chain, sz_u64_t *states, sz_u64_t *stale) {
+    sz_regex_scan_tile_simt_(values, count, elements_per_tile, chain, states, stale, sz_block_scan_bounded_cuda_,
+                             sz_block_sum_cuda_, sz_chain_tile_simt_, sz_chain_look_back_cuda_);
+}
+
+/** @ref sz_regex_scan_tile_simt_ over CUDA's warps. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_scan_cuda_kernel_(sz_size_t *values, sz_size_t count, sz_size_t elements_per_tile, sz_size_t *chain,
+                               sz_u64_t *states, sz_u64_t *stale) {
+    sz_regex_scan_tile_simt_(values, count, elements_per_tile, chain, states, stale, sz_block_scan_cuda_,
+                             sz_block_sum_cuda_, sz_chain_tile_simt_, sz_chain_look_back_cuda_);
+}
+
+/** The warp walk of the links that outlived their first thread, with CUDA's cross-lane steps. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_continue_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_continue_simt_(&engine, haystacks, &round, sz_false_k, sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_,
+                            sz_lanes_any_cuda_);
+}
+
+/** The warp walk of the folded links that outlived their first thread, with CUDA's cross-lane
+ *  steps. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_continue_folded_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                          sz_regex_round_simt_t round) {
+    sz_regex_continue_simt_(&engine, haystacks, &round, sz_true_k, sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_,
+                            sz_lanes_any_cuda_);
+}
+
+/** @ref sz_regex_bound_simt_ over the pass's NFA or positions. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_bound_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_bound_simt_(&engine, haystacks, &round, sz_false_k);
+}
+
+/** @ref sz_regex_bound_simt_ over a body's DFA. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_bound_dfa_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                    sz_regex_round_simt_t round) {
+    sz_regex_bound_simt_(&engine, haystacks, &round, sz_true_k);
+}
+
+/** @ref sz_regex_bound_pieces_simt_ over the pass's NFA or positions. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_bound_pieces_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                       sz_regex_round_simt_t round) {
+    sz_regex_bound_pieces_simt_(&engine, haystacks, &round, sz_false_k);
+}
+
+/** @ref sz_regex_bound_pieces_simt_ over a body's DFA. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_bound_pieces_dfa_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                           sz_regex_round_simt_t round) {
+    sz_regex_bound_pieces_simt_(&engine, haystacks, &round, sz_true_k);
+}
+
+/** @ref sz_regex_affine_simt_ over the pass's NFA or positions. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_affine_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_affine_simt_(&engine, haystacks, &round, sz_false_k);
+}
+
+/** @ref sz_regex_affine_simt_ over a body's DFA. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_affine_dfa_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                     sz_regex_round_simt_t round) {
+    sz_regex_affine_simt_(&engine, haystacks, &round, sz_true_k);
+}
+
+/** @ref sz_regex_affine_double_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_affine_double_cuda_kernel_(sz_regex_round_simt_t round) {
+    sz_regex_affine_double_simt_(round);
+}
+
+/** @ref sz_regex_looks_simt_ over the pass's NFA or positions. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_looks_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_looks_simt_(&engine, haystacks, &round, sz_false_k);
+}
+
+/** @ref sz_regex_looks_simt_ over a body's DFA. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_looks_dfa_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                    sz_regex_round_simt_t round) {
+    sz_regex_looks_simt_(&engine, haystacks, &round, sz_true_k);
+}
+
+/** @ref sz_regex_fill_singles_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_singles_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_fill_singles_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_prime_chunks_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_prime_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_prime_chunks_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_prime_pieces_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_prime_pieces_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                       sz_regex_round_simt_t round) {
+    sz_regex_prime_pieces_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_compose_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_compose_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_compose_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_compose_double_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_compose_double_cuda_kernel_(sz_regex_round_simt_t round) {
+    sz_regex_compose_double_simt_(round);
+}
+
+/** @ref sz_regex_mark_prefixes_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_mark_prefixes_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                        sz_regex_round_simt_t round) {
+    sz_regex_mark_prefixes_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_mark_folded_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_mark_folded_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                      sz_regex_round_simt_t round) {
+    sz_regex_mark_folded_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_mark_positions_simt_ over bytes. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_mark_positions_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                         sz_regex_round_simt_t round) {
+    sz_regex_mark_positions_simt_(&engine, haystacks, &round, sz_false_k);
+}
+
+/** @ref sz_regex_mark_positions_simt_ over folded runes. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_mark_positions_folded_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                                sz_regex_round_simt_t round) {
+    sz_regex_mark_positions_simt_(&engine, haystacks, &round, sz_true_k);
+}
+
+/** @ref sz_regex_list_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_list_cuda_kernel_(sz_regex_round_simt_t round) {
+    sz_regex_list_simt_(round);
+}
+
+/** @ref sz_regex_ends_pike_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_ends_pike_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                    sz_regex_round_simt_t round) {
+    sz_regex_ends_pike_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_ends_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_ends_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_ends_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_links_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_links_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_links_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_resume_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_resume_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_resume_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_links_double_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_links_double_cuda_kernel_(sz_regex_round_simt_t round) {
+    sz_regex_links_double_simt_(round);
+}
+
+/** @ref sz_regex_group_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_group_cuda_kernel_(sz_regex_engine_t engine, sz_regex_round_simt_t round) {
+    sz_regex_group_simt_(engine, round);
+}
+
+/** @ref sz_regex_point_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_point_cuda_kernel_(sz_regex_engine_t engine, sz_regex_round_simt_t round) {
+    sz_regex_point_simt_(engine, round);
+}
+
+/** @ref sz_regex_groups_double_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_groups_double_cuda_kernel_(sz_regex_round_simt_t round) {
+    sz_regex_groups_double_simt_(round);
+}
+
+/** @ref sz_regex_take_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_take_cuda_kernel_(sz_regex_round_simt_t round) {
+    sz_regex_take_simt_(round);
+}
+
+/** @ref sz_regex_retry_folded_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_retry_folded_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                       sz_regex_round_simt_t round) {
+    sz_regex_retry_folded_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_chain_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_chain_cuda_kernel_(sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_chain_simt_(haystacks, round);
+}
+
+/** @ref sz_regex_double_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_double_cuda_kernel_(sz_regex_round_simt_t round) {
+    sz_regex_double_simt_(round);
+}
+
+/** @ref sz_regex_sweep_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_sweep_cuda_kernel_(sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_sweep_simt_(haystacks, round);
+}
+
+/** @ref sz_regex_carry_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_carry_threads_per_block_simt_k)
+    sz_regex_carry_cuda_kernel_(sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_carry_simt_(haystacks, round);
+}
+
+/** @ref sz_regex_counts_edges_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_counts_edges_cuda_kernel_(sz_size_t const *counts, sz_size_t counts_stride, sz_size_t count,
+                                       sz_size_t *edges) {
+    sz_regex_counts_edges_simt_(counts, counts_stride, count, edges);
+}
+
+/** @ref sz_regex_counts_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_counts_cuda_kernel_(sz_size_t *counts, sz_size_t counts_stride, sz_size_t count, sz_size_t const *edges) {
+    sz_regex_counts_simt_(counts, counts_stride, count, edges);
+}
+
+/** @ref sz_regex_expand_kept_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_expand_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_expand_kept_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_drift_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_drift_cuda_kernel_(sz_regex_round_simt_t round) {
+    sz_regex_drift_simt_(round);
+}
+
+/** @ref sz_regex_rewrite_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_rewrite_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_rewrite_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_firsts_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_firsts_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_firsts_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_rows_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_rows_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_rows_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_mark_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_mark_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_mark_simt_(engine, haystacks, round);
+}
+
 /** The CUDA tier's entry points, staging text through registers. */
 static sz_regex_entry_points_cuda_t const sz_regex_entry_points_cuda_ = {
-    (void const *)sz_regex_mark_simt_kernel_,
+    (void const *)sz_regex_mark_cuda_kernel_,
     (void const *)sz_regex_scan_cuda_kernel_,
     (void const *)sz_regex_scan_bounded_cuda_kernel_,
+    (void const *)sz_regex_bound_cuda_kernel_,
+    (void const *)sz_regex_bound_dfa_cuda_kernel_,
+    (void const *)sz_regex_bound_pieces_cuda_kernel_,
+    (void const *)sz_regex_bound_pieces_dfa_cuda_kernel_,
+    (void const *)sz_regex_affine_cuda_kernel_,
+    (void const *)sz_regex_affine_dfa_cuda_kernel_,
+    (void const *)sz_regex_affine_double_cuda_kernel_,
+    (void const *)sz_regex_looks_cuda_kernel_,
+    (void const *)sz_regex_looks_dfa_cuda_kernel_,
+    (void const *)sz_regex_singles_cuda_kernel_,
+    (void const *)sz_regex_prime_cuda_kernel_,
+    (void const *)sz_regex_prime_pieces_cuda_kernel_,
+    (void const *)sz_regex_compose_cuda_kernel_,
+    (void const *)sz_regex_compose_double_cuda_kernel_,
+    (void const *)sz_regex_mark_prefixes_cuda_kernel_,
+    (void const *)sz_regex_mark_folded_cuda_kernel_,
+    (void const *)sz_regex_mark_positions_cuda_kernel_,
+    (void const *)sz_regex_mark_positions_folded_cuda_kernel_,
+    (void const *)sz_regex_list_cuda_kernel_,
+    (void const *)sz_regex_ends_pike_cuda_kernel_,
+    (void const *)sz_regex_ends_cuda_kernel_,
+    (void const *)sz_regex_links_cuda_kernel_,
+    (void const *)sz_regex_continue_cuda_kernel_,
+    (void const *)sz_regex_continue_folded_cuda_kernel_,
+    (void const *)sz_regex_resume_cuda_kernel_,
+    (void const *)sz_regex_links_double_cuda_kernel_,
+    (void const *)sz_regex_group_cuda_kernel_,
+    (void const *)sz_regex_point_cuda_kernel_,
+    (void const *)sz_regex_groups_double_cuda_kernel_,
+    (void const *)sz_regex_take_cuda_kernel_,
+    (void const *)sz_regex_retry_folded_cuda_kernel_,
+    (void const *)sz_regex_chain_cuda_kernel_,
+    (void const *)sz_regex_double_cuda_kernel_,
+    (void const *)sz_regex_sweep_cuda_kernel_,
+    (void const *)sz_regex_carry_cuda_kernel_,
+    (void const *)sz_regex_counts_edges_cuda_kernel_,
+    (void const *)sz_regex_counts_cuda_kernel_,
+    (void const *)sz_regex_expand_cuda_kernel_,
+    (void const *)sz_regex_drift_cuda_kernel_,
+    (void const *)sz_regex_rewrite_cuda_kernel_,
+    (void const *)sz_regex_firsts_cuda_kernel_,
+    (void const *)sz_regex_rows_cuda_kernel_,
     1,
     sz_cap_cuda_k,
 };
@@ -1040,8 +1498,8 @@ STRINGZILLA_API sz_status_t sz_regex_extract_cuda(sz_regex_engine_t *engine, sz_
 
 #endif // STRINGZILLA_TARGET_CUDA
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
 #endif // STRINGZILLA_ARCH_CUDA_
 #endif // STRINGZILLA_REGEX_CUDA_CUH_

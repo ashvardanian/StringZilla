@@ -10,15 +10,17 @@
 #define STRINGZILLA_COMPARE_V128RELAXED_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_WASM_
+#if STRINGZILLA_ARCH_WASM_V128RELAXED_
+
 #include "stringzilla/compare/serial.h"
 #include "stringzilla/compare/v128.h" // baseline SIMD128 fallbacks
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_WASM_
-#if STRINGZILLA_TARGET_V128RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
 #endif
@@ -27,6 +29,8 @@ STRINGZILLA_INLINE sz_ordering_t sz_order_v128relaxed_(sz_cptr_t a, sz_size_t a_
                                                        sz_size_t b_length) {
     return sz_order_v128_(a, a_length, b, b_length);
 }
+
+#if STRINGZILLA_TARGET_V128RELAXED
 
 STRINGZILLA_API sz_status_t sz_order_v128relaxed(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
                                                  sz_ordering_t *ordering, sz_stream_t stream) {
@@ -46,14 +50,17 @@ STRINGZILLA_API sz_status_t sz_equal_v128relaxed(sz_cptr_t a, sz_cptr_t b, sz_si
     return sz_success_k;
 }
 
+#endif // STRINGZILLA_TARGET_V128RELAXED
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
-#endif // STRINGZILLA_TARGET_V128RELAXED
-#endif // STRINGZILLA_ARCH_WASM_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_WASM_V128RELAXED_
+#endif // STRINGZILLA_ARCH_WASM_
 
 #endif // STRINGZILLA_COMPARE_V128RELAXED_H_

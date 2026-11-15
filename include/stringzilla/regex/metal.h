@@ -26,12 +26,14 @@
 #ifndef STRINGZILLA_REGEX_METAL_H_
 #define STRINGZILLA_REGEX_METAL_H_
 
-#include "stringzilla/metal.h"
-#include "stringzilla/regex/serial.h"
+#include "stringzilla/types.h"
 
 #if STRINGZILLA_ARCH_METAL_
 
-#ifdef __cplusplus
+#include "stringzilla/metal.h"
+#include "stringzilla/regex/serial.h"
+
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -1215,8 +1217,8 @@ STRINGZILLA_API sz_status_t sz_regex_extract_metal(sz_regex_engine_t *engine, sz
 
 #endif // STRINGZILLA_TARGET_METAL
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
 
 #endif // STRINGZILLA_ARCH_METAL_

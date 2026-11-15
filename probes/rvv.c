@@ -8,7 +8,7 @@
  *  extension, while a byte search never does.
  */
 #define STRINGZILLA_HEADER_ONLY 1
-#define STRINGZILLA_TARGET_RVV 1
+#define STRINGZILLA_ARCH_RISCV64_RVV_ 1
 #include <stringzilla/utf8_runes/rvv.h>
 
 int main(void) {

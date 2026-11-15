@@ -142,7 +142,7 @@ The most important ones, mirrored from `stringzilla.h`:
 `STRINGZILLA_WITH_LIBC=0` builds freestanding without the C standard library, which disables the default `malloc`-based allocator and the `offsetof` static checks.
 `STRINGZILLA_ALLOW_MISALIGNED_LOADS` allows unaligned word loads in the SWAR fallbacks where the platform permits.
 
-Per-ISA backends are toggled with their own macros; if left undefined they are auto-detected from the compiler's target flags:
+Each ISA backend's kernels sit under their own macro, which defaults to what the compiler's target flags enable and may be set to 0 to drop them; a 1 without those flags declares kernels the library defines, so it links only against the library:
 `STRINGZILLA_TARGET_WESTMERE` for SSE4.2 + AES-NI, `STRINGZILLA_TARGET_GOLDMONT` for SHA-NI, `STRINGZILLA_TARGET_HASWELL` for AVX2, `STRINGZILLA_TARGET_SKYLAKE` for AVX-512 F/BW/VL, `STRINGZILLA_TARGET_ICELAKE` for AVX-512 VBMI + VAES, then `STRINGZILLA_TARGET_NEON`, `STRINGZILLA_TARGET_NEONAES`, `STRINGZILLA_TARGET_NEONSHA`, `STRINGZILLA_TARGET_SVE`, `STRINGZILLA_TARGET_SVE2`, and `STRINGZILLA_TARGET_SVE2AES` on ARM, `STRINGZILLA_TARGET_V128` and `STRINGZILLA_TARGET_V128RELAXED` for WebAssembly SIMD128, `STRINGZILLA_TARGET_RVV` and `STRINGZILLA_TARGET_RVVCRYPTO` for the RISC-V Vector extension, `STRINGZILLA_TARGET_LOONGSONASX` for LoongArch, and `STRINGZILLA_TARGET_POWERVSX` for IBM Power.
 
 The umbrella header also exposes the version triple as `STRINGZILLA_VERSION_MAJOR`/`_MINOR`/`_PATCH`, with matching `sz_version_major()`, `sz_version_minor()`, and `sz_version_patch()` accessors.
@@ -977,7 +977,8 @@ Within each architecture the bits ascend by preference, so the highest bit a mas
 - __WebAssembly__: `sz_cap_v128_k`, `sz_cap_v128relaxed_k`.
 - __LoongArch and Power__: `sz_cap_loongsonasx_k`, `sz_cap_powervsx_k`.
 - __GPUs__: one baseline per vendor above every CPU bit, `sz_cap_cuda_k` at bit 48, `sz_cap_rocm_k` at 56, and `sz_cap_metal_k` at 60.
-  CUDA generations follow its baseline: `sz_cap_hopper_k` at 51 for clusters from compute capability 9.0, and `sz_cap_blackwell_k` at 52 for cluster launch control from 10.0.
+  CUDA generations follow its baseline: `sz_cap_ampere_k` at 49 for warp reductions and asynchronous copies from compute capability 8.0, `sz_cap_hopper_k` at 51 for clusters from 9.0, and `sz_cap_blackwell_k` at 52 for cluster launch control from 10.0.
+  ROCm generations follow its baseline: `sz_cap_cdna3_k` at 57 for DPP wavefront shifts on gfx942, `sz_cap_cdna4_k` at 58 for the same shifts on gfx950, and `sz_cap_cdna5_k` at 59 for DPP row shifts bridged by `v_permlanex16` on gfx1250 and gfx1251.
 
 `sz_cap_cpus_k` and `sz_cap_gpus_k` group the CPU and the GPU bits, and `sz_cap_any_k` sets every bit.
 
@@ -986,25 +987,27 @@ sz_status_t sz_capabilities_detected_cpu(sz_capability_t *capabilities); // what
 sz_status_t sz_capabilities_compiled_cpu(sz_capability_t *capabilities); // what this build holds kernels for
 sz_capability_t sz_capabilities_compiled_cpu_mask(void);                 // the same, constant in the calling unit
 sz_status_t sz_capabilities_enabled_cpu(sz_capability_t *capabilities);  // both at once, always with serial
-sz_status_t sz_thread_configure_cpu(sz_capability_t capabilities);       // once per dispatching thread
-sz_status_t sz_device_count_cuda(sz_size_t *count);
+sz_status_t sz_configure_thread_cpu(sz_capability_t capabilities);       // once per dispatching thread
+sz_status_t sz_count_devices_cuda(sz_size_t *count);
 sz_status_t sz_capabilities_detected_cuda(sz_size_t ordinal, sz_capability_t *capabilities);
-sz_status_t sz_capabilities_compiled_cuda(sz_capability_t *capabilities);
+sz_status_t sz_capabilities_compiled_cuda(sz_size_t ordinal, sz_capability_t *capabilities);
 sz_status_t sz_capabilities_enabled_cuda(sz_size_t ordinal, sz_capability_t *capabilities);
 sz_size_t sz_capabilities_name(sz_capability_t capabilities, char *buffer, sz_size_t capacity); // "serial,haswell"
 char const *sz_status_name(sz_status_t status);
 ```
 
-ROCm and Metal have the same four queries, spelled `sz_rocm_*` and `sz_metal_*`.
+ROCm and Metal have the same four queries, ending in `_rocm` and `_metal`.
 The library probes the CPU once per process and caches the answer, while header-only builds probe on every call.
 The GPU queries ask the vendor's runtime every time, by that runtime's own device ordinal, and report no devices where the vendor isn't built.
-The CPU probe inspects CPUID on x86, the AArch64 ID registers on Arm once the kernel's `HWCAP_CPUID` says it emulates `mrs`, falling back to NEON-only, `getauxval`/`riscv_hwprobe` on RISC-V, and the auxiliary-vector HWCAPs on LoongArch and Power.
+A GPU binary carries code per architecture, so `compiled` is per device: each GPU unit holds one probe kernel, and `sz_capabilities_compiled_cuda` or `sz_capabilities_compiled_rocm` asks the runtime whether it loads that kernel on the device, as `cudaFuncGetAttributes` and `hipFuncGetAttributes` answer.
+Projects compiling StringZilla's building blocks into their own GPU units ask the same of their own kernels.
+The CPU probe inspects CPUID on x86, the AArch64 ID registers on Arm once the kernel's `HWCAP_CPUID` says it emulates `mrs`, falling back to what the compiler's flags imply, `getauxval`/`riscv_hwprobe` on RISC-V, and the auxiliary-vector HWCAPs on LoongArch and Power.
 Detection always reports the full hardware truth, independent of which tiers a build compiled in; `sz_capabilities_enabled_cpu()` intersects it with the compile-time mask.
 Where the OS cannot be asked, detection reports only the capabilities the compiler's own flags guarantee, never the compiled ones, which the CPU may lack.
 WebAssembly is the exception with no runtime probe at all — a module carrying unsupported SIMD opcodes fails validation at instantiation, so its capabilities are fixed at compile time.
 Nothing is process-wide: narrowing the mask a call passes narrows the choice, so `capabilities & ~sz_cap_sve_k` skips SVE and `sz_cap_serial_k` alone runs the reference kernel.
 A host-only process never starts a GPU driver, as only the GPU queries and the engines built for a GPU reach one.
-`sz_thread_configure_cpu` prepares the calling thread for the capabilities it is given, and only those; every current capability needs nothing, so it is a no-op today, kept so bindings call it where NumKong's call theirs.
+`sz_configure_thread_cpu` prepares the calling thread for the capabilities it is given, and only those; every current capability needs nothing, so it is a no-op today, kept so bindings call it where NumKong's call theirs.
 
 On Arm, having SVE in the capability mask doesn't mean SVE kernels always win: at the common 128-bit vector length the scalable kernels for length-sensitive operations — comparisons, memory transforms, substring search, UTF-8 token scanning — are often slower than their NEON twins, while crypto-heavy operations like hashing prefer SVE2 at any width.
 So each such SVE kernel measures the register width on the running CPU (`svcntb`) and hands the 128-bit case to its NEON twin, and the dispatch point needs no special case.
@@ -1014,6 +1017,21 @@ CMake, which every binding builds through, probes which capabilities the toolcha
 Each capability's headers scope its kernels with a target pragma, on every platform; LASX and POWER9 need GCC 15 or newer for that, as Clang's `lasxintrin.h` and `altivec.h` stay closed without `-mlasx` and `-mcpu=power9`.
 Libraries compile every capability the toolchain builds and leave the rest to the mask each call passes; header-only builds enable the capabilities their own flags name.
 `-D STRINGZILLA_TARGET_<CAPABILITY>=0` drops a capability from the libraries, and `=1` keeps one only where its probe compiles.
+Six words name a capability's states, from configure to dispatch:
+
+| Word | Question | When | Scope |
+| --- | --- | --- | --- |
+| __probe__ | Can the toolchain build this capability? | configure: `try_compile` of `probes/<capability>.c` | build |
+| __target__ | Is this capability's unit in the build? | compile: `STRINGZILLA_TARGET_<CAPABILITY>` | build |
+| __implied__ | What do the baseline flags already guarantee? | compile, from predefined macros, and at runtime where the OS cannot be asked | build |
+| __compiled__ | Does the binary carry this capability's code for this processor? | runtime: `sz_capabilities_compiled_<group>` | CPU: the build; GPU: each device |
+| __detected__ | Does this processor offer the capability? | runtime: `sz_capabilities_detected_<group>` | processor |
+| __enabled__ | What may dispatch pick? | runtime: `sz_capabilities_enabled_<group>`, detected and compiled | processor |
+
+A monoversioned build names one machine: one CPU and at most one GPU architecture per vendor, shared by every GPU in it.
+It compiles the best capability for that machine and folds every dispatch row to it, so link-time optimization drops every other kernel.
+On any other machine a call answers `sz_missing_kernel_k`, never a crash and never a slower kernel in silence.
+Sibling GPU capabilities form no chain, so with `STRINGZILLA_MULTIVERSIONED=OFF` a configure listing two CUDA or two ROCm architectures fails.
 
 ```c
 #include <stdio.h>
@@ -1048,7 +1066,7 @@ Each family exports its own finder over its kinds, like `sz_compare_find_kernel`
 Every verb has a kind, `sz_kernel_<verb>_k`, and a pointer type to cast the result to, `sz_kernel_<verb>_t`, taking the dispatch point's arguments short of the mask.
 `sz_kernel_name` spells a kind without its `sz_kernel_` prefix and `_k` suffix, like `"find_byte"`, and `sz_kernel_named` maps such a name back, or to `sz_kernel_unknown_k`.
 Verbs of one shape share a type, like `sz_kernel_find_t` for both `sz_kernel_find_k` and `sz_kernel_rfind_k`, `sz_kernel_utf8_segmenter_t` for the four tiling UTF-8 segmenters, and `sz_kernel_utf8_tokenizer_t` for the newline, whitespace and delimiter finders.
-In C++, every wrapper that takes a mask, like `sz::lookup` or `sz::argsort`, defaults to `sz::default_capabilities()`, the enabled CPU mask, while `sz::device_t::make(kind, ordinal)` opens one GPU to ask its `capabilities_enabled()`, and `sz::device_t::cpu().configure_thread(mask)` wraps `sz_thread_configure_cpu`.
+In C++, every wrapper that takes a mask, like `sz::lookup` or `sz::argsort`, defaults to `sz::default_capabilities()`, the enabled CPU mask, while `sz::device_t::make(kind, ordinal)` opens one GPU to ask its `capabilities_enabled()`, and `sz::device_t::cpu().configure_thread(mask)` wraps `sz_configure_thread_cpu`.
 
 ## Memory Ownership and Small String Optimization
 
@@ -1253,8 +1271,9 @@ __`STRINGZILLA_DEBUG`__:
 
 __`STRINGZILLA_TARGET_GOLDMONT`, `STRINGZILLA_TARGET_WESTMERE`, `STRINGZILLA_TARGET_HASWELL`, `STRINGZILLA_TARGET_SKYLAKE`, `STRINGZILLA_TARGET_ICELAKE`, `STRINGZILLA_TARGET_NEON`, `STRINGZILLA_TARGET_NEONAES`, `STRINGZILLA_TARGET_NEONSHA`, `STRINGZILLA_TARGET_SVE`, `STRINGZILLA_TARGET_SVE2`, `STRINGZILLA_TARGET_SVE2AES`, `STRINGZILLA_TARGET_V128`, `STRINGZILLA_TARGET_V128RELAXED`, `STRINGZILLA_TARGET_RVV`, `STRINGZILLA_TARGET_LOONGSONASX`, `STRINGZILLA_TARGET_POWERVSX`__:
 
-> One can explicitly enable or disable individual SIMD families for compatibility or benchmarking purposes.
+> Each says whether a unit has one SIMD family's kernels; set one to 0 to drop a family for compatibility or benchmarking purposes.
 > In header-only use the defaults are inferred from the compiler's predefined macros under your own `-march` flags; LASX and POWER9 need your `-mlasx` and `-mcpu=power9`, as their intrinsics headers hide without them.
+> Setting one to 1 without those flags declares the family's kernels without defining them, which links only against the library that holds them.
 > The CMake build, which every binding goes through, resolves them from the `probes/` sources instead — compiling each capability's probe, which calls one of its kernels, to learn whether the toolchain builds them — so the libraries carry every compilable capability.
 > The same names work as CMake cache options (`-D STRINGZILLA_TARGET_SVE2=0`) and as Cargo environment variables (`STRINGZILLA_TARGET_SVE2=0 cargo build`); an explicit `1` keeps a capability only where its probe compiles.
 

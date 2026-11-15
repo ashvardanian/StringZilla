@@ -1,10 +1,9 @@
-//
-//  swift/Test.swift
-//  Tests for the StringZilla Swift binding.
-//
-//  - Author: Ash Vardanian
-//  - Date: January 21, 2024
-//
+/**
+ *  @file swift/Test.swift
+ *  @author Ash Vardanian
+ *  @date January 21, 2024
+ *  @brief Tests for the StringZilla Swift binding.
+ */
 
 import StringZilla
 import Testing
@@ -279,7 +278,8 @@ func detectNormalization(_ text: String, _ form: StringZillaNormalizationForm, _
         (.skylake, "skylake"), (.iceLake, "icelake"), (.neon, "neon"), (.neonAES, "neonaes"), (.neonSHA, "neonsha"),
         (.sve, "sve"), (.sve2, "sve2"), (.sve2AES, "sve2aes"), (.rvv, "rvv"), (.rvvCrypto, "rvvcrypto"),
         (.v128, "v128"), (.v128Relaxed, "v128relaxed"), (.loongsonASX, "loongsonasx"), (.powerVSX, "powervsx"),
-        (.cuda, "cuda"), (.hopper, "hopper"), (.blackwell, "blackwell"), (.rocm, "rocm"), (.metal, "metal"),
+        (.cuda, "cuda"), (.ampere, "ampere"), (.hopper, "hopper"), (.blackwell, "blackwell"), (.rocm, "rocm"),
+        (.cdna3, "cdna3"), (.cdna4, "cdna4"), (.cdna5, "cdna5"), (.metal, "metal"),
     ]
     for (capability, name) in names { #expect(capability.description == name) }
     #expect(Capabilities.cpus.union(.gpus).isSubset(of: .any))

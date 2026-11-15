@@ -5,7 +5,7 @@
  *  @brief Whether the toolchain builds the NEON kernels, the AArch64 baseline SIMD kit.
  */
 #define STRINGZILLA_HEADER_ONLY 1
-#define STRINGZILLA_TARGET_NEON 1
+#define STRINGZILLA_ARCH_ARM64_NEON_ 1
 #include <stringzilla/find/neon.h>
 
 int main(void) {

@@ -8,14 +8,16 @@
 #define STRINGZILLA_UTF8_RUNES_NEON_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_runes/serial.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #if STRINGZILLA_ARCH_ARM64_
 #if STRINGZILLA_ARCH_ARM64_NEON_
+
+#include "stringzilla/utf8_runes/serial.h"
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -1242,11 +1244,12 @@ STRINGZILLA_API sz_status_t sz_utf8_decode_neon( //
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_ARM64_NEON_
 #endif // STRINGZILLA_ARCH_ARM64_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_UTF8_RUNES_NEON_H_

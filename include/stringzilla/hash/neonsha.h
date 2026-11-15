@@ -10,14 +10,16 @@
 #define STRINGZILLA_HASH_NEONSHA_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_ARM64_
+#if STRINGZILLA_ARCH_ARM64_NEONSHA_
+
 #include "stringzilla/hash/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_ARM64_
-#if STRINGZILLA_TARGET_NEONSHA
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd+crypto+sha2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -199,6 +201,8 @@ STRINGZILLA_INLINE void sz_sha256_process_block_neon_(
     vst1q_u32(&hash[0], state0);
     vst1q_u32(&hash[4], state1);
 }
+
+#if STRINGZILLA_TARGET_NEONSHA
 
 STRINGZILLA_API sz_status_t sz_sha256_state_init_neonsha(sz_sha256_state_t *state, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
@@ -569,16 +573,19 @@ STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_neonsha(sz_sha256_state_
     return sz_success_k;
 }
 
+#endif // STRINGZILLA_TARGET_NEONSHA
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_NEONSHA
-#endif // STRINGZILLA_ARCH_ARM64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_ARM64_NEONSHA_
+#endif // STRINGZILLA_ARCH_ARM64_
 
 #endif // STRINGZILLA_HASH_NEONSHA_H_

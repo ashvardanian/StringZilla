@@ -12,9 +12,15 @@
 #define STRINGZILLA_CIPHER_RVVCRYPTO_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_RISCV64_
+#if STRINGZILLA_ARCH_RISCV64_RVVCRYPTO_
+
 #include "stringzilla/cipher/serial.h"
 
-#ifdef __cplusplus
+#include <riscv_vector.h>
+
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -22,11 +28,6 @@ extern "C" {
  *  @c sz_capabilities probes all three, so the hash steps below reach for `vghsh.vv` and `vgmul.vv`
  *  unconditionally. RVA23 sells the NIST algorithms only as @c Zvkng, which bundles GHASH in, so no
  *  conformant part reaches this file without it. */
-#if STRINGZILLA_ARCH_RISCV64_
-#if STRINGZILLA_TARGET_RVVCRYPTO
-
-#include <riscv_vector.h>
-
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("arch=+v,+zvkned,+zvkg"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -159,6 +160,8 @@ STRINGZILLA_INLINE void sz_aes256_key_init_rvvcrypto_(sz_aes256_key_t *key, sz_u
     __riscv_vse32_v_u32m1(key->round_keys + 52, round_13_u32m1, vector_length);
     __riscv_vse32_v_u32m1(key->round_keys + 56, round_14_u32m1, vector_length);
 }
+
+#if STRINGZILLA_TARGET_RVVCRYPTO
 
 STRINGZILLA_API sz_status_t sz_aes256_key_init_rvvcrypto(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)],
                                                          sz_stream_t stream) {
@@ -786,16 +789,19 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_rvvcrypto(sz_aes256_gcm_key_t 
 
 #pragma endregion One Shot Interface
 
+#endif // STRINGZILLA_TARGET_RVVCRYPTO
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_RVVCRYPTO
-#endif // STRINGZILLA_ARCH_RISCV64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_RISCV64_RVVCRYPTO_
+#endif // STRINGZILLA_ARCH_RISCV64_
 
 #endif // STRINGZILLA_CIPHER_RVVCRYPTO_H_

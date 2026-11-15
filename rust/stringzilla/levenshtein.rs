@@ -38,7 +38,7 @@ pub enum LevenshteinSymbol {
 /// ```rust
 /// use stringzilla::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, StringsView};
 ///
-/// let cpu = Stream::default(Capabilities::cpu_enabled());
+/// let cpu = Stream::default(Capabilities::enabled_cpu());
 /// let mut engine = LevenshteinEngine::new(&["kitten", "saturday"], LevenshteinSymbol::Bytes, &cpu).unwrap();
 ///
 /// // A `[queries, candidates]` block, query `q` starting at `q * stride`.
@@ -74,8 +74,8 @@ pub struct LevenshteinEngine {
 }
 
 impl LevenshteinEngine {
-    /// Prepares `queries` with the capabilities of `stream`, like [`Capabilities::cpu_enabled`] or
-    /// a GPU's [`Capabilities::cuda_enabled`], fixing the capability and, on a GPU, the launch
+    /// Prepares `queries` with the capabilities of `stream`, like [`Capabilities::enabled_cpu`] or
+    /// a GPU's [`Capabilities::enabled_cuda`], fixing the capability and, on a GPU, the launch
     /// geometry once for every round that follows, on the device `stream` names, which it may join.
     ///
     /// The queries themselves are read on the host, so they need no device residency; everything
@@ -176,7 +176,7 @@ mod tests {
     /// A candidate within the bound or at it is exact, and one past it reports the bound plus one.
     #[test]
     fn bound_clips_distances_past_it() {
-        let cpu = Stream::default(Capabilities::cpu_enabled());
+        let cpu = Stream::default(Capabilities::enabled_cpu());
         let mut engine = LevenshteinEngine::new(&["kitten"], LevenshteinSymbol::Bytes, &cpu).unwrap();
         let candidates = StringsView::from_slices(&["kitten", "mitten", "mittens", "sitting"]);
         let distances_for = |engine: &mut LevenshteinEngine, bound: Option<usize>| {

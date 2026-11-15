@@ -1190,9 +1190,9 @@ napi_value deviceCountAPI(napi_env env, napi_callback_info info) {
     sz_status_t status = sz_success_k;
     switch (kind) {
     case device_cpu_k: break;
-    case device_cuda_k: status = sz_device_count_cuda(&count); break;
-    case device_rocm_k: status = sz_device_count_rocm(&count); break;
-    case device_metal_k: status = sz_device_count_metal(&count); break;
+    case device_cuda_k: status = sz_count_devices_cuda(&count); break;
+    case device_rocm_k: status = sz_count_devices_rocm(&count); break;
+    case device_metal_k: status = sz_count_devices_metal(&count); break;
     default: status = sz_missing_gpu_k;
     }
     if (!check_status(env, status)) return NULL;
@@ -1217,17 +1217,17 @@ napi_value capabilitiesDetectedAPI(napi_env env, napi_callback_info info) {
     return capabilities_or_throw(env, status, capabilities);
 }
 
-/** The capabilities compiled in for devices of a kind, whether or not a device runs them. */
+/** The capabilities compiled in that a device of a kind and ordinal runs, offered or not. */
 napi_value capabilitiesCompiledAPI(napi_env env, napi_callback_info info) {
-    uint32_t kind;
-    if (!read_device_arguments(env, info, 1, &kind, NULL, NULL)) return NULL;
+    uint32_t kind, ordinal;
+    if (!read_device_arguments(env, info, 2, &kind, &ordinal, NULL)) return NULL;
     sz_capability_t capabilities = 0;
     sz_status_t status;
     switch (kind) {
     case device_cpu_k: status = sz_capabilities_compiled_cpu(&capabilities); break;
-    case device_cuda_k: status = sz_capabilities_compiled_cuda(&capabilities); break;
-    case device_rocm_k: status = sz_capabilities_compiled_rocm(&capabilities); break;
-    case device_metal_k: status = sz_capabilities_compiled_metal(&capabilities); break;
+    case device_cuda_k: status = sz_capabilities_compiled_cuda(ordinal, &capabilities); break;
+    case device_rocm_k: status = sz_capabilities_compiled_rocm(ordinal, &capabilities); break;
+    case device_metal_k: status = sz_capabilities_compiled_metal(ordinal, &capabilities); break;
     default: status = sz_missing_gpu_k;
     }
     return capabilities_or_throw(env, status, capabilities);

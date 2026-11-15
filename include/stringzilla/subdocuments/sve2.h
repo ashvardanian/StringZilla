@@ -16,15 +16,16 @@
 
 #include "stringzilla/types.h"
 
+#if STRINGZILLA_ARCH_ARM64_
+#if STRINGZILLA_ARCH_ARM64_SVE2_
+
 #include "stringzilla/find/sve.h" // `sz_find_byte_sve_`
 #include "stringzilla/subdocuments/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_ARM64_
-#if STRINGZILLA_ARCH_ARM64_SVE2_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve+sve2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -131,11 +132,12 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_sve2(sz_subdocuments_engine_t *
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_ARM64_SVE2_
 #endif // STRINGZILLA_ARCH_ARM64_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_SUBDOCUMENTS_SVE2_H_

@@ -11,15 +11,47 @@
 #ifndef STRINGZILLA_UTF8_NORM_CUDA_CUH_
 #define STRINGZILLA_UTF8_NORM_CUDA_CUH_
 
+#include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_CUDA_
+
 #include "stringzilla/cuda.cuh"
 #include "stringzilla/utf8_norm/simt.cuh"
 
-#if STRINGZILLA_ARCH_CUDA_
-#if STRINGZILLA_TARGET_CUDA
-
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
+
+#if STRINGZILLA_TARGET_CUDA
+
+/*  The device's copy of every table of `tables.h` a normalizing lookup reads, sized from the table
+ *  itself and refilled by every call before its kernel runs. */
+#pragma region Device Tables
+
+static __device__ sz_u16_t sz_utf8_norm_stage1_cuda_[sizeof(sz_utf8_norm_stage1_) / sizeof(sz_u16_t)];
+static __device__ sz_u16_t sz_utf8_norm_stage2_cuda_[sizeof(sz_utf8_norm_stage2_) / sizeof(sz_u16_t)];
+static __device__ sz_u16_t sz_utf8_norm_stage3_cuda_[sizeof(sz_utf8_norm_stage3_) / sizeof(sz_u16_t)];
+static __device__ sz_utf8_norm_props_t
+    sz_utf8_norm_props_cuda_[sizeof(sz_utf8_norm_props_) / sizeof(sz_utf8_norm_props_t)];
+static __device__ sz_utf8_norm_decomp_t
+    sz_utf8_norm_decomp_cuda_[sizeof(sz_utf8_norm_decomp_) / sizeof(sz_utf8_norm_decomp_t)];
+static __device__ sz_u16_t sz_utf8_norm_pool_cuda_[sizeof(sz_utf8_norm_pool_) / sizeof(sz_u16_t)];
+static __device__ sz_rune_t sz_utf8_norm_pool_astral_cuda_[sizeof(sz_utf8_norm_pool_astral_) / sizeof(sz_rune_t)];
+static __device__ sz_utf8_norm_compose_starter_t
+    sz_utf8_norm_compose_starters_cuda_[sizeof(sz_utf8_norm_compose_starters_) /
+                                        sizeof(sz_utf8_norm_compose_starter_t)];
+static __device__ sz_u16_t sz_utf8_norm_compose_partner_cuda_[sizeof(sz_utf8_norm_compose_partner_) / sizeof(sz_u16_t)];
+static __device__ sz_rune_t sz_utf8_norm_compose_value_cuda_[sizeof(sz_utf8_norm_compose_value_) / sizeof(sz_rune_t)];
+
+/** The device's copies as the kernels hand them to every lookup. */
+static __device__ sz_utf8_norm_tables_simt_t const sz_utf8_norm_tables_cuda_ = {
+    sz_utf8_norm_stage1_cuda_,        sz_utf8_norm_stage2_cuda_,           sz_utf8_norm_stage3_cuda_,
+    sz_utf8_norm_props_cuda_,         sz_utf8_norm_decomp_cuda_,           sz_utf8_norm_pool_cuda_,
+    sz_utf8_norm_pool_astral_cuda_,   sz_utf8_norm_compose_starters_cuda_, sz_utf8_norm_compose_partner_cuda_,
+    sz_utf8_norm_compose_value_cuda_,
+};
+
+#pragma endregion Device Tables
 
 /** Bytes one thread normalizes at the least, which keeps a short text to few tiles. */
 enum { sz_utf8_norm_thread_bytes_cuda_k = 64 };
@@ -28,39 +60,40 @@ enum { sz_utf8_norm_thread_bytes_cuda_k = 64 };
 static __global__ void __launch_bounds__(sz_utf8_norm_threads_simt_k)
     sz_utf8_norm_cuda_kernel_(sz_u8_t const *text, sz_size_t length, sz_normal_form_t form, sz_size_t tile_bytes,
                               sz_size_t tiles, sz_u8_t *target, sz_size_t *target_length) {
-    sz_utf8_norm_tile_simt_(text, length, form, tile_bytes, tiles, target, target_length, sz_block_scan_cuda_);
+    sz_utf8_norm_tile_simt_(&sz_utf8_norm_tables_cuda_, text, length, form, tile_bytes, tiles, target, target_length,
+                            sz_block_scan_cuda_);
 }
 
 /** Copies every table the device lookups read into the device's copies, in order on @p stream. */
 STRINGZILLA_INLINE sz_status_t sz_utf8_norm_upload_cuda_(sz_stream_t stream) {
-    sz_status_t status = sz_copy_to_symbol_cuda_(sz_utf8_norm_stage1_simt_, sz_utf8_norm_stage1_,
+    sz_status_t status = sz_copy_to_symbol_cuda_(sz_utf8_norm_stage1_cuda_, sz_utf8_norm_stage1_,
                                                  sizeof(sz_utf8_norm_stage1_), stream);
     if (status == sz_success_k)
-        status = sz_copy_to_symbol_cuda_(sz_utf8_norm_stage2_simt_, sz_utf8_norm_stage2_, sizeof(sz_utf8_norm_stage2_),
+        status = sz_copy_to_symbol_cuda_(sz_utf8_norm_stage2_cuda_, sz_utf8_norm_stage2_, sizeof(sz_utf8_norm_stage2_),
                                          stream);
     if (status == sz_success_k)
-        status = sz_copy_to_symbol_cuda_(sz_utf8_norm_stage3_simt_, sz_utf8_norm_stage3_, sizeof(sz_utf8_norm_stage3_),
+        status = sz_copy_to_symbol_cuda_(sz_utf8_norm_stage3_cuda_, sz_utf8_norm_stage3_, sizeof(sz_utf8_norm_stage3_),
                                          stream);
     if (status == sz_success_k)
-        status = sz_copy_to_symbol_cuda_(sz_utf8_norm_props_simt_, sz_utf8_norm_props_, sizeof(sz_utf8_norm_props_),
+        status = sz_copy_to_symbol_cuda_(sz_utf8_norm_props_cuda_, sz_utf8_norm_props_, sizeof(sz_utf8_norm_props_),
                                          stream);
     if (status == sz_success_k)
-        status = sz_copy_to_symbol_cuda_(sz_utf8_norm_decomp_simt_, sz_utf8_norm_decomp_, sizeof(sz_utf8_norm_decomp_),
+        status = sz_copy_to_symbol_cuda_(sz_utf8_norm_decomp_cuda_, sz_utf8_norm_decomp_, sizeof(sz_utf8_norm_decomp_),
                                          stream);
     if (status == sz_success_k)
-        status = sz_copy_to_symbol_cuda_(sz_utf8_norm_pool_simt_, sz_utf8_norm_pool_, sizeof(sz_utf8_norm_pool_),
+        status = sz_copy_to_symbol_cuda_(sz_utf8_norm_pool_cuda_, sz_utf8_norm_pool_, sizeof(sz_utf8_norm_pool_),
                                          stream);
     if (status == sz_success_k)
-        status = sz_copy_to_symbol_cuda_(sz_utf8_norm_pool_astral_simt_, sz_utf8_norm_pool_astral_,
+        status = sz_copy_to_symbol_cuda_(sz_utf8_norm_pool_astral_cuda_, sz_utf8_norm_pool_astral_,
                                          sizeof(sz_utf8_norm_pool_astral_), stream);
     if (status == sz_success_k)
-        status = sz_copy_to_symbol_cuda_(sz_utf8_norm_compose_starters_simt_, sz_utf8_norm_compose_starters_,
+        status = sz_copy_to_symbol_cuda_(sz_utf8_norm_compose_starters_cuda_, sz_utf8_norm_compose_starters_,
                                          sizeof(sz_utf8_norm_compose_starters_), stream);
     if (status == sz_success_k)
-        status = sz_copy_to_symbol_cuda_(sz_utf8_norm_compose_partner_simt_, sz_utf8_norm_compose_partner_,
+        status = sz_copy_to_symbol_cuda_(sz_utf8_norm_compose_partner_cuda_, sz_utf8_norm_compose_partner_,
                                          sizeof(sz_utf8_norm_compose_partner_), stream);
     if (status == sz_success_k)
-        status = sz_copy_to_symbol_cuda_(sz_utf8_norm_compose_value_simt_, sz_utf8_norm_compose_value_,
+        status = sz_copy_to_symbol_cuda_(sz_utf8_norm_compose_value_cuda_, sz_utf8_norm_compose_value_,
                                          sizeof(sz_utf8_norm_compose_value_), stream);
     return status;
 }
@@ -119,9 +152,11 @@ STRINGZILLA_API sz_status_t sz_utf8_norm_cuda(sz_cptr_t source, sz_size_t source
     return sz_utf8_norm_scoped_cuda_(source, source_length, form, target, target_length, stream);
 }
 
-#ifdef __cplusplus
-}
-#endif
 #endif // STRINGZILLA_TARGET_CUDA
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_CUDA_
 #endif // STRINGZILLA_UTF8_NORM_CUDA_CUH_

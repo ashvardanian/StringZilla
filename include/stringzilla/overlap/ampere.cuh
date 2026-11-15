@@ -17,13 +17,15 @@
 #ifndef STRINGZILLA_OVERLAP_AMPERE_CUH_
 #define STRINGZILLA_OVERLAP_AMPERE_CUH_
 
-#include "stringzilla/overlap/cuda.cuh"
-#include "stringzilla/strings/ampere.cuh" // `sz_u32_lanes_sum_ampere_`, `sz_u64_lanes_sum_ampere_`
+#include "stringzilla/types.h"
 
 #if STRINGZILLA_ARCH_CUDA_
 #if STRINGZILLA_ARCH_CUDA_AMPERE_
 
-#ifdef __cplusplus
+#include "stringzilla/overlap/cuda.cuh"
+#include "stringzilla/strings/ampere.cuh" // `sz_u32_lanes_sum_ampere_`, `sz_u64_lanes_sum_ampere_`
+
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -68,8 +70,8 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_ampere(sz_overlap_engine_t *engine
 
 #endif // STRINGZILLA_TARGET_AMPERE
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
 #endif // STRINGZILLA_ARCH_CUDA_AMPERE_
 #endif // STRINGZILLA_ARCH_CUDA_

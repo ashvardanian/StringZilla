@@ -16,15 +16,16 @@
 
 #include "stringzilla/types.h"
 
+#if STRINGZILLA_ARCH_LOONGARCH64_
+#if STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+
 #include "stringzilla/find/loongsonasx.h" // `sz_find_byte_loongsonasx_`, `sz_xvmovemask_b_find_loongsonasx_`
 #include "stringzilla/subdocuments/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_LOONGARCH64_
-#if STRINGZILLA_TARGET_LOONGSONASX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("lasx"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -81,6 +82,8 @@ STRINGZILLA_INLINE sz_subdocuments_block_t sz_subdocuments_classify_loongsonasx_
     return sz_subdocuments_block_settle_(quotes, backslashes, opens, closes, separators, blanks, carry);
 }
 
+#if STRINGZILLA_TARGET_LOONGSONASX
+
 STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_loongsonasx(
     sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths, sz_subdocuments_format_t format,
     sz_subdocuments_options_t options, sz_size_t *malformed_index, sz_allocator_t *allocator, sz_stream_t stream) {
@@ -120,16 +123,19 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_loongsonasx(sz_subdocuments_eng
 
 #pragma endregion LASX
 
+#endif // STRINGZILLA_TARGET_LOONGSONASX
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_LOONGSONASX
-#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
 #endif // STRINGZILLA_SUBDOCUMENTS_LOONGSONASX_H_

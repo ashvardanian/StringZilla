@@ -10,15 +10,17 @@
 #define STRINGZILLA_UTF8_UNCASED_ICELAKE_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_ICELAKE_
+
 #include "stringzilla/find/skylake.h" // `sz_find_skylake_`
 #include "stringzilla/utf8_uncased/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_X8664_
-#if STRINGZILLA_TARGET_ICELAKE
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(                                                                                        \
     __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt,evex512"))), \
@@ -2483,6 +2485,8 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_find_cased_icelake_(sz_cptr_t str, sz_size_
     return STRINGZILLA_NULL_CHAR;
 }
 
+#if STRINGZILLA_TARGET_ICELAKE
+
 STRINGZILLA_API sz_status_t sz_utf8_find_cased_icelake(sz_cptr_t text, sz_size_t length, sz_cptr_t *match,
                                                        sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
@@ -2569,17 +2573,19 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_order_icelake(sz_cptr_t a, sz_size_t
     return sz_success_k;
 }
 
+#endif // STRINGZILLA_TARGET_ICELAKE
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
 
-#endif // STRINGZILLA_TARGET_ICELAKE
-#endif // STRINGZILLA_ARCH_X8664_
-
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_X8664_ICELAKE_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #endif // STRINGZILLA_UTF8_UNCASED_ICELAKE_H_

@@ -15,15 +15,16 @@
 
 #include "stringzilla/types.h"
 
+#if STRINGZILLA_ARCH_LOONGARCH64_
+#if STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+
 #include "stringzilla/find/loongsonasx.h" // `sz_find_byteset_loongsonasx_`
 #include "stringzilla/substrings/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_LOONGARCH64_
-#if STRINGZILLA_TARGET_LOONGSONASX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("lasx"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -69,6 +70,8 @@ STRINGZILLA_INLINE sz_substrings_walks_t sz_substrings_walks_loongsonasx_(void) 
     walks.find_bytes = &sz_substrings_find_bytes_loongsonasx_;
     return walks;
 }
+
+#if STRINGZILLA_TARGET_LOONGSONASX
 
 STRINGZILLA_API sz_status_t sz_substrings_engine_init_loongsonasx(
     sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_case_sensitivity_t case_sensitivity,
@@ -128,16 +131,19 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_loongsonasx(sz_substrings_
 
 #pragma endregion LASX
 
+#endif // STRINGZILLA_TARGET_LOONGSONASX
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_LOONGSONASX
-#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
 #endif // STRINGZILLA_SUBSTRINGS_LOONGSONASX_H_

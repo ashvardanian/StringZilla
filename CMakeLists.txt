@@ -154,8 +154,8 @@ if (STRINGZILLA_MARCH)
 else ()
     set(stringzilla_floor_ "the portable floor")
 endif ()
-get_property(stringzilla_capabilities_enabled_ GLOBAL PROPERTY stringzilla_capabilities_enabled)
-list(JOIN stringzilla_capabilities_enabled_ " " stringzilla_capabilities_summary_)
+get_property(stringzilla_capabilities_compiled_ GLOBAL PROPERTY stringzilla_capabilities_compiled)
+list(JOIN stringzilla_capabilities_compiled_ " " stringzilla_capabilities_summary_)
 if (STRINGZILLA_MULTIVERSIONED)
     message(STATUS "StringZilla: multiversioned above ${stringzilla_floor_}")
 else ()
@@ -210,7 +210,7 @@ function (stringzilla_add_gpu_suite target_ language_ source_)
     endif ()
     target_link_libraries(
         ${target_} PRIVATE stringzilla_cpu_capabilities_disabled_ stringzilla_cuda_capabilities_compiled_
-                           stringzilla_static fmt::fmt
+                           stringzilla_rocm_capabilities_compiled_ stringzilla_static fmt::fmt
     )
 endfunction ()
 
@@ -220,6 +220,8 @@ endfunction ()
 function (stringzilla_add_cpu_launcher executable_ library_ verdicts_)
     add_executable(${executable_} ${ARGN})
     stringzilla_set_compiler_flags(${executable_} 20)
+    # A monoversioned library holds one kernel per operation, which the harnesses check.
+    target_compile_definitions(${executable_} PRIVATE STRINGZILLA_MULTIVERSIONED=$<BOOL:${STRINGZILLA_MULTIVERSIONED}>)
     if (verdicts_ STREQUAL "SERIAL")
         target_link_libraries(${executable_} PRIVATE stringzilla_cpu_capabilities_disabled_)
     else ()
@@ -280,7 +282,7 @@ foreach (unit_ IN LISTS stringzilla_globbed_units_)
         set(capability_ ${CMAKE_MATCH_1})
         if (NOT capability_ STREQUAL "serial"
             AND NOT (stringzilla_arch_wasm_ AND capability_ MATCHES "^v128")
-            AND NOT stringzilla_target_${capability_}_enabled
+            AND NOT stringzilla_target_${capability_}_compiled
         )
             continue()
         endif ()
@@ -402,7 +404,8 @@ endif ()
 # Adds one GPU unit, like `src/capabilities/cuda.cu`, to the archive and the shared library: compiled for `codes_` alone,
 # without the CPU capabilities and with the GPU ones the build's codes run, and linked with the runtime libraries that
 # follow. A unit without codes to compile is skipped. Both the unit and the libraries' host units see `definition_`,
-# so the dispatch lists name the unit's kernels.
+# so the dispatch lists name the unit's kernels, and the per-device `sz_capabilities_compiled_<vendor>` asks the runtime
+# whether it loads the unit's probe kernel.
 function (stringzilla_add_gpu_unit source_ codes_ definition_)
     if (NOT codes_)
         return()
@@ -440,7 +443,7 @@ function (stringzilla_add_gpu_unit source_ codes_ definition_)
     endif ()
     target_link_libraries(
         stringzilla_${unit_}_ PRIVATE stringzilla_cpu_capabilities_disabled_ stringzilla_cuda_capabilities_compiled_
-                                      ${ARGN}
+                                      stringzilla_rocm_capabilities_compiled_ ${ARGN}
     )
     foreach (library_ IN LISTS stringzilla_libraries_)
         target_sources(${library_} PRIVATE $<TARGET_OBJECTS:stringzilla_${unit_}_>)
@@ -448,6 +451,7 @@ function (stringzilla_add_gpu_unit source_ codes_ definition_)
         target_link_libraries(
             ${library_}
             PRIVATE $<BUILD_INTERFACE:stringzilla_cuda_capabilities_compiled_>
+                    $<BUILD_INTERFACE:stringzilla_rocm_capabilities_compiled_>
             PUBLIC ${ARGN}
         )
     endforeach ()
@@ -456,15 +460,22 @@ endfunction ()
 if (STRINGZILLA_CUDA_ARCH)
     # One unit per tier, compiled only for the codes running it, so no cubin carries another tier's kernels.
     # A capability switched off keeps its unit out, as no code then carries its kernels.
+    set(stringzilla_ampere_unit_codes_)
     set(stringzilla_hopper_unit_codes_)
     set(stringzilla_blackwell_unit_codes_)
-    if (stringzilla_target_hopper_enabled)
+    if (stringzilla_target_ampere_compiled)
+        stringzilla_select_gpu_codes(
+            stringzilla_ampere_unit_codes_ "${stringzilla_cuda_resolved_architectures_}"
+            "${stringzilla_target_ampere_architectures}"
+        )
+    endif ()
+    if (stringzilla_target_hopper_compiled)
         stringzilla_select_gpu_codes(
             stringzilla_hopper_unit_codes_ "${stringzilla_cuda_resolved_architectures_}"
             "${stringzilla_target_hopper_architectures}"
         )
     endif ()
-    if (stringzilla_target_blackwell_enabled)
+    if (stringzilla_target_blackwell_compiled)
         stringzilla_select_gpu_codes(
             stringzilla_blackwell_unit_codes_ "${stringzilla_cuda_resolved_architectures_}"
             "${stringzilla_target_blackwell_architectures}"
@@ -485,6 +496,10 @@ if (STRINGZILLA_CUDA_ARCH)
         ${stringzilla_cuda_runtime_}
     )
     stringzilla_add_gpu_unit(
+        src/capabilities/ampere.cu "${stringzilla_ampere_unit_codes_}" "STRINGZILLA_ARCH_CUDA_=1"
+        ${stringzilla_cuda_runtime_}
+    )
+    stringzilla_add_gpu_unit(
         src/capabilities/hopper.cu "${stringzilla_hopper_unit_codes_}" "STRINGZILLA_ARCH_CUDA_=1"
         ${stringzilla_cuda_runtime_}
     )
@@ -494,8 +509,39 @@ if (STRINGZILLA_CUDA_ARCH)
     )
 endif ()
 if (STRINGZILLA_ROCM_ARCH)
+    # One unit per tier, compiled only for the targets running it, so no code object carries another tier's kernels.
+    set(stringzilla_cdna3_unit_codes_)
+    set(stringzilla_cdna4_unit_codes_)
+    set(stringzilla_cdna5_unit_codes_)
+    if (stringzilla_target_cdna3_compiled)
+        stringzilla_select_gpu_codes(
+            stringzilla_cdna3_unit_codes_ "${stringzilla_rocm_resolved_architectures_}"
+            "${stringzilla_target_cdna3_architectures}"
+        )
+    endif ()
+    if (stringzilla_target_cdna4_compiled)
+        stringzilla_select_gpu_codes(
+            stringzilla_cdna4_unit_codes_ "${stringzilla_rocm_resolved_architectures_}"
+            "${stringzilla_target_cdna4_architectures}"
+        )
+    endif ()
+    if (stringzilla_target_cdna5_compiled)
+        stringzilla_select_gpu_codes(
+            stringzilla_cdna5_unit_codes_ "${stringzilla_rocm_resolved_architectures_}"
+            "${stringzilla_target_cdna5_architectures}"
+        )
+    endif ()
     stringzilla_add_gpu_unit(
         src/capabilities/rocm.hip "${stringzilla_rocm_resolved_architectures_}" "STRINGZILLA_ARCH_ROCM_=1" hip::host
+    )
+    stringzilla_add_gpu_unit(
+        src/capabilities/cdna3.hip "${stringzilla_cdna3_unit_codes_}" "STRINGZILLA_ARCH_ROCM_=1" hip::host
+    )
+    stringzilla_add_gpu_unit(
+        src/capabilities/cdna4.hip "${stringzilla_cdna4_unit_codes_}" "STRINGZILLA_ARCH_ROCM_=1" hip::host
+    )
+    stringzilla_add_gpu_unit(
+        src/capabilities/cdna5.hip "${stringzilla_cdna5_unit_codes_}" "STRINGZILLA_ARCH_ROCM_=1" hip::host
     )
 endif ()
 if (STRINGZILLA_METAL_ARCH)

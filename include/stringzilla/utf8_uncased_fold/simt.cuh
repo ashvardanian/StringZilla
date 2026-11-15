@@ -32,8 +32,6 @@
 
 #if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
 
-#include "stringzilla/utf8_uncased_fold/tables.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -67,6 +65,7 @@ STRINGZILLA_DEVICE sz_u32_t sz_rune_image_simt_(sz_rune_t rune, sz_rune_length_t
 
 /** The fold of a well-formed @p rune that encodes in @p length bytes, from two dependent loads. */
 STRINGZILLA_DEVICE sz_utf8_folded_image_t sz_unicode_fold_image_simt_(sz_rune_t rune, sz_rune_length_t length) {
+#include "stringzilla/utf8_uncased_fold/tables.h" // `sz_unicode_fold_pages_simt_`, held here so unused units emit none
     sz_utf8_folded_image_t image;
     sz_size_t const page = rune >> sz_unicode_fold_page_bits_simt_k;
     sz_u32_t const entry = page < sizeof(sz_unicode_fold_pages_simt_)
@@ -155,8 +154,6 @@ STRINGZILLA_DEVICE sz_size_t sz_utf8_uncased_fold_span_simt_(sz_u8_t const *sour
     return folded;
 }
 
-#if STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_ROCM
-
 /** Folds one tile of @p source, @p tile_bytes wide, of the @p tiles a round cuts it into, measuring
  *  each thread's stretch first and writing it once the chain says where the tile begins; the
  *  stretches scan with @p block_scan. */
@@ -179,8 +176,6 @@ STRINGZILLA_DEVICE void sz_utf8_uncased_fold_tile_simt_(sz_u8_t const *source, s
     sz_size_t const tile_offset = sz_chain_offset_simt_(target_length, ticket, tiles, tile_total);
     sz_utf8_uncased_fold_span_simt_(source, length, begin, end, target + tile_offset + preceding);
 }
-
-#endif // STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_ROCM
 
 #pragma endregion Fold Kernel
 

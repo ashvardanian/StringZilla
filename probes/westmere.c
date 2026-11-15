@@ -5,7 +5,7 @@
  *  @brief Whether the toolchain builds the Westmere kernels, the x86-64 SSE4.2 and AES-NI kit.
  */
 #define STRINGZILLA_HEADER_ONLY 1
-#define STRINGZILLA_TARGET_WESTMERE 1
+#define STRINGZILLA_ARCH_X8664_WESTMERE_ 1
 #include <stringzilla/hash/westmere.h>
 
 int main(void) {

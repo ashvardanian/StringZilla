@@ -19,15 +19,16 @@
 
 #include "stringzilla/types.h"
 
+#if STRINGZILLA_ARCH_PPC64_
+#if STRINGZILLA_ARCH_PPC64_POWERVSX_
+
 #include "stringzilla/find/powervsx.h" // `sz_find_byteset_powervsx_`, `sz_rfind_byteset_powervsx_`
 #include "stringzilla/regex/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_PPC64_
-#if STRINGZILLA_TARGET_POWERVSX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("power9-vector"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -147,6 +148,8 @@ STRINGZILLA_INLINE void sz_regex_fill_looks_powervsx_(sz_cptr_t text, sz_size_t 
     looks[length] = after[bytes[length - 1]] ^ flipped;
 }
 
+#if STRINGZILLA_TARGET_POWERVSX
+
 STRINGZILLA_API sz_status_t sz_regex_engine_init_powervsx(sz_regex_engine_t *engine, sz_strings_view_t const *patterns,
                                                           sz_case_sensitivity_t case_sensitivity,
                                                           sz_size_t *malformed_index, sz_allocator_t *allocator,
@@ -203,16 +206,19 @@ STRINGZILLA_API sz_status_t sz_regex_extract_powervsx(sz_regex_engine_t *engine,
 
 #pragma endregion Power VSX
 
+#endif // STRINGZILLA_TARGET_POWERVSX
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_POWERVSX
-#endif // STRINGZILLA_ARCH_PPC64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_PPC64_POWERVSX_
+#endif // STRINGZILLA_ARCH_PPC64_
 
 #endif // STRINGZILLA_REGEX_POWERVSX_H_

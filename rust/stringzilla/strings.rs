@@ -423,7 +423,7 @@ const BLOCK_ALIGNMENT: usize = 16;
 /// use std::alloc::Global;
 /// use stringzilla::{Capabilities, EscapeKind, Stream, Strings, StringsView};
 ///
-/// let cpu = Stream::default(Capabilities::cpu_enabled());
+/// let cpu = Stream::default(Capabilities::enabled_cpu());
 /// let names = Strings::copy_in(StringsView::from_slices(&["Ada", "Grace \"Amazing\" Hopper"]), Global, &cpu)?;
 /// let fields = names.view().escape_in(EscapeKind::Csv, Global, &cpu)?;
 /// assert_eq!(fields.view().get(1), Some(&br#""Grace ""Amazing"" Hopper""#[..]));
@@ -460,7 +460,7 @@ impl<A: Allocator> Strings<A> {
     /// use std::alloc::Global;
     /// use stringzilla::{Byteset, Capabilities, SplitKind, Stream, Strings};
     ///
-    /// let cpu = Stream::default(Capabilities::cpu_enabled());
+    /// let cpu = Stream::default(Capabilities::enabled_cpu());
     /// let fields = Strings::split_in(b"Ada,,Grace", Byteset::from(","), SplitKind::Each, Global, &cpu)?;
     /// assert!(fields.view().iter().eq([&b"Ada"[..], b"", b"Grace"]));
     /// let words = Strings::split_in(b" Ada  Grace ", Byteset::from(" "), SplitKind::Runs, Global, &cpu)?;
@@ -651,7 +651,7 @@ unsafe extern "C" fn free_in<A: Allocator>(
 /// assert!(candidates.iter().eq([&b"sitting"[..], b"kitten"]));
 /// assert_eq!(StringsView::from_u32_tape(data, &[3, 17]).err(), Some(Status::UnexpectedDimensions));
 ///
-/// let cpu = Stream::default(Capabilities::cpu_enabled());
+/// let cpu = Stream::default(Capabilities::enabled_cpu());
 /// let mut engine = LevenshteinEngine::new(&["kitten"], LevenshteinSymbol::Bytes, &cpu)?;
 /// let mut distances = [0usize; 2];
 /// cpu.scope(|scope| engine.distances(scope, candidates, None, &mut distances, 2))?;
@@ -833,7 +833,7 @@ impl<'a> StringsView<'a> {
     /// use std::alloc::Global;
     /// use stringzilla::{Capabilities, Stream, StringsView};
     ///
-    /// let cpu = Stream::default(Capabilities::cpu_enabled());
+    /// let cpu = Stream::default(Capabilities::enabled_cpu());
     /// let names = StringsView::from_slices(&["Ada", "Grace"]);
     /// let years = StringsView::from_u32_tape(b"18151906", &[0, 4, 8])?;
     /// let csv = StringsView::join_columns_in(&[names, years], &[b"", b",", b""], b"\n", Global, &cpu)?;
@@ -936,7 +936,7 @@ impl<'a> StringsView<'a> {
     /// ```
     /// use stringzilla::{Capabilities, Stream, StringsView};
     ///
-    /// let cpu = Stream::default(Capabilities::cpu_enabled());
+    /// let cpu = Stream::default(Capabilities::enabled_cpu());
     /// let requests = StringsView::from_slices(&["GET /index", "POST /login", "GET /login"]);
     /// let mut positions = [0usize; 3];
     /// requests.find(b"login", &mut positions, &cpu)?;
@@ -972,7 +972,7 @@ impl<'a> StringsView<'a> {
     /// ```
     /// use stringzilla::{self as sz, Capabilities, Stream, StringsView};
     ///
-    /// let cpu = Stream::default(Capabilities::cpu_enabled());
+    /// let cpu = Stream::default(Capabilities::enabled_cpu());
     /// let keys = StringsView::from_u32_tape(b"adagrace", &[0, 3, 8])?;
     /// let mut hashes = [0u64; 2];
     /// keys.hashes(42, &mut hashes, &cpu)?;
@@ -1150,7 +1150,7 @@ mod tests {
     ];
 
     fn cpu() -> sz::Stream {
-        sz::Stream::default(sz::Capabilities::cpu_enabled())
+        sz::Stream::default(sz::Capabilities::enabled_cpu())
     }
 
     // region: Buffers
@@ -1685,7 +1685,7 @@ mod tests {
     #[cfg(feature = "metal")]
     #[test]
     fn metal_columns_convert_like_host_ones() {
-        let Ok(capabilities) = sz::Capabilities::metal_enabled(0) else {
+        let Ok(capabilities) = sz::Capabilities::enabled_metal(0) else {
             return;
         };
         let gpu = sz::Stream::new(capabilities, 0).unwrap();

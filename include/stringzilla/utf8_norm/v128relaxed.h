@@ -17,20 +17,23 @@
 #define STRINGZILLA_UTF8_NORM_V128RELAXED_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_WASM_
+#if STRINGZILLA_ARCH_WASM_V128RELAXED_
+
 #include "stringzilla/utf8_norm/serial.h"
 #include "stringzilla/utf8_norm/v128.h" // baseline SIMD128 fallbacks
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_WASM_
-#if STRINGZILLA_TARGET_V128RELAXED
+#pragma region relaxed_simd
+
+#if STRINGZILLA_TARGET_V128RELAXED // Kernels only: an empty pragma region would fail under -Werror
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
 #endif
-
-#pragma region relaxed_simd
 
 STRINGZILLA_API sz_status_t sz_utf8_norm_v128relaxed(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
                                                      sz_ptr_t target, sz_size_t *target_length, sz_stream_t stream) {
@@ -55,10 +58,12 @@ STRINGZILLA_API sz_status_t sz_utf8_find_denormalized_v128relaxed(sz_cptr_t sour
 #pragma clang attribute pop
 #endif
 #endif // STRINGZILLA_TARGET_V128RELAXED
-#endif // STRINGZILLA_ARCH_WASM_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_WASM_V128RELAXED_
+#endif // STRINGZILLA_ARCH_WASM_
 
 #endif // STRINGZILLA_UTF8_NORM_V128RELAXED_H_

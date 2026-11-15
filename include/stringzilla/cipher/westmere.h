@@ -14,14 +14,16 @@
 #define STRINGZILLA_CIPHER_WESTMERE_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/cipher/serial.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_ARCH_X8664_WESTMERE_
+
+#include "stringzilla/cipher/serial.h"
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("sse4.2,aes,pclmul"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -842,11 +844,12 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_westmere(sz_aes256_gcm_key_t c
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_X8664_WESTMERE_
 #endif // STRINGZILLA_ARCH_X8664_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_CIPHER_WESTMERE_H_

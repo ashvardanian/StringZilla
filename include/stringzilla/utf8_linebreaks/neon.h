@@ -8,11 +8,15 @@
 #define STRINGZILLA_UTF8_LINEBREAKS_NEON_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_ARM64_
+#if STRINGZILLA_ARCH_ARM64_NEON_
+
 #include "stringzilla/utf8_linebreaks/tables.h"
 #include "stringzilla/utf8_linebreaks/serial.h"
 #include "stringzilla/utf8_runes/neon.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -28,8 +32,6 @@ extern "C" {
  *  @c sz_line_break_classify_astral_neon_ cascade and its 62-entry palette, a different index
  *  space, so its resolved bytes blend over the valid 4-byte lanes after the expansion,
  *  bit-identical to the icelake and haswell blend. */
-#if STRINGZILLA_ARCH_ARM64_
-#if STRINGZILLA_ARCH_ARM64_NEON_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -653,11 +655,12 @@ STRINGZILLA_API sz_status_t sz_utf8_linebreaks_neon(sz_cptr_t text, sz_size_t le
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_ARM64_NEON_
 #endif // STRINGZILLA_ARCH_ARM64_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_UTF8_LINEBREAKS_NEON_H_

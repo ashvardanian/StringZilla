@@ -16,17 +16,107 @@
 #ifndef STRINGZILLA_STRINGS_ROCM_CUH_
 #define STRINGZILLA_STRINGS_ROCM_CUH_
 
+#include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_ROCM_
+
 #include "stringzilla/rocm.cuh"
 #include "stringzilla/strings/simt.cuh"
 #include "stringzilla/utf8_norm/rocm.cuh" // `sz_utf8_norm_upload_rocm_`
 
-#if STRINGZILLA_ARCH_ROCM_
-
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
 #if STRINGZILLA_TARGET_ROCM
+
+/** @ref sz_strings_scan_offsets_simt_ as a ROCM kernel. */
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_scan_offsets_rocm_kernel_(sz_u64_t *offsets, sz_size_t count, sz_size_t const *blocks) {
+    sz_strings_scan_offsets_simt_(offsets, count, blocks);
+}
+
+/** @ref sz_strings_payload_offset_simt_ as a ROCM kernel. */
+static __global__ void __launch_bounds__(sz_strings_payload_threads_simt_k)
+    sz_strings_payload_rocm_kernel_(sz_u64_t *offsets, sz_size_t count) {
+    sz_strings_payload_offset_simt_(offsets, count);
+}
+
+/** @ref sz_strings_lengths_simt_ as a ROCM kernel. */
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_lengths_rocm_kernel_(sz_strings_view_t strings, sz_size_t const *order, sz_size_t count,
+                                    sz_u64_t *lengths) {
+    sz_strings_lengths_simt_(strings, order, count, lengths);
+}
+
+/** @ref sz_strings_escape_lengths_simt_ as a ROCM kernel. */
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_escape_lengths_rocm_kernel_(sz_strings_view_t strings, sz_size_t const *order, sz_size_t count,
+                                           sz_escape_kind_t kind, sz_u64_t *lengths) {
+    sz_strings_escape_lengths_simt_(strings, order, count, kind, lengths);
+}
+
+/** @ref sz_strings_unescape_lengths_simt_ as a ROCM kernel. */
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_unescape_lengths_rocm_kernel_(sz_strings_view_t strings, sz_size_t const *order, sz_size_t count,
+                                             sz_escape_kind_t kind, sz_u64_t *lengths) {
+    sz_strings_unescape_lengths_simt_(strings, order, count, kind, lengths);
+}
+
+/** @ref sz_strings_escape_simt_ as a ROCM kernel. */
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_escape_rocm_kernel_(sz_strings_view_t strings, sz_size_t const *order, sz_size_t count,
+                                   sz_escape_kind_t kind, sz_u64_t const *offsets, sz_strings_span_t tape) {
+    sz_strings_escape_simt_(strings, order, count, kind, offsets, tape);
+}
+
+/** @ref sz_strings_unescape_simt_ as a ROCM kernel. */
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_unescape_rocm_kernel_(sz_strings_view_t strings, sz_size_t const *order, sz_size_t count,
+                                     sz_escape_kind_t kind, sz_u64_t const *offsets, sz_strings_span_t tape) {
+    sz_strings_unescape_simt_(strings, order, count, kind, offsets, tape);
+}
+
+/** @ref sz_strings_gather_simt_ as a ROCM kernel. */
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_gather_rocm_kernel_(sz_strings_view_t strings, sz_size_t const *order, sz_size_t count,
+                                   sz_strings_lut_simt_t lut, sz_u64_t const *offsets, sz_strings_span_t tape) {
+    sz_strings_gather_simt_(strings, order, count, lut, offsets, tape);
+}
+
+/** @ref sz_strings_lookup_simt_ as a ROCM kernel. */
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_lookup_rocm_kernel_(sz_u8_t const *source, sz_size_t length, sz_strings_lut_simt_t lut,
+                                   sz_u8_t *target) {
+    sz_strings_lookup_simt_(source, length, lut, target);
+}
+
+/** @ref sz_strings_rebase_simt_ as a ROCM kernel. */
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_rebase_rocm_kernel_(sz_strings_view_t strings, sz_size_t count, sz_strings_span_t tape) {
+    sz_strings_rebase_simt_(strings, count, tape);
+}
+
+/** @ref sz_strings_to_rows_simt_ as a ROCM kernel. */
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_to_rows_rocm_kernel_(sz_strings_view_t strings, sz_size_t const *order, sz_size_t count,
+                                    sz_strings_rows_t rows, sz_size_t *longest) {
+    sz_strings_to_rows_simt_(strings, order, count, rows, longest);
+}
+
+/** @ref sz_strings_normalize_lengths_simt_ as a ROCM kernel. */
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_normalize_lengths_rocm_kernel_(sz_strings_view_t strings, sz_size_t const *order, sz_size_t count,
+                                              sz_normal_form_t form, sz_u64_t *lengths) {
+    sz_strings_normalize_lengths_simt_(strings, order, count, form, lengths, &sz_utf8_norm_tables_rocm_);
+}
+
+/** @ref sz_strings_normalize_simt_ as a ROCM kernel. */
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_normalize_rocm_kernel_(sz_strings_view_t strings, sz_size_t const *order, sz_size_t count,
+                                      sz_normal_form_t form, sz_u64_t const *offsets, sz_strings_span_t tape) {
+    sz_strings_normalize_simt_(strings, order, count, form, offsets, tape, &sz_utf8_norm_tables_rocm_);
+}
 
 /** @ref sz_strings_scan_local_simt_ over ROCm's 32-lane halves of wavefronts. */
 static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
@@ -94,10 +184,10 @@ STRINGZILLA_INLINE sz_status_t sz_strings_measured_rocm_(sz_u64_t *scratch, sz_s
             status = sz_launch_rocm_((void const *)&sz_strings_scan_blocks_rocm_kernel_, single, block,
                                      blocks_arguments, 0, stream);
         if (status == sz_success_k)
-            status = sz_launch_rocm_((void const *)&sz_strings_scan_offsets_simt_kernel_, grid, block,
+            status = sz_launch_rocm_((void const *)&sz_strings_scan_offsets_rocm_kernel_, grid, block,
                                      offsets_arguments, 0, stream);
         if (status == sz_success_k)
-            status = sz_launch_rocm_((void const *)&sz_strings_payload_simt_kernel_, single,
+            status = sz_launch_rocm_((void const *)&sz_strings_payload_rocm_kernel_, single,
                                      dim3(sz_strings_payload_threads_simt_k), payload_arguments, 0, stream);
         if (status == sz_success_k) status = sz_copy_rocm_(report, scratch + count + 1, sizeof(report), stream);
     }
@@ -192,7 +282,7 @@ STRINGZILLA_INLINE sz_status_t sz_strings_map_rocm_(sz_strings_view_t const *str
     if (order) {
         status = sz_strings_scratch_rocm_(count, &scratch, stream);
         if (status == sz_success_k && count)
-            status = sz_strings_launch_rocm_((void const *)&sz_strings_lengths_simt_kernel_, count,
+            status = sz_strings_launch_rocm_((void const *)&sz_strings_lengths_rocm_kernel_, count,
                                              sz_strings_threads_simt_k, measure_arguments, stream);
         if (status == sz_success_k) status = sz_strings_measured_rocm_(scratch, count, &valid, &payload, stream);
     }
@@ -201,14 +291,14 @@ STRINGZILLA_INLINE sz_status_t sz_strings_map_rocm_(sz_strings_view_t const *str
         target = (sz_u8_t *)sz_strings_payload_(&output);
         status = sz_strings_open_rocm_(&output, stream);
         if (status == sz_success_k && order && count)
-            status = sz_strings_launch_rocm_((void const *)&sz_strings_gather_simt_kernel_, count,
+            status = sz_strings_launch_rocm_((void const *)&sz_strings_gather_rocm_kernel_, count,
                                              sz_strings_threads_simt_k / sz_strings_lanes_simt_k, gather_arguments,
                                              stream);
         if (status == sz_success_k && !order && payload)
-            status = sz_strings_launch_rocm_((void const *)&sz_strings_lookup_simt_kernel_, payload,
+            status = sz_strings_launch_rocm_((void const *)&sz_strings_lookup_rocm_kernel_, payload,
                                              sz_strings_threads_simt_k, lookup_arguments, stream);
         if (status == sz_success_k && !order && count)
-            status = sz_strings_launch_rocm_((void const *)&sz_strings_rebase_simt_kernel_, count + 1,
+            status = sz_strings_launch_rocm_((void const *)&sz_strings_rebase_rocm_kernel_, count + 1,
                                              sz_strings_threads_simt_k, rebase_arguments, stream);
         if (status == sz_success_k) sz_strings_commit_(tape, &output, allocator, stream);
         else sz_strings_release_(tape, &output, payload, allocator, stream);
@@ -247,7 +337,7 @@ STRINGZILLA_INLINE sz_status_t sz_strings_lookup_rocm_(sz_strings_view_t const *
         return sz_strings_map_rocm_(strings, order, count, &table, first, end, allocator, tape, stream);
     bytes = (sz_u8_t *)sz_strings_payload_(tape) + first, length = end - first;
     if (length)
-        status = sz_strings_launch_rocm_((void const *)&sz_strings_lookup_simt_kernel_, length,
+        status = sz_strings_launch_rocm_((void const *)&sz_strings_lookup_rocm_kernel_, length,
                                          sz_strings_threads_simt_k, arguments, stream);
     return status;
 }
@@ -265,7 +355,7 @@ STRINGZILLA_INLINE sz_status_t sz_strings_to_rows_rocm_(sz_strings_view_t const 
         return sz_device_memory_mismatch_k;
     status = sz_fill_rocm_(longest, sizeof(sz_size_t), 0, stream);
     if (status == sz_success_k && count)
-        status = sz_strings_launch_rocm_((void const *)&sz_strings_to_rows_simt_kernel_, count,
+        status = sz_strings_launch_rocm_((void const *)&sz_strings_to_rows_rocm_kernel_, count,
                                          sz_strings_threads_simt_k / sz_strings_lanes_simt_k, arguments, stream);
     return status;
 }
@@ -299,8 +389,8 @@ STRINGZILLA_API sz_status_t sz_strings_escape_rocm(sz_strings_view_t const *stri
     sz_size_t malformed_index = 0;
     sz_status_t status = sz_device_enter_rocm_(stream, &caller);
     if (status != sz_success_k) return status;
-    status = sz_strings_rewrite_rocm_((void const *)&sz_strings_escape_lengths_simt_kernel_,
-                                      (void const *)&sz_strings_escape_simt_kernel_, strings, order, count, &kind,
+    status = sz_strings_rewrite_rocm_((void const *)&sz_strings_escape_lengths_rocm_kernel_,
+                                      (void const *)&sz_strings_escape_rocm_kernel_, strings, order, count, &kind,
                                       allocator, tape, &malformed_index, stream);
     sz_device_leave_rocm_(caller);
     return status;
@@ -313,8 +403,8 @@ STRINGZILLA_API sz_status_t sz_strings_unescape_rocm(sz_strings_view_t const *st
     int caller = 0;
     sz_status_t status = sz_device_enter_rocm_(stream, &caller);
     if (status != sz_success_k) return status;
-    status = sz_strings_rewrite_rocm_((void const *)&sz_strings_unescape_lengths_simt_kernel_,
-                                      (void const *)&sz_strings_unescape_simt_kernel_, strings, order, count, &kind,
+    status = sz_strings_rewrite_rocm_((void const *)&sz_strings_unescape_lengths_rocm_kernel_,
+                                      (void const *)&sz_strings_unescape_rocm_kernel_, strings, order, count, &kind,
                                       allocator, tape, malformed_index, stream);
     sz_device_leave_rocm_(caller);
     return status;
@@ -341,8 +431,8 @@ STRINGZILLA_API sz_status_t sz_strings_normalize_rocm(sz_strings_view_t const *s
     if (status != sz_success_k) return status;
     status = sz_utf8_norm_upload_rocm_(stream);
     if (status == sz_success_k)
-        status = sz_strings_rewrite_rocm_((void const *)&sz_strings_normalize_lengths_simt_kernel_,
-                                          (void const *)&sz_strings_normalize_simt_kernel_, strings, order, count,
+        status = sz_strings_rewrite_rocm_((void const *)&sz_strings_normalize_lengths_rocm_kernel_,
+                                          (void const *)&sz_strings_normalize_rocm_kernel_, strings, order, count,
                                           &form, allocator, tape, &malformed_index, stream);
     sz_device_leave_rocm_(caller);
     return status;
@@ -350,8 +440,8 @@ STRINGZILLA_API sz_status_t sz_strings_normalize_rocm(sz_strings_view_t const *s
 
 #endif // STRINGZILLA_TARGET_ROCM
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
 
 #endif // STRINGZILLA_ARCH_ROCM_

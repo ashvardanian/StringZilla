@@ -30,7 +30,7 @@ The crate ships the C sources, and its `build.rs` builds them into `stringzilla_
 ### Feature Flags
 
 - `std`, on by default: `std` support, without which the crate is `no_std`.
-- `cuda`: the CUDA backend, so `Capabilities::cuda_count_devices` counts devices and engines can be built on a `Stream` of `Capabilities::cuda_enabled(ordinal)`.
+- `cuda`: the CUDA backend, so `Capabilities::count_devices_cuda` counts devices and engines can be built on a `Stream` of `Capabilities::enabled_cuda(ordinal)`.
 - `rocm`: the ROCm backend, compiled through HIP, so the `Capabilities::rocm_*` producers answer the same way.
 - `metal`: the Metal backend on Apple platforms, linking the Metal and Foundation frameworks, so the `Capabilities::metal_*` producers answer the same way.
 
@@ -51,7 +51,7 @@ use stringzilla::{StringZillableBinary, StringZillableUnary};
 
 ### SIMD Dispatch
 
-Every call picks its kernel from the capability mask it passes, `Capabilities::cpu_enabled()` (see [Runtime Dispatch](#runtime-dispatch)) — the same `_best` dispatch points as the precompiled `stringzilla_shared` C library.
+Every call picks its kernel from the capability mask it passes, `Capabilities::enabled_cpu()` (see [Runtime Dispatch](#runtime-dispatch)) — the same `_best` dispatch points as the precompiled `stringzilla_shared` C library.
 One binary runs optimally on any CPU of the target architecture, at the cost of one pick per operation.
 CMake decides which capabilities to compile in, as for every other binding, by try-compiling `probes/<capability>.c` — tiny programs calling one of the capability's real kernels header-only at the baseline flags, so broken or old toolchains are caught up front.
 Every capability the toolchain can emit is built, and the enabled mask leaves out whatever the CPU lacks.
@@ -423,7 +423,7 @@ impl<'a> StringsView<'a> {
 use std::alloc::Global;
 use stringzilla::{Byteset, Capabilities, EscapeKind, NormalForm, SplitKind, Stream, Strings, StringsError, StringsView};
 
-let cpu = Stream::default(Capabilities::cpu_enabled());
+let cpu = Stream::default(Capabilities::enabled_cpu());
 let names = StringsView::from_slices(&["Ada", "Grace \"Amazing\" Hopper", "Stra\u{df}e"]);
 
 let fields = names.escape_in(EscapeKind::Csv, Global, &cpu)?;
@@ -714,7 +714,7 @@ A `bound` of `Some(limit)` keeps a distance exact up to `limit` and reports `lim
 ```rust
 use stringzilla::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, StringsView};
 
-let cpu = Stream::default(Capabilities::cpu_enabled());
+let cpu = Stream::default(Capabilities::enabled_cpu());
 let mut engine = LevenshteinEngine::new(&["kitten", "saturday"], LevenshteinSymbol::Bytes, &cpu).unwrap();
 
 let mut distances = [0usize; 4];
@@ -763,7 +763,7 @@ A `radius` of `Some(share)` is the share of the longer side's windows, summed ov
 ```rust
 use stringzilla::{Capabilities, OverlapEngine, Stream, StringsView};
 
-let cpu = Stream::default(Capabilities::cpu_enabled());
+let cpu = Stream::default(Capabilities::enabled_cpu());
 let mut engine = OverlapEngine::new(&["the quick brown fox"], &[4, 8], 0, &cpu).unwrap();
 
 let mut scores = [0.0f32; 2];
@@ -823,7 +823,7 @@ use stringzilla::{
     SUBSTRINGS_HOT_STATES_AUTO, SUBSTRINGS_MATCHES_BUDGET_AUTO,
 };
 
-let cpu = Stream::default(Capabilities::cpu_enabled());
+let cpu = Stream::default(Capabilities::enabled_cpu());
 let mut engine = SubstringsEngine::new(
     &["cat", "catalog"],
     CaseSensitivity::Cased,
@@ -866,7 +866,7 @@ A `target` too small is not an error either: `report().target_length` names the 
 use stringzilla::{Bm25Params, Capabilities, CaseSensitivity, Stream, StringsView, SubstringsEngine,
                       SubstringsOverlapPolicy, SUBSTRINGS_HOT_STATES_AUTO, SUBSTRINGS_MATCHES_BUDGET_AUTO};
 
-let cpu = Stream::default(Capabilities::cpu_enabled());
+let cpu = Stream::default(Capabilities::enabled_cpu());
 let mut engine = SubstringsEngine::new(
     &["cat", "dog"],
     CaseSensitivity::Cased,
@@ -1000,27 +1000,27 @@ use stringzilla::{self as sz, Capabilities, Capability};
 let v = sz::version();
 println!("StringZilla {}.{}.{}", v.major, v.minor, v.patch);
 
-let enabled = Capabilities::cpu_enabled();
-enabled.configure_thread()?;
+let enabled = Capabilities::enabled_cpu();
+enabled.configure_thread_cpu()?;
 println!("dispatching to {enabled}"); // like "serial,neon,neonaes,neonsha"
 
-for ordinal in 0..Capabilities::cuda_count_devices().unwrap_or(0) {
-    println!("CUDA device {ordinal} runs {}", Capabilities::cuda_enabled(ordinal)?); // like "cuda"
+for ordinal in 0..Capabilities::count_devices_cuda().unwrap_or(0) {
+    println!("CUDA device {ordinal} runs {}", Capabilities::enabled_cuda(ordinal)?); // like "cuda"
 }
 ```
 
 Each group, `cpu`, `cuda`, `rocm` and `metal`, reports along two independent axes, plus the set dispatch uses:
 
-- `cpu_detected()`, `cuda_detected(ordinal)`: what the device can execute, from CPUID or HWCAP on the CPU and from the runtime on a GPU
-- `cpu_compiled()`, `cuda_compiled()`: what this binary contains, from the probes at build time
-- `cpu_enabled()`, `cuda_enabled(ordinal)`: what dispatch uses, i.e. both axes at once
+- `detected_cpu()`, `detected_cuda(ordinal)`: what the device can execute, from CPUID or HWCAP on the CPU and from the runtime on a GPU
+- `compiled_cpu()`, `compiled_cuda(ordinal)`: what this binary contains for the device, from the probes at build time and, on a GPU, the codes each unit carries
+- `enabled_cpu()`, `enabled_cuda(ordinal)`: what dispatch uses, i.e. both axes at once
 
 Reach for the enabled set unless you specifically mean one of the raw axes.
 The detected set describes the machine and says nothing about whether a kernel was compiled in, so a build whose ISA probes failed still reports your CPU's full feature set while containing no SIMD kernels at all.
 The crate keeps no process state: every call passes `Capabilities::CPUS`, which the library clamps to the enabled set, while an engine keeps the capability it was built with.
-`cuda_count_devices()` fails with `Status::MissingGpu` for a vendor this build or machine has no device of, and `cuda_enabled(ordinal)` fails the same way past the last device.
+`count_devices_cuda()` fails with `Status::MissingGpu` for a vendor this build or machine has no device of, and `enabled_cuda(ordinal)` fails the same way past the last device.
 
-Call `configure_thread` at the start of every thread that runs kernels, to prepare it for the capabilities it passes.
+Call `configure_thread_cpu` at the start of every thread that runs kernels, to prepare it for the capabilities it passes.
 In a thread-pool setting, each worker thread needs its own call.
 The function is idempotent and cheap to call more than once on the same thread.
 
@@ -1042,8 +1042,8 @@ The conversions of a column on a GPU stream, like `escape_in` or `normalize_in`,
 ```rust
 use stringzilla::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, Strings, StringsView, UnifiedAllocator};
 
-let cpu = Stream::default(Capabilities::cpu_enabled());
-let stream = Stream::new(Capabilities::cuda_enabled(0)?, 0)?;
+let cpu = Stream::default(Capabilities::enabled_cpu());
+let stream = Stream::new(Capabilities::enabled_cuda(0)?, 0)?;
 let unified = UnifiedAllocator::new(&stream);
 let candidates = Strings::copy_in(StringsView::from_slices(&["sitting", "kitten"]), unified, &cpu)?;
 let mut distances = Vec::new_in(unified);

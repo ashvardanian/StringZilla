@@ -8,20 +8,23 @@
 #define STRINGZILLA_UTF8_RUNES_V128RELAXED_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_WASM_
+#if STRINGZILLA_ARCH_WASM_V128RELAXED_
+
 #include "stringzilla/utf8_runes/serial.h"
 #include "stringzilla/utf8_runes/v128.h" // baseline SIMD128 fallbacks
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
+#if STRINGZILLA_TARGET_V128RELAXED // Kernels only: an empty pragma region would fail under -Werror
 /*  Relaxed-SIMD offers no win for the count / find-nth kernels (they use @c wasm_i8x16_eq, range
  *  compares, compile-time-constant @c wasm_i8x16_shuffle rotations, and @c wasm_i8x16_bitmask -
  *  none of which map onto a relaxed op), so they delegate to the baseline SIMD128. The decoder and
  *  the multistep newline/whitespace iterators are not defined here at all: a @c v128relaxed mask
  *  also carries @c v128, so their lists pick the @c v128 kernels. */
-#if STRINGZILLA_ARCH_WASM_
-#if STRINGZILLA_TARGET_V128RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
 #endif
@@ -44,10 +47,12 @@ STRINGZILLA_API sz_status_t sz_utf8_seek_v128relaxed(sz_cptr_t text, sz_size_t l
 #pragma clang attribute pop
 #endif
 #endif // STRINGZILLA_TARGET_V128RELAXED
-#endif // STRINGZILLA_ARCH_WASM_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_WASM_V128RELAXED_
+#endif // STRINGZILLA_ARCH_WASM_
 
 #endif // STRINGZILLA_UTF8_RUNES_V128RELAXED_H_

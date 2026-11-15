@@ -15,15 +15,16 @@
 
 #include "stringzilla/types.h"
 
+#if STRINGZILLA_ARCH_WASM_
+#if STRINGZILLA_ARCH_WASM_V128_
+
 #include "stringzilla/find/v128.h" // `sz_find_byteset_v128_`
 #include "stringzilla/substrings/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_WASM_
-#if STRINGZILLA_ARCH_WASM_V128_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
@@ -131,11 +132,12 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_v128(sz_substrings_engine_
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_WASM_V128_
 #endif // STRINGZILLA_ARCH_WASM_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_SUBSTRINGS_V128_H_

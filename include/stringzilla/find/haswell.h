@@ -10,17 +10,19 @@
 #define STRINGZILLA_FIND_HASWELL_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_HASWELL_
+
 #include "stringzilla/compare/haswell.h" // `sz_equal_haswell_`
 #include "stringzilla/find/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
 /*  AVX2 implementation of the string search algorithms for Haswell processors and newer.
  *  Very minimalistic (compared to AVX-512), but still faster than the serial implementation. */
-#if STRINGZILLA_ARCH_X8664_
-#if STRINGZILLA_ARCH_X8664_HASWELL_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,lzcnt"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -430,11 +432,12 @@ STRINGZILLA_API sz_status_t sz_rfind_byteset_haswell(sz_cptr_t haystack, sz_size
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_X8664_HASWELL_
 #endif // STRINGZILLA_ARCH_X8664_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_FIND_HASWELL_H_

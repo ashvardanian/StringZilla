@@ -10,15 +10,17 @@
 #define STRINGZILLA_LEVENSHTEIN_POWERVSX_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_PPC64_
+#if STRINGZILLA_ARCH_PPC64_POWERVSX_
+
 #include "stringzilla/levenshtein/serial.h"
 #include "stringzilla/utf8_runes/powervsx.h" // `sz_utf8_decode_powervsx_`
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_PPC64_
-#if STRINGZILLA_TARGET_POWERVSX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("power9-vector"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -389,6 +391,8 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x2_distances_powervsx_(
     }
 }
 
+#if STRINGZILLA_TARGET_POWERVSX
+
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_powervsx(sz_levenshtein_engine_t *engine,
                                                                 sz_strings_view_t const *queries,
                                                                 sz_levenshtein_symbol_t symbol,
@@ -443,16 +447,19 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_powervsx(sz_levenshtein_eng
     return sz_success_k;
 }
 
+#endif // STRINGZILLA_TARGET_POWERVSX
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_POWERVSX
-#endif // STRINGZILLA_ARCH_PPC64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_PPC64_POWERVSX_
+#endif // STRINGZILLA_ARCH_PPC64_
 
 #endif // STRINGZILLA_LEVENSHTEIN_POWERVSX_H_

@@ -30,7 +30,7 @@ use super::*;
 /// ```rust
 /// use stringzilla::{Capabilities, OverlapEngine, Stream, StringsView};
 ///
-/// let cpu = Stream::default(Capabilities::cpu_enabled());
+/// let cpu = Stream::default(Capabilities::enabled_cpu());
 /// let mut engine = OverlapEngine::new(&["the quick brown fox"], &[4, 8], 0, &cpu).unwrap();
 ///
 /// // A `[queries, candidates, widths]` block with the width axis unit-strided.
@@ -61,7 +61,7 @@ pub struct OverlapEngine {
 
 impl OverlapEngine {
     /// Sorts `queries` into one forest with the capabilities of `stream`, like
-    /// [`Capabilities::cpu_enabled`] or a GPU's [`Capabilities::cuda_enabled`], fixing the
+    /// [`Capabilities::enabled_cpu`] or a GPU's [`Capabilities::enabled_cuda`], fixing the
     /// capability once, on the device `stream` names, which it may join.
     ///
     /// `window_widths` are n-gram widths in bytes and need not form a doubling chain; a width past
@@ -219,7 +219,7 @@ mod tests {
     /// scores zero at every width once they pass it.
     #[test]
     fn radius_zeroes_pairs_past_it() {
-        let cpu = Stream::default(Capabilities::cpu_enabled());
+        let cpu = Stream::default(Capabilities::enabled_cpu());
         let mut engine = OverlapEngine::new(&["abcdefgh"], &[3, 4], 0, &cpu).unwrap();
         // Misses over the longer side's eleven windows at both widths: none, two, and eight.
         let candidates = StringsView::from_slices(&["abcdefgh", "abcdefgx", "abcdxxxx"]);

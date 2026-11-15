@@ -38,9 +38,13 @@ const (
 	CapPowerVSX    Capability = C.sz_cap_powervsx_k    // Power VSX 128-bit SIMD
 
 	CapCUDA      Capability = C.sz_cap_cuda_k      // Any CUDA device
+	CapAmpere    Capability = C.sz_cap_ampere_k    // CUDA warp reductions and async copies, from compute capability 8.0
 	CapHopper    Capability = C.sz_cap_hopper_k    // CUDA clusters, from compute capability 9.0
 	CapBlackwell Capability = C.sz_cap_blackwell_k // CUDA cluster launch control, from compute capability 10.0
 	CapROCm      Capability = C.sz_cap_rocm_k      // Any ROCm device
+	CapCDNA3     Capability = C.sz_cap_cdna3_k     // ROCm DPP wavefront shifts, on gfx942
+	CapCDNA4     Capability = C.sz_cap_cdna4_k     // ROCm DPP wavefront shifts, on gfx950
+	CapCDNA5     Capability = C.sz_cap_cdna5_k     // ROCm DPP row shifts over permlanex16, on gfx1250 and gfx1251
 	CapMetal     Capability = C.sz_cap_metal_k     // Any Metal device
 
 	CapCPUs Capability = C.sz_cap_cpus_k // Every CPU capability
@@ -78,11 +82,11 @@ func CountDevices(kind DeviceKind) (int, error) {
 	switch kind {
 	case DeviceCPU:
 	case DeviceCUDA:
-		status = C.sz_device_count_cuda(&count)
+		status = C.sz_count_devices_cuda(&count)
 	case DeviceROCm:
-		status = C.sz_device_count_rocm(&count)
+		status = C.sz_count_devices_rocm(&count)
 	case DeviceMetal:
-		status = C.sz_device_count_metal(&count)
+		status = C.sz_count_devices_metal(&count)
 	default:
 		count, status = 0, C.sz_missing_gpu_k
 	}
@@ -118,21 +122,25 @@ func (d Device) CapabilitiesDetected() (Capability, error) {
 	return Capability(capabilities), statusError(status)
 }
 
-// CapabilitiesCompiled returns the capabilities whose kernels were compiled in for devices of d's
-// kind, whether or not d runs them.
-func (d Device) CapabilitiesCompiled() Capability {
+// CapabilitiesCompiled returns the capabilities whose kernels this binary holds code for that d
+// runs, whether or not d offers them.
+func (d Device) CapabilitiesCompiled() (Capability, error) {
 	var capabilities C.sz_capability_t
+	ordinal := C.sz_size_t(d.Ordinal)
+	var status C.sz_status_t
 	switch d.Kind {
 	case DeviceCPU:
-		C.sz_capabilities_compiled_cpu(&capabilities)
+		status = C.sz_capabilities_compiled_cpu(&capabilities)
 	case DeviceCUDA:
-		C.sz_capabilities_compiled_cuda(&capabilities)
+		status = C.sz_capabilities_compiled_cuda(ordinal, &capabilities)
 	case DeviceROCm:
-		C.sz_capabilities_compiled_rocm(&capabilities)
+		status = C.sz_capabilities_compiled_rocm(ordinal, &capabilities)
 	case DeviceMetal:
-		C.sz_capabilities_compiled_metal(&capabilities)
+		status = C.sz_capabilities_compiled_metal(ordinal, &capabilities)
+	default:
+		status = C.sz_missing_gpu_k
 	}
-	return Capability(capabilities)
+	return Capability(capabilities), statusError(status)
 }
 
 // CapabilitiesEnabled returns the mask for d's calls: [Device.CapabilitiesDetected] and
@@ -164,7 +172,7 @@ func (d Device) ConfigureThread(capabilities Capability) (func(), error) {
 		return func() {}, statusError(C.sz_missing_kernel_k)
 	}
 	runtime.LockOSThread()
-	return runtime.UnlockOSThread, statusError(C.sz_thread_configure_cpu(C.sz_capability_t(capabilities)))
+	return runtime.UnlockOSThread, statusError(C.sz_configure_thread_cpu(C.sz_capability_t(capabilities)))
 }
 
 // statusError names a failed call's status, or returns nil on success.

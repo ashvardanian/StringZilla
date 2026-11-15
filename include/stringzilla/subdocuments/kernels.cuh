@@ -146,29 +146,6 @@ STRINGZILLA_DEVICE void sz_subdocuments_contains_simt_(sz_size_t const *counted,
     }
 }
 
-/** Lowers the header's @c large_bytes to one of @c large_shares of the batch's bytes once any
- *  document passes both that share and the round's @c large_bytes, so the documents past their
- *  share walk over chunks only in a batch that takes the cooperative walk anyway. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_route_simt_kernel_(sz_strings_view_t documents, sz_subdocuments_round_simt_t round) {
-    sz_size_t const batch = (sz_size_t)(sz_strings_start_simt_(documents, documents.count) -
-                                        sz_strings_start_simt_(documents, 0));
-    sz_size_t const share = batch / round.large_shares, floor = sz_max_of_two(round.large_bytes, share);
-    for (sz_size_t document = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; document < documents.count;
-         document += (sz_size_t)gridDim.x * blockDim.x) {
-        sz_size_t const length = sz_strings_length_simt_(documents, document);
-        if (length > floor && length <= 0xFFFFFFFFull) round.header->large_bytes = share;
-    }
-}
-
-/** @ref sz_subdocuments_walk_documents_simt_ with a thread walking each XML document. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_walk_simt_kernel_(sz_subdocuments_engine_t engine, sz_strings_view_t documents,
-                                      sz_subdocuments_round_simt_t round) {
-    sz_subdocuments_walk_documents_simt_(&engine, &documents, &round, (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x,
-                                         0, 1, (sz_simt_group_t const *)STRINGZILLA_NULL);
-}
-
 /** Scans the tile @p ticket hands the block in place with @p block_scan, seeded by the totals the
  *  tiles before it publish in the cleared @p states for @p look_back to read, so the whole scan is
  *  one launch, as @c sz_regex_scan_tile_simt_ does; its own total takes one @p block_sum . */
@@ -195,46 +172,6 @@ STRINGZILLA_DEVICE void sz_subdocuments_scan_tile_simt_(
         sz_size_t const exclusive = block_scan(value, shared, &total, sz_subdocuments_threads_per_block_simt_k);
         if (index < end) values[index] = running + exclusive;
         running += total;
-    }
-}
-
-/** Counts each listed document's chunks into its slot, none for one at or past @c bound,
- *  and clears its verdict. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_large_lengths_simt_kernel_(sz_subdocuments_large_simt_t large) {
-    for (sz_size_t slot = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; slot <= large.listed;
-         slot += large.threads) {
-        sz_bool_t const kept = (sz_bool_t)(slot != large.listed && large.list[2 * slot] < large.bound);
-        large.firsts[slot] =
-            kept ? sz_size_divide_round_up((sz_size_t)large.list[2 * slot + 1], sz_subdocuments_chunk_bytes_simt_k) : 0;
-        if (slot != large.listed) large.malformed[slot] = 0;
-    }
-}
-
-/** Records each chunk's effect on the escape, quote and scalar carries, for either escape carry it
- *  starts with, marking the first of each document. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_large_summary_simt_kernel_(sz_strings_view_t documents, sz_subdocuments_large_simt_t large) {
-    for (sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; chunk <= large.chunks;
-         chunk += large.threads) {
-        sz_subdocuments_place_simt_t const place = sz_subdocuments_place_simt_(&large, chunk);
-        sz_u8_t const *const text = (sz_u8_t const *)sz_strings_start_simt_(documents, place.document);
-        sz_size_t const start = (chunk - place.first) * sz_subdocuments_chunk_bytes_simt_k;
-        sz_size_t const end = sz_min_of_two(start + sz_subdocuments_chunk_bytes_simt_k, place.length);
-        sz_u64_t transfer = chunk == place.first ? 0x81 : 1;
-        sz_subdocuments_cursor_simt_t cursor;
-        if (place.slot == large.listed) {
-            large.transfers[chunk] = 0;
-            continue;
-        }
-        cursor.text = text, cursor.length = place.length, cursor.scalar = 0, cursor.slashes = 0;
-        for (sz_u64_t escape = 0; escape != 2; ++escape) {
-            cursor.escaped = escape, cursor.in_string = 0;
-            for (sz_size_t offset = start; offset < end; offset += 64) sz_subdocuments_load_simt_(&cursor, offset);
-            transfer |= (cursor.escaped & 1) << (1 + escape) | (cursor.in_string & 1) << (3 + escape) |
-                        sz_subdocuments_scalar_end_simt_(text, start, end, escape) << (5 + escape);
-        }
-        large.transfers[chunk] = transfer;
     }
 }
 
@@ -293,10 +230,79 @@ STRINGZILLA_DEVICE void sz_subdocuments_large_apply_simt_(sz_subdocuments_large_
     }
 }
 
+/** Drops @p chunk where its document was refused, so no token or container is numbered in it, and
+ *  returns how deep it nests within a kept document, zero for none; a large document spans at most
+ *  0xFFFFFFFF bytes, so no depth passes 32 bits. */
+STRINGZILLA_DEVICE sz_u32_t sz_subdocuments_large_drop_chunk_simt_(sz_subdocuments_large_simt_t const *large,
+                                                                   sz_size_t chunk) {
+    sz_size_t const slot = sz_subdocuments_slot_simt_(large, (sz_u64_t const *)STRINGZILLA_NULL, chunk);
+    sz_i64_t highest;
+    if (slot == large->listed) return 0;
+    if (large->malformed[slot]) {
+        large->tokens[chunk] = 0, large->opens[chunk] = 0;
+        return 0;
+    }
+    highest = (sz_i64_t)(large->depths[chunk] - large->depths[large->firsts[slot]] + (large->extremes[chunk] >> 32));
+    return highest > 0 ? (sz_u32_t)highest : 0;
+}
+
+/** Lowers the header's @c large_bytes to one of @c large_shares of the batch's bytes once any
+ *  document passes both that share and the round's @c large_bytes, so the documents past their
+ *  share walk over chunks only in a batch that takes the cooperative walk anyway. */
+STRINGZILLA_DEVICE void sz_subdocuments_route_simt_(sz_strings_view_t documents, sz_subdocuments_round_simt_t round) {
+    sz_size_t const batch = (sz_size_t)(sz_strings_start_simt_(documents, documents.count) -
+                                        sz_strings_start_simt_(documents, 0));
+    sz_size_t const share = batch / round.large_shares, floor = sz_max_of_two(round.large_bytes, share);
+    for (sz_size_t document = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; document < documents.count;
+         document += (sz_size_t)gridDim.x * blockDim.x) {
+        sz_size_t const length = sz_strings_length_simt_(documents, document);
+        if (length > floor && length <= 0xFFFFFFFFull) round.header->large_bytes = share;
+    }
+}
+
+/** Counts each listed document's chunks into its slot, none for one at or past @c bound,
+ *  and clears its verdict. */
+STRINGZILLA_DEVICE void sz_subdocuments_large_lengths_simt_(sz_subdocuments_large_simt_t large) {
+    for (sz_size_t slot = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; slot <= large.listed;
+         slot += large.threads) {
+        sz_bool_t const kept = (sz_bool_t)(slot != large.listed && large.list[2 * slot] < large.bound);
+        large.firsts[slot] =
+            kept ? sz_size_divide_round_up((sz_size_t)large.list[2 * slot + 1], sz_subdocuments_chunk_bytes_simt_k) : 0;
+        if (slot != large.listed) large.malformed[slot] = 0;
+    }
+}
+
+/** Records each chunk's effect on the escape, quote and scalar carries, for either escape carry it
+ *  starts with, marking the first of each document. */
+STRINGZILLA_DEVICE void sz_subdocuments_large_summary_simt_(sz_strings_view_t documents,
+                                                            sz_subdocuments_large_simt_t large) {
+    for (sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; chunk <= large.chunks;
+         chunk += large.threads) {
+        sz_subdocuments_place_simt_t const place = sz_subdocuments_place_simt_(&large, chunk);
+        sz_u8_t const *const text = (sz_u8_t const *)sz_strings_start_simt_(documents, place.document);
+        sz_size_t const start = (chunk - place.first) * sz_subdocuments_chunk_bytes_simt_k;
+        sz_size_t const end = sz_min_of_two(start + sz_subdocuments_chunk_bytes_simt_k, place.length);
+        sz_u64_t transfer = chunk == place.first ? 0x81 : 1;
+        sz_subdocuments_cursor_simt_t cursor;
+        if (place.slot == large.listed) {
+            large.transfers[chunk] = 0;
+            continue;
+        }
+        cursor.text = text, cursor.length = place.length, cursor.scalar = 0, cursor.slashes = 0;
+        for (sz_u64_t escape = 0; escape != 2; ++escape) {
+            cursor.escaped = escape, cursor.in_string = 0;
+            for (sz_size_t offset = start; offset < end; offset += 64) sz_subdocuments_load_simt_(&cursor, offset);
+            transfer |= (cursor.escaped & 1) << (1 + escape) | (cursor.in_string & 1) << (3 + escape) |
+                        sz_subdocuments_scalar_end_simt_(text, start, end, escape) << (5 + escape);
+        }
+        large.transfers[chunk] = transfer;
+    }
+}
+
 /** Counts each chunk's tokens and opening brackets, the depth it ends at, and how far its
  *  depth dips and rises, marking its document malformed for a <tt>/</tt> outside strings. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_large_count_simt_kernel_(sz_strings_view_t documents, sz_subdocuments_large_simt_t large) {
+STRINGZILLA_DEVICE void sz_subdocuments_large_count_simt_(sz_strings_view_t documents,
+                                                          sz_subdocuments_large_simt_t large) {
     for (sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; chunk <= large.chunks;
          chunk += large.threads) {
         sz_subdocuments_place_simt_t const place = sz_subdocuments_place_simt_(&large, chunk);
@@ -327,8 +333,8 @@ static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_
 
 /** Refuses a document whose depth dips below zero, counted from its first chunk, ends above it,
  *  ends inside a string, or that the count marked, as no walk accepts one. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_large_check_simt_kernel_(sz_subdocuments_round_simt_t round, sz_subdocuments_large_simt_t large) {
+STRINGZILLA_DEVICE void sz_subdocuments_large_check_simt_(sz_subdocuments_round_simt_t round,
+                                                          sz_subdocuments_large_simt_t large) {
     for (sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; chunk < large.chunks;
          chunk += large.threads) {
         sz_subdocuments_place_simt_t const place = sz_subdocuments_place_simt_(&large, chunk);
@@ -346,38 +352,11 @@ static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_
     }
 }
 
-/** Drops @p chunk where its document was refused, so no token or container is numbered in it, and
- *  returns how deep it nests within a kept document, zero for none; a large document spans at most
- *  0xFFFFFFFF bytes, so no depth passes 32 bits. */
-STRINGZILLA_DEVICE sz_u32_t sz_subdocuments_large_drop_chunk_simt_(sz_subdocuments_large_simt_t const *large,
-                                                                   sz_size_t chunk) {
-    sz_size_t const slot = sz_subdocuments_slot_simt_(large, (sz_u64_t const *)STRINGZILLA_NULL, chunk);
-    sz_i64_t highest;
-    if (slot == large->listed) return 0;
-    if (large->malformed[slot]) {
-        large->tokens[chunk] = 0, large->opens[chunk] = 0;
-        return 0;
-    }
-    highest = (sz_i64_t)(large->depths[chunk] - large->depths[large->firsts[slot]] + (large->extremes[chunk] >> 32));
-    return highest > 0 ? (sz_u32_t)highest : 0;
-}
-
-/** Drops the chunks of every refused document and publishes the deepest any kept document nests,
- *  a chunk per thread, with an atomic per chunk. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_large_drop_simt_kernel_(sz_subdocuments_round_simt_t round, sz_subdocuments_large_simt_t large) {
-    for (sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; chunk < large.chunks;
-         chunk += large.threads) {
-        sz_u32_t const highest = sz_subdocuments_large_drop_chunk_simt_(&large, chunk);
-        if (highest) atomicMax((unsigned long long *)&round.header->deepest, (unsigned long long)highest);
-    }
-}
-
 /** Writes each chunk's tokens, and for every container it opens the token, the depth counted from
  *  its document's first chunk, an empty element count, and the parent when the chunk opened that
  *  too, @c sz_subdocuments_outer_container_simt_k when an earlier one did. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_large_tokens_simt_kernel_(sz_strings_view_t documents, sz_subdocuments_large_simt_t large) {
+STRINGZILLA_DEVICE void sz_subdocuments_large_tokens_simt_(sz_strings_view_t documents,
+                                                           sz_subdocuments_large_simt_t large) {
     for (sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; chunk < large.chunks;
          chunk += large.threads) {
         sz_subdocuments_place_simt_t const place = sz_subdocuments_place_simt_(&large, chunk);
@@ -424,8 +403,7 @@ static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_
 
 /** Builds level @c round of the depth minima, each entry the least of @c fanout entries
  *  of the level below. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_large_minima_simt_kernel_(sz_subdocuments_large_simt_t large) {
+STRINGZILLA_DEVICE void sz_subdocuments_large_minima_simt_(sz_subdocuments_large_simt_t large) {
     sz_size_t const below = large.minima_offsets[large.round - 1], above = large.minima_offsets[large.round];
     sz_size_t const count = large.minima_offsets[large.round + 1] - above;
     for (sz_size_t index = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; index < count; index += large.threads) {
@@ -441,8 +419,7 @@ static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_
  *  depth, as every container a chunk opens directly inside an earlier chunk's at one depth shares
  *  that parent. A kept document's depths start at zero at its root, so no search passes its root
  *  into an earlier document. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_large_parents_simt_kernel_(sz_subdocuments_large_simt_t large) {
+STRINGZILLA_DEVICE void sz_subdocuments_large_parents_simt_(sz_subdocuments_large_simt_t large) {
     for (sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; chunk < large.chunks;
          chunk += large.threads) {
         sz_subdocuments_place_simt_t const place = sz_subdocuments_place_simt_(&large, chunk);
@@ -463,8 +440,7 @@ static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_
 
 /** Records where each container closes, and counts the values directly inside it, one atomic per
  *  container a chunk touches. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_large_closes_simt_kernel_(sz_subdocuments_large_simt_t large) {
+STRINGZILLA_DEVICE void sz_subdocuments_large_closes_simt_(sz_subdocuments_large_simt_t large) {
     for (sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; chunk < large.chunks;
          chunk += large.threads) {
         sz_size_t const last = large.tokens[chunk + 1];
@@ -487,8 +463,7 @@ static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_
 
 /** Sums each chunk's values less the values of the containers it closes, so a scan of the sums
  *  counts, before any token, the values of every container still open there. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_large_sums_simt_kernel_(sz_subdocuments_large_simt_t large) {
+STRINGZILLA_DEVICE void sz_subdocuments_large_sums_simt_(sz_subdocuments_large_simt_t large) {
     for (sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; chunk <= large.chunks;
          chunk += large.threads) {
         sz_size_t const last = chunk == large.chunks ? 0 : large.tokens[chunk + 1];
@@ -509,8 +484,7 @@ static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_
 
 /** Records the scanned count just past each container's opening bracket, from which
  *  its elements' positions count. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_large_offsets_simt_kernel_(sz_subdocuments_large_simt_t large) {
+STRINGZILLA_DEVICE void sz_subdocuments_large_offsets_simt_(sz_subdocuments_large_simt_t large) {
     for (sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; chunk < large.chunks;
          chunk += large.threads) {
         sz_size_t const last = large.tokens[chunk + 1];
@@ -531,9 +505,9 @@ static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_
 
 /** Settles each container's selector, its key's name in an object or its position in an array, and
  *  starts the live sets: the root steps at the root, nothing elsewhere. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_large_selectors_simt_kernel_(sz_subdocuments_engine_t engine, sz_strings_view_t documents,
-                                                 sz_subdocuments_large_simt_t large) {
+STRINGZILLA_DEVICE void sz_subdocuments_large_selectors_simt_(sz_subdocuments_engine_t engine,
+                                                              sz_strings_view_t documents,
+                                                              sz_subdocuments_large_simt_t large) {
     sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x, words = engine.words_count;
     sz_u8_t *const key = large.keys + thread * large.key_bytes;
     for (sz_size_t container = thread; container < large.containers_count; container += large.threads) {
@@ -559,8 +533,8 @@ static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_
 /** Gathers into each container the descendant steps live at its ancestors: round zero
  *  takes its parent's, and every later round doubles how far up each one reaches, from one
  *  buffer into the other. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_large_jump_simt_kernel_(sz_subdocuments_engine_t engine, sz_subdocuments_large_simt_t large) {
+STRINGZILLA_DEVICE void sz_subdocuments_large_jump_simt_(sz_subdocuments_engine_t engine,
+                                                         sz_subdocuments_large_simt_t large) {
     sz_size_t const words = engine.words_count, containers = large.containers_count;
     sz_size_t const source = (large.round + 1) & 1, target = large.round & 1;
     for (sz_size_t container = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; container < containers;
@@ -586,8 +560,8 @@ static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_
 
 /** Advances each container's live sets from its parent's, joined with what its ancestors carry, in
  *  place: a set read before or after its update only grows towards the settled one. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_large_advance_simt_kernel_(sz_subdocuments_engine_t engine, sz_subdocuments_large_simt_t large) {
+STRINGZILLA_DEVICE void sz_subdocuments_large_advance_simt_(sz_subdocuments_engine_t engine,
+                                                            sz_subdocuments_large_simt_t large) {
     sz_size_t const words = engine.words_count;
     for (sz_size_t container = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; container < large.containers_count;
          container += large.threads) {
@@ -610,9 +584,9 @@ static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_
 /** Walks each chunk's tokens in order, counting into its chunk's slot the matches of every value
  *  and refusing its document at any token the serial walk refuses or when it holds none, or, when
  *  storing, writing the matches from where its document's first match lands. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_large_walk_simt_kernel_(sz_subdocuments_engine_t engine, sz_strings_view_t documents,
-                                            sz_subdocuments_round_simt_t round, sz_subdocuments_large_simt_t large) {
+STRINGZILLA_DEVICE void sz_subdocuments_large_walk_simt_(sz_subdocuments_engine_t engine, sz_strings_view_t documents,
+                                                         sz_subdocuments_round_simt_t round,
+                                                         sz_subdocuments_large_simt_t large) {
     sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x, words = engine.words_count;
     sz_u8_t *const key = large.keys + thread * large.key_bytes;
     for (sz_size_t chunk = thread; chunk <= large.chunks; chunk += large.threads) {
@@ -692,14 +666,25 @@ static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_
 }
 
 /** Writes each listed document's matches, the scanned matches of its chunks, into its count. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_large_finish_simt_kernel_(sz_subdocuments_round_simt_t round, sz_subdocuments_large_simt_t large) {
+STRINGZILLA_DEVICE void sz_subdocuments_large_finish_simt_(sz_subdocuments_round_simt_t round,
+                                                           sz_subdocuments_large_simt_t large) {
     for (sz_size_t slot = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; slot < large.listed;
          slot += large.threads) {
         sz_size_t const document = (sz_size_t)large.list[2 * slot];
         sz_size_t const found = (sz_size_t)(large.matches[large.firsts[slot + 1]] - large.matches[large.firsts[slot]]);
         if (round.counted) round.counted[document] = found;
         else round.counts[document * round.counts_stride] = found;
+    }
+}
+
+/** Drops the chunks of every refused document and publishes the deepest any kept document nests,
+ *  a chunk per thread, with an atomic per chunk. */
+STRINGZILLA_DEVICE void sz_subdocuments_large_drop_simt_(sz_subdocuments_round_simt_t round,
+                                                         sz_subdocuments_large_simt_t large) {
+    for (sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; chunk < large.chunks;
+         chunk += large.threads) {
+        sz_u32_t const highest = sz_subdocuments_large_drop_chunk_simt_(&large, chunk);
+        if (highest) atomicMax((unsigned long long *)&round.header->deepest, (unsigned long long)highest);
     }
 }
 

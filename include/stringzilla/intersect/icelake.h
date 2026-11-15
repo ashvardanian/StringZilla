@@ -10,11 +10,15 @@
 #define STRINGZILLA_INTERSECT_ICELAKE_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_ICELAKE_
+
 #include "stringzilla/compare/serial.h"   // `sz_equal_serial_`
 #include "stringzilla/intersect/serial.h" // `STRINGZILLA_INTERSECT_BUDGET`
 #include "stringzilla/hash/icelake.h"     // `sz_hash_icelake_`, `sz_hash_state_short_x4_*_icelake_`
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -25,8 +29,6 @@ extern "C" {
  *      - 2019 Ice Lake: VPOPCNTDQ, VNNI, VBMI2, BITALG, GFNI, VPCLMULQDQ, VAES.
  *
  *  We are going to use VBMI2 for @c _mm256_maskz_compress_epi8. */
-#if STRINGZILLA_ARCH_X8664_
-#if STRINGZILLA_TARGET_ICELAKE
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(                                                                                   \
     __attribute__((                                                                                             \
@@ -64,6 +66,8 @@ STRINGZILLA_INLINE int sz_u64x4_contains_collisions_haswell_(__m256i values_u64x
     int matches_mask = _mm256_movemask_epi8(cmp_u64x4);
     return matches_mask;
 }
+
+#if STRINGZILLA_TARGET_ICELAKE
 
 STRINGZILLA_API sz_status_t sz_intersect_icelake(                                    //
     sz_strings_view_t const *first_strings, sz_strings_view_t const *second_strings, //
@@ -457,16 +461,19 @@ STRINGZILLA_API sz_status_t sz_intersect_icelake(                               
     return sz_success_k;
 }
 
+#endif // STRINGZILLA_TARGET_ICELAKE
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_ICELAKE
-#endif // STRINGZILLA_ARCH_X8664_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_X8664_ICELAKE_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #endif // STRINGZILLA_INTERSECT_ICELAKE_H_

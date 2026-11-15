@@ -10,9 +10,13 @@
 #define STRINGZILLA_COMPARE_LOONGSONASX_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_LOONGARCH64_
+#if STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+
 #include "stringzilla/compare/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -21,8 +25,6 @@ extern "C" {
  *  word 4 for the high one. Recombining them yields the same 32-bit mask @c _mm256_movemask_epi8
  *  of AVX2 would produce, so the byte order matches and @c ctz and @c clz index bytes
  *  identically to the Haswell backend. */
-#if STRINGZILLA_ARCH_LOONGARCH64_
-#if STRINGZILLA_TARGET_LOONGSONASX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("lasx"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -51,6 +53,8 @@ STRINGZILLA_INLINE sz_ordering_t sz_order_loongsonasx_(sz_cptr_t a, sz_size_t a_
     //! https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md#general-performance-observations
     return sz_order_serial_(a, a_length, b, b_length);
 }
+
+#if STRINGZILLA_TARGET_LOONGSONASX
 
 STRINGZILLA_API sz_status_t sz_order_loongsonasx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
                                                  sz_ordering_t *ordering, sz_stream_t stream) {
@@ -120,16 +124,19 @@ STRINGZILLA_API sz_status_t sz_equal_loongsonasx(sz_cptr_t a, sz_cptr_t b, sz_si
     return sz_success_k;
 }
 
+#endif // STRINGZILLA_TARGET_LOONGSONASX
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_LOONGSONASX
-#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
 #endif // STRINGZILLA_COMPARE_LOONGSONASX_H_

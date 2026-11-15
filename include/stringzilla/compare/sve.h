@@ -10,15 +10,17 @@
 #define STRINGZILLA_COMPARE_SVE_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/compare/serial.h"
-#include "stringzilla/compare/neon.h" // `sz_equal_neon_`
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #if STRINGZILLA_ARCH_ARM64_
 #if STRINGZILLA_ARCH_ARM64_SVE_
+
+#include "stringzilla/compare/serial.h"
+#include "stringzilla/compare/neon.h" // `sz_equal_neon_`
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -72,11 +74,12 @@ STRINGZILLA_API sz_status_t sz_order_sve(sz_cptr_t a, sz_size_t a_length, sz_cpt
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_ARM64_SVE_
 #endif // STRINGZILLA_ARCH_ARM64_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_COMPARE_SVE_H_

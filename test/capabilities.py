@@ -1,5 +1,5 @@
-"""Capability tests: the sz.{cpu,cuda,rocm,metal}_capabilities_{detected,compiled,enabled} producers,
-the sz.{cuda,rocm,metal}_stream_{init,free} producers, cpu_configure_thread, Strings.copy and
+"""Capability tests: the sz.capabilities_{detected,compiled,enabled}_{cpu,cuda,rocm,metal} producers,
+the sz.stream_{init,free}_{cuda,rocm,metal} producers, configure_thread_cpu, Strings.copy and
 synchronize.
 
 Capabilities are reported along two independent axes, `detected` (what a device can execute) and
@@ -73,9 +73,9 @@ def test_capability_members_are_the_cpu_capabilities():
 def test_enabled_is_both_detected_and_compiled():
     """What dispatch uses by default is what this CPU runs and this build holds, serial included."""
     detected, compiled, enabled = (
-        sz.cpu_capabilities_detected(),
-        sz.cpu_capabilities_compiled(),
-        sz.cpu_capabilities_enabled(),
+        sz.capabilities_detected_cpu(),
+        sz.capabilities_compiled_cpu(),
+        sz.capabilities_enabled_cpu(),
     )
     assert enabled & ~(detected | sz.Capability.SERIAL) == 0, "enabled never exceeds what the CPU detects"
     assert enabled & ~compiled == 0, "enabled never exceeds what the build compiled"
@@ -89,7 +89,7 @@ def test_masks_past_this_cpu_are_clamped():
     would point dispatch at instructions the hardware refuses to execute.
     """
     text = "The quick brown fox jumps over the lazy dog" * 8
-    everything = sz.cpu_capabilities_detected() | sz.cpu_capabilities_compiled()
+    everything = sz.capabilities_detected_cpu() | sz.capabilities_compiled_cpu()
     assert sz.find(text, "lazy", capabilities=everything) == text.find("lazy")
     assert sz.hash(text, capabilities=everything) == sz.hash(text)
 
@@ -107,10 +107,10 @@ def test_compiled_covers_the_baseline_this_machine_detects():
     baseline = baseline_for_this_machine()
     if baseline is None:
         pytest.skip(f"no SIMD baseline is guaranteed on {platform.machine()}")
-    if baseline not in sz.cpu_capabilities_detected():
+    if baseline not in sz.capabilities_detected_cpu():
         pytest.skip(f"this CPU does not report {baseline.name}; nothing to verify")
 
-    assert baseline in sz.cpu_capabilities_compiled(), (
+    assert baseline in sz.capabilities_compiled_cpu(), (
         f"this CPU reports {baseline.name} but no {baseline.name} kernels were compiled in - "
         f"the ISA probes failed at build time and this build is scalar"
     )
@@ -119,7 +119,7 @@ def test_compiled_covers_the_baseline_this_machine_detects():
 def test_configure_thread_prepares_another_thread():
     """A thread other than the importing one prepares itself for the CPU's enabled capabilities."""
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        assert pool.submit(sz.cpu_configure_thread, sz.cpu_capabilities_enabled()).result() is None
+        assert pool.submit(sz.configure_thread_cpu, sz.capabilities_enabled_cpu()).result() is None
 
 
 def test_capabilities_keyword_narrows_one_call():
@@ -128,10 +128,10 @@ def test_capabilities_keyword_narrows_one_call():
     The keyword keeps no serial fallback, so a mask of no capability finds no kernel.
     """
     text = "The quick brown fox jumps over the lazy dog" * 8
-    enabled = sz.cpu_capabilities_enabled()
+    enabled = sz.capabilities_enabled_cpu()
     assert sz.find(text, "lazy", capabilities=sz.Capability.SERIAL) == sz.find(text, "lazy") == text.find("lazy")
     assert sz.hash(text, capabilities=sz.Capability.SERIAL) == sz.hash(text)
-    assert sz.cpu_capabilities_enabled() == enabled
+    assert sz.capabilities_enabled_cpu() == enabled
     with pytest.raises(LookupError):
         sz.find(text, "lazy", capabilities=sz.Capability(0))
 
@@ -139,7 +139,7 @@ def test_capabilities_keyword_narrows_one_call():
 def test_engine_capabilities_narrow_the_cpu():
     """A CPU engine's `capabilities=` is clamped to what this CPU runs, and it takes no stream."""
     queries = sz.Strings(["kitten", "saturday"])
-    everything = sz.cpu_capabilities_detected() | sz.cpu_capabilities_compiled()
+    everything = sz.capabilities_detected_cpu() | sz.capabilities_compiled_cpu()
     for capabilities in (sz.Capability.SERIAL, everything):
         distances = memoryview(bytearray(4 * 8)).cast("Q", (2, 2))
         sz.LevenshteinEngine(queries, capabilities=capabilities).distances(queries, distances)
@@ -156,12 +156,12 @@ def test_gpu_producers_report_clamped_capabilities():
     """Each GPU vendor counts its devices, or raises without one, enables what is both detected and compiled,
     and makes a stream on its last device that synchronizes and frees."""
     for vendor in ("cuda", "rocm", "metal"):
-        count_devices = getattr(sz, f"{vendor}_count_devices")
-        detected = getattr(sz, f"{vendor}_capabilities_detected")
-        compiled = getattr(sz, f"{vendor}_capabilities_compiled")
-        enabled = getattr(sz, f"{vendor}_capabilities_enabled")
-        stream_init = getattr(sz, f"{vendor}_stream_init")
-        stream_free = getattr(sz, f"{vendor}_stream_free")
+        count_devices = getattr(sz, f"count_devices_{vendor}")
+        detected = getattr(sz, f"capabilities_detected_{vendor}")
+        compiled = getattr(sz, f"capabilities_compiled_{vendor}")
+        enabled = getattr(sz, f"capabilities_enabled_{vendor}")
+        stream_init = getattr(sz, f"stream_init_{vendor}")
+        stream_free = getattr(sz, f"stream_free_{vendor}")
         with pytest.raises(ValueError):
             enabled(-1)
         with pytest.raises(ValueError):
@@ -177,7 +177,7 @@ def test_gpu_producers_report_clamped_capabilities():
         assert count > 0
         with pytest.raises(RuntimeError):
             enabled(count)
-        assert enabled(count - 1) == detected(count - 1) & compiled()
+        assert enabled(count - 1) == detected(count - 1) & compiled(count - 1)
         stream = stream_init(count - 1)
         assert sz.synchronize(enabled(count - 1), stream) is None and stream_free(stream) is None
 
@@ -185,7 +185,7 @@ def test_gpu_producers_report_clamped_capabilities():
 def test_cpu_copies_read_like_their_strings():
     """A tape copied for the CPU reads like the strings it came from, on the host and in an engine."""
     texts = ["kitten", "", "sitting"]
-    capabilities = sz.cpu_capabilities_enabled()
+    capabilities = sz.capabilities_enabled_cpu()
     tape = sz.Strings(texts).copy(capabilities)
     assert tape == sz.Strings(texts) and [str(text) for text in tape[1:]] == texts[1:]
     queries = sz.Strings(["kitten"])
@@ -298,7 +298,7 @@ def test_engine_verbs_release_the_gil(rng):
 def cuda_capabilities_or_skip():
     """The capabilities of CUDA device 0, skipping the test where no CUDA device answers."""
     try:
-        return sz.cuda_capabilities_enabled(0)
+        return sz.capabilities_enabled_cuda(0)
     except RuntimeError:
         pytest.skip("no CUDA device answers here")
 

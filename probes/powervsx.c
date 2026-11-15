@@ -5,7 +5,7 @@
  *  @brief Whether the toolchain builds the Power VSX kernels, the IBM POWER9 vector kit.
  */
 #define STRINGZILLA_HEADER_ONLY 1
-#define STRINGZILLA_TARGET_POWERVSX 1
+#define STRINGZILLA_ARCH_PPC64_POWERVSX_ 1
 #include "stringzilla/find/powervsx.h"
 #include "stringzilla/cipher/powervsx.h" // Needs the POWER9 half of `altivec.h`, closed to Clang at the floor
 

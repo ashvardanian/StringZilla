@@ -8,15 +8,17 @@
 #define STRINGZILLA_UTF8_RUNES_HASWELL_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/compare/westmere.h" // `sz_load_short_westmere_`
-#include "stringzilla/utf8_runes/serial.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_ARCH_X8664_HASWELL_
+
+#include "stringzilla/compare/westmere.h" // `sz_load_short_westmere_`
+#include "stringzilla/utf8_runes/serial.h"
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,popcnt"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -1050,7 +1052,6 @@ STRINGZILLA_INLINE sz_status_t sz_utf8_count_run_haswell_(sz_strings_view_t cons
  *  classification plus a local pair decision. Any stateful rule (WB4/6/7/7a/11/12/15/16/3c),
  *  non-ASCII, or window-edge position defers to @c sz_utf8_is_word_boundary_serial, keeping the
  *  output byte-exact versus serial. */
-
 #if STRINGZILLA_TARGET_HASWELL
 
 STRINGZILLA_API sz_status_t sz_utf8_count_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *count,
@@ -1107,11 +1108,12 @@ STRINGZILLA_API sz_status_t sz_utf8_decode_haswell( //
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_X8664_HASWELL_
 #endif // STRINGZILLA_ARCH_X8664_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_UTF8_RUNES_HASWELL_H_

@@ -10,22 +10,25 @@
 #define STRINGZILLA_HASH_SVE2AES_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_ARM64_
+#if STRINGZILLA_ARCH_ARM64_SVE2AES_
+
 #include "stringzilla/hash/serial.h"
 #include "stringzilla/hash/neonaes.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_ARM64_
-#if STRINGZILLA_TARGET_SVE2AES
-/* `+crypto` matches `hash/neonaes.h`, so its always-inline helpers inline into these kernels. */
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve+sve2+sve2-aes+crypto"))), apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("+sve+sve2+sve2-aes+crypto")
 #endif
+
+/* `+crypto` matches `hash/neonaes.h`, so its always-inline helpers inline into these kernels. */
 
 /**
  *  @brief Emulates the Intel's AES-NI @c AESENC instruction with Arm SVE2.
@@ -85,6 +88,7 @@ STRINGZILLA_INLINE sz_u64_t sz_hash_upto16_sve2aes_(sz_cptr_t text, sz_size_t le
  *
  *  SVE2 comes with optional AES extensions, but they yield no performance improvement at all, even
  *  for wider registers, because of the added cost and complexity of dealing with predicates. */
+#if STRINGZILLA_TARGET_SVE2AES
 
 STRINGZILLA_API sz_status_t sz_hash_state_init_sve2aes(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
@@ -120,16 +124,19 @@ STRINGZILLA_API sz_status_t sz_fill_random_sve2aes(sz_ptr_t target, sz_size_t le
     return sz_success_k;
 }
 
+#endif // STRINGZILLA_TARGET_SVE2AES
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_SVE2AES
-#endif // STRINGZILLA_ARCH_ARM64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_ARM64_SVE2AES_
+#endif // STRINGZILLA_ARCH_ARM64_
 
 #endif // STRINGZILLA_HASH_SVE2AES_H_

@@ -17,16 +17,18 @@
 #define STRINGZILLA_UTF8_NORM_ICELAKE_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_ICELAKE_
+
 #include "stringzilla/utf8_norm/serial.h"
 #include "stringzilla/utf8_norm/skylake.h"         // reuses `sz_utf8_norm_classify_avx512_`
 #include "stringzilla/utf8_uncased_fold/icelake.h" // `sz_utf8_uncased_fold_icelake_`
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_X8664_
-#if STRINGZILLA_TARGET_ICELAKE
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(                                                                                  \
     __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,evex512"))), \
@@ -56,6 +58,8 @@ STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_norm_classify_icelake_(sz_cptr_t text, s
     return sz_utf8_norm_classify_avx512_(text, length, form, &sz_utf8_norm_lead_classify_vbmi_icelake_);
 }
 
+#if STRINGZILLA_TARGET_ICELAKE
+
 STRINGZILLA_API sz_status_t sz_utf8_norm_icelake(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
                                                  sz_ptr_t target, sz_size_t *target_length, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
@@ -73,16 +77,19 @@ STRINGZILLA_API sz_status_t sz_utf8_find_denormalized_icelake(sz_cptr_t source, 
     return sz_success_k;
 }
 
+#endif // STRINGZILLA_TARGET_ICELAKE
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_ICELAKE
-#endif // STRINGZILLA_ARCH_X8664_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_X8664_ICELAKE_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #endif // STRINGZILLA_UTF8_NORM_ICELAKE_H_

@@ -10,11 +10,15 @@
 #define STRINGZILLA_UTF8_UNCASED_RVV_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_RISCV64_
+#if STRINGZILLA_ARCH_RISCV64_RVV_
+
 #include "stringzilla/find/rvv.h"              // `sz_find_rvv_`
 #include "stringzilla/utf8_uncased_fold/rvv.h" // `sz_utf8_fold_c456_deltas_lut_`
 #include "stringzilla/utf8_uncased/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -23,8 +27,6 @@ extern "C" {
  *  dropping matches, so they are @c STRINGZILLA_OUTLINED_ to keep their out-of-line shape.
  *  Toolchain artifact: -O1 still drops matches even out-of-line; -O0, -O2, and -O3 are byte-exact
  *  with serial, and StringZilla ships -O2 or -O3. */
-#if STRINGZILLA_ARCH_RISCV64_
-#if STRINGZILLA_ARCH_RISCV64_RVV_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("arch=+v"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -1041,11 +1043,12 @@ STRINGZILLA_API sz_status_t sz_utf8_find_cased_rvv(sz_cptr_t text, sz_size_t len
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_RISCV64_RVV_
 #endif // STRINGZILLA_ARCH_RISCV64_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_UTF8_UNCASED_RVV_H_

@@ -151,142 +151,6 @@ STRINGZILLA_DEVICE void sz_levenshtein_sweep_simt_(
     }
 }
 
-/*  One entry point per word count, each passing its own literal, so every query length gets its
- *  own register budget - thirty-eight registers at one word against ninety-six at sixteen, which
- *  one shared kernel would have to spend on every launch, and each vendor's launcher picks one. */
-#if STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_AMPERE || STRINGZILLA_TARGET_BLACKWELL || STRINGZILLA_TARGET_ROCM || \
-    STRINGZILLA_TARGET_CDNA3 || STRINGZILLA_TARGET_CDNA4 || STRINGZILLA_TARGET_CDNA5
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_w1_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 1,
-                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_w2_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 2,
-                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_w3_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 3,
-                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_w4_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 4,
-                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_w5_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 5,
-                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_w6_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 6,
-                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_w7_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 7,
-                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_w8_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 8,
-                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_w9_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 9,
-                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_w10_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 10,
-                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_w11_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 11,
-                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_w12_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 12,
-                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_w13_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 13,
-                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_w14_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 14,
-                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_w15_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 15,
-                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_w16_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 16,
-                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-#endif // STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_AMPERE || STRINGZILLA_TARGET_BLACKWELL || STRINGZILLA_TARGET_ROCM
-
 #pragma endregion Myers Threaded
 
 #pragma region Myers Groups
@@ -826,22 +690,6 @@ STRINGZILLA_DEVICE void sz_levenshtein_lanes_sweep_simt_(sz_levenshtein_engine_t
     }
 }
 
-/*  One entry point per lane width, each passing its own literals, for the reason the threaded rung
- *  states: a width the compiler cannot see turns the lane arrays into local memory. */
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_u8x4_simt_kernel_(sz_levenshtein_engine_t engine, sz_u32_t const *order,
-                                               sz_strings_view_t candidates, sz_size_t *distances,
-                                               sz_size_t distances_stride, sz_size_t bound) {
-    sz_levenshtein_lanes_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, 8, 4);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_u16x2_simt_kernel_(sz_levenshtein_engine_t engine, sz_u32_t const *order,
-                                                sz_strings_view_t candidates, sz_size_t *distances,
-                                                sz_size_t distances_stride, sz_size_t bound) {
-    sz_levenshtein_lanes_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, 16, 2);
-}
-
 #pragma endregion Myers Byte Lanes
 
 #pragma region Myers UTF 8
@@ -909,141 +757,6 @@ STRINGZILLA_DEVICE void sz_levenshtein_sweep_utf8_simt_(
         sz_levenshtein_u64x1_init_serial(&state, verticals, words, &query);
     }
 }
-
-/*  One rune entry point per word count, each passing its own literal, for the reason the byte tier
- *  states: a word count the compiler cannot see spills the verticals to local memory. */
-#if STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_AMPERE || STRINGZILLA_TARGET_BLACKWELL || STRINGZILLA_TARGET_ROCM || \
-    STRINGZILLA_TARGET_CDNA3 || STRINGZILLA_TARGET_CDNA4 || STRINGZILLA_TARGET_CDNA5
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_utf8_w1_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 1,
-                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_utf8_w2_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 2,
-                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_utf8_w3_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 3,
-                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_utf8_w4_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 4,
-                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_utf8_w5_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 5,
-                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_utf8_w6_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 6,
-                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_utf8_w7_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 7,
-                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_utf8_w8_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 8,
-                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_utf8_w9_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 9,
-                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_utf8_w10_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 10,
-                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_utf8_w11_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 11,
-                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_utf8_w12_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 12,
-                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_utf8_w13_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 13,
-                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_utf8_w14_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 14,
-                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_utf8_w15_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 15,
-                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
-    sz_levenshtein_distances_utf8_w16_simt_kernel_( //
-        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
-    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 16,
-                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
-}
-
-#endif // STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_AMPERE || STRINGZILLA_TARGET_BLACKWELL || STRINGZILLA_TARGET_ROCM
 
 #pragma endregion Myers UTF 8
 
@@ -1211,52 +924,6 @@ STRINGZILLA_DEVICE void sz_levenshtein_query_prepare_utf8_simt_(sz_cptr_t text, 
  *  the whole build. */
 enum { sz_levenshtein_masks_threads_simt_k = sz_levenshtein_byte_classes_k };
 
-/**
- *  @brief Builds one byte query's match masks and class map per grid row, on the device itself.
- *
- *  The passes are @ref sz_levenshtein_query_prepare 's: flag the byte values the query holds, hand
- *  them dense classes in byte order, give the row past them to every byte the query lacks, then
- *  set one bit per position in its class's row. One block per query, so the ranks walk shared
- *  memory rather than the grid, and the planes arrive zeroed from the memset the stream runs ahead
- *  of this launch.
- *
- *  @param[in] first The batch index of grid row zero, since the query axis is cut at the
- *      grid's own ceiling.
- */
-static __global__ void __launch_bounds__(sz_levenshtein_masks_threads_simt_k)
-    sz_levenshtein_masks_simt_kernel_(sz_levenshtein_engine_t engine, sz_string_view_t const *texts, sz_size_t first) {
-    __shared__ sz_u32_t ranks[sz_levenshtein_byte_classes_k];
-    __shared__ sz_u32_t classes;
-    sz_size_t const query = first + (sz_size_t)blockIdx.y;
-    sz_cptr_t const text = texts[query].start;
-    sz_size_t const length = texts[query].length;
-    sz_size_t const stride = sz_levenshtein_query_stride(length);
-    sz_u64_t *const masks = (sz_u64_t *)engine.masks + engine.masks_offsets[query];
-    sz_u8_t *const byte_to_class = (sz_u8_t *)engine.symbol_to_class + query * sz_levenshtein_byte_classes_k;
-
-    // The block is exactly as wide as the byte values, so a thread owns one of them throughout.
-    ranks[threadIdx.x] = 0;
-    __syncthreads();
-    for (sz_size_t position = threadIdx.x; position < length; position += blockDim.x)
-        ranks[(sz_u8_t)text[position]] = 1;
-    __syncthreads();
-    // One thread ranks the flags: the walk is 256 shared-memory steps, and every pass below needs all of them.
-    if (threadIdx.x == 0) {
-        sz_u32_t distinct = 0;
-        for (sz_size_t byte = 0; byte != sz_levenshtein_byte_classes_k; ++byte)
-            if (ranks[byte]) ranks[byte] = ++distinct;
-        classes = distinct < sz_levenshtein_byte_classes_k ? distinct + 1 : sz_levenshtein_byte_classes_k;
-    }
-    __syncthreads();
-    byte_to_class[threadIdx.x] = ranks[threadIdx.x] ? (sz_u8_t)(ranks[threadIdx.x] - 1) : (sz_u8_t)(classes - 1);
-    // A thread owns one word of every class's row, so no two of them ever fold into the same entry.
-    for (sz_size_t word = threadIdx.x; word * 64 < length; word += blockDim.x) {
-        sz_size_t const start = word * 64, end = sz_min_of_two(start + 64, length);
-        for (sz_size_t position = start; position != end; ++position)
-            masks[(sz_size_t)(ranks[(sz_u8_t)text[position]] - 1) * stride + word] |= (sz_u64_t)1 << (position & 63);
-    }
-}
-
 #pragma endregion Myers Engine
 
 /*  A block holds its threads until its slowest candidate is done, so a round draws its candidates
@@ -1278,21 +945,6 @@ STRINGZILLA_DEVICE sz_size_t sz_levenshtein_length_key_simt_(sz_size_t length) {
         ascending = octave * 4 + ((length >> (octave - 2)) & 3);
     }
     return sz_levenshtein_length_keys_simt_k - 1 - ascending;
-}
-
-/** Adds the round's candidates per length key into @p counts, which the stream zeroed, tallying
- *  in shared memory and adding once per key and block. */
-static __global__ void __launch_bounds__(sz_levenshtein_length_keys_simt_k)
-    sz_levenshtein_length_counts_simt_kernel_(sz_strings_view_t candidates, sz_size_t *counts) {
-    __shared__ sz_u32_t tally[sz_levenshtein_length_keys_simt_k];
-    tally[threadIdx.x] = 0;
-    __syncthreads();
-    for (sz_size_t index = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; index < candidates.count;
-         index += (sz_size_t)gridDim.x * blockDim.x)
-        atomicAdd(&tally[sz_levenshtein_length_key_simt_(sz_strings_length_simt_(candidates, index))], 1u);
-    __syncthreads();
-    if (tally[threadIdx.x])
-        atomicAdd((unsigned long long *)(counts + threadIdx.x), (unsigned long long)tally[threadIdx.x]);
 }
 
 /** Writes every candidate's index at the next free position of its key, from the @p cursors the
@@ -1624,10 +1276,49 @@ typedef struct sz_levenshtein_long_layout_simt_t {
     sz_bool_t tiled;
 } sz_levenshtein_long_layout_simt_t;
 
-static sz_levenshtein_long_layout_simt_t sz_levenshtein_long_layout_simt_(sz_levenshtein_symbol_t symbol,
-                                                                          sz_levenshtein_length_bucket_t queries,
-                                                                          sz_levenshtein_length_bucket_t candidates,
-                                                                          sz_size_t resident) {
+/** Candidate index ranges passed by value to the device counting sort. */
+typedef struct sz_levenshtein_candidate_buckets_simt_t {
+    sz_size_t offsets[sz_levenshtein_length_buckets_k];
+} sz_levenshtein_candidate_buckets_simt_t;
+
+/** One slice of the bucketed cross-product, retaining original output indices. */
+typedef struct sz_levenshtein_long_arguments_simt_t {
+    sz_size_t query_first, candidate_first, candidate_count, pair_count, distances_stride, bound;
+    sz_size_t scratch_stride, frontier_cells;
+    sz_u32_t const *query_order;
+    sz_size_t const *candidate_order;
+    sz_size_t const *query_offsets;
+    sz_cptr_t query_text;
+} sz_levenshtein_long_arguments_simt_t;
+
+/** One pair of the slice per grid row, the shorter text of the two along the wavefront's rows,
+ *  with the vendor's steps @ref sz_levenshtein_tiled_simt_ takes. */
+STRINGZILLA_DEVICE void sz_levenshtein_tiled_batch_simt_(
+    sz_levenshtein_engine_t engine, sz_strings_view_t candidates, sz_size_t *distances, sz_ptr_t workspace,
+    sz_levenshtein_long_arguments_simt_t batch, unsigned warp_stride, sz_u32_t (*shuffle_up)(sz_u32_t, unsigned),
+    void (*publish)(sz_u32_t *, sz_u32_t), void (*await)(sz_u32_t const *, sz_u32_t)) {
+    sz_size_t const pair = blockIdx.y;
+    sz_size_t const query_index = batch.query_order[batch.query_first + pair / batch.candidate_count];
+    sz_size_t const position = batch.candidate_first + pair % batch.candidate_count;
+    sz_size_t const candidate = batch.candidate_order ? batch.candidate_order[position] : position;
+    sz_size_t const query_length = engine.lengths[query_index];
+    sz_size_t const length = sz_strings_length_simt_(candidates, candidate);
+    sz_cptr_t const query = batch.query_text + batch.query_offsets[query_index];
+    sz_cptr_t const text = sz_strings_start_simt_(candidates, candidate);
+    sz_bool_t const query_shorter = query_length <= length ? sz_true_k : sz_false_k;
+    sz_u32_t *const frontier = (sz_u32_t *)(workspace + pair * batch.scratch_stride);
+    sz_levenshtein_tiled_simt_(query_shorter ? query : text, (sz_u32_t)(query_shorter ? query_length : length),
+                               query_shorter ? text : query, (sz_u32_t)(query_shorter ? length : query_length),
+                               frontier, frontier + batch.frontier_cells,
+                               distances + query_index * batch.distances_stride + candidate, batch.bound, warp_stride,
+                               shuffle_up, publish, await);
+}
+
+#pragma endregion Tiled
+
+STRINGZILLA_INLINE sz_levenshtein_long_layout_simt_t sz_levenshtein_long_layout_simt_(
+    sz_levenshtein_symbol_t symbol, sz_levenshtein_length_bucket_t queries, sz_levenshtein_length_bucket_t candidates,
+    sz_size_t resident) {
     sz_levenshtein_long_layout_simt_t layout = {0, 0, 0, 0, sz_false_k};
     layout.tiled = sz_levenshtein_long_tiled_simt_(symbol, queries.length_max, candidates.length_max);
     if (layout.tiled) {
@@ -1651,14 +1342,71 @@ static sz_levenshtein_long_layout_simt_t sz_levenshtein_long_layout_simt_(sz_lev
     return layout;
 }
 
-/** Candidate index ranges passed by value to the device counting sort. */
-typedef struct sz_levenshtein_candidate_buckets_simt_t {
-    sz_size_t offsets[sz_levenshtein_length_buckets_k];
-} sz_levenshtein_candidate_buckets_simt_t;
+/**
+ *  @brief Builds one byte query's match masks and class map per grid row, on the device itself.
+ *
+ *  The passes are @ref sz_levenshtein_query_prepare 's: flag the byte values the query holds, hand
+ *  them dense classes in byte order, give the row past them to every byte the query lacks, then
+ *  set one bit per position in its class's row. One block per query, so the ranks walk shared
+ *  memory rather than the grid, and the planes arrive zeroed from the memset the stream runs ahead
+ *  of this launch.
+ *
+ *  @param[in] first The batch index of grid row zero, since the query axis is cut at the
+ *      grid's own ceiling.
+ */
+STRINGZILLA_DEVICE void sz_levenshtein_masks_simt_(sz_levenshtein_engine_t engine, sz_string_view_t const *texts,
+                                                   sz_size_t first) {
+    __shared__ sz_u32_t ranks[sz_levenshtein_byte_classes_k];
+    __shared__ sz_u32_t classes;
+    sz_size_t const query = first + (sz_size_t)blockIdx.y;
+    sz_cptr_t const text = texts[query].start;
+    sz_size_t const length = texts[query].length;
+    sz_size_t const stride = sz_levenshtein_query_stride(length);
+    sz_u64_t *const masks = (sz_u64_t *)engine.masks + engine.masks_offsets[query];
+    sz_u8_t *const byte_to_class = (sz_u8_t *)engine.symbol_to_class + query * sz_levenshtein_byte_classes_k;
 
-static __global__ void __launch_bounds__(sz_levenshtein_long_threads_simt_k)
-    sz_levenshtein_order_simt_kernel_(sz_strings_view_t candidates, sz_levenshtein_candidate_buckets_simt_t buckets,
-                                      sz_size_t *cursors, sz_size_t *order) {
+    // The block is exactly as wide as the byte values, so a thread owns one of them throughout.
+    ranks[threadIdx.x] = 0;
+    __syncthreads();
+    for (sz_size_t position = threadIdx.x; position < length; position += blockDim.x)
+        ranks[(sz_u8_t)text[position]] = 1;
+    __syncthreads();
+    // One thread ranks the flags: the walk is 256 shared-memory steps, and every pass
+    // below needs all of them.
+    if (threadIdx.x == 0) {
+        sz_u32_t distinct = 0;
+        for (sz_size_t byte = 0; byte != sz_levenshtein_byte_classes_k; ++byte)
+            if (ranks[byte]) ranks[byte] = ++distinct;
+        classes = distinct < sz_levenshtein_byte_classes_k ? distinct + 1 : sz_levenshtein_byte_classes_k;
+    }
+    __syncthreads();
+    byte_to_class[threadIdx.x] = ranks[threadIdx.x] ? (sz_u8_t)(ranks[threadIdx.x] - 1) : (sz_u8_t)(classes - 1);
+    // A thread owns one word of every class's row, so no two of them ever fold into the same entry.
+    for (sz_size_t word = threadIdx.x; word * 64 < length; word += blockDim.x) {
+        sz_size_t const start = word * 64, end = sz_min_of_two(start + 64, length);
+        for (sz_size_t position = start; position != end; ++position)
+            masks[(sz_size_t)(ranks[(sz_u8_t)text[position]] - 1) * stride + word] |= (sz_u64_t)1 << (position & 63);
+    }
+}
+
+/** Adds the round's candidates per length key into @p counts, which the stream zeroed, tallying
+ *  in shared memory and adding once per key and block. */
+STRINGZILLA_DEVICE void sz_levenshtein_length_counts_simt_(sz_strings_view_t candidates, sz_size_t *counts) {
+    __shared__ sz_u32_t tally[sz_levenshtein_length_keys_simt_k];
+    tally[threadIdx.x] = 0;
+    __syncthreads();
+    for (sz_size_t index = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; index < candidates.count;
+         index += (sz_size_t)gridDim.x * blockDim.x)
+        atomicAdd(&tally[sz_levenshtein_length_key_simt_(sz_strings_length_simt_(candidates, index))], 1u);
+    __syncthreads();
+    if (tally[threadIdx.x])
+        atomicAdd((unsigned long long *)(counts + threadIdx.x), (unsigned long long)tally[threadIdx.x]);
+}
+
+/** Scatters @p candidates into their length buckets, at @p cursors past each bucket's offset. */
+STRINGZILLA_DEVICE void sz_levenshtein_order_simt_(sz_strings_view_t candidates,
+                                                   sz_levenshtein_candidate_buckets_simt_t buckets, sz_size_t *cursors,
+                                                   sz_size_t *order) {
     for (sz_size_t index = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; index < candidates.count;
          index += (sz_size_t)gridDim.x * blockDim.x) {
         sz_size_t const length = sz_strings_length_simt_(candidates, index);
@@ -1669,19 +1417,10 @@ static __global__ void __launch_bounds__(sz_levenshtein_long_threads_simt_k)
     }
 }
 
-/** One slice of the bucketed cross-product, retaining original output indices. */
-typedef struct sz_levenshtein_long_arguments_simt_t {
-    sz_size_t query_first, candidate_first, candidate_count, pair_count, distances_stride, bound;
-    sz_size_t scratch_stride, frontier_cells;
-    sz_u32_t const *query_order;
-    sz_size_t const *candidate_order;
-    sz_size_t const *query_offsets;
-    sz_cptr_t query_text;
-} sz_levenshtein_long_arguments_simt_t;
-
-static __global__ void __launch_bounds__(sz_levenshtein_long_threads_simt_k)
-    sz_levenshtein_long_simt_kernel_(sz_levenshtein_engine_t engine, sz_strings_view_t candidates, sz_size_t *distances,
-                                     sz_ptr_t workspace, sz_levenshtein_long_arguments_simt_t batch) {
+/** One thread per long pair, stepping the serial Myers verticals kept in @p workspace . */
+STRINGZILLA_DEVICE void sz_levenshtein_long_simt_(sz_levenshtein_engine_t engine, sz_strings_view_t candidates,
+                                                  sz_size_t *distances, sz_ptr_t workspace,
+                                                  sz_levenshtein_long_arguments_simt_t batch) {
     sz_size_t const pair = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (pair >= batch.pair_count) return;
     sz_size_t const query_index = batch.query_order[batch.query_first + pair / batch.candidate_count];
@@ -1714,31 +1453,6 @@ static __global__ void __launch_bounds__(sz_levenshtein_long_threads_simt_k)
     }
     distances[query_index * batch.distances_stride + candidate] = sz_levenshtein_bounded_(score, batch.bound);
 }
-
-/** One pair of the slice per grid row, the shorter text of the two along the wavefront's rows,
- *  with the vendor's steps @ref sz_levenshtein_tiled_simt_ takes. */
-STRINGZILLA_DEVICE void sz_levenshtein_tiled_batch_simt_(
-    sz_levenshtein_engine_t engine, sz_strings_view_t candidates, sz_size_t *distances, sz_ptr_t workspace,
-    sz_levenshtein_long_arguments_simt_t batch, unsigned warp_stride, sz_u32_t (*shuffle_up)(sz_u32_t, unsigned),
-    void (*publish)(sz_u32_t *, sz_u32_t), void (*await)(sz_u32_t const *, sz_u32_t)) {
-    sz_size_t const pair = blockIdx.y;
-    sz_size_t const query_index = batch.query_order[batch.query_first + pair / batch.candidate_count];
-    sz_size_t const position = batch.candidate_first + pair % batch.candidate_count;
-    sz_size_t const candidate = batch.candidate_order ? batch.candidate_order[position] : position;
-    sz_size_t const query_length = engine.lengths[query_index];
-    sz_size_t const length = sz_strings_length_simt_(candidates, candidate);
-    sz_cptr_t const query = batch.query_text + batch.query_offsets[query_index];
-    sz_cptr_t const text = sz_strings_start_simt_(candidates, candidate);
-    sz_bool_t const query_shorter = query_length <= length ? sz_true_k : sz_false_k;
-    sz_u32_t *const frontier = (sz_u32_t *)(workspace + pair * batch.scratch_stride);
-    sz_levenshtein_tiled_simt_(query_shorter ? query : text, (sz_u32_t)(query_shorter ? query_length : length),
-                               query_shorter ? text : query, (sz_u32_t)(query_shorter ? length : query_length),
-                               frontier, frontier + batch.frontier_cells,
-                               distances + query_index * batch.distances_stride + candidate, batch.bound, warp_stride,
-                               shuffle_up, publish, await);
-}
-
-#pragma endregion Tiled
 
 #ifdef __cplusplus
 }

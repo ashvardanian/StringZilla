@@ -16,8 +16,8 @@
 extern "C" {
 #endif
 
-/*  StringZilla's own kernels and the block bodies they share, which read @c blockIdx, declare
- *  @c __shared__ and drive the multi-launch rounds each vendor's host side sizes; the walks of
+/*  The bodies each generation's own kernels wrap, which read @c blockIdx, declare @c __shared__
+ *  and drive the multi-launch rounds each vendor's host side sizes; the walks of
  *  <tt>regex/simt.cuh</tt> do the walking. */
 #pragma region Kernels
 
@@ -138,21 +138,8 @@ STRINGZILLA_DEVICE void sz_regex_bound_simt_(sz_regex_engine_t const *engine, sz
     }
 }
 
-/** @ref sz_regex_bound_simt_ over the pass's NFA or positions. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_bound_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
-    sz_regex_bound_simt_(&engine, haystacks, &round, sz_false_k);
-}
-
-/** @ref sz_regex_bound_simt_ over a body's DFA. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_bound_dfa_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                    sz_regex_round_simt_t round) {
-    sz_regex_bound_simt_(&engine, haystacks, &round, sz_true_k);
-}
-
 /**
- *  @brief Settles every wide chunk of the round's flow as @ref sz_regex_prime_pieces_simt_kernel_
+ *  @brief Settles every wide chunk of the round's flow as @ref sz_regex_prime_pieces_simt_
  *      settles priming, one thread per run of unsettled chunks holding one in each thread's share
  *      of the walks.
  *
@@ -237,20 +224,6 @@ STRINGZILLA_DEVICE void sz_regex_bound_pieces_simt_(sz_regex_engine_t const *eng
     }
 }
 
-/** @ref sz_regex_bound_pieces_simt_ over the pass's NFA or positions. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_bound_pieces_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                       sz_regex_round_simt_t round) {
-    sz_regex_bound_pieces_simt_(&engine, haystacks, &round, sz_false_k);
-}
-
-/** @ref sz_regex_bound_pieces_simt_ over a body's DFA. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_bound_pieces_dfa_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                           sz_regex_round_simt_t round) {
-    sz_regex_bound_pieces_simt_(&engine, haystacks, &round, sz_true_k);
-}
-
 /**
  *  @brief Maps the undecided elements each chunk hands on from those its upstream neighbour hands
  *      it, one thread per chunk in each thread's share of the walks.
@@ -311,65 +284,6 @@ STRINGZILLA_DEVICE void sz_regex_affine_simt_(sz_regex_engine_t const *engine, s
     }
 }
 
-/** @ref sz_regex_affine_simt_ over the pass's NFA or positions. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_affine_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
-    sz_regex_affine_simt_(&engine, haystacks, &round, sz_false_k);
-}
-
-/** @ref sz_regex_affine_simt_ over a body's DFA. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_affine_dfa_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                     sz_regex_round_simt_t round) {
-    sz_regex_affine_simt_(&engine, haystacks, &round, sz_true_k);
-}
-
-/**
- *  @brief One round of pointer doubling over the chunks' affine maps: each composes its own with
- *      the maps a round's hops upstream until one is answered.
- *
- *  The last round adds the answer to the chunk's handoff and keeps the handoff of the segment's
- *  last chunk downstream for the segment beyond.
- */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_affine_double_simt_kernel_(sz_regex_round_simt_t round) {
-    sz_bool_t const even = (sz_bool_t)(round.round % 2 == 0), last = (sz_bool_t)(round.round + 1 == round.rounds);
-    sz_bool_t const backward = (sz_bool_t)(round.flow != sz_regex_flow_behind_simt_k);
-    sz_regex_affine_simt_t const *source = even ? round.affines : round.affines_next;
-    sz_regex_affine_simt_t *target = even ? round.affines_next : round.affines;
-    sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
-    sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    for (; chunk < round.chunks_count; chunk += stride) {
-        sz_regex_undecided_simt_t const *const undecided = round.undecided + chunk;
-        sz_u64_t *const handoff = round.handoffs + chunk * round.set_words;
-        sz_regex_affine_simt_t affine;
-        sz_u64_t rows[sz_regex_undecided_simt_k];
-        sz_u32_t hop, row, index;
-        sz_size_t word;
-        if (undecided->count) {
-            affine = source[chunk];
-            for (hop = 1; hop != sz_regex_round_hops_simt_k && affine.target != sz_regex_none_simt_k; ++hop) {
-                sz_regex_affine_simt_t const *const next = source + affine.target;
-                affine.fixed |= sz_regex_apply_simt_(affine.rows, next->fixed);
-                for (row = 0; next->target != sz_regex_none_simt_k && row != next->rows_count; ++row)
-                    rows[row] = sz_regex_apply_simt_(affine.rows, next->rows[row]);
-                for (row = 0; next->target != sz_regex_none_simt_k && row != next->rows_count; ++row)
-                    affine.rows[row] = rows[row];
-                affine.target = next->target, affine.rows_count = next->rows_count;
-            }
-            target[chunk] = affine;
-            if (last)
-                for (index = 0; index != undecided->count; ++index)
-                    if (affine.fixed >> index & 1)
-                        handoff[undecided->indices[index] / 64] |= (sz_u64_t)1 << (undecided->indices[index] % 64);
-        }
-        if (last && chunk == (backward ? 0 : round.chunks_count - 1))
-            for (word = 0; word != round.set_words; ++word)
-                round.handoff_edges[(backward ? round.segment : round.segment + 1) * round.set_words + word] =
-                    handoff[word];
-    }
-}
-
 /** Walks each chunk's pieces from the sets handed to them, one thread per chunk in each thread's
  *  share of the walks, recording where the lookarounds of the round's pass hold. */
 STRINGZILLA_DEVICE void sz_regex_looks_simt_(sz_regex_engine_t const *engine, sz_strings_view_t haystacks,
@@ -410,469 +324,6 @@ STRINGZILLA_DEVICE void sz_regex_looks_simt_(sz_regex_engine_t const *engine, sz
             sz_regex_flow_walk_simt_(engine, round, &pike, &table, &haystack, backward ? end : begin,
                                      backward ? begin : end, sets, sets + stride, sz_true_k, dfa);
         }
-    }
-}
-
-/** @ref sz_regex_looks_simt_ over the pass's NFA or positions. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_looks_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
-    sz_regex_looks_simt_(&engine, haystacks, &round, sz_false_k);
-}
-
-/** @ref sz_regex_looks_simt_ over a body's DFA. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_looks_dfa_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                    sz_regex_round_simt_t round) {
-    sz_regex_looks_simt_(&engine, haystacks, &round, sz_true_k);
-}
-
-/**
- *  @brief Writes the one-byte lookarounds holding at every slot of the round's segment into its
- *      half of the table, negated ones flipped, as @c sz_regex_fill_looks_serial_ does, which the
- *      passes then add their own bits to.
- *
- *  Each block takes a run of slots a tile at a time, its first thread galloping to the haystack of
- *  the tile's first slot from the last tile's, and the threads past that haystack on from it.
- */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_singles_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
-    __shared__ sz_u32_t tables[512];
-    __shared__ sz_size_t tile_index;
-    __shared__ sz_regex_haystack_simt_t tile_haystack;
-    sz_size_t const share = sz_size_divide_round_up(
-                                sz_size_divide_round_up(round.segment_end - round.segment_begin, gridDim.x),
-                                blockDim.x) *
-                            blockDim.x;
-    sz_size_t const low = round.segment_begin + blockIdx.x * share;
-    sz_size_t const high = sz_min_of_two(low + share, round.segment_end);
-    sz_u32_t flipped = 0, index;
-    sz_size_t tile;
-    for (index = threadIdx.x; index < 512; index += blockDim.x) tables[index] = engine.looks_bytes[1 + index];
-    for (index = 0; index != engine.lookarounds_count; ++index)
-        if (engine.lookarounds[index].kind & 1) flipped |= (sz_u32_t)sz_regex_look_lookaround_k << index;
-    flipped &= engine.looks_bytes[0];
-    if (threadIdx.x == 0) tile_index = 0;
-    for (tile = low; tile < high; tile += blockDim.x) {
-        sz_size_t const slot = tile + threadIdx.x;
-        sz_regex_haystack_simt_t haystack;
-        sz_size_t position;
-        __syncthreads();
-        if (threadIdx.x == 0)
-            tile_index = sz_regex_haystack_at_simt_(haystacks, tile, tile_index),
-            tile_haystack = sz_regex_haystack_simt_(haystacks, tile_index);
-        __syncthreads();
-        if (slot >= high) continue;
-        haystack = tile_haystack;
-        if (slot > haystack.first + haystack.length)
-            haystack = sz_regex_haystack_simt_(haystacks, sz_regex_haystack_at_simt_(haystacks, slot, tile_index + 1));
-        position = slot - haystack.first;
-        round.looks.table[slot & round.looks.mask] =
-            ((position ? tables[haystack.text[position - 1]] : 0) |
-             (position != haystack.length ? tables[256 + haystack.text[position]] : 0)) ^
-            flipped;
-    }
-}
-
-/**
- *  @brief Primes every chunk whose last haystack runs past its right edge, one thread per chunk, as
- *      the Metal kernel does.
- *
- *  It leaves the state in @c entries, or, when priming does not collapse within its reach, the
- *  uncollapsed set and where each of its states would leave the chunk, or, when no column narrows
- *  within its reach, a frontier one wider than a priming set holds for the pieces kernel. The first
- *  chunk's entry also lands in the segment's edge, which priming the segment before reads.
- *
- *  A folded walk's chunk edges move to the next unit boundary, where it steps the
- *  folds of whole units.
- */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_prime_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
-    sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.reverse_rows, round.reverse_cells);
-    sz_size_t const width = (sz_size_t)1 << round.chunk_shift, stride = (sz_size_t)gridDim.x * blockDim.x;
-    sz_bool_t const folded = (sz_bool_t)(engine.case_sensitivity != sz_cased_k);
-    sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    for (; chunk < round.chunks_count; chunk += stride) {
-        sz_size_t const low = round.segment_begin + chunk * width;
-        sz_size_t const high = sz_min_of_two(low + width, round.segment_end);
-        sz_regex_frontier_simt_t *const frontier = round.frontiers + chunk;
-        sz_regex_haystack_simt_t haystack;
-        sz_u32_t set[sz_regex_priming_states_simt_k], count, state, index, byte, block;
-        sz_size_t edge, stop, at;
-        frontier->count = 0;
-        if (high == round.slots_count) continue;
-        haystack = sz_regex_haystack_simt_(haystacks, sz_regex_haystack_at_simt_(haystacks, high - 1, 0));
-        if (haystack.first + haystack.length < high) continue;
-        edge = folded ? sz_regex_boundary_simt_(haystack.text, haystack.length, high - haystack.first)
-                      : high - haystack.first - 1;
-        state = folded ? sz_regex_prime_folded_simt_(&engine, &table, round.reverse_images, &haystack, edge,
-                                                     sz_regex_priming_bytes_simt_k, set, &count)
-                       : sz_regex_prime_simt_(&engine, &table, round.reverse_images, &haystack, edge,
-                                              sz_regex_priming_bytes_simt_k, set, &count);
-        round.entries[chunk] = state;
-        if (chunk == 0) round.edges[round.segment] = state;
-        if (state) continue;
-        frontier->count = count ? count : sz_regex_priming_states_simt_k + 1;
-        if (!count) continue;
-
-        // Each state walks the chunk alone, as the chunk left of it depends on where each leaves.
-        for (index = 0; index != count; ++index) frontier->states[index] = set[index];
-        if (haystack.first < low && folded)
-            for (at = edge, stop = sz_regex_boundary_simt_(haystack.text, haystack.length, low - haystack.first);
-                 at > stop;) {
-                sz_utf8_folded_image_t image;
-                block = sz_regex_block_at_simt_(&table, haystack.first + at);
-                at = sz_regex_unit_before_simt_(sz_true_k, haystack.text, at, &image);
-                for (byte = image.length; byte--; block = 0) {
-                    sz_u32_t const column = block + table.classes[sz_regex_image_byte_simt_(&image, byte)];
-                    for (index = 0; index != count; ++index)
-                        if (set[index]) set[index] = sz_regex_move_simt_(&table, set[index], column);
-                }
-            }
-        else if (haystack.first < low)
-            for (at = edge; at != low - haystack.first - 1; --at) {
-                sz_u32_t const column = sz_regex_block_at_simt_(&table, haystack.first + at) +
-                                        table.classes[haystack.text[at - 1]];
-#pragma unroll
-                for (index = 0; index != sz_regex_priming_states_simt_k; ++index)
-                    if (index < count && set[index]) set[index] = sz_regex_move_simt_(&table, set[index], column);
-            }
-        for (index = 0; index != count; ++index) frontier->exits[index] = set[index];
-    }
-}
-
-/**
- *  @brief Settles every wide chunk, one thread per run of unsettled chunks holding one, as
- *      @c sz_regex_prime_pieces_metal_kernel_ does.
- *
- *  The run's rightmost wide chunk walks its haystack right to left from the nearest exact state
- *  right of it: a settled chunk's entry, the reverse start where the haystack ends, or the next
- *  segment's edge, so no walk leaves its segment. It writes the entry of every chunk it passes down
- *  to the run's leftmost wide one, and the frontiers between them compose onto those entries as
- *  onto any settled chunk's.
- */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_prime_pieces_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                       sz_regex_round_simt_t round) {
-    sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.reverse_rows, round.reverse_cells);
-    sz_size_t const begin = round.segment_begin, width = (sz_size_t)1 << round.chunk_shift;
-    sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
-    sz_bool_t const folded = (sz_bool_t)(engine.case_sensitivity != sz_cased_k);
-    sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    for (; chunk < round.chunks_count; chunk += stride) {
-        sz_size_t high, last, next, at = 0, leftmost, previous, walked;
-        sz_regex_haystack_simt_t haystack;
-        sz_u32_t state = 0;
-        sz_bool_t owner = sz_true_k;
-        if (round.frontiers[chunk].count <= sz_regex_priming_states_simt_k) continue;
-        high = sz_min_of_two(begin + (chunk + 1) * width, round.segment_end);
-        haystack = sz_regex_haystack_simt_(haystacks, sz_regex_haystack_at_simt_(haystacks, high - 1, 0));
-        last = haystack.first + haystack.length;
-
-        // The anchor right of the chunk, past frontiers only, as a wide chunk past it owns the run.
-        for (next = chunk + 1;; ++next) {
-            sz_size_t const next_high = sz_min_of_two(begin + (next + 1) * width, round.slots_count);
-            sz_u32_t const count = next == round.chunks_count ? 0 : round.frontiers[next].count;
-            if (last < next_high) {
-                state = engine.reverse_starts[0], at = haystack.length;
-                break;
-            }
-            if (count > sz_regex_priming_states_simt_k) {
-                owner = sz_false_k;
-                break;
-            }
-            if (count) continue;
-            state = next == round.chunks_count ? round.edges[round.segment + 1] : round.entries[next];
-            at = sz_regex_prime_edge_simt_(folded, &haystack, next_high);
-            break;
-        }
-        if (!owner) continue;
-
-        // The run's leftmost wide chunk, where a settled chunk or the haystack's start ends it.
-        for (leftmost = chunk, previous = chunk; previous-- != 0;) {
-            sz_u32_t const count = round.frontiers[previous].count;
-            if (!count || begin + (previous + 1) * width <= haystack.first) break;
-            if (count > sz_regex_priming_states_simt_k) leftmost = previous;
-        }
-        for (walked = next; walked-- != leftmost;) {
-            sz_size_t const edge = sz_regex_prime_edge_simt_(folded, &haystack, begin + (walked + 1) * width);
-            state = folded ? sz_regex_walk_folded_back_simt_(&table, state, &haystack, at, edge)
-                           : sz_regex_walk_back_simt_(&table, state, &haystack, at, edge);
-            round.entries[walked] = state, at = edge;
-            if (walked == 0) round.edges[round.segment] = state;
-        }
-    }
-}
-
-/** Points every unsettled chunk at what settles it, as @c sz_regex_compose_metal_kernel_ does; the
- *  last chunk's right neighbour is the next segment's first, whose entry its edge holds. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_compose_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
-    sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.reverse_rows, round.reverse_cells);
-    sz_size_t const width = (sz_size_t)1 << round.chunk_shift, stride = (sz_size_t)gridDim.x * blockDim.x;
-    sz_bool_t const folded = (sz_bool_t)(engine.case_sensitivity != sz_cased_k);
-    sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    for (; chunk < round.chunks_count; chunk += stride) {
-        sz_u32_t const count = round.frontiers[chunk].count;
-        sz_u32_t states[sz_regex_priming_states_simt_k], index;
-        sz_regex_composition_simt_t composition;
-        sz_size_t next, low, high;
-        sz_regex_haystack_simt_t haystack;
-        sz_bool_t ends;
-        if (!sz_regex_composing_simt_(count)) continue;
-        for (index = 0; index != count; ++index) states[index] = round.frontiers[chunk].states[index];
-        composition.target = sz_regex_none_simt_k, composition.known = sz_regex_none_simt_k;
-        next = chunk + 1, low = round.segment_begin + next * width;
-        high = sz_min_of_two(low + width, round.slots_count);
-        haystack = sz_regex_haystack_simt_(haystacks, sz_regex_haystack_at_simt_(haystacks, low, 0));
-        // The haystack either ends inside the next chunk or spans it, which then is settled or not.
-        ends = (sz_bool_t)(haystack.first + haystack.length < high);
-        if (!ends && next != round.chunks_count && sz_regex_composing_simt_(round.frontiers[next].count)) {
-            composition.target = (sz_u32_t)next;
-            for (index = 0; index != round.frontiers[next].count; ++index)
-                composition.indices[index] = sz_regex_index_of_simt_(states, count, round.frontiers[next].exits[index]);
-        }
-        else {
-            sz_u32_t const entry = ends                         ? engine.reverse_starts[0]
-                                   : next == round.chunks_count ? round.edges[round.segment + 1]
-                                                                : round.entries[next];
-            sz_size_t const at = ends ? haystack.length : sz_regex_prime_edge_simt_(folded, &haystack, high);
-            sz_size_t const edge = sz_regex_prime_edge_simt_(folded, &haystack, low);
-            sz_u32_t const state = folded ? sz_regex_walk_folded_back_simt_(&table, entry, &haystack, at, edge)
-                                          : sz_regex_walk_back_simt_(&table, entry, &haystack, at, edge);
-            composition.known = sz_regex_index_of_simt_(states, count, state);
-        }
-        round.compositions[chunk] = composition;
-    }
-}
-
-/** One round of pointer doubling over the unsettled chunks; the last round writes the entry. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_compose_double_simt_kernel_(sz_regex_round_simt_t round) {
-    sz_bool_t const even = (sz_bool_t)(round.round % 2 == 0);
-    sz_regex_composition_simt_t const *source = even ? round.compositions : round.compositions_next;
-    sz_regex_composition_simt_t *target = even ? round.compositions_next : round.compositions;
-    sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
-    sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    for (; chunk < round.chunks_count; chunk += stride) {
-        sz_regex_composition_simt_t composition;
-        sz_u32_t hop, index;
-        if (!sz_regex_composing_simt_(round.frontiers[chunk].count)) continue;
-        composition = source[chunk];
-        for (hop = 1; hop != sz_regex_round_hops_simt_k && composition.target != sz_regex_none_simt_k; ++hop) {
-            sz_regex_composition_simt_t const next = source[composition.target];
-            sz_u8_t indices[sz_regex_priming_states_simt_k];
-            sz_u32_t const next_count = round.frontiers[next.target == sz_regex_none_simt_k ? 0 : next.target].count;
-            if (next.known != sz_regex_none_simt_k) {
-                composition.known = composition.indices[next.known];
-                composition.target = sz_regex_none_simt_k;
-                break;
-            }
-            for (index = 0; index != next_count; ++index)
-                indices[index] = next.indices[index] == 0xFF ? 0xFF : composition.indices[next.indices[index]];
-            for (index = 0; index != next_count; ++index) composition.indices[index] = indices[index];
-            composition.target = next.target;
-        }
-        target[chunk] = composition;
-        if (round.round + 1 != round.rounds) continue;
-        round.entries[chunk] = round.frontiers[chunk].states[composition.known];
-        if (chunk == 0) round.edges[round.segment] = round.entries[chunk];
-    }
-}
-
-/** Marks every slot of one chunk where a match starts, one thread per chunk, as the Metal kernel
- *  does, each block first staging its tile's text, which its threads read a chunk apart. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_mark_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
-    extern __shared__ sz_u8_t sz_regex_staged_simt_[];
-    __shared__ sz_size_t tile_haystack;
-    sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.reverse_rows, round.reverse_cells);
-    sz_u8_t *const staged = sz_regex_staged_simt_ + sz_regex_staged_bytes_simt_k +
-                            round.staged_cells * sizeof(sz_u32_t);
-    sz_u8_t const *const tape = (sz_u8_t const *)sz_strings_start_simt_(haystacks, 0);
-    sz_u8_t const *const tape_end = (sz_u8_t const *)sz_strings_start_simt_(haystacks, haystacks.count);
-    sz_size_t const width = (sz_size_t)1 << round.chunk_shift, tile_slots = width * blockDim.x;
-    sz_u32_t const accepts = engine.reverse_accepts_begin;
-    sz_size_t tile;
-    // The scan reads one entry past the chunks, which ends up holding the candidates' total.
-    if (blockIdx.x == 0 && threadIdx.x == 0) round.chunk_offsets[round.chunks_count] = 0;
-    for (tile = blockIdx.x; tile * blockDim.x < round.chunks_count; tile += gridDim.x) {
-        sz_size_t const chunk = tile * blockDim.x + threadIdx.x, tile_low = round.segment_begin + tile * tile_slots;
-        sz_size_t const low = round.segment_begin + chunk * width;
-        sz_size_t const high = sz_min_of_two(low + width, round.segment_end);
-        sz_size_t index, word, first_byte;
-        sz_u64_t *const words = round.starts + (low - round.segment_begin) / 64;
-        sz_u8_t const *origin;
-        sz_u32_t marked = 0;
-        // The last tile's walks are done with its text and its haystack before either is replaced.
-        __syncthreads();
-        if (threadIdx.x == 0) tile_haystack = sz_regex_haystack_at_simt_(haystacks, tile_low, 0);
-        __syncthreads();
-        // A tile's bytes run from the byte before its first slot, as each slot past the first of a
-        // haystack stands for the byte before it, and span at most its slots.
-        first_byte = tile_low > tile_haystack ? tile_low - tile_haystack - 1 : 0;
-        origin = sz_regex_stage_text_simt_(
-            staged, tape + first_byte, tape + sz_min_of_two(first_byte + tile_slots + 1, (sz_size_t)(tape_end - tape)),
-            tape, tape_end);
-        __syncthreads();
-        if (chunk >= round.chunks_count) continue;
-        index = sz_regex_haystack_at_simt_(haystacks, low, tile_haystack);
-        round.chunk_haystacks[chunk] = index;
-        for (word = 0; word != width / 64; ++word) words[word] = 0;
-        for (; index < haystacks.count; ++index) {
-            sz_regex_haystack_simt_t const haystack = sz_regex_haystack_simt_(haystacks, index);
-            sz_size_t begin_byte, end_byte, at;
-            sz_u32_t state, bit;
-            if (haystack.first >= high) break;
-            begin_byte = low > haystack.first ? low - haystack.first - 1 : 0;
-            end_byte = sz_min_of_two(haystack.length, high - haystack.first - 1);
-            state = end_byte == haystack.length ? engine.reverse_starts[0] : round.entries[chunk];
-            for (at = end_byte; at != begin_byte;) {
-                sz_u32_t const count = (sz_u32_t)sz_min_of_two(at - begin_byte, (sz_size_t)sz_regex_run_bytes_simt_k);
-                sz_u32_t const mask = sz_regex_run_back_staged_simt_(&table, &state, staged,
-                                                                     (sz_size_t)(haystack.text + at - origin),
-                                                                     haystack.first + at, count, accepts);
-                at -= count;
-                if (!mask) continue;
-                // A byte's own slot marks the match starting right after it.
-                bit = (sz_u32_t)(haystack.first + 1 + at - low);
-                words[bit / 64] |= (sz_u64_t)mask << (bit % 64);
-                if (bit % 64 + count > 64) words[bit / 64 + 1] |= (sz_u64_t)mask >> (64 - bit % 64);
-                marked += (sz_u32_t)sz_u32_popcount_simt_(mask);
-            }
-            if (haystack.first < low || sz_regex_step_edge_simt_(&table, state, haystack.first) < accepts) continue;
-            bit = (sz_u32_t)(haystack.first - low);
-            words[bit / 64] |= (sz_u64_t)1 << (bit % 64), ++marked;
-        }
-        round.chunk_offsets[chunk] = marked;
-    }
-}
-
-/**
- *  @brief Marks every slot whose bytes keep some bucket of the engine's prefixes at every offset
- *      inside its haystack, a slot per thread at a time, as @c sz_regex_find_prefixes_serial_ finds
- *      them, in place of the start-finding walk and its priming; the end walks settle each one.
- *
- *  Each block takes a run of whole chunks a tile at a time, where a thread per chunk gallops to the
- *  haystack of its first slot from the last tile's last, and the slots past that haystack on from
- *  it. A haystack's last slot, past its bytes, is never marked, as no match is empty.
- */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_mark_prefixes_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                        sz_regex_round_simt_t round) {
-    __shared__ sz_u8_t buckets[sz_regex_prefixes_depth_k][256];
-    __shared__ sz_u64_t words[sz_regex_prefix_chunks_simt_k];
-    __shared__ sz_size_t indices[sz_regex_prefix_chunks_simt_k];
-    __shared__ sz_regex_haystack_simt_t heads[sz_regex_prefix_chunks_simt_k];
-    sz_size_t const tile_slots = (sz_size_t)sz_regex_prefix_chunks_simt_k * sz_regex_chunk_slots_simt_k;
-    sz_size_t const chunks = sz_size_divide_round_up(round.chunks_count, gridDim.x);
-    sz_size_t const share = sz_size_divide_round_up(chunks * sz_regex_chunk_slots_simt_k, tile_slots) * tile_slots;
-    sz_size_t const low = round.segment_begin + blockIdx.x * share;
-    sz_size_t const high = sz_min_of_two(low + share, round.segment_end);
-    sz_u32_t const depth = engine.prefixes->depth;
-    sz_size_t tile, index, last = 0;
-    for (index = threadIdx.x; index < sz_regex_prefixes_depth_k * 256; index += blockDim.x)
-        buckets[index / 256][index % 256] = engine.prefixes->buckets[index / 256][index % 256];
-    if (blockIdx.x == 0 && threadIdx.x == 0) round.chunk_offsets[round.chunks_count] = 0;
-    for (tile = low; tile < high; tile += tile_slots) {
-        __syncthreads();
-        if (threadIdx.x < sz_regex_prefix_chunks_simt_k) {
-            sz_size_t const first = tile + threadIdx.x * sz_regex_chunk_slots_simt_k;
-            words[threadIdx.x] = 0;
-            if (first < high) {
-                indices[threadIdx.x] = sz_regex_haystack_at_simt_(haystacks, first, last);
-                heads[threadIdx.x] = sz_regex_haystack_simt_(haystacks, indices[threadIdx.x]);
-                round.chunk_haystacks[(first - round.segment_begin) / sz_regex_chunk_slots_simt_k] =
-                    indices[threadIdx.x];
-            }
-        }
-        __syncthreads();
-        last = indices[sz_min_of_two((high - tile - 1) / sz_regex_chunk_slots_simt_k,
-                                     (sz_size_t)sz_regex_prefix_chunks_simt_k - 1)];
-        // Each thread tests a run of consecutive slots, so the haystack it holds serves them all.
-        {
-            sz_size_t const run = tile + threadIdx.x * sz_regex_prefix_slots_simt_k;
-            sz_size_t const chunk = threadIdx.x * sz_regex_prefix_slots_simt_k / sz_regex_chunk_slots_simt_k;
-            sz_regex_haystack_simt_t haystack = heads[chunk];
-            sz_size_t haystack_index = indices[chunk], slot, position, offset;
-            sz_u64_t marks = 0;
-            for (slot = run; slot != run + sz_regex_prefix_slots_simt_k && slot < high; ++slot) {
-                sz_u8_t held = 0;
-                if (slot > haystack.first + haystack.length)
-                    haystack_index = sz_regex_haystack_at_simt_(haystacks, slot, haystack_index + 1),
-                    haystack = sz_regex_haystack_simt_(haystacks, haystack_index);
-                position = slot - haystack.first;
-                if (position != haystack.length) held = buckets[0][haystack.text[position]];
-                for (offset = 1; held && offset != depth && position + offset != haystack.length; ++offset)
-                    held &= buckets[offset][haystack.text[position + offset]];
-                marks |= (sz_u64_t)(held != 0) << (slot - run);
-            }
-            if (marks)
-                atomicOr((unsigned long long *)words + chunk,
-                         (unsigned long long)(marks << (run - tile) % sz_regex_chunk_slots_simt_k));
-        }
-        __syncthreads();
-        for (index = threadIdx.x; index < sz_regex_prefix_chunks_simt_k && tile + index * 64 < high;
-             index += blockDim.x) {
-            sz_size_t const chunk = (tile - round.segment_begin) / sz_regex_chunk_slots_simt_k + index;
-            round.starts[chunk] = words[index];
-            round.chunk_offsets[chunk] = (sz_size_t)sz_u64_popcount_simt_(words[index]);
-        }
-    }
-}
-
-/**
- *  @brief Marks every slot of one chunk where a match of a folded walk starts, one thread per
- *      chunk, as the Metal kernel does.
- *
- *  A start inside the folds of one codepoint snaps outward to the codepoint's own start, as
- *  @c sz_regex_mark_folded_ snaps it, so the walk begins past the unit holding the chunk's last
- *  slot, where priming left its entry.
- */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_mark_folded_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                      sz_regex_round_simt_t round) {
-    sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.reverse_rows, round.reverse_cells);
-    sz_size_t const width = (sz_size_t)1 << round.chunk_shift, stride = (sz_size_t)gridDim.x * blockDim.x;
-    sz_u32_t const accepts = engine.reverse_accepts_begin;
-    sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    if (chunk == 0) round.chunk_offsets[round.chunks_count] = 0;
-    for (; chunk < round.chunks_count; chunk += stride) {
-        sz_size_t const low = round.segment_begin + chunk * width;
-        sz_size_t const high = sz_min_of_two(low + width, round.segment_end);
-        sz_size_t index = sz_regex_haystack_at_simt_(haystacks, low, 0), word;
-        sz_u64_t *const words = round.starts + (low - round.segment_begin) / 64;
-        sz_u32_t marked = 0;
-        round.chunk_haystacks[chunk] = index;
-        for (word = 0; word != width / 64; ++word) words[word] = 0;
-        for (; index < haystacks.count; ++index) {
-            sz_regex_haystack_simt_t const haystack = sz_regex_haystack_simt_(haystacks, index);
-            sz_size_t first, last, at, stop;
-            sz_u32_t state;
-            if (haystack.first >= high) break;
-            first = low > haystack.first ? low - haystack.first : 0;
-            last = sz_min_of_two(haystack.length, high - haystack.first - 1);
-            at = last == haystack.length ? last : sz_regex_boundary_simt_(haystack.text, haystack.length, last + 1);
-            state = at == haystack.length ? engine.reverse_starts[0] : round.entries[chunk];
-            stop = first ? first - 1 : 0;
-            while (at > stop) {
-                sz_utf8_folded_image_t image;
-                sz_u32_t block = sz_regex_block_at_simt_(&table, haystack.first + at), byte;
-                sz_size_t const begin = sz_regex_unit_before_simt_(sz_true_k, haystack.text, at, &image);
-                for (byte = image.length; byte--; block = 0) {
-                    sz_size_t const start = byte + 1u == image.length ? at : begin;
-                    state = sz_regex_move_simt_(&table, state,
-                                                block + table.classes[sz_regex_image_byte_simt_(&image, byte)]);
-                    if (state >= accepts && start >= first && start <= last)
-                        words[(haystack.first + start - low) / 64] |= (sz_u64_t)1
-                                                                      << ((haystack.first + start - low) % 64);
-                }
-                at = begin;
-            }
-            if (first == 0 && sz_regex_step_edge_simt_(&table, state, haystack.first) >= accepts)
-                words[(haystack.first - low) / 64] |= (sz_u64_t)1 << ((haystack.first - low) % 64);
-        }
-        for (word = 0; word != width / 64; ++word) marked += (sz_u32_t)sz_u64_popcount_simt_(words[word]);
-        round.chunk_offsets[chunk] = marked;
     }
 }
 
@@ -932,213 +383,6 @@ STRINGZILLA_DEVICE void sz_regex_mark_positions_simt_(sz_regex_engine_t const *e
         for (word = 0; word != width / 64; ++word) marked += (sz_u32_t)sz_u64_popcount_simt_(bits[word]);
         round->chunk_offsets[chunk] = marked;
     }
-}
-
-/** @ref sz_regex_mark_positions_simt_ over bytes. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_mark_positions_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                         sz_regex_round_simt_t round) {
-    sz_regex_mark_positions_simt_(&engine, haystacks, &round, sz_false_k);
-}
-
-/** @ref sz_regex_mark_positions_simt_ over folded runes. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_mark_positions_folded_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                sz_regex_round_simt_t round) {
-    sz_regex_mark_positions_simt_(&engine, haystacks, &round, sz_true_k);
-}
-
-/** Lists the candidates of one chunk in slot order, one thread per chunk, for the end walks taking
- *  one candidate per thread. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_list_simt_kernel_(sz_regex_round_simt_t round) {
-    sz_size_t const width = (sz_size_t)1 << round.chunk_shift, stride = (sz_size_t)gridDim.x * blockDim.x;
-    sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    for (; chunk < round.chunks_count; chunk += stride) {
-        sz_size_t const offset = chunk * width;
-        sz_u32_t index = (sz_u32_t)round.chunk_offsets[chunk];
-        sz_size_t word;
-        for (word = 0; word != width / 64; ++word) {
-            sz_u64_t bits = round.starts[offset / 64 + word];
-            for (; bits; bits &= bits - 1)
-                round.slots[index++] = (sz_u32_t)(offset + word * 64 + sz_u64_ctz_simt_(bits));
-        }
-    }
-}
-
-/** Walks every candidate to its end with a PikeVM in each thread's share of the
- *  walks, linking nothing. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_ends_pike_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                    sz_regex_round_simt_t round) {
-    sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    sz_size_t const count = round.chunk_offsets[round.chunks_count];
-    sz_regex_pike_simt_t pike;
-    sz_size_t item;
-    if (thread >= round.walks_count) return;
-    pike = sz_regex_pike_carve_simt_(&round, thread, &engine);
-    pike.slots_count = 0;
-    for (item = thread; item < count; item += round.walks_count) {
-        sz_size_t const mark = round.segment_begin + round.slots[item];
-        sz_regex_haystack_simt_t const haystack = sz_regex_haystack_simt_(
-            haystacks,
-            sz_regex_haystack_at_simt_(haystacks, mark, round.chunk_haystacks[round.slots[item] >> round.chunk_shift]));
-        sz_regex_result_simt_t result;
-        sz_size_t end, offset = 0;
-        sz_u32_t pattern;
-        result.link = sz_regex_none_simt_k, result.pattern = sz_regex_none_simt_k, result.end = 0;
-        if (sz_regex_match_at_simt_(&engine, STRINGZILLA_NULL, &pike, &haystack, mark - haystack.first, &end, &pattern,
-                                    &offset))
-            result.pattern = pattern, result.end = haystack.first + end;
-        round.results[item] = result;
-    }
-}
-
-/**
- *  @brief Walks every candidate of one chunk to its end, right to left, one thread per chunk, which
- *      lists the candidates in slot order as it goes, as @c sz_regex_ends_metal_kernel_ does.
- *
- *  A walk leaves its state at the checkpoint of every 16-slot mark it passes, the first unit
- *  boundary at or past the mark, and a later walk, starting further left, that holds the same state
- *  at the same checkpoint stops there and takes that walk's outcome. A walk reaching the chunk's
- *  edge leaves a link there instead: the state it would walk on in, which the links kernel follows.
- *  A folded walk starts at the first rune its unit folds to, and once the links settle
- *  @ref sz_regex_retry_folded_simt_kernel_ tries the others.
- */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_ends_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
-    sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.forward_rows, round.forward_cells);
-    sz_size_t const width = (sz_size_t)1 << round.chunk_shift, stride = (sz_size_t)gridDim.x * blockDim.x;
-    sz_size_t const begin = round.segment_begin;
-    sz_bool_t const folded = (sz_bool_t)(engine.case_sensitivity != sz_cased_k);
-    sz_u32_t const accepts = engine.forward_accepts_begin;
-    sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    for (; chunk < round.chunks_count; chunk += stride) {
-        sz_u32_t index = (sz_u32_t)round.chunk_offsets[chunk + 1];
-        sz_size_t low, high, checkpoint, haystack_index, word;
-        sz_regex_haystack_simt_t haystack;
-        if (index == round.chunk_offsets[chunk]) continue;
-        low = begin + chunk * width, high = sz_min_of_two(low + width, round.segment_end);
-        // Only a chunk with candidates has its checkpoints read, so only such a chunk clears them.
-        for (checkpoint = (low - begin) / sz_regex_checkpoint_slots_simt_k + 1;
-             checkpoint <= (high - begin) / sz_regex_checkpoint_slots_simt_k; ++checkpoint)
-            round.checkpoints[checkpoint].state = 0;
-        haystack_index = sz_regex_haystack_at_simt_(haystacks, high - 1, round.chunk_haystacks[chunk]);
-        haystack = sz_regex_haystack_simt_(haystacks, haystack_index);
-
-        for (word = (high - low + 63) / 64; word-- != 0;) {
-            sz_u64_t bits = round.starts[(low - begin) / 64 + word];
-            while (bits) {
-                sz_u32_t const bit = (sz_u32_t)sz_size_log2i_nonzero_simt_(bits);
-                sz_size_t const mark = low + word * 64 + bit;
-                sz_size_t start, at, stepped = 1, kind = 0, last_end = 0, last_at = 0, inherited_end = 0;
-                sz_size_t recorded_low = 0, recorded_high = 0;
-                sz_u32_t state, last = 0, link = sz_regex_none_simt_k, inherited = sz_regex_none_simt_k;
-                sz_regex_result_simt_t result;
-                bits ^= (sz_u64_t)1 << bit;
-                while (mark < haystack.first) haystack = sz_regex_haystack_simt_(haystacks, --haystack_index);
-                round.slots[--index] = (sz_u32_t)(mark - begin);
-
-                start = mark - haystack.first;
-                if (start && folded) {
-                    sz_utf8_folded_image_t previous;
-                    stepped = start - sz_regex_unit_before_simt_(sz_true_k, haystack.text, start, &previous);
-                    kind = sz_regex_byte_kind_(sz_regex_image_byte_simt_(&previous, previous.length - 1u));
-                }
-                else if (start) kind = sz_regex_byte_kind_simt_(haystack.text[start - 1]);
-                state = engine.forward_starts[kind];
-                for (at = start; state != 0;) {
-                    sz_size_t due;
-                    if (at == haystack.length) {
-                        state = sz_regex_step_edge_simt_(&table, state, haystack.first + at);
-                        if (state >= accepts) last = state, last_end = last_at = at;
-                        break;
-                    }
-                    // The mark at the chunk's own start is the edge of the chunk before,
-                    // which owns its checkpoint.
-                    due = sz_regex_mark_at_simt_(haystack.first + 1 + at, stepped);
-                    if (due > low) {
-                        sz_size_t const visited = (due - begin) / sz_regex_checkpoint_slots_simt_k;
-                        sz_regex_checkpoint_simt_t *const entry = round.checkpoints + visited;
-                        if (entry->state == state) {
-                            link = entry->link;
-                            if (entry->pattern != sz_regex_none_simt_k)
-                                inherited = entry->pattern, inherited_end = begin + entry->end, last_at = at;
-                            break;
-                        }
-                        entry->state = state;
-                        if (due == high) {
-                            link = index;
-                            entry->link = index, entry->pattern = sz_regex_none_simt_k;
-                            round.links[index].link = state;
-                            round.links_list[atomicAdd(round.counters + sz_regex_links_counter_simt_k, 1u)] = index;
-                            break;
-                        }
-                        if (recorded_high == 0) recorded_low = visited;
-                        recorded_high = visited + 1;
-                    }
-                    at = sz_regex_advance_simt_(&table, folded, &haystack, at, haystack.length, accepts, &state, &last,
-                                                &last_end, &last_at, &stepped);
-                }
-                result.link = link;
-                result.end = inherited != sz_regex_none_simt_k ? inherited_end : haystack.first + last_end;
-                result.pattern = inherited != sz_regex_none_simt_k ? inherited
-                                 : last                            ? sz_regex_pattern_simt_(&engine, last)
-                                                                   : sz_regex_none_simt_k;
-                // The checkpoints passed learn the outcome, keeping the match only when the step
-                // reaching it was past them, which a match ending inside the folds of the unit
-                // before a checkpoint was not.
-                for (checkpoint = recorded_low; checkpoint < recorded_high; ++checkpoint) {
-                    sz_bool_t const past = (sz_bool_t)(result.pattern != sz_regex_none_simt_k &&
-                                                       haystack.first + 1 + last_at >=
-                                                           begin + checkpoint * sz_regex_checkpoint_slots_simt_k);
-                    round.checkpoints[checkpoint].link = result.link;
-                    round.checkpoints[checkpoint].pattern = past ? result.pattern : sz_regex_none_simt_k;
-                    round.checkpoints[checkpoint].end = (sz_u32_t)(result.end - begin);
-                }
-                round.results[index] = result;
-            }
-        }
-    }
-}
-
-/** Walks every link on from its chunk's edge, at the first unit boundary past it for a folded walk,
- *  as @ref sz_regex_link_walk_simt_ walks it. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_links_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
-    sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.forward_rows, round.forward_cells);
-    sz_size_t const begin = round.segment_begin, end = round.segment_end;
-    sz_bool_t const folded = (sz_bool_t)(engine.case_sensitivity != sz_cased_k);
-    sz_u32_t const links_count = round.counters[sz_regex_links_counter_simt_k];
-    sz_u32_t item = blockIdx.x * blockDim.x + threadIdx.x;
-    for (; item < links_count; item += gridDim.x * blockDim.x) {
-        sz_u32_t const link = round.links_list[item];
-        sz_size_t const chunk = round.slots[link] >> round.chunk_shift;
-        sz_size_t const edge = sz_min_of_two(begin + ((chunk + 1) << round.chunk_shift), end);
-        sz_regex_haystack_simt_t const haystack = sz_regex_haystack_simt_(
-            haystacks, sz_regex_haystack_at_simt_(haystacks, begin + round.slots[link], round.chunk_haystacks[chunk]));
-        sz_size_t const at = edge - haystack.first - 1;
-        sz_regex_link_walk_simt_(&engine, &round, &table, folded, link, round.links[link].link, &haystack,
-                                 folded ? sz_regex_boundary_simt_(haystack.text, haystack.length, at) : at);
-    }
-}
-
-/** Walks every group the last slide made on from where its walks paused, as the links kernel walks
- *  links, the window having moved two segments on from its end there. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_resume_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
-    sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.forward_rows, round.forward_cells);
-    sz_size_t const paused = round.looks.begin;
-    sz_bool_t const folded = (sz_bool_t)(engine.case_sensitivity != sz_cased_k);
-    sz_regex_haystack_simt_t const haystack = sz_regex_haystack_simt_(haystacks,
-                                                                      sz_regex_haystack_at_simt_(haystacks, paused, 0));
-    sz_size_t const at = folded ? sz_regex_boundary_simt_(haystack.text, haystack.length, paused - haystack.first)
-                                : paused - haystack.first;
-    sz_u32_t const groups_count = round.counters[sz_regex_groups_counter_simt_k];
-    sz_u32_t group = round.groups_begin + blockIdx.x * blockDim.x + threadIdx.x;
-    for (; group < groups_count; group += gridDim.x * blockDim.x)
-        sz_regex_link_walk_simt_(&engine, &round, &table, folded, sz_regex_group_simt_k | group,
-                                 round.groups[group].link, &haystack, at);
 }
 
 /**
@@ -1282,9 +526,622 @@ STRINGZILLA_DEVICE void sz_regex_continue_simt_(sz_regex_engine_t const *engine,
     }
 }
 
+/**
+ *  @brief One round of pointer doubling over the chunks' affine maps: each composes its own with
+ *      the maps a round's hops upstream until one is answered.
+ *
+ *  The last round adds the answer to the chunk's handoff and keeps the handoff of the segment's
+ *  last chunk downstream for the segment beyond.
+ */
+STRINGZILLA_DEVICE void sz_regex_affine_double_simt_(sz_regex_round_simt_t round) {
+    sz_bool_t const even = (sz_bool_t)(round.round % 2 == 0), last = (sz_bool_t)(round.round + 1 == round.rounds);
+    sz_bool_t const backward = (sz_bool_t)(round.flow != sz_regex_flow_behind_simt_k);
+    sz_regex_affine_simt_t const *source = even ? round.affines : round.affines_next;
+    sz_regex_affine_simt_t *target = even ? round.affines_next : round.affines;
+    sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
+    sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    for (; chunk < round.chunks_count; chunk += stride) {
+        sz_regex_undecided_simt_t const *const undecided = round.undecided + chunk;
+        sz_u64_t *const handoff = round.handoffs + chunk * round.set_words;
+        sz_regex_affine_simt_t affine;
+        sz_u64_t rows[sz_regex_undecided_simt_k];
+        sz_u32_t hop, row, index;
+        sz_size_t word;
+        if (undecided->count) {
+            affine = source[chunk];
+            for (hop = 1; hop != sz_regex_round_hops_simt_k && affine.target != sz_regex_none_simt_k; ++hop) {
+                sz_regex_affine_simt_t const *const next = source + affine.target;
+                affine.fixed |= sz_regex_apply_simt_(affine.rows, next->fixed);
+                for (row = 0; next->target != sz_regex_none_simt_k && row != next->rows_count; ++row)
+                    rows[row] = sz_regex_apply_simt_(affine.rows, next->rows[row]);
+                for (row = 0; next->target != sz_regex_none_simt_k && row != next->rows_count; ++row)
+                    affine.rows[row] = rows[row];
+                affine.target = next->target, affine.rows_count = next->rows_count;
+            }
+            target[chunk] = affine;
+            if (last)
+                for (index = 0; index != undecided->count; ++index)
+                    if (affine.fixed >> index & 1)
+                        handoff[undecided->indices[index] / 64] |= (sz_u64_t)1 << (undecided->indices[index] % 64);
+        }
+        if (last && chunk == (backward ? 0 : round.chunks_count - 1))
+            for (word = 0; word != round.set_words; ++word)
+                round.handoff_edges[(backward ? round.segment : round.segment + 1) * round.set_words + word] =
+                    handoff[word];
+    }
+}
+
+/**
+ *  @brief Writes the one-byte lookarounds holding at every slot of the round's segment into its
+ *      half of the table, negated ones flipped, as @c sz_regex_fill_looks_serial_ does, which the
+ *      passes then add their own bits to.
+ *
+ *  Each block takes a run of slots a tile at a time, its first thread galloping to the haystack of
+ *  the tile's first slot from the last tile's, and the threads past that haystack on from it.
+ */
+STRINGZILLA_DEVICE void sz_regex_fill_singles_simt_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                                    sz_regex_round_simt_t round) {
+    __shared__ sz_u32_t tables[512];
+    __shared__ sz_size_t tile_index;
+    __shared__ sz_regex_haystack_simt_t tile_haystack;
+    sz_size_t const share = sz_size_divide_round_up(
+                                sz_size_divide_round_up(round.segment_end - round.segment_begin, gridDim.x),
+                                blockDim.x) *
+                            blockDim.x;
+    sz_size_t const low = round.segment_begin + blockIdx.x * share;
+    sz_size_t const high = sz_min_of_two(low + share, round.segment_end);
+    sz_u32_t flipped = 0, index;
+    sz_size_t tile;
+    for (index = threadIdx.x; index < 512; index += blockDim.x) tables[index] = engine.looks_bytes[1 + index];
+    for (index = 0; index != engine.lookarounds_count; ++index)
+        if (engine.lookarounds[index].kind & 1) flipped |= (sz_u32_t)sz_regex_look_lookaround_k << index;
+    flipped &= engine.looks_bytes[0];
+    if (threadIdx.x == 0) tile_index = 0;
+    for (tile = low; tile < high; tile += blockDim.x) {
+        sz_size_t const slot = tile + threadIdx.x;
+        sz_regex_haystack_simt_t haystack;
+        sz_size_t position;
+        __syncthreads();
+        if (threadIdx.x == 0)
+            tile_index = sz_regex_haystack_at_simt_(haystacks, tile, tile_index),
+            tile_haystack = sz_regex_haystack_simt_(haystacks, tile_index);
+        __syncthreads();
+        if (slot >= high) continue;
+        haystack = tile_haystack;
+        if (slot > haystack.first + haystack.length)
+            haystack = sz_regex_haystack_simt_(haystacks, sz_regex_haystack_at_simt_(haystacks, slot, tile_index + 1));
+        position = slot - haystack.first;
+        round.looks.table[slot & round.looks.mask] =
+            ((position ? tables[haystack.text[position - 1]] : 0) |
+             (position != haystack.length ? tables[256 + haystack.text[position]] : 0)) ^
+            flipped;
+    }
+}
+
+/**
+ *  @brief Primes every chunk whose last haystack runs past its right edge, one thread per chunk, as
+ *      the Metal kernel does.
+ *
+ *  It leaves the state in @c entries, or, when priming does not collapse within its reach, the
+ *  uncollapsed set and where each of its states would leave the chunk, or, when no column narrows
+ *  within its reach, a frontier one wider than a priming set holds for the pieces kernel. The first
+ *  chunk's entry also lands in the segment's edge, which priming the segment before reads.
+ *
+ *  A folded walk's chunk edges move to the next unit boundary, where it steps the
+ *  folds of whole units.
+ */
+STRINGZILLA_DEVICE void sz_regex_prime_chunks_simt_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                                    sz_regex_round_simt_t round) {
+    sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.reverse_rows, round.reverse_cells);
+    sz_size_t const width = (sz_size_t)1 << round.chunk_shift, stride = (sz_size_t)gridDim.x * blockDim.x;
+    sz_bool_t const folded = (sz_bool_t)(engine.case_sensitivity != sz_cased_k);
+    sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    for (; chunk < round.chunks_count; chunk += stride) {
+        sz_size_t const low = round.segment_begin + chunk * width;
+        sz_size_t const high = sz_min_of_two(low + width, round.segment_end);
+        sz_regex_frontier_simt_t *const frontier = round.frontiers + chunk;
+        sz_regex_haystack_simt_t haystack;
+        sz_u32_t set[sz_regex_priming_states_simt_k], count, state, index, byte, block;
+        sz_size_t edge, stop, at;
+        frontier->count = 0;
+        if (high == round.slots_count) continue;
+        haystack = sz_regex_haystack_simt_(haystacks, sz_regex_haystack_at_simt_(haystacks, high - 1, 0));
+        if (haystack.first + haystack.length < high) continue;
+        edge = folded ? sz_regex_boundary_simt_(haystack.text, haystack.length, high - haystack.first)
+                      : high - haystack.first - 1;
+        state = folded ? sz_regex_prime_folded_simt_(&engine, &table, round.reverse_images, &haystack, edge,
+                                                     sz_regex_priming_bytes_simt_k, set, &count)
+                       : sz_regex_prime_simt_(&engine, &table, round.reverse_images, &haystack, edge,
+                                              sz_regex_priming_bytes_simt_k, set, &count);
+        round.entries[chunk] = state;
+        if (chunk == 0) round.edges[round.segment] = state;
+        if (state) continue;
+        frontier->count = count ? count : sz_regex_priming_states_simt_k + 1;
+        if (!count) continue;
+
+        // Each state walks the chunk alone, as the chunk left of it depends on where each leaves.
+        for (index = 0; index != count; ++index) frontier->states[index] = set[index];
+        if (haystack.first < low && folded)
+            for (at = edge, stop = sz_regex_boundary_simt_(haystack.text, haystack.length, low - haystack.first);
+                 at > stop;) {
+                sz_utf8_folded_image_t image;
+                block = sz_regex_block_at_simt_(&table, haystack.first + at);
+                at = sz_regex_unit_before_simt_(sz_true_k, haystack.text, at, &image);
+                for (byte = image.length; byte--; block = 0) {
+                    sz_u32_t const column = block + table.classes[sz_regex_image_byte_simt_(&image, byte)];
+                    for (index = 0; index != count; ++index)
+                        if (set[index]) set[index] = sz_regex_move_simt_(&table, set[index], column);
+                }
+            }
+        else if (haystack.first < low)
+            for (at = edge; at != low - haystack.first - 1; --at) {
+                sz_u32_t const column = sz_regex_block_at_simt_(&table, haystack.first + at) +
+                                        table.classes[haystack.text[at - 1]];
+#pragma unroll
+                for (index = 0; index != sz_regex_priming_states_simt_k; ++index)
+                    if (index < count && set[index]) set[index] = sz_regex_move_simt_(&table, set[index], column);
+            }
+        for (index = 0; index != count; ++index) frontier->exits[index] = set[index];
+    }
+}
+
+/**
+ *  @brief Settles every wide chunk, one thread per run of unsettled chunks holding one, as
+ *      @c sz_regex_prime_pieces_metal_kernel_ does.
+ *
+ *  The run's rightmost wide chunk walks its haystack right to left from the nearest exact state
+ *  right of it: a settled chunk's entry, the reverse start where the haystack ends, or the next
+ *  segment's edge, so no walk leaves its segment. It writes the entry of every chunk it passes down
+ *  to the run's leftmost wide one, and the frontiers between them compose onto those entries as
+ *  onto any settled chunk's.
+ */
+STRINGZILLA_DEVICE void sz_regex_prime_pieces_simt_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                                    sz_regex_round_simt_t round) {
+    sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.reverse_rows, round.reverse_cells);
+    sz_size_t const begin = round.segment_begin, width = (sz_size_t)1 << round.chunk_shift;
+    sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
+    sz_bool_t const folded = (sz_bool_t)(engine.case_sensitivity != sz_cased_k);
+    sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    for (; chunk < round.chunks_count; chunk += stride) {
+        sz_size_t high, last, next, at = 0, leftmost, previous, walked;
+        sz_regex_haystack_simt_t haystack;
+        sz_u32_t state = 0;
+        sz_bool_t owner = sz_true_k;
+        if (round.frontiers[chunk].count <= sz_regex_priming_states_simt_k) continue;
+        high = sz_min_of_two(begin + (chunk + 1) * width, round.segment_end);
+        haystack = sz_regex_haystack_simt_(haystacks, sz_regex_haystack_at_simt_(haystacks, high - 1, 0));
+        last = haystack.first + haystack.length;
+
+        // The anchor right of the chunk, past frontiers only, as a wide chunk past it owns the run.
+        for (next = chunk + 1;; ++next) {
+            sz_size_t const next_high = sz_min_of_two(begin + (next + 1) * width, round.slots_count);
+            sz_u32_t const count = next == round.chunks_count ? 0 : round.frontiers[next].count;
+            if (last < next_high) {
+                state = engine.reverse_starts[0], at = haystack.length;
+                break;
+            }
+            if (count > sz_regex_priming_states_simt_k) {
+                owner = sz_false_k;
+                break;
+            }
+            if (count) continue;
+            state = next == round.chunks_count ? round.edges[round.segment + 1] : round.entries[next];
+            at = sz_regex_prime_edge_simt_(folded, &haystack, next_high);
+            break;
+        }
+        if (!owner) continue;
+
+        // The run's leftmost wide chunk, where a settled chunk or the haystack's start ends it.
+        for (leftmost = chunk, previous = chunk; previous-- != 0;) {
+            sz_u32_t const count = round.frontiers[previous].count;
+            if (!count || begin + (previous + 1) * width <= haystack.first) break;
+            if (count > sz_regex_priming_states_simt_k) leftmost = previous;
+        }
+        for (walked = next; walked-- != leftmost;) {
+            sz_size_t const edge = sz_regex_prime_edge_simt_(folded, &haystack, begin + (walked + 1) * width);
+            state = folded ? sz_regex_walk_folded_back_simt_(&table, state, &haystack, at, edge)
+                           : sz_regex_walk_back_simt_(&table, state, &haystack, at, edge);
+            round.entries[walked] = state, at = edge;
+            if (walked == 0) round.edges[round.segment] = state;
+        }
+    }
+}
+
+/** Points every unsettled chunk at what settles it, as @c sz_regex_compose_metal_kernel_ does; the
+ *  last chunk's right neighbour is the next segment's first, whose entry its edge holds. */
+STRINGZILLA_DEVICE void sz_regex_compose_simt_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                               sz_regex_round_simt_t round) {
+    sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.reverse_rows, round.reverse_cells);
+    sz_size_t const width = (sz_size_t)1 << round.chunk_shift, stride = (sz_size_t)gridDim.x * blockDim.x;
+    sz_bool_t const folded = (sz_bool_t)(engine.case_sensitivity != sz_cased_k);
+    sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    for (; chunk < round.chunks_count; chunk += stride) {
+        sz_u32_t const count = round.frontiers[chunk].count;
+        sz_u32_t states[sz_regex_priming_states_simt_k], index;
+        sz_regex_composition_simt_t composition;
+        sz_size_t next, low, high;
+        sz_regex_haystack_simt_t haystack;
+        sz_bool_t ends;
+        if (!sz_regex_composing_simt_(count)) continue;
+        for (index = 0; index != count; ++index) states[index] = round.frontiers[chunk].states[index];
+        composition.target = sz_regex_none_simt_k, composition.known = sz_regex_none_simt_k;
+        next = chunk + 1, low = round.segment_begin + next * width;
+        high = sz_min_of_two(low + width, round.slots_count);
+        haystack = sz_regex_haystack_simt_(haystacks, sz_regex_haystack_at_simt_(haystacks, low, 0));
+        // The haystack either ends inside the next chunk or spans it, which then is settled or not.
+        ends = (sz_bool_t)(haystack.first + haystack.length < high);
+        if (!ends && next != round.chunks_count && sz_regex_composing_simt_(round.frontiers[next].count)) {
+            composition.target = (sz_u32_t)next;
+            for (index = 0; index != round.frontiers[next].count; ++index)
+                composition.indices[index] = sz_regex_index_of_simt_(states, count, round.frontiers[next].exits[index]);
+        }
+        else {
+            sz_u32_t const entry = ends                         ? engine.reverse_starts[0]
+                                   : next == round.chunks_count ? round.edges[round.segment + 1]
+                                                                : round.entries[next];
+            sz_size_t const at = ends ? haystack.length : sz_regex_prime_edge_simt_(folded, &haystack, high);
+            sz_size_t const edge = sz_regex_prime_edge_simt_(folded, &haystack, low);
+            sz_u32_t const state = folded ? sz_regex_walk_folded_back_simt_(&table, entry, &haystack, at, edge)
+                                          : sz_regex_walk_back_simt_(&table, entry, &haystack, at, edge);
+            composition.known = sz_regex_index_of_simt_(states, count, state);
+        }
+        round.compositions[chunk] = composition;
+    }
+}
+
+/** One round of pointer doubling over the unsettled chunks; the last round writes the entry. */
+STRINGZILLA_DEVICE void sz_regex_compose_double_simt_(sz_regex_round_simt_t round) {
+    sz_bool_t const even = (sz_bool_t)(round.round % 2 == 0);
+    sz_regex_composition_simt_t const *source = even ? round.compositions : round.compositions_next;
+    sz_regex_composition_simt_t *target = even ? round.compositions_next : round.compositions;
+    sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
+    sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    for (; chunk < round.chunks_count; chunk += stride) {
+        sz_regex_composition_simt_t composition;
+        sz_u32_t hop, index;
+        if (!sz_regex_composing_simt_(round.frontiers[chunk].count)) continue;
+        composition = source[chunk];
+        for (hop = 1; hop != sz_regex_round_hops_simt_k && composition.target != sz_regex_none_simt_k; ++hop) {
+            sz_regex_composition_simt_t const next = source[composition.target];
+            sz_u8_t indices[sz_regex_priming_states_simt_k];
+            sz_u32_t const next_count = round.frontiers[next.target == sz_regex_none_simt_k ? 0 : next.target].count;
+            if (next.known != sz_regex_none_simt_k) {
+                composition.known = composition.indices[next.known];
+                composition.target = sz_regex_none_simt_k;
+                break;
+            }
+            for (index = 0; index != next_count; ++index)
+                indices[index] = next.indices[index] == 0xFF ? 0xFF : composition.indices[next.indices[index]];
+            for (index = 0; index != next_count; ++index) composition.indices[index] = indices[index];
+            composition.target = next.target;
+        }
+        target[chunk] = composition;
+        if (round.round + 1 != round.rounds) continue;
+        round.entries[chunk] = round.frontiers[chunk].states[composition.known];
+        if (chunk == 0) round.edges[round.segment] = round.entries[chunk];
+    }
+}
+
+/**
+ *  @brief Marks every slot whose bytes keep some bucket of the engine's prefixes at every offset
+ *      inside its haystack, a slot per thread at a time, as @c sz_regex_find_prefixes_serial_ finds
+ *      them, in place of the start-finding walk and its priming; the end walks settle each one.
+ *
+ *  Each block takes a run of whole chunks a tile at a time, where a thread per chunk gallops to the
+ *  haystack of its first slot from the last tile's last, and the slots past that haystack on from
+ *  it. A haystack's last slot, past its bytes, is never marked, as no match is empty.
+ */
+STRINGZILLA_DEVICE void sz_regex_mark_prefixes_simt_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                                     sz_regex_round_simt_t round) {
+    __shared__ sz_u8_t buckets[sz_regex_prefixes_depth_k][256];
+    __shared__ sz_u64_t words[sz_regex_prefix_chunks_simt_k];
+    __shared__ sz_size_t indices[sz_regex_prefix_chunks_simt_k];
+    __shared__ sz_regex_haystack_simt_t heads[sz_regex_prefix_chunks_simt_k];
+    sz_size_t const tile_slots = (sz_size_t)sz_regex_prefix_chunks_simt_k * sz_regex_chunk_slots_simt_k;
+    sz_size_t const chunks = sz_size_divide_round_up(round.chunks_count, gridDim.x);
+    sz_size_t const share = sz_size_divide_round_up(chunks * sz_regex_chunk_slots_simt_k, tile_slots) * tile_slots;
+    sz_size_t const low = round.segment_begin + blockIdx.x * share;
+    sz_size_t const high = sz_min_of_two(low + share, round.segment_end);
+    sz_u32_t const depth = engine.prefixes->depth;
+    sz_size_t tile, index, last = 0;
+    for (index = threadIdx.x; index < sz_regex_prefixes_depth_k * 256; index += blockDim.x)
+        buckets[index / 256][index % 256] = engine.prefixes->buckets[index / 256][index % 256];
+    if (blockIdx.x == 0 && threadIdx.x == 0) round.chunk_offsets[round.chunks_count] = 0;
+    for (tile = low; tile < high; tile += tile_slots) {
+        __syncthreads();
+        if (threadIdx.x < sz_regex_prefix_chunks_simt_k) {
+            sz_size_t const first = tile + threadIdx.x * sz_regex_chunk_slots_simt_k;
+            words[threadIdx.x] = 0;
+            if (first < high) {
+                indices[threadIdx.x] = sz_regex_haystack_at_simt_(haystacks, first, last);
+                heads[threadIdx.x] = sz_regex_haystack_simt_(haystacks, indices[threadIdx.x]);
+                round.chunk_haystacks[(first - round.segment_begin) / sz_regex_chunk_slots_simt_k] =
+                    indices[threadIdx.x];
+            }
+        }
+        __syncthreads();
+        last = indices[sz_min_of_two((high - tile - 1) / sz_regex_chunk_slots_simt_k,
+                                     (sz_size_t)sz_regex_prefix_chunks_simt_k - 1)];
+        // Each thread tests a run of consecutive slots, so the haystack it holds serves them all.
+        {
+            sz_size_t const run = tile + threadIdx.x * sz_regex_prefix_slots_simt_k;
+            sz_size_t const chunk = threadIdx.x * sz_regex_prefix_slots_simt_k / sz_regex_chunk_slots_simt_k;
+            sz_regex_haystack_simt_t haystack = heads[chunk];
+            sz_size_t haystack_index = indices[chunk], slot, position, offset;
+            sz_u64_t marks = 0;
+            for (slot = run; slot != run + sz_regex_prefix_slots_simt_k && slot < high; ++slot) {
+                sz_u8_t held = 0;
+                if (slot > haystack.first + haystack.length)
+                    haystack_index = sz_regex_haystack_at_simt_(haystacks, slot, haystack_index + 1),
+                    haystack = sz_regex_haystack_simt_(haystacks, haystack_index);
+                position = slot - haystack.first;
+                if (position != haystack.length) held = buckets[0][haystack.text[position]];
+                for (offset = 1; held && offset != depth && position + offset != haystack.length; ++offset)
+                    held &= buckets[offset][haystack.text[position + offset]];
+                marks |= (sz_u64_t)(held != 0) << (slot - run);
+            }
+            if (marks)
+                atomicOr((unsigned long long *)words + chunk,
+                         (unsigned long long)(marks << (run - tile) % sz_regex_chunk_slots_simt_k));
+        }
+        __syncthreads();
+        for (index = threadIdx.x; index < sz_regex_prefix_chunks_simt_k && tile + index * 64 < high;
+             index += blockDim.x) {
+            sz_size_t const chunk = (tile - round.segment_begin) / sz_regex_chunk_slots_simt_k + index;
+            round.starts[chunk] = words[index];
+            round.chunk_offsets[chunk] = (sz_size_t)sz_u64_popcount_simt_(words[index]);
+        }
+    }
+}
+
+/**
+ *  @brief Marks every slot of one chunk where a match of a folded walk starts, one thread per
+ *      chunk, as the Metal kernel does.
+ *
+ *  A start inside the folds of one codepoint snaps outward to the codepoint's own start, as
+ *  @c sz_regex_mark_folded_ snaps it, so the walk begins past the unit holding the chunk's last
+ *  slot, where priming left its entry.
+ */
+STRINGZILLA_DEVICE void sz_regex_mark_folded_simt_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                                   sz_regex_round_simt_t round) {
+    sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.reverse_rows, round.reverse_cells);
+    sz_size_t const width = (sz_size_t)1 << round.chunk_shift, stride = (sz_size_t)gridDim.x * blockDim.x;
+    sz_u32_t const accepts = engine.reverse_accepts_begin;
+    sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (chunk == 0) round.chunk_offsets[round.chunks_count] = 0;
+    for (; chunk < round.chunks_count; chunk += stride) {
+        sz_size_t const low = round.segment_begin + chunk * width;
+        sz_size_t const high = sz_min_of_two(low + width, round.segment_end);
+        sz_size_t index = sz_regex_haystack_at_simt_(haystacks, low, 0), word;
+        sz_u64_t *const words = round.starts + (low - round.segment_begin) / 64;
+        sz_u32_t marked = 0;
+        round.chunk_haystacks[chunk] = index;
+        for (word = 0; word != width / 64; ++word) words[word] = 0;
+        for (; index < haystacks.count; ++index) {
+            sz_regex_haystack_simt_t const haystack = sz_regex_haystack_simt_(haystacks, index);
+            sz_size_t first, last, at, stop;
+            sz_u32_t state;
+            if (haystack.first >= high) break;
+            first = low > haystack.first ? low - haystack.first : 0;
+            last = sz_min_of_two(haystack.length, high - haystack.first - 1);
+            at = last == haystack.length ? last : sz_regex_boundary_simt_(haystack.text, haystack.length, last + 1);
+            state = at == haystack.length ? engine.reverse_starts[0] : round.entries[chunk];
+            stop = first ? first - 1 : 0;
+            while (at > stop) {
+                sz_utf8_folded_image_t image;
+                sz_u32_t block = sz_regex_block_at_simt_(&table, haystack.first + at), byte;
+                sz_size_t const begin = sz_regex_unit_before_simt_(sz_true_k, haystack.text, at, &image);
+                for (byte = image.length; byte--; block = 0) {
+                    sz_size_t const start = byte + 1u == image.length ? at : begin;
+                    state = sz_regex_move_simt_(&table, state,
+                                                block + table.classes[sz_regex_image_byte_simt_(&image, byte)]);
+                    if (state >= accepts && start >= first && start <= last)
+                        words[(haystack.first + start - low) / 64] |= (sz_u64_t)1
+                                                                      << ((haystack.first + start - low) % 64);
+                }
+                at = begin;
+            }
+            if (first == 0 && sz_regex_step_edge_simt_(&table, state, haystack.first) >= accepts)
+                words[(haystack.first - low) / 64] |= (sz_u64_t)1 << ((haystack.first - low) % 64);
+        }
+        for (word = 0; word != width / 64; ++word) marked += (sz_u32_t)sz_u64_popcount_simt_(words[word]);
+        round.chunk_offsets[chunk] = marked;
+    }
+}
+
+/** Lists the candidates of one chunk in slot order, one thread per chunk, for the end walks taking
+ *  one candidate per thread. */
+STRINGZILLA_DEVICE void sz_regex_list_simt_(sz_regex_round_simt_t round) {
+    sz_size_t const width = (sz_size_t)1 << round.chunk_shift, stride = (sz_size_t)gridDim.x * blockDim.x;
+    sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    for (; chunk < round.chunks_count; chunk += stride) {
+        sz_size_t const offset = chunk * width;
+        sz_u32_t index = (sz_u32_t)round.chunk_offsets[chunk];
+        sz_size_t word;
+        for (word = 0; word != width / 64; ++word) {
+            sz_u64_t bits = round.starts[offset / 64 + word];
+            for (; bits; bits &= bits - 1)
+                round.slots[index++] = (sz_u32_t)(offset + word * 64 + sz_u64_ctz_simt_(bits));
+        }
+    }
+}
+
+/** Walks every candidate to its end with a PikeVM in each thread's share of the
+ *  walks, linking nothing. */
+STRINGZILLA_DEVICE void sz_regex_ends_pike_simt_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                                 sz_regex_round_simt_t round) {
+    sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    sz_size_t const count = round.chunk_offsets[round.chunks_count];
+    sz_regex_pike_simt_t pike;
+    sz_size_t item;
+    if (thread >= round.walks_count) return;
+    pike = sz_regex_pike_carve_simt_(&round, thread, &engine);
+    pike.slots_count = 0;
+    for (item = thread; item < count; item += round.walks_count) {
+        sz_size_t const mark = round.segment_begin + round.slots[item];
+        sz_regex_haystack_simt_t const haystack = sz_regex_haystack_simt_(
+            haystacks,
+            sz_regex_haystack_at_simt_(haystacks, mark, round.chunk_haystacks[round.slots[item] >> round.chunk_shift]));
+        sz_regex_result_simt_t result;
+        sz_size_t end, offset = 0;
+        sz_u32_t pattern;
+        result.link = sz_regex_none_simt_k, result.pattern = sz_regex_none_simt_k, result.end = 0;
+        if (sz_regex_match_at_simt_(&engine, STRINGZILLA_NULL, &pike, &haystack, mark - haystack.first, &end, &pattern,
+                                    &offset))
+            result.pattern = pattern, result.end = haystack.first + end;
+        round.results[item] = result;
+    }
+}
+
+/**
+ *  @brief Walks every candidate of one chunk to its end, right to left, one thread per chunk, which
+ *      lists the candidates in slot order as it goes, as @c sz_regex_ends_metal_kernel_ does.
+ *
+ *  A walk leaves its state at the checkpoint of every 16-slot mark it passes, the first unit
+ *  boundary at or past the mark, and a later walk, starting further left, that holds the same state
+ *  at the same checkpoint stops there and takes that walk's outcome. A walk reaching the chunk's
+ *  edge leaves a link there instead: the state it would walk on in, which the links kernel follows.
+ *  A folded walk starts at the first rune its unit folds to, and once the links settle
+ *  @ref sz_regex_retry_folded_simt_ tries the others.
+ */
+STRINGZILLA_DEVICE void sz_regex_ends_simt_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                            sz_regex_round_simt_t round) {
+    sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.forward_rows, round.forward_cells);
+    sz_size_t const width = (sz_size_t)1 << round.chunk_shift, stride = (sz_size_t)gridDim.x * blockDim.x;
+    sz_size_t const begin = round.segment_begin;
+    sz_bool_t const folded = (sz_bool_t)(engine.case_sensitivity != sz_cased_k);
+    sz_u32_t const accepts = engine.forward_accepts_begin;
+    sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    for (; chunk < round.chunks_count; chunk += stride) {
+        sz_u32_t index = (sz_u32_t)round.chunk_offsets[chunk + 1];
+        sz_size_t low, high, checkpoint, haystack_index, word;
+        sz_regex_haystack_simt_t haystack;
+        if (index == round.chunk_offsets[chunk]) continue;
+        low = begin + chunk * width, high = sz_min_of_two(low + width, round.segment_end);
+        // Only a chunk with candidates has its checkpoints read, so only such a chunk clears them.
+        for (checkpoint = (low - begin) / sz_regex_checkpoint_slots_simt_k + 1;
+             checkpoint <= (high - begin) / sz_regex_checkpoint_slots_simt_k; ++checkpoint)
+            round.checkpoints[checkpoint].state = 0;
+        haystack_index = sz_regex_haystack_at_simt_(haystacks, high - 1, round.chunk_haystacks[chunk]);
+        haystack = sz_regex_haystack_simt_(haystacks, haystack_index);
+
+        for (word = (high - low + 63) / 64; word-- != 0;) {
+            sz_u64_t bits = round.starts[(low - begin) / 64 + word];
+            while (bits) {
+                sz_u32_t const bit = (sz_u32_t)sz_size_log2i_nonzero_simt_(bits);
+                sz_size_t const mark = low + word * 64 + bit;
+                sz_size_t start, at, stepped = 1, kind = 0, last_end = 0, last_at = 0, inherited_end = 0;
+                sz_size_t recorded_low = 0, recorded_high = 0;
+                sz_u32_t state, last = 0, link = sz_regex_none_simt_k, inherited = sz_regex_none_simt_k;
+                sz_regex_result_simt_t result;
+                bits ^= (sz_u64_t)1 << bit;
+                while (mark < haystack.first) haystack = sz_regex_haystack_simt_(haystacks, --haystack_index);
+                round.slots[--index] = (sz_u32_t)(mark - begin);
+
+                start = mark - haystack.first;
+                if (start && folded) {
+                    sz_utf8_folded_image_t previous;
+                    stepped = start - sz_regex_unit_before_simt_(sz_true_k, haystack.text, start, &previous);
+                    kind = sz_regex_byte_kind_(sz_regex_image_byte_simt_(&previous, previous.length - 1u));
+                }
+                else if (start) kind = sz_regex_byte_kind_simt_(haystack.text[start - 1]);
+                state = engine.forward_starts[kind];
+                for (at = start; state != 0;) {
+                    sz_size_t due;
+                    if (at == haystack.length) {
+                        state = sz_regex_step_edge_simt_(&table, state, haystack.first + at);
+                        if (state >= accepts) last = state, last_end = last_at = at;
+                        break;
+                    }
+                    // The mark at the chunk's own start is the edge of the chunk before,
+                    // which owns its checkpoint.
+                    due = sz_regex_mark_at_simt_(haystack.first + 1 + at, stepped);
+                    if (due > low) {
+                        sz_size_t const visited = (due - begin) / sz_regex_checkpoint_slots_simt_k;
+                        sz_regex_checkpoint_simt_t *const entry = round.checkpoints + visited;
+                        if (entry->state == state) {
+                            link = entry->link;
+                            if (entry->pattern != sz_regex_none_simt_k)
+                                inherited = entry->pattern, inherited_end = begin + entry->end, last_at = at;
+                            break;
+                        }
+                        entry->state = state;
+                        if (due == high) {
+                            link = index;
+                            entry->link = index, entry->pattern = sz_regex_none_simt_k;
+                            round.links[index].link = state;
+                            round.links_list[atomicAdd(round.counters + sz_regex_links_counter_simt_k, 1u)] = index;
+                            break;
+                        }
+                        if (recorded_high == 0) recorded_low = visited;
+                        recorded_high = visited + 1;
+                    }
+                    at = sz_regex_advance_simt_(&table, folded, &haystack, at, haystack.length, accepts, &state, &last,
+                                                &last_end, &last_at, &stepped);
+                }
+                result.link = link;
+                result.end = inherited != sz_regex_none_simt_k ? inherited_end : haystack.first + last_end;
+                result.pattern = inherited != sz_regex_none_simt_k ? inherited
+                                 : last                            ? sz_regex_pattern_simt_(&engine, last)
+                                                                   : sz_regex_none_simt_k;
+                // The checkpoints passed learn the outcome, keeping the match only when the step
+                // reaching it was past them, which a match ending inside the folds of the unit
+                // before a checkpoint was not.
+                for (checkpoint = recorded_low; checkpoint < recorded_high; ++checkpoint) {
+                    sz_bool_t const past = (sz_bool_t)(result.pattern != sz_regex_none_simt_k &&
+                                                       haystack.first + 1 + last_at >=
+                                                           begin + checkpoint * sz_regex_checkpoint_slots_simt_k);
+                    round.checkpoints[checkpoint].link = result.link;
+                    round.checkpoints[checkpoint].pattern = past ? result.pattern : sz_regex_none_simt_k;
+                    round.checkpoints[checkpoint].end = (sz_u32_t)(result.end - begin);
+                }
+                round.results[index] = result;
+            }
+        }
+    }
+}
+
+/** Walks every link on from its chunk's edge, at the first unit boundary past it for a folded walk,
+ *  as @ref sz_regex_link_walk_simt_ walks it. */
+STRINGZILLA_DEVICE void sz_regex_links_simt_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                             sz_regex_round_simt_t round) {
+    sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.forward_rows, round.forward_cells);
+    sz_size_t const begin = round.segment_begin, end = round.segment_end;
+    sz_bool_t const folded = (sz_bool_t)(engine.case_sensitivity != sz_cased_k);
+    sz_u32_t const links_count = round.counters[sz_regex_links_counter_simt_k];
+    sz_u32_t item = blockIdx.x * blockDim.x + threadIdx.x;
+    for (; item < links_count; item += gridDim.x * blockDim.x) {
+        sz_u32_t const link = round.links_list[item];
+        sz_size_t const chunk = round.slots[link] >> round.chunk_shift;
+        sz_size_t const edge = sz_min_of_two(begin + ((chunk + 1) << round.chunk_shift), end);
+        sz_regex_haystack_simt_t const haystack = sz_regex_haystack_simt_(
+            haystacks, sz_regex_haystack_at_simt_(haystacks, begin + round.slots[link], round.chunk_haystacks[chunk]));
+        sz_size_t const at = edge - haystack.first - 1;
+        sz_regex_link_walk_simt_(&engine, &round, &table, folded, link, round.links[link].link, &haystack,
+                                 folded ? sz_regex_boundary_simt_(haystack.text, haystack.length, at) : at);
+    }
+}
+
+/** Walks every group the last slide made on from where its walks paused, as the links kernel walks
+ *  links, the window having moved two segments on from its end there. */
+STRINGZILLA_DEVICE void sz_regex_resume_simt_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                              sz_regex_round_simt_t round) {
+    sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.forward_rows, round.forward_cells);
+    sz_size_t const paused = round.looks.begin;
+    sz_bool_t const folded = (sz_bool_t)(engine.case_sensitivity != sz_cased_k);
+    sz_regex_haystack_simt_t const haystack = sz_regex_haystack_simt_(haystacks,
+                                                                      sz_regex_haystack_at_simt_(haystacks, paused, 0));
+    sz_size_t const at = folded ? sz_regex_boundary_simt_(haystack.text, haystack.length, paused - haystack.first)
+                                : paused - haystack.first;
+    sz_u32_t const groups_count = round.counters[sz_regex_groups_counter_simt_k];
+    sz_u32_t group = round.groups_begin + blockIdx.x * blockDim.x + threadIdx.x;
+    for (; group < groups_count; group += gridDim.x * blockDim.x)
+        sz_regex_link_walk_simt_(&engine, &round, &table, folded, sz_regex_group_simt_k | group,
+                                 round.groups[group].link, &haystack, at);
+}
+
 /** One round of pointer doubling over the links, each taking the deepest match its hops reach. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_links_double_simt_kernel_(sz_regex_round_simt_t round) {
+STRINGZILLA_DEVICE void sz_regex_links_double_simt_(sz_regex_round_simt_t round) {
     sz_bool_t const even = (sz_bool_t)(round.round % 2 == 0);
     sz_regex_result_simt_t const *source = even ? round.links : round.links_next;
     sz_regex_result_simt_t *target = even ? round.links_next : round.links;
@@ -1303,8 +1160,7 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
  *  The first walk to take its state's leader allocates the group and publishes it there, and one
  *  past the groups' capacity raises the refusal instead.
  */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_group_simt_kernel_(sz_regex_engine_t engine, sz_regex_round_simt_t round) {
+STRINGZILLA_DEVICE void sz_regex_group_simt_(sz_regex_engine_t engine, sz_regex_round_simt_t round) {
     sz_regex_continuation_simt_t const *const continuations = (sz_regex_continuation_simt_t const *)round.links_next;
     sz_size_t const columns = sz_regex_stride_(engine.classes_count, engine.lookarounds_count);
     sz_u32_t const count = round.counters[sz_regex_handed_counter_simt_k];
@@ -1327,8 +1183,7 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
 
 /** Points every walk paused at the end of the lookaround table's window at its state's group, which
  *  a link or a group of the window's last end then follows as the link whose match wins. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_point_simt_kernel_(sz_regex_engine_t engine, sz_regex_round_simt_t round) {
+STRINGZILLA_DEVICE void sz_regex_point_simt_(sz_regex_engine_t engine, sz_regex_round_simt_t round) {
     sz_regex_continuation_simt_t const *const continuations = (sz_regex_continuation_simt_t const *)round.links_next;
     sz_size_t const columns = sz_regex_stride_(engine.classes_count, engine.lookarounds_count);
     sz_u32_t const count = round.counters[sz_regex_handed_counter_simt_k];
@@ -1344,8 +1199,7 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
 
 /** One round of pointer doubling over the groups, as over the links, each taking the deepest match
  *  a round's hops ahead among the groups of later window ends. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_groups_double_simt_kernel_(sz_regex_round_simt_t round) {
+STRINGZILLA_DEVICE void sz_regex_groups_double_simt_(sz_regex_round_simt_t round) {
     sz_bool_t const even = (sz_bool_t)(round.round % 2 == 0);
     sz_regex_result_simt_t const *source = even ? round.groups : round.groups_next;
     sz_regex_result_simt_t *target = even ? round.groups_next : round.groups;
@@ -1356,8 +1210,7 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
 
 /** Gives every link that paused at the end of the lookaround table's window its settled group's
  *  match, when it has one, and unlinks it, so the links double as though it never paused. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_take_simt_kernel_(sz_regex_round_simt_t round) {
+STRINGZILLA_DEVICE void sz_regex_take_simt_(sz_regex_round_simt_t round) {
     sz_u32_t const links_count = round.counters[sz_regex_links_counter_simt_k];
     sz_u32_t item = blockIdx.x * blockDim.x + threadIdx.x;
     for (; item < links_count; item += gridDim.x * blockDim.x) {
@@ -1377,9 +1230,8 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
  *  It takes one thread per candidate, each walked to its end without links, raising the refusal
  *  rather than reading the lookaround table past its window.
  */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_retry_folded_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                       sz_regex_round_simt_t round) {
+STRINGZILLA_DEVICE void sz_regex_retry_folded_simt_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                                    sz_regex_round_simt_t round) {
     sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.forward_rows, round.forward_cells);
     sz_size_t const count = round.chunk_offsets[round.chunks_count], stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t item = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -1406,8 +1258,7 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
 
 /** Follows the search through one chunk from every candidate as an entry, right to left, one thread
  *  per chunk, and seeds each haystack's chain, as @c sz_regex_chain_metal_kernel_ does. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_chain_simt_kernel_(sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+STRINGZILLA_DEVICE void sz_regex_chain_simt_(sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
     sz_size_t const begin = round.segment_begin, cursor = round.carry->cursor;
     sz_bool_t const refusing = (sz_bool_t)(round.carry->refusing != 0);
     sz_u32_t const count = (sz_u32_t)round.chunk_offsets[round.chunks_count];
@@ -1476,8 +1327,7 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
 
 /** One round of pointer doubling over the chunk exits: every kept candidate keeps those its next
  *  hops reach, and jumps that far again; a round after one that left nothing to follow retires. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_double_simt_kernel_(sz_regex_round_simt_t round) {
+STRINGZILLA_DEVICE void sz_regex_double_simt_(sz_regex_round_simt_t round) {
     sz_bool_t const even = (sz_bool_t)(round.round % 2 == 0);
     sz_u32_t const *source = even ? round.exits : round.exits_next;
     sz_u32_t *target = even ? round.exits_next : round.exits;
@@ -1505,8 +1355,7 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
  *  It counts what it keeps, flagging each kept candidate and counting those of the extracted
  *  pattern, or, once the counts are scanned, stores what the call asks.
  */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_sweep_simt_kernel_(sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+STRINGZILLA_DEVICE void sz_regex_sweep_simt_(sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
     sz_size_t const begin = round.segment_begin, width = (sz_size_t)1 << round.chunk_shift;
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -1560,8 +1409,7 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
 
 /** Hands the next segment its carry, launched on one thread, as the Metal kernel does, the last
  *  boundary of whatever the call writes, and the edges of a contains call's bitmap. */
-static __global__ void __launch_bounds__(sz_regex_carry_threads_per_block_simt_k)
-    sz_regex_carry_simt_kernel_(sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+STRINGZILLA_DEVICE void sz_regex_carry_simt_(sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
     sz_regex_carry_simt_t *const carry = round.carry;
     sz_size_t const kept = round.chunk_kept[round.chunks_count];
     if (round.segment_end < round.slots_count) {
@@ -1587,9 +1435,8 @@ static __global__ void __launch_bounds__(sz_regex_carry_threads_per_block_simt_k
 }
 
 /** Saves the total each thread's range of counts follows, before the differences overwrite it. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_counts_edges_simt_kernel_(sz_size_t const *counts, sz_size_t counts_stride, sz_size_t count,
-                                       sz_size_t *edges) {
+STRINGZILLA_DEVICE void sz_regex_counts_edges_simt_(sz_size_t const *counts, sz_size_t counts_stride, sz_size_t count,
+                                                    sz_size_t *edges) {
     sz_size_t const threads = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     sz_size_t const begin = sz_min_of_two(thread * sz_size_divide_round_up(count, threads), count);
@@ -1598,8 +1445,8 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
 
 /** Turns the running totals the sweep left in @p counts into each haystack's own count, every
  *  thread over its own range right to left, so it reads each total before overwriting it. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_counts_simt_kernel_(sz_size_t *counts, sz_size_t counts_stride, sz_size_t count, sz_size_t const *edges) {
+STRINGZILLA_DEVICE void sz_regex_counts_simt_(sz_size_t *counts, sz_size_t counts_stride, sz_size_t count,
+                                              sz_size_t const *edges) {
     sz_size_t const threads = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     sz_size_t const per_thread = sz_size_divide_round_up(count, threads);
@@ -1611,8 +1458,8 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
 
 /** Measures every kept match's replacement, one thread per candidate in each thread's share of the
  *  walks, leaving how far it moves what follows. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_expand_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+STRINGZILLA_DEVICE void sz_regex_expand_kept_simt_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                                   sz_regex_round_simt_t round) {
     sz_regex_table_simt_t const table = sz_regex_direct_simt_(&engine, &round);
     sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     sz_size_t const count = round.chunk_offsets[round.chunks_count];
@@ -1642,8 +1489,7 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
 
 /** Sums the drift of every chunk's kept matches, one thread per chunk, and tells the chunks the
  *  last of them reaches into that they start covered. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_drift_simt_kernel_(sz_regex_round_simt_t round) {
+STRINGZILLA_DEVICE void sz_regex_drift_simt_(sz_regex_round_simt_t round) {
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (chunk == 0) round.chunk_sums[round.chunks_count] = 0;
@@ -1667,8 +1513,8 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
  *  Byte @c b of haystack @c h, in slot @c s, lands at <tt>s - h - 1</tt> plus the drift of the kept
  *  matches before it, and a match starting in slot @c s at <tt>s - h</tt> plus the same.
  */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_rewrite_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+STRINGZILLA_DEVICE void sz_regex_rewrite_simt_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                               sz_regex_round_simt_t round) {
     sz_regex_table_simt_t const table = sz_regex_direct_simt_(&engine, &round);
     sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     sz_size_t const begin = round.segment_begin, width = (sz_size_t)1 << round.chunk_shift;
@@ -1709,8 +1555,8 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
 /** Finds every haystack's first kept match of the extracted pattern and counts its rows, one thread
  *  per chunk in each thread's share of the walks: a match is the first when as many kept matches of
  *  the pattern precede it as precede its haystack. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_firsts_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+STRINGZILLA_DEVICE void sz_regex_firsts_simt_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                              sz_regex_round_simt_t round) {
     sz_regex_table_simt_t const table = sz_regex_direct_simt_(&engine, &round);
     sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     sz_size_t const begin = round.segment_begin;
@@ -1751,8 +1597,8 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
 
 /** Writes the rows the firsts kernel counted and where each haystack starting in a chunk begins
  *  among them, one thread per chunk in each thread's share of the walks. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_rows_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+STRINGZILLA_DEVICE void sz_regex_rows_simt_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                            sz_regex_round_simt_t round) {
     sz_regex_table_simt_t const table = sz_regex_direct_simt_(&engine, &round);
     sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     sz_size_t const begin = round.segment_begin, width = (sz_size_t)1 << round.chunk_shift;
@@ -1784,6 +1630,74 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
         }
         for (; pending < haystacks.count && sz_regex_first_slot_simt_(haystacks, pending) < high; ++pending)
             round.rows_offsets[pending] = base + written;
+    }
+}
+
+/** Marks every slot of one chunk where a match starts, one thread per chunk, as the Metal kernel
+ *  does, each block first staging its tile's text, which its threads read a chunk apart. */
+STRINGZILLA_DEVICE void sz_regex_mark_simt_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                            sz_regex_round_simt_t round) {
+    extern __shared__ sz_u8_t sz_regex_staged_simt_[];
+    __shared__ sz_size_t tile_haystack;
+    sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.reverse_rows, round.reverse_cells);
+    sz_u8_t *const staged = sz_regex_staged_simt_ + sz_regex_staged_bytes_simt_k +
+                            round.staged_cells * sizeof(sz_u32_t);
+    sz_u8_t const *const tape = (sz_u8_t const *)sz_strings_start_simt_(haystacks, 0);
+    sz_u8_t const *const tape_end = (sz_u8_t const *)sz_strings_start_simt_(haystacks, haystacks.count);
+    sz_size_t const width = (sz_size_t)1 << round.chunk_shift, tile_slots = width * blockDim.x;
+    sz_u32_t const accepts = engine.reverse_accepts_begin;
+    sz_size_t tile;
+    // The scan reads one entry past the chunks, which ends up holding the candidates' total.
+    if (blockIdx.x == 0 && threadIdx.x == 0) round.chunk_offsets[round.chunks_count] = 0;
+    for (tile = blockIdx.x; tile * blockDim.x < round.chunks_count; tile += gridDim.x) {
+        sz_size_t const chunk = tile * blockDim.x + threadIdx.x, tile_low = round.segment_begin + tile * tile_slots;
+        sz_size_t const low = round.segment_begin + chunk * width;
+        sz_size_t const high = sz_min_of_two(low + width, round.segment_end);
+        sz_size_t index, word, first_byte;
+        sz_u64_t *const words = round.starts + (low - round.segment_begin) / 64;
+        sz_u8_t const *origin;
+        sz_u32_t marked = 0;
+        // The last tile's walks are done with its text and its haystack before either is replaced.
+        __syncthreads();
+        if (threadIdx.x == 0) tile_haystack = sz_regex_haystack_at_simt_(haystacks, tile_low, 0);
+        __syncthreads();
+        // A tile's bytes run from the byte before its first slot, as each slot past the first of a
+        // haystack stands for the byte before it, and span at most its slots.
+        first_byte = tile_low > tile_haystack ? tile_low - tile_haystack - 1 : 0;
+        origin = sz_regex_stage_text_simt_(
+            staged, tape + first_byte, tape + sz_min_of_two(first_byte + tile_slots + 1, (sz_size_t)(tape_end - tape)),
+            tape, tape_end);
+        __syncthreads();
+        if (chunk >= round.chunks_count) continue;
+        index = sz_regex_haystack_at_simt_(haystacks, low, tile_haystack);
+        round.chunk_haystacks[chunk] = index;
+        for (word = 0; word != width / 64; ++word) words[word] = 0;
+        for (; index < haystacks.count; ++index) {
+            sz_regex_haystack_simt_t const haystack = sz_regex_haystack_simt_(haystacks, index);
+            sz_size_t begin_byte, end_byte, at;
+            sz_u32_t state, bit;
+            if (haystack.first >= high) break;
+            begin_byte = low > haystack.first ? low - haystack.first - 1 : 0;
+            end_byte = sz_min_of_two(haystack.length, high - haystack.first - 1);
+            state = end_byte == haystack.length ? engine.reverse_starts[0] : round.entries[chunk];
+            for (at = end_byte; at != begin_byte;) {
+                sz_u32_t const count = (sz_u32_t)sz_min_of_two(at - begin_byte, (sz_size_t)sz_regex_run_bytes_simt_k);
+                sz_u32_t const mask = sz_regex_run_back_staged_simt_(&table, &state, staged,
+                                                                     (sz_size_t)(haystack.text + at - origin),
+                                                                     haystack.first + at, count, accepts);
+                at -= count;
+                if (!mask) continue;
+                // A byte's own slot marks the match starting right after it.
+                bit = (sz_u32_t)(haystack.first + 1 + at - low);
+                words[bit / 64] |= (sz_u64_t)mask << (bit % 64);
+                if (bit % 64 + count > 64) words[bit / 64 + 1] |= (sz_u64_t)mask >> (64 - bit % 64);
+                marked += (sz_u32_t)sz_u32_popcount_simt_(mask);
+            }
+            if (haystack.first < low || sz_regex_step_edge_simt_(&table, state, haystack.first) < accepts) continue;
+            bit = (sz_u32_t)(haystack.first - low);
+            words[bit / 64] |= (sz_u64_t)1 << (bit % 64), ++marked;
+        }
+        round.chunk_offsets[chunk] = marked;
     }
 }
 

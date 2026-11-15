@@ -31,18 +31,20 @@
 #define STRINGZILLA_UTF8_WORDBREAKS_SVE2_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_ARM64_
+#if STRINGZILLA_ARCH_ARM64_SVE2_
+
 #include "stringzilla/utf8_wordbreaks/tables.h"
 #include "stringzilla/utf8_wordbreaks/serial.h"
 #include "stringzilla/utf8_runes/sve2.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
 /*  In-register SVE2 Word_Break classifier core: flat-table BMP classify + astral nibble cascade +
  *  the predicate/lane-mask bridge. The substrate LUT readers live in `utf8_runes/sve2.h`. */
-#if STRINGZILLA_ARCH_ARM64_
-#if STRINGZILLA_ARCH_ARM64_SVE2_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve+sve2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -1023,11 +1025,12 @@ STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_sve2(sz_cptr_t text, sz_size_t le
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_ARM64_SVE2_
 #endif // STRINGZILLA_ARCH_ARM64_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_UTF8_WORDBREAKS_SVE2_H_

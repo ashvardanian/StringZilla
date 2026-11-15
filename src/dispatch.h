@@ -48,26 +48,26 @@ STRINGZILLA_CONSTEXPR sz_capability_group_t sz_capability_group_of_(sz_capabilit
                                    (capabilities >= sz_cap_metal_k));
 }
 
-/** What each group runs: the CPU entry starts at serial and widens once the library loads, and
- *  each GPU entry stays all-ones, as a GPU mask comes from its own device's producer. */
-extern sz_capability_t sz_capabilities_runnable_[sz_capability_groups_k];
+/** What the CPU runs: serial until the library loads, then what it detects and this library
+ *  compiled. A GPU mask comes from its own device's producer, so the picks clamp only CPU masks. */
+extern sz_capability_t sz_capabilities_enabled_cpu_;
 
-/** The best capability @p capabilities shares with its group's runnable kernels, or zero if none. */
+/** The best capability @p capabilities shares with its group's enabled kernels, or zero if none. */
 STRINGZILLA_INLINE sz_capability_t sz_capability_pick_(sz_capability_t capabilities,
                                                        sz_capability_kernels_t const groups[sz_capability_groups_k]) {
     sz_capability_group_t const group_index = sz_capability_group_of_(capabilities);
-    sz_u64_t const at_or_below = sz_u64_smear_down_(capabilities & groups[group_index].capabilities &
-                                                    sz_capabilities_runnable_[group_index]);
+    sz_capability_t const clamp = group_index ? ~(sz_capability_t)0 : sz_capabilities_enabled_cpu_;
+    sz_u64_t const at_or_below = sz_u64_smear_down_(capabilities & groups[group_index].capabilities & clamp);
     return at_or_below ^ (at_or_below >> 1);
 }
 
-/** The kernel of the best capability @p capabilities shares with its group's runnable kernels. */
+/** The kernel of the best capability @p capabilities shares with its group's enabled kernels. */
 STRINGZILLA_INLINE sz_kernel_punned_t sz_kernel_pick_(sz_capability_t capabilities,
                                                       sz_capability_kernels_t const groups[sz_capability_groups_k]) {
     sz_capability_group_t const group_index = sz_capability_group_of_(capabilities);
     sz_capability_kernels_t const *group = &groups[group_index];
-    sz_u64_t const at_or_below = sz_u64_smear_down_(capabilities & group->capabilities &
-                                                    sz_capabilities_runnable_[group_index]);
+    sz_capability_t const clamp = group_index ? ~(sz_capability_t)0 : sz_capabilities_enabled_cpu_;
+    sz_u64_t const at_or_below = sz_u64_smear_down_(capabilities & group->capabilities & clamp);
     return group->kernels[sz_u64_popcount(group->capabilities & at_or_below)];
 }
 

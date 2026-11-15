@@ -1401,10 +1401,9 @@ inline sz_subdocuments_engine_metal_t sz_subdocuments_engine_reach_metal_(
     return engine;
 }
 
-/** Walks every document, or every listed one, one thread each: counting, or storing at the
- *  offsets the counts were scanned into, as @c sz_subdocuments_walk_simt_kernel_ does,
- *  leaving a document past @c large_bytes to the cooperative walk while it has room, and to
- *  the second walk past that. */
+/** Walks every document, or every listed one, one thread each: counting, or storing at the offsets
+ *  the counts were scanned into, as @c sz_subdocuments_walk_simt_ does, leaving a document past
+ *  @c large_bytes to the cooperative walk while it has room, and to the second walk past that. */
 kernel void sz_subdocuments_walk_metal_kernel_(
     device uchar *engine_block [[buffer(0)]], device uchar *scratch [[buffer(1)]],
     device uchar const *documents [[buffer(2)]], device uchar const *documents_offsets [[buffer(3)]],
@@ -1777,7 +1776,7 @@ inline ulong sz_subdocuments_token_length_metal_(thread sz_subdocuments_view_met
 }
 
 /** Counts each listed document's chunks, none for one at or past @c bound, and clears its verdict,
- *  as @c sz_subdocuments_large_lengths_simt_kernel_ does. */
+ *  as @c sz_subdocuments_large_lengths_simt_ does. */
 kernel void sz_subdocuments_large_lengths_metal_kernel_(device uchar *scratch [[buffer(1)]],
                                                         constant sz_subdocuments_arguments_metal_t &arguments
                                                         [[buffer(8)]],
@@ -1794,7 +1793,7 @@ kernel void sz_subdocuments_large_lengths_metal_kernel_(device uchar *scratch [[
 }
 
 /** Records each chunk's effect on the carries for either escape carry it starts with, marking the
- *  first of each document, as @c sz_subdocuments_large_summary_simt_kernel_ does. */
+ *  first of each document, as @c sz_subdocuments_large_summary_simt_ does. */
 kernel void sz_subdocuments_large_summary_metal_kernel_(device uchar *scratch [[buffer(1)]],
                                                         device uchar const *documents [[buffer(2)]],
                                                         device uchar const *documents_offsets [[buffer(3)]],
@@ -1930,8 +1929,8 @@ kernel void sz_subdocuments_large_count_metal_kernel_(device uchar *scratch [[bu
 }
 
 /** Refuses a document whose depth dips below zero, counted from its first chunk, ends above it,
- *  ends inside a string, or that the count marked, as @c sz_subdocuments_large_check_simt_kernel_
- *  does for the CUDA and ROCm walks. */
+ *  ends inside a string, or that the count marked, as @c sz_subdocuments_large_check_simt_ does for
+ *  the CUDA and ROCm walks. */
 kernel void sz_subdocuments_large_check_metal_kernel_(device uchar *scratch [[buffer(1)]],
                                                       constant sz_subdocuments_arguments_metal_t &arguments
                                                       [[buffer(8)]],
@@ -1956,7 +1955,7 @@ kernel void sz_subdocuments_large_check_metal_kernel_(device uchar *scratch [[bu
 }
 
 /** Drops the chunks of every refused document and publishes the deepest any kept document nests, as
- *  @c sz_subdocuments_large_drop_simt_kernel_ does. */
+ *  @c sz_subdocuments_large_drop_simt_ does. */
 kernel void sz_subdocuments_large_drop_metal_kernel_(device uchar *scratch [[buffer(1)]],
                                                      constant sz_subdocuments_arguments_metal_t &arguments
                                                      [[buffer(8)]],
@@ -1977,7 +1976,7 @@ kernel void sz_subdocuments_large_drop_metal_kernel_(device uchar *scratch [[buf
 }
 
 /** Writes each chunk's tokens and the containers it opens, at depths counted from its document's
- *  first chunk, as @c sz_subdocuments_large_tokens_simt_kernel_ does. */
+ *  first chunk, as @c sz_subdocuments_large_tokens_simt_ does. */
 kernel void sz_subdocuments_large_tokens_metal_kernel_(device uchar *scratch [[buffer(1)]],
                                                        device uchar const *documents [[buffer(2)]],
                                                        device uchar const *documents_offsets [[buffer(3)]],
@@ -2052,7 +2051,7 @@ kernel void sz_subdocuments_large_minima_metal_kernel_(device uchar *scratch [[b
 }
 
 /** Finds the container each chunk starts inside and the parents its chunk left open, as
- *  @c sz_subdocuments_large_parents_simt_kernel_ does. */
+ *  @c sz_subdocuments_large_parents_simt_ does. */
 kernel void sz_subdocuments_large_parents_metal_kernel_(device uchar *scratch [[buffer(1)]],
                                                         constant sz_subdocuments_arguments_metal_t &arguments
                                                         [[buffer(8)]],
@@ -2077,7 +2076,7 @@ kernel void sz_subdocuments_large_parents_metal_kernel_(device uchar *scratch [[
 }
 
 /** Records where each container closes and counts the values directly inside it, as
- *  @c sz_subdocuments_large_closes_simt_kernel_ does. */
+ *  @c sz_subdocuments_large_closes_simt_ does. */
 kernel void sz_subdocuments_large_closes_metal_kernel_(device uchar *scratch [[buffer(1)]],
                                                        constant sz_subdocuments_arguments_metal_t &arguments
                                                        [[buffer(8)]],
@@ -2153,7 +2152,7 @@ kernel void sz_subdocuments_large_offsets_metal_kernel_(device uchar *scratch [[
 }
 
 /** Settles each container's selector and starts its live sets, as
- *  @c sz_subdocuments_large_selectors_simt_kernel_ does. */
+ *  @c sz_subdocuments_large_selectors_simt_ does. */
 kernel void sz_subdocuments_large_selectors_metal_kernel_(
     device uchar *engine_block [[buffer(0)]], device uchar *scratch [[buffer(1)]],
     device uchar const *documents [[buffer(2)]], device uchar const *documents_offsets [[buffer(3)]],
@@ -2187,7 +2186,7 @@ kernel void sz_subdocuments_large_selectors_metal_kernel_(
 }
 
 /** Gathers into each container the descendant steps live at its ancestors, doubling how far up per
- *  round, as @c sz_subdocuments_large_jump_simt_kernel_ does. */
+ *  round, as @c sz_subdocuments_large_jump_simt_ does. */
 kernel void sz_subdocuments_large_jump_metal_kernel_(device uchar *engine_block [[buffer(0)]],
                                                      device uchar *scratch [[buffer(1)]],
                                                      device uchar *regex_block [[buffer(7)]],
@@ -2220,7 +2219,7 @@ kernel void sz_subdocuments_large_jump_metal_kernel_(device uchar *engine_block 
 }
 
 /** Advances each container's live sets from its parent's in place, as
- *  @c sz_subdocuments_large_advance_simt_kernel_ does. */
+ *  @c sz_subdocuments_large_advance_simt_ does. */
 kernel void sz_subdocuments_large_advance_metal_kernel_(device uchar *engine_block [[buffer(0)]],
                                                         device uchar *scratch [[buffer(1)]],
                                                         device uchar *regex_block [[buffer(7)]],
@@ -2253,7 +2252,7 @@ kernel void sz_subdocuments_large_advance_metal_kernel_(device uchar *engine_blo
 
 /** Walks each chunk's tokens in order, counting matches and refusing its document where the serial
  *  walk would or when it holds no token, or writing the matches from where its document's first
- *  match lands when storing, as @c sz_subdocuments_large_walk_simt_kernel_ does. */
+ *  match lands when storing, as @c sz_subdocuments_large_walk_simt_ does. */
 kernel void sz_subdocuments_large_walk_metal_kernel_(
     device uchar *engine_block [[buffer(0)]], device uchar *scratch [[buffer(1)]],
     device uchar const *documents [[buffer(2)]], device uchar const *documents_offsets [[buffer(3)]],
@@ -2338,7 +2337,7 @@ kernel void sz_subdocuments_large_walk_metal_kernel_(
 }
 
 /** Writes each listed document's matches, the scanned matches of its chunks, into its count, as
- *  @c sz_subdocuments_large_finish_simt_kernel_ does. */
+ *  @c sz_subdocuments_large_finish_simt_ does. */
 kernel void sz_subdocuments_large_finish_metal_kernel_(device uchar *scratch [[buffer(1)]],
                                                        device ulong *counts [[buffer(6)]],
                                                        constant sz_subdocuments_arguments_metal_t &arguments

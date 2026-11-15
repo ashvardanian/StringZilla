@@ -8,16 +8,18 @@
 #define STRINGZILLA_UTF8_TOKENS_HASWELL_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_HASWELL_
+
 #include "stringzilla/utf8_tokens/serial.h"
 #include "stringzilla/utf8_runes/haswell.h"
 #include "stringzilla/utf8_tokens/tables.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_X8664_
-#if STRINGZILLA_ARCH_X8664_HASWELL_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,popcnt"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -576,11 +578,12 @@ STRINGZILLA_API sz_status_t sz_utf8_delimiters_haswell(                         
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_X8664_HASWELL_
 #endif // STRINGZILLA_ARCH_X8664_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_UTF8_TOKENS_HASWELL_H_

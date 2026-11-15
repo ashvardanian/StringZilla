@@ -16,19 +16,335 @@
 #ifndef STRINGZILLA_LEVENSHTEIN_AMPERE_CUH_
 #define STRINGZILLA_LEVENSHTEIN_AMPERE_CUH_
 
-#include "stringzilla/levenshtein/cuda.cuh"
-#include "stringzilla/strings/ampere.cuh" // `sz_u32_lanes_sum_ampere_`
+#include "stringzilla/types.h"
 
 #if STRINGZILLA_ARCH_CUDA_
 #if STRINGZILLA_ARCH_CUDA_AMPERE_
 
-#ifdef __cplusplus
+#include "stringzilla/levenshtein/cuda.cuh"
+#include "stringzilla/strings/ampere.cuh" // `sz_u32_lanes_sum_ampere_`
+
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
 #if STRINGZILLA_TARGET_AMPERE
 
 #pragma region Entry Points
+
+/*  Threaded byte rung: one entry point per word count. */
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_w1_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 1,
+                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_w2_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 2,
+                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_w3_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 3,
+                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_w4_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 4,
+                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_w5_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 5,
+                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_w6_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 6,
+                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_w7_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 7,
+                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_w8_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 8,
+                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_w9_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 9,
+                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_w10_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 10,
+                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_w11_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 11,
+                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_w12_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 12,
+                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_w13_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 13,
+                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_w14_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 14,
+                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_w15_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 15,
+                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_w16_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 16,
+                               sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+/*  Threaded rune rung: one entry point per word count. */
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_utf8_w1_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 1,
+                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_utf8_w2_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 2,
+                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_utf8_w3_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 3,
+                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_utf8_w4_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 4,
+                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_utf8_w5_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 5,
+                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_utf8_w6_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 6,
+                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_utf8_w7_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 7,
+                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_utf8_w8_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 8,
+                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_utf8_w9_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 9,
+                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_utf8_w10_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 10,
+                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_utf8_w11_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 11,
+                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_utf8_w12_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 12,
+                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_utf8_w13_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 13,
+                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_utf8_w14_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 14,
+                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_utf8_w15_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 15,
+                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_utf8_w16_ampere_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound, sz_size_t const *candidate_order) {
+    sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, candidate_order, 16,
+                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+}
+
+/*  Narrow byte rungs: one entry point per lane width. */
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_u8x4_ampere_kernel_(sz_levenshtein_engine_t engine, sz_u32_t const *order,
+                                                 sz_strings_view_t candidates, sz_size_t *distances,
+                                                 sz_size_t distances_stride, sz_size_t bound) {
+    sz_levenshtein_lanes_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, 8, 4);
+}
+
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_u16x2_ampere_kernel_(sz_levenshtein_engine_t engine, sz_u32_t const *order,
+                                                  sz_strings_view_t candidates, sz_size_t *distances,
+                                                  sz_size_t distances_stride, sz_size_t bound) {
+    sz_levenshtein_lanes_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, 16, 2);
+}
+
+/** @ref sz_levenshtein_masks_simt_ , one block per query. */
+static __global__ void __launch_bounds__(sz_levenshtein_masks_threads_simt_k)
+    sz_levenshtein_masks_ampere_kernel_(sz_levenshtein_engine_t engine, sz_string_view_t const *texts,
+                                        sz_size_t first) {
+    sz_levenshtein_masks_simt_(engine, texts, first);
+}
+
+/** @ref sz_levenshtein_length_counts_simt_ over a resident wave of blocks. */
+static __global__ void __launch_bounds__(sz_levenshtein_length_keys_simt_k)
+    sz_levenshtein_length_counts_ampere_kernel_(sz_strings_view_t candidates, sz_size_t *counts) {
+    sz_levenshtein_length_counts_simt_(candidates, counts);
+}
+
+/** @ref sz_levenshtein_length_offsets_cuda_ in one block. */
+static __global__ void __launch_bounds__(sz_levenshtein_length_keys_simt_k)
+    sz_levenshtein_length_offsets_ampere_kernel_(sz_size_t *counts) {
+    sz_levenshtein_length_offsets_cuda_(counts);
+}
+
+/** @ref sz_levenshtein_length_scatter_simt_. */
+static __global__ void __launch_bounds__(sz_levenshtein_length_keys_simt_k)
+    sz_levenshtein_length_scatter_ampere_kernel_(sz_strings_view_t candidates, sz_size_t *cursors,
+                                                 sz_size_t *candidate_order) {
+    sz_levenshtein_length_scatter_simt_(candidates, cursors, candidate_order, sz_u32_increment_cuda_);
+}
+
+/** @ref sz_levenshtein_order_simt_ over the long pairs' candidates. */
+static __global__ void __launch_bounds__(sz_levenshtein_long_threads_simt_k)
+    sz_levenshtein_order_ampere_kernel_(sz_strings_view_t candidates, sz_levenshtein_candidate_buckets_simt_t buckets,
+                                        sz_size_t *cursors, sz_size_t *order) {
+    sz_levenshtein_order_simt_(candidates, buckets, cursors, order);
+}
+
+/** @ref sz_levenshtein_long_simt_ , one thread per pair. */
+static __global__ void __launch_bounds__(sz_levenshtein_long_threads_simt_k)
+    sz_levenshtein_long_ampere_kernel_(sz_levenshtein_engine_t engine, sz_strings_view_t candidates,
+                                       sz_size_t *distances, sz_ptr_t workspace,
+                                       sz_levenshtein_long_arguments_simt_t batch) {
+    sz_levenshtein_long_simt_(engine, candidates, distances, workspace, batch);
+}
 
 /*  Warped byte rung: one entry point per words-per-lane. */
 static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
@@ -192,44 +508,44 @@ __launch_bounds__(sz_levenshtein_tiled_threads_per_block_cuda_k) void sz_levensh
                                      sz_shuffle_up_cuda_, sz_levenshtein_publish_cuda_, sz_levenshtein_await_cuda_);
 }
 
-/** The Ampere tier's entry points: the shared threaded rungs, warped ones summing their final
- *  deltas in one @c redux.sync , and the tiled one of the CUDA tier. */
+/** The Ampere tier's entry points: threaded rungs over the shared sweeps, warped ones summing their
+ *  final deltas in one @c redux.sync , and the tiled one of the CUDA tier. */
 static sz_levenshtein_entry_points_cuda_t const sz_levenshtein_entry_points_ampere_ = {
     {
-        (void const *)sz_levenshtein_distances_w1_simt_kernel_,
-        (void const *)sz_levenshtein_distances_w2_simt_kernel_,
-        (void const *)sz_levenshtein_distances_w3_simt_kernel_,
-        (void const *)sz_levenshtein_distances_w4_simt_kernel_,
-        (void const *)sz_levenshtein_distances_w5_simt_kernel_,
-        (void const *)sz_levenshtein_distances_w6_simt_kernel_,
-        (void const *)sz_levenshtein_distances_w7_simt_kernel_,
-        (void const *)sz_levenshtein_distances_w8_simt_kernel_,
-        (void const *)sz_levenshtein_distances_w9_simt_kernel_,
-        (void const *)sz_levenshtein_distances_w10_simt_kernel_,
-        (void const *)sz_levenshtein_distances_w11_simt_kernel_,
-        (void const *)sz_levenshtein_distances_w12_simt_kernel_,
-        (void const *)sz_levenshtein_distances_w13_simt_kernel_,
-        (void const *)sz_levenshtein_distances_w14_simt_kernel_,
-        (void const *)sz_levenshtein_distances_w15_simt_kernel_,
-        (void const *)sz_levenshtein_distances_w16_simt_kernel_,
+        (void const *)sz_levenshtein_distances_w1_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_w2_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_w3_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_w4_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_w5_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_w6_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_w7_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_w8_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_w9_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_w10_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_w11_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_w12_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_w13_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_w14_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_w15_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_w16_ampere_kernel_,
     },
     {
-        (void const *)sz_levenshtein_distances_utf8_w1_simt_kernel_,
-        (void const *)sz_levenshtein_distances_utf8_w2_simt_kernel_,
-        (void const *)sz_levenshtein_distances_utf8_w3_simt_kernel_,
-        (void const *)sz_levenshtein_distances_utf8_w4_simt_kernel_,
-        (void const *)sz_levenshtein_distances_utf8_w5_simt_kernel_,
-        (void const *)sz_levenshtein_distances_utf8_w6_simt_kernel_,
-        (void const *)sz_levenshtein_distances_utf8_w7_simt_kernel_,
-        (void const *)sz_levenshtein_distances_utf8_w8_simt_kernel_,
-        (void const *)sz_levenshtein_distances_utf8_w9_simt_kernel_,
-        (void const *)sz_levenshtein_distances_utf8_w10_simt_kernel_,
-        (void const *)sz_levenshtein_distances_utf8_w11_simt_kernel_,
-        (void const *)sz_levenshtein_distances_utf8_w12_simt_kernel_,
-        (void const *)sz_levenshtein_distances_utf8_w13_simt_kernel_,
-        (void const *)sz_levenshtein_distances_utf8_w14_simt_kernel_,
-        (void const *)sz_levenshtein_distances_utf8_w15_simt_kernel_,
-        (void const *)sz_levenshtein_distances_utf8_w16_simt_kernel_,
+        (void const *)sz_levenshtein_distances_utf8_w1_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_utf8_w2_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_utf8_w3_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_utf8_w4_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_utf8_w5_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_utf8_w6_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_utf8_w7_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_utf8_w8_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_utf8_w9_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_utf8_w10_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_utf8_w11_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_utf8_w12_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_utf8_w13_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_utf8_w14_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_utf8_w15_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_utf8_w16_ampere_kernel_,
     },
     {
         (void const *)sz_levenshtein_distances_k1_ampere_kernel_,
@@ -252,6 +568,16 @@ static sz_levenshtein_entry_points_cuda_t const sz_levenshtein_entry_points_ampe
         (void const *)sz_levenshtein_distances_utf8_k8_ampere_kernel_,
     },
     (void const *)sz_levenshtein_tiled_batch_ampere_kernel_,
+    {
+        (void const *)sz_levenshtein_distances_u8x4_ampere_kernel_,
+        (void const *)sz_levenshtein_distances_u16x2_ampere_kernel_,
+    },
+    (void const *)sz_levenshtein_long_ampere_kernel_,
+    (void const *)sz_levenshtein_masks_ampere_kernel_,
+    (void const *)sz_levenshtein_length_counts_ampere_kernel_,
+    (void const *)sz_levenshtein_length_offsets_ampere_kernel_,
+    (void const *)sz_levenshtein_length_scatter_ampere_kernel_,
+    (void const *)sz_levenshtein_order_ampere_kernel_,
     sz_cap_ampere_k,
 };
 
@@ -277,8 +603,8 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_ampere(sz_levenshtein_engin
 
 #endif // STRINGZILLA_TARGET_AMPERE
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
 #endif // STRINGZILLA_ARCH_CUDA_AMPERE_
 #endif // STRINGZILLA_ARCH_CUDA_

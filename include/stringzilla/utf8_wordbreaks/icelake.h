@@ -77,16 +77,18 @@
 #define STRINGZILLA_UTF8_WORDBREAKS_ICELAKE_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_ICELAKE_
+
 #include "stringzilla/utf8_wordbreaks/tables.h"
 #include "stringzilla/utf8_wordbreaks/serial.h"
 #include "stringzilla/utf8_runes/icelake.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_X8664_
-#if STRINGZILLA_TARGET_ICELAKE
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(                                                                                    \
     __attribute__((                                                                                              \
@@ -640,6 +642,8 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_wordbreaks_icelake_( //
     return words + 1;
 }
 
+#if STRINGZILLA_TARGET_ICELAKE
+
 STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
                                                        sz_size_t capacity, sz_size_t *count, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
@@ -650,16 +654,19 @@ STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_icelake(sz_cptr_t text, sz_size_t
 
 #pragma endregion Word_Break Forward Driver
 
+#endif // STRINGZILLA_TARGET_ICELAKE
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_ICELAKE
-#endif // STRINGZILLA_ARCH_X8664_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_X8664_ICELAKE_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #endif // STRINGZILLA_UTF8_WORDBREAKS_ICELAKE_H_

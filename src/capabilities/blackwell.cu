@@ -6,6 +6,8 @@
  */
 #undef STRINGZILLA_TARGET_CUDA
 #define STRINGZILLA_TARGET_CUDA 0
+#undef STRINGZILLA_TARGET_AMPERE
+#define STRINGZILLA_TARGET_AMPERE 0
 #undef STRINGZILLA_TARGET_HOPPER
 #define STRINGZILLA_TARGET_HOPPER 0
 #include "stringzilla/levenshtein.h"
@@ -13,3 +15,6 @@
 
 #include "stringzilla/levenshtein/blackwell.cuh"
 #include "stringzilla/overlap/blackwell.cuh"
+
+/** The kernel @c sz_capabilities_compiled_cuda asks the runtime to load. */
+extern "C" void const *sz_probe_blackwell_(void) { return (void const *)&sz_overlap_bounded_scores_blackwell_kernel_; }

@@ -18,12 +18,14 @@
 #ifndef STRINGZILLA_STRINGS_METAL_H_
 #define STRINGZILLA_STRINGS_METAL_H_
 
-#include "stringzilla/metal.h"
-#include "stringzilla/strings/serial.h"
+#include "stringzilla/types.h"
 
 #if STRINGZILLA_ARCH_METAL_
 
-#ifdef __cplusplus
+#include "stringzilla/metal.h"
+#include "stringzilla/strings/serial.h"
+
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -473,8 +475,8 @@ STRINGZILLA_API sz_status_t sz_strings_normalize_metal(sz_strings_view_t const *
 
 #endif // STRINGZILLA_TARGET_METAL
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
 
 #endif // STRINGZILLA_ARCH_METAL_

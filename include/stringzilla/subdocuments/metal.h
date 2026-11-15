@@ -20,12 +20,14 @@
 #ifndef STRINGZILLA_SUBDOCUMENTS_METAL_H_
 #define STRINGZILLA_SUBDOCUMENTS_METAL_H_
 
-#include "stringzilla/metal.h"
-#include "stringzilla/subdocuments.h"
+#include "stringzilla/types.h"
 
 #if STRINGZILLA_ARCH_METAL_
 
-#ifdef __cplusplus
+#include "stringzilla/metal.h"
+#include "stringzilla/subdocuments.h"
+
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -622,8 +624,8 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_metal(sz_subdocuments_engine_t 
 
 #endif // STRINGZILLA_TARGET_METAL
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
 
 #endif // STRINGZILLA_ARCH_METAL_

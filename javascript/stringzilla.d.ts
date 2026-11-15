@@ -28,9 +28,13 @@ export type CapabilityName =
     | "loongsonasx"
     | "powervsx"
     | "cuda"
+    | "ampere"
     | "hopper"
     | "blackwell"
     | "rocm"
+    | "cdna3"
+    | "cdna4"
+    | "cdna5"
     | "metal"
     | "cpus"
     | "gpus"
@@ -152,7 +156,7 @@ export interface Device {
     /** The capabilities this device runs, compiled in or not, as a bitmask. */
     capabilitiesDetected(): bigint;
 
-    /** The capabilities compiled into this build for devices of this kind, as a bitmask. */
+    /** The capabilities compiled into this build that this device runs, as a bitmask. */
     capabilitiesCompiled(): bigint;
 
     /** The capabilities this device's calls run: detected and compiled at once, as a bitmask.

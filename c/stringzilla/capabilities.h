@@ -135,12 +135,19 @@ typedef sz_u64_t sz_capability_t;
 /*  GPU capabilities, as each vendor's <tt>sz_&lt;vendor&gt;_capabilities_*</tt> functions report them for one
  *  device, grouped by vendor above bit 47 to leave room for more CPU capabilities and more per
  *  vendor. Each vendor's baseline runs on all its devices, as @c serial runs on every CPU, and each
- *  later tier on every device from its generation on: @c hopper from compute capability 9.0, for
- *  its clusters and their distributed shared memory, and @c blackwell from 10.0, for cluster launch
- *  control, which lets a block take over the tile of one not yet started. */
+ *  later tier on every device from its generation on: @c ampere from compute capability 8.0, for
+ *  warp reductions and asynchronous copies into shared memory, @c hopper from 9.0, for its clusters
+ *  and their distributed shared memory, and @c blackwell from 10.0, for cluster launch control,
+ *  which lets a block take over the tile of one not yet started. AMD's tiers are generations
+ *  instead: @c cdna3 on gfx942, @c cdna4 on gfx950, and @c cdna5 on gfx1250 and gfx1251, each
+ *  moving a one-lane shift through a DPP form rather than the LDS crossbar. */
 
 /** NVIDIA GPUs through CUDA, on every device. */
 #define sz_cap_cuda_k ((sz_capability_t)1 << 48)
+
+/** NVIDIA GPUs from compute capability 8.0, for warp reductions and asynchronous copies into
+ *  shared memory. */
+#define sz_cap_ampere_k ((sz_capability_t)1 << 49)
 
 /** NVIDIA GPUs from compute capability 9.0, for clusters and their distributed shared memory. */
 #define sz_cap_hopper_k ((sz_capability_t)1 << 51)
@@ -151,11 +158,23 @@ typedef sz_u64_t sz_capability_t;
 /** AMD GPUs through ROCm, on every device. */
 #define sz_cap_rocm_k ((sz_capability_t)1 << 56)
 
+/** AMD gfx942 GPUs on 64-lane wavefronts, for DPP wavefront shifts, as on MI300X and MI325X. */
+#define sz_cap_cdna3_k ((sz_capability_t)1 << 57)
+
+/** AMD gfx950 GPUs, for the DPP wavefront shifts of @c cdna3, as on MI350X and MI355X. */
+#define sz_cap_cdna4_k ((sz_capability_t)1 << 58)
+
+/** AMD gfx1250 and gfx1251 GPUs on a 32-lane wavefront, for DPP row shifts bridged by
+ *  @c v_permlanex16, as on MI450X and MI430X. */
+#define sz_cap_cdna5_k ((sz_capability_t)1 << 59)
+
 /** Apple GPUs through Metal, on every device. */
 #define sz_cap_metal_k ((sz_capability_t)1 << 60)
 
 /** Every GPU capability above, which the CPU queries never detect, compile or enable. */
-#define sz_cap_gpus_k (sz_cap_cuda_k | sz_cap_hopper_k | sz_cap_blackwell_k | sz_cap_rocm_k | sz_cap_metal_k)
+#define sz_cap_gpus_k                                                                                          \
+    (sz_cap_cuda_k | sz_cap_ampere_k | sz_cap_hopper_k | sz_cap_blackwell_k | sz_cap_rocm_k | sz_cap_cdna3_k | \
+     sz_cap_cdna4_k | sz_cap_cdna5_k | sz_cap_metal_k)
 
 /** Every CPU capability, the bits below the first GPU vendor's. */
 #define sz_cap_cpus_k (sz_cap_cuda_k - 1)
@@ -184,9 +203,13 @@ static struct {
     {"loongsonasx", sz_cap_loongsonasx_k},
     {"powervsx", sz_cap_powervsx_k},
     {"cuda", sz_cap_cuda_k},
+    {"ampere", sz_cap_ampere_k},
     {"hopper", sz_cap_hopper_k},
     {"blackwell", sz_cap_blackwell_k},
     {"rocm", sz_cap_rocm_k},
+    {"cdna3", sz_cap_cdna3_k},
+    {"cdna4", sz_cap_cdna4_k},
+    {"cdna5", sz_cap_cdna5_k},
     {"metal", sz_cap_metal_k},
     {0, 0},
 };
@@ -1026,7 +1049,7 @@ STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_arm64_(void) {
     unsigned long hwcap = 0;
     elf_aux_info(AT_HWCAP, &hwcap, sizeof(hwcap));
 #endif
-    if (!(hwcap & hwcap_cpuid)) return (sz_capability_t)(sz_cap_neon_k | sz_cap_serial_k);
+    if (!(hwcap & hwcap_cpuid)) return sz_capabilities_implied_cpu_();
 
     // Each raw `mrs` writes x0, as older assemblers reject the symbolic names of the SVE registers.
     unsigned long id_aa64isar0_el1 = 0, id_aa64pfr0_el1 = 0, id_aa64zfr0_el1 = 0;
@@ -1287,8 +1310,8 @@ STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_power64_(void) {
 
 #endif // STRINGZILLA_ARCH_PPC64_
 
-/** Prepares the calling thread for @p capabilities, behind @c sz_thread_configure_cpu. */
-STRINGZILLA_INLINE sz_status_t sz_thread_configure_cpu_(sz_capability_t capabilities) {
+/** Prepares the calling thread for @p capabilities, behind @c sz_configure_thread_cpu. */
+STRINGZILLA_INLINE sz_status_t sz_configure_thread_cpu_(sz_capability_t capabilities) {
     sz_unused_(capabilities);
     return sz_success_k;
 }
@@ -1361,7 +1384,7 @@ STRINGZILLA_CONSTEXPR sz_capability_t sz_capabilities_compiled_cpu_mask(void) {
  *  Call it once on each thread that dispatches. Every current capability needs nothing, so today
  *  it returns right away.
  */
-STRINGZILLA_API sz_status_t sz_thread_configure_cpu(sz_capability_t capabilities);
+STRINGZILLA_API sz_status_t sz_configure_thread_cpu(sz_capability_t capabilities);
 
 /**
  *  @brief Writes @p capabilities as a comma-separated name list such as "serial,haswell,skylake".
@@ -1412,9 +1435,9 @@ STRINGZILLA_API sz_status_t sz_capabilities_enabled_cpu(sz_capability_t *capabil
     return sz_success_k;
 }
 
-/** @copydoc sz_thread_configure_cpu */
-STRINGZILLA_API sz_status_t sz_thread_configure_cpu(sz_capability_t capabilities) {
-    return sz_thread_configure_cpu_(capabilities);
+/** @copydoc sz_configure_thread_cpu */
+STRINGZILLA_API sz_status_t sz_configure_thread_cpu(sz_capability_t capabilities) {
+    return sz_configure_thread_cpu_(capabilities);
 }
 
 /** @copydoc sz_capabilities_name */
@@ -1459,7 +1482,7 @@ STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(sz_stream_t stream);
  *  their own compilers reach; Metal's answer from here, behind the switch the build stamps. */
 
 /** How many Metal devices the system lists, or zero. */
-STRINGZILLA_INLINE sz_size_t sz_device_count_metal_(void) {
+STRINGZILLA_INLINE sz_size_t sz_count_devices_metal_(void) {
 #if STRINGZILLA_ARCH_METAL_
     return sz_metal_list_devices_();
 #else
@@ -1471,7 +1494,7 @@ STRINGZILLA_INLINE sz_size_t sz_device_count_metal_(void) {
  *  needs Apple7, whose threadgroup atomics and simdgroup scans the kernels use. */
 STRINGZILLA_INLINE sz_status_t sz_capabilities_detected_metal_(sz_size_t ordinal, sz_capability_t *capabilities) {
     *capabilities = 0;
-    if (ordinal >= sz_device_count_metal_()) return sz_missing_gpu_k;
+    if (ordinal >= sz_count_devices_metal_()) return sz_missing_gpu_k;
 #if STRINGZILLA_ARCH_METAL_
     void *const metal_device = sz_metal_device_(ordinal);
     if (!metal_device) return sz_device_code_mismatch_k;
@@ -1487,7 +1510,7 @@ STRINGZILLA_INLINE sz_status_t sz_capabilities_detected_metal_(sz_size_t ordinal
 /** Opens a command queue on Metal device @p ordinal, in the order the system lists them. */
 STRINGZILLA_INLINE sz_status_t sz_stream_init_metal_(sz_size_t ordinal, sz_stream_t *stream) {
     *stream = STRINGZILLA_NULL;
-    if (ordinal >= sz_device_count_metal_()) return sz_missing_gpu_k;
+    if (ordinal >= sz_count_devices_metal_()) return sz_missing_gpu_k;
 #if STRINGZILLA_ARCH_METAL_
     void *const metal_device = sz_metal_device_(ordinal);
     if (!metal_device) return sz_device_code_mismatch_k;
@@ -1513,13 +1536,14 @@ STRINGZILLA_INLINE sz_status_t sz_stream_free_metal_(sz_stream_t stream) {
 
 /** The CUDA capabilities this binary holds kernels for. */
 STRINGZILLA_CONSTEXPR sz_capability_t sz_capabilities_compiled_cuda_(void) {
-    return sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER |
-           sz_cap_blackwell_k * STRINGZILLA_TARGET_BLACKWELL;
+    return sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+           sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER | sz_cap_blackwell_k * STRINGZILLA_TARGET_BLACKWELL;
 }
 
 /** The ROCm capabilities this binary holds kernels for. */
 STRINGZILLA_CONSTEXPR sz_capability_t sz_capabilities_compiled_rocm_(void) {
-    return sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM;
+    return sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM | sz_cap_cdna3_k * STRINGZILLA_TARGET_CDNA3 |
+           sz_cap_cdna4_k * STRINGZILLA_TARGET_CDNA4 | sz_cap_cdna5_k * STRINGZILLA_TARGET_CDNA5;
 }
 
 /** The Metal capabilities this binary holds kernels for. */
@@ -1531,16 +1555,21 @@ STRINGZILLA_CONSTEXPR sz_capability_t sz_capabilities_compiled_metal_(void) {
  *  @c cudaSetDevice or @c hipSetDevice takes, or the position in Metal's device list. Each vendor
  *  has four queries:
  *
- *  - @b sz_device_count_cuda() — how many devices the runtime sees, zero without its kernels.
+ *  - @b sz_count_devices_cuda() — how many devices the runtime sees, zero without its kernels.
  *  - @b sz_capabilities_detected_cuda() — what one device runs.
- *  - @b sz_capabilities_compiled_cuda() — what this binary holds kernels for.
+ *  - @b sz_capabilities_compiled_cuda() — what this binary holds code for that one device runs.
  *  - @b sz_capabilities_enabled_cuda() — both at once: the mask to dispatch on that device with.
  *
  *  ROCm and Metal have the same four. Nothing is cached, as the runtimes answer from their own
  *  state: ask once per device and keep the mask. Each vendor also makes a stream on one device
  *  with @b sz_stream_init_cuda() and frees it with @b sz_stream_free_cuda(), for a caller without
  *  the vendor's runtime at hand. These are the only functions an ordinal reaches: everything
- *  consuming a mask takes a stream instead, which names its device. */
+ *  consuming a mask takes a stream instead, which names its device.
+ *
+ *  A CUDA or ROCm unit holds code for the architectures CMake compiled it for, and a device runs a
+ *  capability only where its runtime loads that unit's kernels: @b sz_capabilities_compiled_cuda()
+ *  asks @c cudaFuncGetAttributes about one kernel of each unit, and the ROCm twin asks
+ *  @c hipFuncGetAttributes. */
 
 /**
  *  @brief Counts the CUDA devices the process sees.
@@ -1549,7 +1578,7 @@ STRINGZILLA_CONSTEXPR sz_capability_t sz_capabilities_compiled_metal_(void) {
  *  @par Statuses:
  *  - @c sz_missing_gpu_k Without one.
  */
-STRINGZILLA_API sz_status_t sz_device_count_cuda(sz_size_t *count);
+STRINGZILLA_API sz_status_t sz_count_devices_cuda(sz_size_t *count);
 
 /**
  *  @brief Reports the capabilities CUDA device @p ordinal runs.
@@ -1562,10 +1591,14 @@ STRINGZILLA_API sz_status_t sz_device_count_cuda(sz_size_t *count);
 STRINGZILLA_API sz_status_t sz_capabilities_detected_cuda(sz_size_t ordinal, sz_capability_t *capabilities);
 
 /**
- *  @brief Reports the CUDA capabilities this binary holds kernels for.
- *  @param[out] capabilities The CUDA capabilities compiled in, zero without any.
+ *  @brief Reports the CUDA capabilities this binary holds code for that device @p ordinal runs.
+ *  @param[in] ordinal The CUDA runtime's device index, like @c cudaSetDevice takes.
+ *  @param[out] capabilities The CUDA capabilities compiled in for that device, zero on failure.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_gpu_k Past the last device.
  */
-STRINGZILLA_API sz_status_t sz_capabilities_compiled_cuda(sz_capability_t *capabilities);
+STRINGZILLA_API sz_status_t sz_capabilities_compiled_cuda(sz_size_t ordinal, sz_capability_t *capabilities);
 
 /**
  *  @brief Reports the capabilities CUDA device @p ordinal runs that this binary holds kernels for.
@@ -1590,7 +1623,7 @@ STRINGZILLA_API sz_status_t sz_stream_free_cuda(sz_stream_t stream);
  *  @par Statuses:
  *  - @c sz_missing_gpu_k Without one.
  */
-STRINGZILLA_API sz_status_t sz_device_count_rocm(sz_size_t *count);
+STRINGZILLA_API sz_status_t sz_count_devices_rocm(sz_size_t *count);
 
 /**
  *  @brief Reports the capabilities ROCm device @p ordinal runs.
@@ -1603,10 +1636,14 @@ STRINGZILLA_API sz_status_t sz_device_count_rocm(sz_size_t *count);
 STRINGZILLA_API sz_status_t sz_capabilities_detected_rocm(sz_size_t ordinal, sz_capability_t *capabilities);
 
 /**
- *  @brief Reports the ROCm capabilities this binary holds kernels for.
- *  @param[out] capabilities The ROCm capabilities compiled in, zero without any.
+ *  @brief Reports the ROCm capabilities this binary holds code for that device @p ordinal runs.
+ *  @param[in] ordinal The HIP runtime's device index, like @c hipSetDevice takes.
+ *  @param[out] capabilities The ROCm capabilities compiled in for that device, zero on failure.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_gpu_k Past the last device.
  */
-STRINGZILLA_API sz_status_t sz_capabilities_compiled_rocm(sz_capability_t *capabilities);
+STRINGZILLA_API sz_status_t sz_capabilities_compiled_rocm(sz_size_t ordinal, sz_capability_t *capabilities);
 
 /**
  *  @brief Reports the capabilities ROCm device @p ordinal runs that this binary holds kernels for.
@@ -1631,7 +1668,7 @@ STRINGZILLA_API sz_status_t sz_stream_free_rocm(sz_stream_t stream);
  *  @par Statuses:
  *  - @c sz_missing_gpu_k Without one.
  */
-STRINGZILLA_API sz_status_t sz_device_count_metal(sz_size_t *count);
+STRINGZILLA_API sz_status_t sz_count_devices_metal(sz_size_t *count);
 
 /**
  *  @brief Reports the capabilities Metal device @p ordinal runs.
@@ -1644,10 +1681,15 @@ STRINGZILLA_API sz_status_t sz_device_count_metal(sz_size_t *count);
 STRINGZILLA_API sz_status_t sz_capabilities_detected_metal(sz_size_t ordinal, sz_capability_t *capabilities);
 
 /**
- *  @brief Reports the Metal capabilities this binary holds kernels for.
- *  @param[out] capabilities The Metal capabilities compiled in, zero without any.
+ *  @brief Reports the Metal capabilities this binary holds kernels for, which device @p ordinal
+ *      compiles from the embedded source.
+ *  @param[in] ordinal The device's position in the order the system lists them.
+ *  @param[out] capabilities The Metal capabilities compiled in, zero on failure.
+ *
+ *  @par Statuses:
+ *  - @c sz_missing_gpu_k Past the last device.
  */
-STRINGZILLA_API sz_status_t sz_capabilities_compiled_metal(sz_capability_t *capabilities);
+STRINGZILLA_API sz_status_t sz_capabilities_compiled_metal(sz_size_t ordinal, sz_capability_t *capabilities);
 
 /**
  *  @brief Reports the capabilities Metal device @p ordinal runs that this binary holds kernels for.
@@ -1669,7 +1711,7 @@ STRINGZILLA_API sz_status_t sz_stream_free_metal(sz_stream_t stream);
 
 /*  Compiled for CUDA or ROCm, the producers come from `cuda.cuh` or `rocm.cuh`, included below. */
 #if !STRINGZILLA_ARCH_CUDA_
-STRINGZILLA_API sz_status_t sz_device_count_cuda(sz_size_t *count) {
+STRINGZILLA_API sz_status_t sz_count_devices_cuda(sz_size_t *count) {
     *count = 0;
     return sz_missing_gpu_k;
 }
@@ -1688,9 +1730,10 @@ STRINGZILLA_API sz_status_t sz_stream_free_cuda(sz_stream_t stream) {
     return sz_missing_gpu_k;
 }
 #endif // !STRINGZILLA_ARCH_CUDA_
-STRINGZILLA_API sz_status_t sz_capabilities_compiled_cuda(sz_capability_t *capabilities) {
-    *capabilities = sz_capabilities_compiled_cuda_();
-    return sz_success_k;
+STRINGZILLA_API sz_status_t sz_capabilities_compiled_cuda(sz_size_t ordinal, sz_capability_t *capabilities) {
+    sz_status_t const status = sz_capabilities_detected_cuda(ordinal, capabilities);
+    *capabilities = status == sz_success_k ? sz_capabilities_compiled_cuda_() : 0;
+    return status;
 }
 STRINGZILLA_API sz_status_t sz_capabilities_enabled_cuda(sz_size_t ordinal, sz_capability_t *capabilities) {
     sz_status_t const status = sz_capabilities_detected_cuda(ordinal, capabilities);
@@ -1698,7 +1741,7 @@ STRINGZILLA_API sz_status_t sz_capabilities_enabled_cuda(sz_size_t ordinal, sz_c
     return status;
 }
 #if !STRINGZILLA_ARCH_ROCM_
-STRINGZILLA_API sz_status_t sz_device_count_rocm(sz_size_t *count) {
+STRINGZILLA_API sz_status_t sz_count_devices_rocm(sz_size_t *count) {
     *count = 0;
     return sz_missing_gpu_k;
 }
@@ -1717,23 +1760,26 @@ STRINGZILLA_API sz_status_t sz_stream_free_rocm(sz_stream_t stream) {
     return sz_missing_gpu_k;
 }
 #endif // !STRINGZILLA_ARCH_ROCM_
-STRINGZILLA_API sz_status_t sz_capabilities_compiled_rocm(sz_capability_t *capabilities) {
-    *capabilities = sz_capabilities_compiled_rocm_();
-    return sz_success_k;
+STRINGZILLA_API sz_status_t sz_capabilities_compiled_rocm(sz_size_t ordinal, sz_capability_t *capabilities) {
+    sz_status_t const status = sz_capabilities_detected_rocm(ordinal, capabilities);
+    *capabilities = status == sz_success_k ? sz_capabilities_compiled_rocm_() : 0;
+    return status;
 }
 STRINGZILLA_API sz_status_t sz_capabilities_enabled_rocm(sz_size_t ordinal, sz_capability_t *capabilities) {
     sz_status_t const status = sz_capabilities_detected_rocm(ordinal, capabilities);
     *capabilities &= sz_capabilities_compiled_rocm_();
     return status;
 }
-STRINGZILLA_API sz_status_t sz_device_count_metal(sz_size_t *count) {
-    *count = sz_device_count_metal_();
+STRINGZILLA_API sz_status_t sz_count_devices_metal(sz_size_t *count) {
+    *count = sz_count_devices_metal_();
     return *count ? sz_success_k : sz_missing_gpu_k;
 }
 STRINGZILLA_API sz_status_t sz_capabilities_detected_metal(sz_size_t ordinal, sz_capability_t *capabilities) {
     return sz_capabilities_detected_metal_(ordinal, capabilities);
 }
-STRINGZILLA_API sz_status_t sz_capabilities_compiled_metal(sz_capability_t *capabilities) {
+STRINGZILLA_API sz_status_t sz_capabilities_compiled_metal(sz_size_t ordinal, sz_capability_t *capabilities) {
+    *capabilities = 0;
+    if (ordinal >= sz_count_devices_metal_()) return sz_missing_gpu_k;
     *capabilities = sz_capabilities_compiled_metal_();
     return sz_success_k;
 }

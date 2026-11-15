@@ -8,16 +8,18 @@
 #define STRINGZILLA_UTF8_LINEBREAKS_ICELAKE_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_ICELAKE_
+
 #include "stringzilla/utf8_linebreaks/tables.h"
 #include "stringzilla/utf8_linebreaks/serial.h"
 #include "stringzilla/utf8_runes/icelake.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_X8664_
-#if STRINGZILLA_TARGET_ICELAKE
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(                                                                                         \
     __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,evex512,popcnt"))), \
@@ -681,6 +683,8 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_linebreaks_icelake_( //
     return produced;
 }
 
+#if STRINGZILLA_TARGET_ICELAKE
+
 /**
  *  @brief Forward UAX-14 line-break-opportunity kernel for Ice Lake AVX-512.
  *
@@ -701,16 +705,20 @@ STRINGZILLA_API sz_status_t sz_utf8_linebreaks_icelake(sz_cptr_t text, sz_size_t
 #pragma endregion Forward driver
 
 #pragma endregion UAX 14 Line Boundaries forward kernel
+
+#endif // STRINGZILLA_TARGET_ICELAKE
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_ICELAKE
-#endif // STRINGZILLA_ARCH_X8664_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_X8664_ICELAKE_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #endif // STRINGZILLA_UTF8_LINEBREAKS_ICELAKE_H_

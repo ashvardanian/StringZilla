@@ -221,7 +221,7 @@ void test_regex_safety(test_context_t &) {
             rationed_heap_t rationed(granted);
             sz_regex_engine_t engine {};
             sz_status_t const status = regex_compile_(*vocabulary, vocabulary == &folded ? sz_uncased_k : sz_cased_k, 0,
-                                                      0, &rationed.allocator, &engine);
+                                                      0, &rationed.allocator, &engine, sz_cap_serial_k);
             if (status == sz_success_k) {
                 sz_regex_engine_free(&engine, nullptr);
                 verify(rationed.live_allocations == 0);

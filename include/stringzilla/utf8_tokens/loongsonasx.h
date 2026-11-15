@@ -8,15 +8,17 @@
 #define STRINGZILLA_UTF8_TOKENS_LOONGSONASX_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_LOONGARCH64_
+#if STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+
 #include "stringzilla/utf8_tokens/serial.h"
 #include "stringzilla/utf8_runes/loongsonasx.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_LOONGARCH64_
-#if STRINGZILLA_TARGET_LOONGSONASX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("lasx"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -143,6 +145,8 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_newlines_loongsonasx_( //
                                          match_offsets, match_lengths));
     return count;
 }
+
+#if STRINGZILLA_TARGET_LOONGSONASX
 
 STRINGZILLA_API sz_status_t sz_utf8_newlines_loongsonasx(                           //
     sz_cptr_t text, sz_size_t length,                                               //
@@ -523,16 +527,19 @@ STRINGZILLA_API sz_status_t sz_utf8_delimiters_loongsonasx(                     
     return sz_success_k;
 }
 
+#endif // STRINGZILLA_TARGET_LOONGSONASX
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_LOONGSONASX
-#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
 #endif // STRINGZILLA_UTF8_TOKENS_LOONGSONASX_H_

@@ -10,9 +10,13 @@
 #define STRINGZILLA_COMPARE_V128_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_WASM_
+#if STRINGZILLA_ARCH_WASM_V128_
+
 #include "stringzilla/compare/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -22,8 +26,6 @@ extern "C" {
  *  is a small constant-lane switch; the 8..15 case loads the low 8 with @c load64_zero and folds
  *  the remaining bytes in with one constant `i8x16.shuffle`. They live in this lowest @c v128
  *  header, which includes no other family, so every @c v128 backend reaches them without cycles. */
-#if STRINGZILLA_ARCH_WASM_
-#if STRINGZILLA_ARCH_WASM_V128_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
@@ -167,11 +169,12 @@ STRINGZILLA_API sz_status_t sz_equal_v128(sz_cptr_t a, sz_cptr_t b, sz_size_t le
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_WASM_V128_
 #endif // STRINGZILLA_ARCH_WASM_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_COMPARE_V128_H_

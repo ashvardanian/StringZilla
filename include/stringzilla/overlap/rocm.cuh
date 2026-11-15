@@ -14,12 +14,14 @@
 #ifndef STRINGZILLA_OVERLAP_ROCM_CUH_
 #define STRINGZILLA_OVERLAP_ROCM_CUH_
 
-#include "stringzilla/rocm.cuh"
-#include "stringzilla/overlap/simt.cuh"
+#include "stringzilla/types.h"
 
 #if STRINGZILLA_ARCH_ROCM_
 
-#ifdef __cplusplus
+#include "stringzilla/rocm.cuh"
+#include "stringzilla/overlap/simt.cuh"
+
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -300,8 +302,8 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_rocm(sz_overlap_engine_t *engine, 
 
 #endif // STRINGZILLA_TARGET_ROCM
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
 #endif // STRINGZILLA_ARCH_ROCM_
 #endif // STRINGZILLA_OVERLAP_ROCM_CUH_

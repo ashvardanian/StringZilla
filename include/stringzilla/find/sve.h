@@ -10,18 +10,20 @@
 #define STRINGZILLA_FIND_SVE_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_ARM64_
+#if STRINGZILLA_ARCH_ARM64_SVE_
+
 #include "stringzilla/compare/sve.h" // `sz_equal_sve_`
 #include "stringzilla/find/serial.h"
 #include "stringzilla/find/neon.h" // `sz_find_neon_`, `sz_rfind_neon_`
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
 /*  Implementation of the string search algorithms using the Arm SVE variable-length registers,
  *  available in Arm v9 processors, like in Apple M4+ and Graviton 3+ CPUs. */
-#if STRINGZILLA_ARCH_ARM64_
-#if STRINGZILLA_ARCH_ARM64_SVE_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -246,11 +248,12 @@ STRINGZILLA_API sz_status_t sz_rfind_sve(sz_cptr_t haystack, sz_size_t haystack_
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_ARM64_SVE_
 #endif // STRINGZILLA_ARCH_ARM64_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_FIND_SVE_H_

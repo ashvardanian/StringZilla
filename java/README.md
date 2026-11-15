@@ -224,7 +224,7 @@ System.out.println(StringZilla.version());
 `capabilitiesEnabled()` is the one you usually want, and derives from two independent axes:
 
 - `capabilitiesDetected()`: what this device can execute.
-- `capabilitiesCompiled()`: what this build contains for devices of its kind, from the ISA probes at build time.
+- `capabilitiesCompiled()`: what this build contains for the device, from the ISA probes at build time and, on a GPU, the codes each unit carries.
 - `capabilitiesEnabled()`: what dispatch uses, both axes at once.
 
 `capabilitiesDetected()` describes the machine and says nothing about whether a kernel was compiled in, so a build whose ISA probes failed still reports your CPU's full feature set while containing no SIMD kernels at all.

@@ -16,18 +16,22 @@
 #ifndef STRINGZILLA_OVERLAP_BLACKWELL_CUH_
 #define STRINGZILLA_OVERLAP_BLACKWELL_CUH_
 
-#include "stringzilla/overlap/cuda.cuh"
+#include "stringzilla/types.h"
 
 #if STRINGZILLA_ARCH_CUDA_
-#if STRINGZILLA_TARGET_BLACKWELL
+#if STRINGZILLA_ARCH_CUDA_BLACKWELL_
 
-#ifdef __cplusplus
+#include "stringzilla/overlap/cuda.cuh"
+
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
 /** Blocks one multiprocessor keeps resident, which caps the walk at 40 registers: it waits on
  *  dependent loads, so more resident blocks hide more of them, up to where spills cost more. */
 enum { sz_overlap_blocks_per_multiprocessor_blackwell_k = 12 };
+
+#if STRINGZILLA_TARGET_BLACKWELL
 
 static __global__ __launch_bounds__(
     sz_overlap_candidates_per_block_cuda_k,
@@ -68,9 +72,11 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_blackwell(sz_overlap_engine_t *eng
                                           (void const *)sz_overlap_bounded_scores_blackwell_kernel_, stream);
 }
 
-#ifdef __cplusplus
-}
-#endif
 #endif // STRINGZILLA_TARGET_BLACKWELL
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+#endif // STRINGZILLA_ARCH_CUDA_BLACKWELL_
 #endif // STRINGZILLA_ARCH_CUDA_
 #endif // STRINGZILLA_OVERLAP_BLACKWELL_CUH_

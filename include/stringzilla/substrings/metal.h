@@ -19,12 +19,14 @@
 #ifndef STRINGZILLA_SUBSTRINGS_METAL_H_
 #define STRINGZILLA_SUBSTRINGS_METAL_H_
 
-#include "stringzilla/metal.h"
-#include "stringzilla/substrings/serial.h"
+#include "stringzilla/types.h"
 
 #if STRINGZILLA_ARCH_METAL_
 
-#ifdef __cplusplus
+#include "stringzilla/metal.h"
+#include "stringzilla/substrings/serial.h"
+
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -598,8 +600,8 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_metal(sz_substrings_engine
 
 #endif // STRINGZILLA_TARGET_METAL
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
 
 #endif // STRINGZILLA_ARCH_METAL_

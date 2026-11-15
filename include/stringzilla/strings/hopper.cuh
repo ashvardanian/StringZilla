@@ -130,7 +130,6 @@ STRINGZILLA_DEVICE sz_size_t sz_chain_look_back_hopper_(sz_u64_t *states, sz_siz
 #ifdef __cplusplus
 } // extern "C"
 #endif
-
 #endif // STRINGZILLA_ARCH_CUDA_HOPPER_
 #endif // STRINGZILLA_ARCH_CUDA_
 #endif // STRINGZILLA_STRINGS_HOPPER_CUH_

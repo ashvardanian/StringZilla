@@ -10,19 +10,21 @@
 #define STRINGZILLA_STRINGS_V128RELAXED_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_WASM_
+#if STRINGZILLA_ARCH_WASM_V128RELAXED_
+
 #include "stringzilla/find/v128relaxed.h" // `sz_find_byteset_v128relaxed_`
 #include "stringzilla/utf8_norm.h"        // `sz_utf8_norm_v128relaxed`, `sz_utf8_find_denormalized_v128relaxed`
 #include "stringzilla/strings/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
 /*  The lookup swaps every @c wasm_i8x16_swizzle for @c wasm_i8x16_relaxed_swizzle, which skips
  *  zeroing out-of-range indices and runs about 21% faster on most engines. Its indices are low
  *  nibbles, never out of range, so the result matches the serial kernel byte for byte. */
-#if STRINGZILLA_ARCH_WASM_
-#if STRINGZILLA_TARGET_V128RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
 #endif
@@ -91,6 +93,8 @@ STRINGZILLA_INLINE sz_strings_walks_t sz_strings_walks_v128relaxed_(void) {
     return walks;
 }
 
+#if STRINGZILLA_TARGET_V128RELAXED
+
 STRINGZILLA_API sz_status_t sz_strings_to_tape_v128relaxed(sz_strings_view_t const *strings, sz_size_t const *order,
                                                            sz_size_t count, sz_allocator_t *allocator,
                                                            sz_strings_span_t *tape, sz_stream_t stream) {
@@ -140,14 +144,17 @@ STRINGZILLA_API sz_status_t sz_strings_normalize_v128relaxed(sz_strings_view_t c
     return sz_strings_normalize_with_(strings, order, count, form, allocator, tape, &sz_utf8_norm_v128relaxed);
 }
 
+#endif // STRINGZILLA_TARGET_V128RELAXED
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
-#endif // STRINGZILLA_TARGET_V128RELAXED
-#endif // STRINGZILLA_ARCH_WASM_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_WASM_V128RELAXED_
+#endif // STRINGZILLA_ARCH_WASM_
 
 #endif // STRINGZILLA_STRINGS_V128RELAXED_H_

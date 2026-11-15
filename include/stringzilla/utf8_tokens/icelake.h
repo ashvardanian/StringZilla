@@ -8,16 +8,18 @@
 #define STRINGZILLA_UTF8_TOKENS_ICELAKE_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_ICELAKE_
+
 #include "stringzilla/utf8_tokens/serial.h"
 #include "stringzilla/utf8_runes/icelake.h" // shared lane-identity + peel substrate
 #include "stringzilla/utf8_tokens/tables.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_X8664_
-#if STRINGZILLA_TARGET_ICELAKE
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(                                                                                         \
     __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,evex512,popcnt"))), \
@@ -113,6 +115,8 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_newlines_icelake_( //
                                          match_offsets, match_lengths));
     return count;
 }
+
+#if STRINGZILLA_TARGET_ICELAKE
 
 STRINGZILLA_API sz_status_t sz_utf8_newlines_icelake(                               //
     sz_cptr_t text, sz_size_t length,                                               //
@@ -508,16 +512,19 @@ STRINGZILLA_API sz_status_t sz_utf8_delimiters_icelake(                         
 
 #pragma endregion Forward driver
 
+#endif // STRINGZILLA_TARGET_ICELAKE
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_ICELAKE
-#endif // STRINGZILLA_ARCH_X8664_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_X8664_ICELAKE_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #endif // STRINGZILLA_UTF8_TOKENS_ICELAKE_H_

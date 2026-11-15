@@ -50,7 +50,7 @@ func CPU() Device
 func CountDevices(kind DeviceKind) (int, error)
 func NewDevice(kind DeviceKind, ordinal int) (Device, error)
 func (d Device) CapabilitiesDetected() (Capability, error)
-func (d Device) CapabilitiesCompiled() Capability
+func (d Device) CapabilitiesCompiled() (Capability, error)
 func (d Device) CapabilitiesEnabled() (Capability, error)
 func (d Device) ConfigureThread(capabilities Capability) (func(), error)
 func (c Capability) Has(capability Capability) bool
@@ -59,7 +59,7 @@ func (c Capability) String() string
 
 A `Device` is the host CPU or one GPU of a runtime, `DeviceCUDA`, `DeviceROCm` or `DeviceMetal`, named by that runtime's own ordinal.
 `CountDevices` counts them and fails without a GPU of that kind, and `NewDevice` fails past the last one.
-`CapabilitiesDetected` and `CapabilitiesCompiled` report the two raw axes, what the device executes and what this binary contains for its kind.
+`CapabilitiesDetected` and `CapabilitiesCompiled` report the two raw axes, what the device executes and what this binary contains for it.
 `CapabilitiesEnabled` is both at once, and on the CPU always keeps `CapSerial`.
 `ConfigureThread` pins the goroutine to an OS thread and prepares it for the kernels of its argument, returning the function that unpins it; it fails on a GPU, which has no thread state to configure.
 Every capability is a typed `Capability` constant, like `CapSerial`, `CapHaswell`, `CapNEON`, `CapSVE2` or `CapCUDA`, and `CapCPUs`, `CapGPUs` and `CapAny` group them.

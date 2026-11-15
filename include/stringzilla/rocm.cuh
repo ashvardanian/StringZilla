@@ -299,7 +299,7 @@ STRINGZILLA_INLINE void sz_prefetch_rocm_(void const *pointer, sz_size_t bytes, 
 #pragma region Devices
 
 /** How many ROCm devices the runtime sees, or zero. */
-STRINGZILLA_INLINE sz_size_t sz_device_count_rocm_(void) {
+STRINGZILLA_INLINE sz_size_t sz_count_devices_rocm_(void) {
     int count = 0;
     return hipGetDeviceCount(&count) == hipSuccess ? (sz_size_t)count : 0;
 }
@@ -309,10 +309,14 @@ STRINGZILLA_INLINE sz_size_t sz_device_count_rocm_(void) {
 STRINGZILLA_INLINE sz_status_t sz_capabilities_detected_rocm_(sz_size_t ordinal, sz_capability_t *capabilities) {
     hipDeviceProp_t properties;
     *capabilities = 0;
-    if (ordinal >= sz_device_count_rocm_()) return sz_missing_gpu_k;
-    if (hipDeviceGetAttribute(&multiprocessors, hipDeviceAttributeMultiprocessorCount, (int)ordinal) != hipSuccess)
-        return sz_device_code_mismatch_k;
-    if (multiprocessors > 0) *capabilities = sz_cap_rocm_k;
+    if (ordinal >= sz_count_devices_rocm_()) return sz_missing_gpu_k;
+    if (hipGetDeviceProperties(&properties, (int)ordinal) != hipSuccess) return sz_device_code_mismatch_k;
+    if (properties.multiProcessorCount <= 0) return sz_success_k;
+    sz_cptr_t const name = properties.gcnArchName;
+    *capabilities = sz_cap_rocm_k;
+    if (sz_equal_serial_(name, "gfx942", 6)) *capabilities |= sz_cap_cdna3_k;
+    if (sz_equal_serial_(name, "gfx950", 6)) *capabilities |= sz_cap_cdna4_k;
+    if (sz_equal_serial_(name, "gfx1250", 7) || sz_equal_serial_(name, "gfx1251", 7)) *capabilities |= sz_cap_cdna5_k;
     return sz_success_k;
 }
 
@@ -322,7 +326,7 @@ STRINGZILLA_INLINE sz_status_t sz_stream_init_rocm_(sz_size_t ordinal, sz_stream
     sz_status_t status = sz_success_k;
     hipStream_t created = STRINGZILLA_NULL;
     *stream = STRINGZILLA_NULL;
-    if (ordinal >= sz_device_count_rocm_()) return sz_missing_gpu_k;
+    if (ordinal >= sz_count_devices_rocm_()) return sz_missing_gpu_k;
     if (hipGetDevice(&caller) != hipSuccess || hipSetDevice((int)ordinal) != hipSuccess) return sz_missing_gpu_k;
     if (hipStreamCreate(&created) != hipSuccess) status = sz_bad_alloc_k;
     sz_device_leave_rocm_(caller);
@@ -519,8 +523,8 @@ STRINGZILLA_DEVICE sz_i32_t sz_i32_rows_prefix_min_rocm_(sz_i32_t value) {
  *  here. */
 #if STRINGZILLA_HEADER_ONLY
 
-STRINGZILLA_API sz_status_t sz_device_count_rocm(sz_size_t *count) {
-    *count = sz_device_count_rocm_();
+STRINGZILLA_API sz_status_t sz_count_devices_rocm(sz_size_t *count) {
+    *count = sz_count_devices_rocm_();
     return *count ? sz_success_k : sz_missing_gpu_k;
 }
 

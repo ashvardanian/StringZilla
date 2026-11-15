@@ -13,9 +13,13 @@
 #define STRINGZILLA_CIPHER_POWERVSX_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_PPC64_
+#if STRINGZILLA_ARCH_PPC64_POWERVSX_
+
 #include "stringzilla/cipher/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -42,8 +46,6 @@ extern "C" {
  *  is the sole @c STRINGZILLA_ARCH_BIG_ENDIAN_ branch below. Everything else is expressed through
  *  @c vec_sld, which is a raw big-endian @c vsldoi, or through lane-wise operations whose meaning
  *  does not depend on element numbering, so the two branches cannot drift apart. */
-#if STRINGZILLA_ARCH_PPC64_
-#if STRINGZILLA_TARGET_POWERVSX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("power9-vector"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -223,6 +225,8 @@ STRINGZILLA_INLINE void sz_aes256_key_init_powervsx_(sz_aes256_key_t *key, sz_u8
         even_round_key_u8x16, sz_aes256_key_rotate_substitute_powervsx_(odd_round_key_u8x16, 0x40u));
     sz_aes256_round_key_store_powervsx_(even_round_key_u8x16, schedule + 14 * 4);
 }
+
+#if STRINGZILLA_TARGET_POWERVSX
 
 STRINGZILLA_API sz_status_t sz_aes256_key_init_powervsx(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)],
                                                         sz_stream_t stream) {
@@ -1111,16 +1115,19 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_powervsx(sz_aes256_gcm_key_t c
 
 #pragma endregion One Shot Interface
 
+#endif // STRINGZILLA_TARGET_POWERVSX
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_POWERVSX
-#endif // STRINGZILLA_ARCH_PPC64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_PPC64_POWERVSX_
+#endif // STRINGZILLA_ARCH_PPC64_
 
 #endif // STRINGZILLA_CIPHER_POWERVSX_H_

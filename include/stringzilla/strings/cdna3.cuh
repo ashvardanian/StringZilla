@@ -118,7 +118,6 @@ STRINGZILLA_DEVICE sz_size_t sz_block_sum_cdna3_(sz_size_t value, sz_size_t *sha
 #ifdef __cplusplus
 } // extern "C"
 #endif
-
 #endif // STRINGZILLA_ARCH_ROCM_CDNA3_
 #endif // STRINGZILLA_ARCH_ROCM_
 #endif // STRINGZILLA_STRINGS_CDNA3_CUH_

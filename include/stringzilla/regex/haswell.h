@@ -19,15 +19,16 @@
 
 #include "stringzilla/types.h"
 
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_HASWELL_
+
 #include "stringzilla/find/haswell.h" // `sz_find_byteset_haswell_`, `sz_rfind_byteset_haswell_`
 #include "stringzilla/regex/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_X8664_
-#if STRINGZILLA_ARCH_X8664_HASWELL_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,lzcnt"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -135,11 +136,12 @@ STRINGZILLA_API sz_status_t sz_regex_extract_haswell(sz_regex_engine_t *engine, 
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_X8664_HASWELL_
 #endif // STRINGZILLA_ARCH_X8664_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_REGEX_HASWELL_H_

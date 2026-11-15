@@ -5,7 +5,7 @@
  *  @brief Whether the toolchain builds the RVV Crypto kernels: Zvkned, Zvknhb and Zvkg.
  */
 #define STRINGZILLA_HEADER_ONLY 1
-#define STRINGZILLA_TARGET_RVVCRYPTO 1
+#define STRINGZILLA_ARCH_RISCV64_RVVCRYPTO_ 1
 #include "stringzilla/hash/rvvcrypto.h"
 #include "stringzilla/cipher/rvvcrypto.h"
 

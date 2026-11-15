@@ -216,8 +216,8 @@ static char const doc_LevenshteinEngine[] =                                     
     "Args:\n"                                                                                        //
     "  queries (Strings): Patterns every candidate is scored against.\n"                             //
     "  symbol (str, optional): 'bytes' counts byte edits, 'runes' counts UTF-8 rune edits.\n"        //
-    "  capabilities (Capability, optional): A producer's mask, like cuda_capabilities_enabled(0),\n" //
-    "    defaulting to cpu_capabilities_enabled().\n"                                                //
+    "  capabilities (Capability, optional): A producer's mask, like capabilities_enabled_cuda(0),\n" //
+    "    defaulting to capabilities_enabled_cpu().\n"                                                //
     "  stream (int, optional): A stream of that vendor as an integer, naming the device, or None\n"  //
     "    for the default.\n"                                                                         //
     "Example:\n"                                                                                     //

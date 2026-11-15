@@ -148,7 +148,7 @@ impl Bm25Params {
 ///     SUBSTRINGS_HOT_STATES_AUTO, SUBSTRINGS_MATCHES_BUDGET_AUTO,
 /// };
 ///
-/// let cpu = Stream::default(Capabilities::cpu_enabled());
+/// let cpu = Stream::default(Capabilities::enabled_cpu());
 /// let mut engine = SubstringsEngine::new(
 ///     &["cat", "catalog"],
 ///     CaseSensitivity::Cased,
@@ -204,7 +204,7 @@ pub struct SubstringsEngine {
 
 impl SubstringsEngine {
     /// Compiles `needles` into an automaton the matching verbs read, with the capabilities of
-    /// `stream`, like [`Capabilities::cpu_enabled`] or a GPU's [`Capabilities::cuda_enabled`], on
+    /// `stream`, like [`Capabilities::enabled_cpu`] or a GPU's [`Capabilities::enabled_cuda`], on
     /// the device `stream` names, which it may join.
     ///
     /// An empty needle is refused rather than skipped, since it would match at every position

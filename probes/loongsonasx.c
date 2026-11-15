@@ -5,7 +5,7 @@
  *  @brief Whether the toolchain builds the LASX kernels, the LoongArch 256-bit SIMD kit.
  */
 #define STRINGZILLA_HEADER_ONLY 1
-#define STRINGZILLA_TARGET_LOONGSONASX 1
+#define STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_ 1
 #include <stringzilla/find/loongsonasx.h>
 
 int main(void) {

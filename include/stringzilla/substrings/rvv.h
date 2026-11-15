@@ -15,15 +15,16 @@
 
 #include "stringzilla/types.h"
 
+#if STRINGZILLA_ARCH_RISCV64_
+#if STRINGZILLA_ARCH_RISCV64_RVV_
+
 #include "stringzilla/find/rvv.h" // `sz_find_byteset_rvv_`
 #include "stringzilla/substrings/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_RISCV64_
-#if STRINGZILLA_ARCH_RISCV64_RVV_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("arch=+v"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -135,11 +136,12 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_rvv(sz_substrings_engine_t
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_RISCV64_RVV_
 #endif // STRINGZILLA_ARCH_RISCV64_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_SUBSTRINGS_RVV_H_

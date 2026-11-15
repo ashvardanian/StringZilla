@@ -10,9 +10,13 @@
 #define STRINGZILLA_FIND_ICELAKE_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_ICELAKE_
+
 #include "stringzilla/find/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -23,8 +27,6 @@ extern "C" {
  *      - 2019 Ice Lake: VPOPCNTDQ, VNNI, VBMI2, BITALG, GFNI, VPCLMULQDQ, VAES.
  *
  *  We are going to use VBMI2 for @c _mm256_maskz_compress_epi8. */
-#if STRINGZILLA_ARCH_X8664_
-#if STRINGZILLA_TARGET_ICELAKE
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(                                                                                        \
     __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt,evex512"))), \
@@ -157,6 +159,8 @@ STRINGZILLA_OUTLINED_ sz_cptr_t sz_find_byteset_icelake_(sz_cptr_t haystack, sz_
     return STRINGZILLA_NULL_CHAR;
 }
 
+#if STRINGZILLA_TARGET_ICELAKE
+
 STRINGZILLA_API sz_status_t sz_find_byteset_icelake(sz_cptr_t haystack, sz_size_t haystack_length,
                                                     sz_byteset_t const *filter, sz_cptr_t *match, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
@@ -220,16 +224,19 @@ STRINGZILLA_API sz_status_t sz_rfind_byteset_icelake(sz_cptr_t haystack, sz_size
     return sz_success_k;
 }
 
+#endif // STRINGZILLA_TARGET_ICELAKE
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_ICELAKE
-#endif // STRINGZILLA_ARCH_X8664_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_X8664_ICELAKE_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #endif // STRINGZILLA_FIND_ICELAKE_H_

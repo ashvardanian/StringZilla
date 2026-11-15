@@ -10,14 +10,17 @@
 #define STRINGZILLA_UTF8_UNCASED_FOLD_LOONGSONASX_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_LOONGARCH64_
+#if STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+
 #include "stringzilla/utf8_uncased_fold/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_LOONGARCH64_
-#if STRINGZILLA_TARGET_LOONGSONASX
+#if STRINGZILLA_TARGET_LOONGSONASX // Kernels only: an empty pragma region would fail under -Werror
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("lasx"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -38,10 +41,12 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_loongsonasx(sz_cptr_t source, s
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_TARGET_LOONGSONASX
-#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
 #endif // STRINGZILLA_UTF8_UNCASED_FOLD_LOONGSONASX_H_

@@ -14,7 +14,7 @@
 //!   vendor's devices count and make a `Stream`, on which engines, `StringsView` conversions and
 //!   `UnifiedAllocator` memory are built; without the feature those report `Status::MissingGpu`.
 //!
-//! Every call dispatches on [`Capabilities::cpu_enabled`], the CPU features this build can use.
+//! Every call dispatches on [`Capabilities::enabled_cpu`], the CPU features this build can use.
 //! Engine verbs queue on a [`Stream`] inside its [`Stream::scope`], which joins the stream before
 //! returning.
 //!

@@ -24,14 +24,16 @@
 #define STRINGZILLA_UTF8_NORM_POWERVSX_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_PPC64_
+#if STRINGZILLA_ARCH_PPC64_POWERVSX_
+
 #include "stringzilla/utf8_norm/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_PPC64_
-#if STRINGZILLA_TARGET_POWERVSX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("power9-vector"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -108,6 +110,8 @@ STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_norm_classify_powervsx_(sz_cptr_t text, 
     return sz_utf8_norm_verify_block_(&position, end, end, form_flag, &previous_canonical_combining_class);
 }
 
+#if STRINGZILLA_TARGET_POWERVSX
+
 STRINGZILLA_API sz_status_t sz_utf8_norm_powervsx(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
                                                   sz_ptr_t target, sz_size_t *target_length, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
@@ -125,16 +129,19 @@ STRINGZILLA_API sz_status_t sz_utf8_find_denormalized_powervsx(sz_cptr_t source,
     return sz_success_k;
 }
 
+#endif // STRINGZILLA_TARGET_POWERVSX
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_POWERVSX
-#endif // STRINGZILLA_ARCH_PPC64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_PPC64_POWERVSX_
+#endif // STRINGZILLA_ARCH_PPC64_
 
 #endif // STRINGZILLA_UTF8_NORM_POWERVSX_H_

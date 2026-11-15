@@ -237,6 +237,20 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_cuda(sz_levenshtein_engine_
                                                           sz_size_t distances_stride, sz_stream_t stream);
 #endif
 
+#if STRINGZILLA_TARGET_AMPERE
+/** @copydoc sz_levenshtein_engine_init */
+STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_ampere(sz_levenshtein_engine_t *engine,
+                                                              sz_strings_view_t const *queries,
+                                                              sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
+                                                              sz_stream_t stream);
+/** @copydoc sz_levenshtein_distances */
+STRINGZILLA_API sz_status_t sz_levenshtein_distances_ampere(sz_levenshtein_engine_t *engine,
+                                                            sz_strings_view_t const *candidates,
+                                                            sz_size_t const *symbol_counts, sz_size_t const *order,
+                                                            sz_size_t bound, sz_size_t *distances,
+                                                            sz_size_t distances_stride, sz_stream_t stream);
+#endif
+
 #if STRINGZILLA_TARGET_BLACKWELL
 /** @copydoc sz_levenshtein_engine_init */
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_blackwell(sz_levenshtein_engine_t *engine,
@@ -263,6 +277,48 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_rocm(sz_levenshtein_engine_
                                                           sz_size_t const *symbol_counts, sz_size_t const *order,
                                                           sz_size_t bound, sz_size_t *distances,
                                                           sz_size_t distances_stride, sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_CDNA3
+/** @copydoc sz_levenshtein_engine_init */
+STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_cdna3(sz_levenshtein_engine_t *engine,
+                                                             sz_strings_view_t const *queries,
+                                                             sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
+                                                             sz_stream_t stream);
+/** @copydoc sz_levenshtein_distances */
+STRINGZILLA_API sz_status_t sz_levenshtein_distances_cdna3(sz_levenshtein_engine_t *engine,
+                                                           sz_strings_view_t const *candidates,
+                                                           sz_size_t const *symbol_counts, sz_size_t const *order,
+                                                           sz_size_t bound, sz_size_t *distances,
+                                                           sz_size_t distances_stride, sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_CDNA4
+/** @copydoc sz_levenshtein_engine_init */
+STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_cdna4(sz_levenshtein_engine_t *engine,
+                                                             sz_strings_view_t const *queries,
+                                                             sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
+                                                             sz_stream_t stream);
+/** @copydoc sz_levenshtein_distances */
+STRINGZILLA_API sz_status_t sz_levenshtein_distances_cdna4(sz_levenshtein_engine_t *engine,
+                                                           sz_strings_view_t const *candidates,
+                                                           sz_size_t const *symbol_counts, sz_size_t const *order,
+                                                           sz_size_t bound, sz_size_t *distances,
+                                                           sz_size_t distances_stride, sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_CDNA5
+/** @copydoc sz_levenshtein_engine_init */
+STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_cdna5(sz_levenshtein_engine_t *engine,
+                                                             sz_strings_view_t const *queries,
+                                                             sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
+                                                             sz_stream_t stream);
+/** @copydoc sz_levenshtein_distances */
+STRINGZILLA_API sz_status_t sz_levenshtein_distances_cdna5(sz_levenshtein_engine_t *engine,
+                                                           sz_strings_view_t const *candidates,
+                                                           sz_size_t const *symbol_counts, sz_size_t const *order,
+                                                           sz_size_t bound, sz_size_t *distances,
+                                                           sz_size_t distances_stride, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_METAL

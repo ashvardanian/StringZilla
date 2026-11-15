@@ -25,14 +25,18 @@
 #ifndef STRINGZILLA_REGEX_ROCM_CUH_
 #define STRINGZILLA_REGEX_ROCM_CUH_
 
-#include "stringzilla/rocm.cuh"
-#include "stringzilla/regex/kernels.cuh"
+#include "stringzilla/types.h"
 
 #if STRINGZILLA_ARCH_ROCM_
 
-#ifdef __cplusplus
+#include "stringzilla/rocm.cuh"
+#include "stringzilla/regex/kernels.cuh"
+
+#if defined(__cplusplus)
 extern "C" {
 #endif
+
+#if STRINGZILLA_TARGET_ROCM
 
 #pragma region Host Plumbing
 
@@ -71,6 +75,265 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
                                           sz_regex_round_simt_t round) {
     sz_regex_continue_simt_(&engine, haystacks, &round, sz_true_k, sz_shuffle_down_rocm_, sz_lanes_broadcast_rocm_,
                             sz_lanes_any_rocm_);
+}
+
+/** @ref sz_regex_bound_simt_ over the pass's NFA or positions. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_bound_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_bound_simt_(&engine, haystacks, &round, sz_false_k);
+}
+
+/** @ref sz_regex_bound_simt_ over a body's DFA. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_bound_dfa_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                    sz_regex_round_simt_t round) {
+    sz_regex_bound_simt_(&engine, haystacks, &round, sz_true_k);
+}
+
+/** @ref sz_regex_bound_pieces_simt_ over the pass's NFA or positions. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_bound_pieces_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                       sz_regex_round_simt_t round) {
+    sz_regex_bound_pieces_simt_(&engine, haystacks, &round, sz_false_k);
+}
+
+/** @ref sz_regex_bound_pieces_simt_ over a body's DFA. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_bound_pieces_dfa_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                           sz_regex_round_simt_t round) {
+    sz_regex_bound_pieces_simt_(&engine, haystacks, &round, sz_true_k);
+}
+
+/** @ref sz_regex_affine_simt_ over the pass's NFA or positions. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_affine_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_affine_simt_(&engine, haystacks, &round, sz_false_k);
+}
+
+/** @ref sz_regex_affine_simt_ over a body's DFA. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_affine_dfa_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                     sz_regex_round_simt_t round) {
+    sz_regex_affine_simt_(&engine, haystacks, &round, sz_true_k);
+}
+
+/** @ref sz_regex_affine_double_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_affine_double_rocm_kernel_(sz_regex_round_simt_t round) {
+    sz_regex_affine_double_simt_(round);
+}
+
+/** @ref sz_regex_looks_simt_ over the pass's NFA or positions. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_looks_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_looks_simt_(&engine, haystacks, &round, sz_false_k);
+}
+
+/** @ref sz_regex_looks_simt_ over a body's DFA. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_looks_dfa_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                    sz_regex_round_simt_t round) {
+    sz_regex_looks_simt_(&engine, haystacks, &round, sz_true_k);
+}
+
+/** @ref sz_regex_fill_singles_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_singles_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_fill_singles_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_prime_chunks_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_prime_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_prime_chunks_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_prime_pieces_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_prime_pieces_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                       sz_regex_round_simt_t round) {
+    sz_regex_prime_pieces_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_compose_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_compose_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_compose_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_compose_double_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_compose_double_rocm_kernel_(sz_regex_round_simt_t round) {
+    sz_regex_compose_double_simt_(round);
+}
+
+/** @ref sz_regex_mark_prefixes_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_mark_prefixes_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                        sz_regex_round_simt_t round) {
+    sz_regex_mark_prefixes_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_mark_folded_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_mark_folded_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                      sz_regex_round_simt_t round) {
+    sz_regex_mark_folded_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_mark_positions_simt_ over bytes. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_mark_positions_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                         sz_regex_round_simt_t round) {
+    sz_regex_mark_positions_simt_(&engine, haystacks, &round, sz_false_k);
+}
+
+/** @ref sz_regex_mark_positions_simt_ over folded runes. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_mark_positions_folded_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                                sz_regex_round_simt_t round) {
+    sz_regex_mark_positions_simt_(&engine, haystacks, &round, sz_true_k);
+}
+
+/** @ref sz_regex_list_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_list_rocm_kernel_(sz_regex_round_simt_t round) {
+    sz_regex_list_simt_(round);
+}
+
+/** @ref sz_regex_ends_pike_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_ends_pike_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                    sz_regex_round_simt_t round) {
+    sz_regex_ends_pike_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_ends_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_ends_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_ends_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_links_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_links_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_links_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_resume_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_resume_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_resume_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_links_double_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_links_double_rocm_kernel_(sz_regex_round_simt_t round) {
+    sz_regex_links_double_simt_(round);
+}
+
+/** @ref sz_regex_group_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_group_rocm_kernel_(sz_regex_engine_t engine, sz_regex_round_simt_t round) {
+    sz_regex_group_simt_(engine, round);
+}
+
+/** @ref sz_regex_point_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_point_rocm_kernel_(sz_regex_engine_t engine, sz_regex_round_simt_t round) {
+    sz_regex_point_simt_(engine, round);
+}
+
+/** @ref sz_regex_groups_double_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_groups_double_rocm_kernel_(sz_regex_round_simt_t round) {
+    sz_regex_groups_double_simt_(round);
+}
+
+/** @ref sz_regex_take_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_take_rocm_kernel_(sz_regex_round_simt_t round) {
+    sz_regex_take_simt_(round);
+}
+
+/** @ref sz_regex_retry_folded_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_retry_folded_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                       sz_regex_round_simt_t round) {
+    sz_regex_retry_folded_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_chain_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_chain_rocm_kernel_(sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_chain_simt_(haystacks, round);
+}
+
+/** @ref sz_regex_double_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_double_rocm_kernel_(sz_regex_round_simt_t round) {
+    sz_regex_double_simt_(round);
+}
+
+/** @ref sz_regex_sweep_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_sweep_rocm_kernel_(sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_sweep_simt_(haystacks, round);
+}
+
+/** @ref sz_regex_carry_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_carry_threads_per_block_simt_k)
+    sz_regex_carry_rocm_kernel_(sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_carry_simt_(haystacks, round);
+}
+
+/** @ref sz_regex_counts_edges_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_counts_edges_rocm_kernel_(sz_size_t const *counts, sz_size_t counts_stride, sz_size_t count,
+                                       sz_size_t *edges) {
+    sz_regex_counts_edges_simt_(counts, counts_stride, count, edges);
+}
+
+/** @ref sz_regex_counts_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_counts_rocm_kernel_(sz_size_t *counts, sz_size_t counts_stride, sz_size_t count, sz_size_t const *edges) {
+    sz_regex_counts_simt_(counts, counts_stride, count, edges);
+}
+
+/** @ref sz_regex_expand_kept_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_expand_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_expand_kept_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_drift_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_drift_rocm_kernel_(sz_regex_round_simt_t round) {
+    sz_regex_drift_simt_(round);
+}
+
+/** @ref sz_regex_rewrite_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_rewrite_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_rewrite_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_firsts_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_firsts_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_firsts_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_rows_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_rows_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_rows_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_mark_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_mark_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_mark_simt_(engine, haystacks, round);
 }
 
 /** The segment geometry of an engine's round block, and the byte offsets of everything in it. */
@@ -325,24 +588,24 @@ STRINGZILLA_INLINE sz_status_t sz_regex_flow_rocm_(sz_regex_engine_t const *engi
     walk_arguments[0] = &launched_engine, walk_arguments[1] = &launched_haystacks, walk_arguments[2] = round;
     round_arguments[0] = round;
     status = sz_regex_launch_rocm_(
-        dfa ? (void const *)sz_regex_bound_dfa_simt_kernel_ : (void const *)sz_regex_bound_simt_kernel_, walks_grid,
+        dfa ? (void const *)sz_regex_bound_dfa_rocm_kernel_ : (void const *)sz_regex_bound_rocm_kernel_, walks_grid,
         walk_arguments, shared_bytes, stream);
     if (status == sz_success_k)
-        status = sz_regex_launch_rocm_(dfa ? (void const *)sz_regex_bound_pieces_dfa_simt_kernel_
-                                           : (void const *)sz_regex_bound_pieces_simt_kernel_,
+        status = sz_regex_launch_rocm_(dfa ? (void const *)sz_regex_bound_pieces_dfa_rocm_kernel_
+                                           : (void const *)sz_regex_bound_pieces_rocm_kernel_,
                                        walks_grid, walk_arguments, shared_bytes, stream);
     if (status == sz_success_k)
         status = sz_regex_launch_rocm_(
-            dfa ? (void const *)sz_regex_affine_dfa_simt_kernel_ : (void const *)sz_regex_affine_simt_kernel_,
+            dfa ? (void const *)sz_regex_affine_dfa_rocm_kernel_ : (void const *)sz_regex_affine_rocm_kernel_,
             walks_grid, walk_arguments, shared_bytes, stream);
     for (step = 0; status == sz_success_k && step != round->rounds; ++step) {
         round->round = step;
-        status = sz_regex_launch_rocm_((void const *)sz_regex_affine_double_simt_kernel_,
+        status = sz_regex_launch_rocm_((void const *)sz_regex_affine_double_rocm_kernel_,
                                        sz_regex_grid_rocm_(round->chunks_count), round_arguments, 0, stream);
     }
     if (status == sz_success_k && recording)
         status = sz_regex_launch_rocm_(
-            dfa ? (void const *)sz_regex_looks_dfa_simt_kernel_ : (void const *)sz_regex_looks_simt_kernel_, walks_grid,
+            dfa ? (void const *)sz_regex_looks_dfa_rocm_kernel_ : (void const *)sz_regex_looks_rocm_kernel_, walks_grid,
             walk_arguments, shared_bytes, stream);
     return status;
 }
@@ -386,7 +649,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_looks_rocm_(sz_regex_engine_t const *eng
     arguments[0] = &launched_engine, arguments[1] = &launched_haystacks, arguments[2] = round;
     // The one-byte lookarounds fill the half outright, which the passes then add to.
     if (sz_regex_singles_simt_(engine))
-        status = sz_regex_launch_rocm_((void const *)sz_regex_singles_simt_kernel_,
+        status = sz_regex_launch_rocm_((void const *)sz_regex_singles_rocm_kernel_,
                                        sz_regex_grid_rocm_(round->segment_end - round->segment_begin), arguments, 0,
                                        stream);
     else
@@ -419,17 +682,17 @@ STRINGZILLA_INLINE sz_status_t sz_regex_prime_segment_rocm_(sz_regex_engine_t co
                                    sz_regex_none_simt_k, sz_false_k, stream);
     walk_arguments[0] = &launched_engine, walk_arguments[1] = &launched_haystacks, walk_arguments[2] = round;
     round_arguments[0] = round;
-    status = sz_regex_launch_rocm_((void const *)sz_regex_prime_simt_kernel_, grid, walk_arguments, shared_bytes,
+    status = sz_regex_launch_rocm_((void const *)sz_regex_prime_rocm_kernel_, grid, walk_arguments, shared_bytes,
                                    stream);
     if (status == sz_success_k)
-        status = sz_regex_launch_rocm_((void const *)sz_regex_prime_pieces_simt_kernel_, grid, walk_arguments,
+        status = sz_regex_launch_rocm_((void const *)sz_regex_prime_pieces_rocm_kernel_, grid, walk_arguments,
                                        shared_bytes, stream);
     if (status == sz_success_k)
-        status = sz_regex_launch_rocm_((void const *)sz_regex_compose_simt_kernel_, grid, walk_arguments, shared_bytes,
+        status = sz_regex_launch_rocm_((void const *)sz_regex_compose_rocm_kernel_, grid, walk_arguments, shared_bytes,
                                        stream);
     for (step = 0; status == sz_success_k && step != round->rounds; ++step) {
         round->round = step;
-        status = sz_regex_launch_rocm_((void const *)sz_regex_compose_double_simt_kernel_, grid, round_arguments, 0,
+        status = sz_regex_launch_rocm_((void const *)sz_regex_compose_double_rocm_kernel_, grid, round_arguments, 0,
                                        stream);
     }
     return status;
@@ -474,9 +737,9 @@ STRINGZILLA_INLINE sz_status_t sz_regex_slides_rocm_(sz_regex_engine_t const *en
     while (status == sz_success_k && counters[sz_regex_paused_counter_simt_k]) {
         status = sz_fill_rocm_(round->leaders, engine->forward_states_count * sizeof(sz_u32_t), 0xFF, stream);
         if (status == sz_success_k)
-            status = sz_regex_launch_rocm_((void const *)sz_regex_group_simt_kernel_, grid, group_arguments, 0, stream);
+            status = sz_regex_launch_rocm_((void const *)sz_regex_group_rocm_kernel_, grid, group_arguments, 0, stream);
         if (status == sz_success_k)
-            status = sz_regex_launch_rocm_((void const *)sz_regex_point_simt_kernel_, grid, group_arguments, 0, stream);
+            status = sz_regex_launch_rocm_((void const *)sz_regex_point_rocm_kernel_, grid, group_arguments, 0, stream);
         if (status == sz_success_k)
             status = sz_fill_rocm_(round->counters + sz_regex_handed_counter_simt_k, 2 * sizeof(sz_u32_t), 0, stream);
         // The window moves two segments on, filling both halves before the groups resume.
@@ -488,7 +751,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_slides_rocm_(sz_regex_engine_t const *en
         sz_regex_segment_rocm_(round, segment, slots);
         round->groups_begin = counters[sz_regex_groups_counter_simt_k];
         if (status == sz_success_k)
-            status = sz_regex_launch_rocm_((void const *)sz_regex_resume_simt_kernel_, grid, walk_arguments,
+            status = sz_regex_launch_rocm_((void const *)sz_regex_resume_rocm_kernel_, grid, walk_arguments,
                                            shared_bytes, stream);
         if (status == sz_success_k)
             status = sz_regex_launch_rocm_(folded ? (void const *)sz_regex_continue_folded_rocm_kernel_
@@ -501,12 +764,12 @@ STRINGZILLA_INLINE sz_status_t sz_regex_slides_rocm_(sz_regex_engine_t const *en
     round->rounds = sz_regex_rounds_count_rocm_(ends);
     for (step = 0; status == sz_success_k && step != round->rounds; ++step) {
         round->round = step;
-        status = sz_regex_launch_rocm_((void const *)sz_regex_groups_double_simt_kernel_, grid, round_arguments, 0,
+        status = sz_regex_launch_rocm_((void const *)sz_regex_groups_double_rocm_kernel_, grid, round_arguments, 0,
                                        stream);
     }
     round->rounds = rounds;
     if (status == sz_success_k)
-        status = sz_regex_launch_rocm_((void const *)sz_regex_take_simt_kernel_, grid, round_arguments, 0, stream);
+        status = sz_regex_launch_rocm_((void const *)sz_regex_take_rocm_kernel_, grid, round_arguments, 0, stream);
     if (status == sz_success_k)
         status = sz_regex_looks_rocm_(engine, haystacks, round, arena, segment, segment, levels, stream);
     if (status == sz_success_k)
@@ -665,35 +928,35 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_rocm_(sz_regex_engine_t const *en
         if (status == sz_success_k && !engine->reverse_rows) {
             round->walks_count = positions_walks, round->walk_bytes = arena.positions_bytes;
             status = sz_regex_launch_rocm_(
-                folded ? (void const *)sz_regex_mark_positions_folded_simt_kernel_
-                       : (void const *)sz_regex_mark_positions_simt_kernel_,
+                folded ? (void const *)sz_regex_mark_positions_folded_rocm_kernel_
+                       : (void const *)sz_regex_mark_positions_rocm_kernel_,
                 (unsigned)sz_size_divide_round_up(positions_walks, sz_regex_threads_per_block_simt_k), walk_arguments,
                 0, stream);
         }
         else if (status == sz_success_k && engine->prefixes)
-            status = sz_regex_launch_rocm_((void const *)sz_regex_mark_prefixes_simt_kernel_, grid, walk_arguments, 0,
+            status = sz_regex_launch_rocm_((void const *)sz_regex_mark_prefixes_rocm_kernel_, grid, walk_arguments, 0,
                                            stream);
         else if (status == sz_success_k)
             status = sz_regex_launch_rocm_(
-                folded ? (void const *)sz_regex_mark_folded_simt_kernel_ : (void const *)sz_regex_mark_simt_kernel_,
+                folded ? (void const *)sz_regex_mark_folded_rocm_kernel_ : (void const *)sz_regex_mark_rocm_kernel_,
                 grid, walk_arguments, shared_bytes + (folded ? 0 : sz_regex_staged_text_bytes_simt_k), stream);
         if (status == sz_success_k)
             status = sz_regex_scan_rocm_(round, chunk_offsets, round->chunks_count + 1,
                                          (void const *)sz_regex_scan_bounded_rocm_kernel_, stream);
         if (status == sz_success_k && !engine->forward_rows) {
             round->walks_count = pike_walks, round->walk_bytes = arena.pike_bytes;
-            status = sz_regex_launch_rocm_((void const *)sz_regex_list_simt_kernel_, grid, round_arguments, 0, stream);
+            status = sz_regex_launch_rocm_((void const *)sz_regex_list_rocm_kernel_, grid, round_arguments, 0, stream);
             if (status == sz_success_k)
                 status = sz_regex_launch_rocm_(
-                    (void const *)sz_regex_ends_pike_simt_kernel_,
+                    (void const *)sz_regex_ends_pike_rocm_kernel_,
                     (unsigned)sz_size_divide_round_up(pike_walks, sz_regex_threads_per_block_simt_k), walk_arguments, 0,
                     stream);
         }
         else if (status == sz_success_k) {
-            status = sz_regex_launch_rocm_((void const *)sz_regex_ends_simt_kernel_, grid, walk_arguments, shared_bytes,
+            status = sz_regex_launch_rocm_((void const *)sz_regex_ends_rocm_kernel_, grid, walk_arguments, shared_bytes,
                                            stream);
             if (status == sz_success_k)
-                status = sz_regex_launch_rocm_((void const *)sz_regex_links_simt_kernel_, grid, walk_arguments,
+                status = sz_regex_launch_rocm_((void const *)sz_regex_links_rocm_kernel_, grid, walk_arguments,
                                                shared_bytes, stream);
             if (status == sz_success_k)
                 status = sz_regex_launch_rocm_(folded ? (void const *)sz_regex_continue_folded_rocm_kernel_
@@ -706,22 +969,22 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_rocm_(sz_regex_engine_t const *en
             status = sz_regex_slides_rocm_(engine, haystacks, round, &arena, levels, stream);
         for (step = 0; status == sz_success_k && engine->forward_rows && step != round->rounds; ++step) {
             round->round = step;
-            status = sz_regex_launch_rocm_((void const *)sz_regex_links_double_simt_kernel_, grid, round_arguments, 0,
+            status = sz_regex_launch_rocm_((void const *)sz_regex_links_double_rocm_kernel_, grid, round_arguments, 0,
                                            stream);
         }
         if (status == sz_success_k && engine->forward_rows && folded)
-            status = sz_regex_launch_rocm_((void const *)sz_regex_retry_folded_simt_kernel_, sz_regex_grid_rocm_(slots),
+            status = sz_regex_launch_rocm_((void const *)sz_regex_retry_folded_rocm_kernel_, sz_regex_grid_rocm_(slots),
                                            walk_arguments, shared_bytes, stream);
         if (status == sz_success_k)
-            status = sz_regex_launch_rocm_((void const *)sz_regex_chain_simt_kernel_, grid, chain_arguments, 0, stream);
+            status = sz_regex_launch_rocm_((void const *)sz_regex_chain_rocm_kernel_, grid, chain_arguments, 0, stream);
         for (step = 0; status == sz_success_k && step != round->rounds; ++step) {
             round->round = step;
-            status = sz_regex_launch_rocm_((void const *)sz_regex_double_simt_kernel_, sz_regex_grid_rocm_(slots),
+            status = sz_regex_launch_rocm_((void const *)sz_regex_double_rocm_kernel_, sz_regex_grid_rocm_(slots),
                                            round_arguments, 0, stream);
         }
         round->storing = 0;
         if (status == sz_success_k)
-            status = sz_regex_launch_rocm_((void const *)sz_regex_sweep_simt_kernel_, grid, chain_arguments, 0, stream);
+            status = sz_regex_launch_rocm_((void const *)sz_regex_sweep_rocm_kernel_, grid, chain_arguments, 0, stream);
         if (status == sz_success_k)
             status = sz_regex_scan_rocm_(round, chunk_kept, round->chunks_count + 1,
                                          (void const *)sz_regex_scan_rocm_kernel_, stream);
@@ -732,18 +995,18 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_rocm_(sz_regex_engine_t const *en
         if (status == sz_success_k && round->offsets) {
             unsigned const walks_grid = (unsigned)sz_size_divide_round_up(pike_walks,
                                                                           sz_regex_threads_per_block_simt_k);
-            status = sz_regex_launch_rocm_((void const *)sz_regex_expand_simt_kernel_, walks_grid, walk_arguments,
+            status = sz_regex_launch_rocm_((void const *)sz_regex_expand_rocm_kernel_, walks_grid, walk_arguments,
                                            sz_regex_staged_bytes_simt_k, stream);
             if (status == sz_success_k)
                 status = sz_fill_rocm_(chunk_covers, (round->chunks_count + 1) * sizeof(sz_size_t), 0, stream);
             if (status == sz_success_k)
-                status = sz_regex_launch_rocm_((void const *)sz_regex_drift_simt_kernel_, grid, round_arguments, 0,
+                status = sz_regex_launch_rocm_((void const *)sz_regex_drift_rocm_kernel_, grid, round_arguments, 0,
                                                stream);
             if (status == sz_success_k)
                 status = sz_regex_scan_rocm_(round, chunk_sums, round->chunks_count + 1,
                                              (void const *)sz_regex_scan_rocm_kernel_, stream);
             if (status == sz_success_k)
-                status = sz_regex_launch_rocm_((void const *)sz_regex_rewrite_simt_kernel_, walks_grid, walk_arguments,
+                status = sz_regex_launch_rocm_((void const *)sz_regex_rewrite_rocm_kernel_, walks_grid, walk_arguments,
                                                sz_regex_staged_bytes_simt_k, stream);
         }
         if (status == sz_success_k && round->rows_offsets) {
@@ -752,13 +1015,13 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_rocm_(sz_regex_engine_t const *en
             status = sz_regex_scan_rocm_(round, chunk_sums, round->chunks_count + 1,
                                          (void const *)sz_regex_scan_rocm_kernel_, stream);
             if (status == sz_success_k)
-                status = sz_regex_launch_rocm_((void const *)sz_regex_firsts_simt_kernel_, walks_grid, walk_arguments,
+                status = sz_regex_launch_rocm_((void const *)sz_regex_firsts_rocm_kernel_, walks_grid, walk_arguments,
                                                sz_regex_staged_bytes_simt_k, stream);
             if (status == sz_success_k)
                 status = sz_regex_scan_rocm_(round, chunk_covers, round->chunks_count + 1,
                                              (void const *)sz_regex_scan_rocm_kernel_, stream);
             if (status == sz_success_k)
-                status = sz_regex_launch_rocm_((void const *)sz_regex_rows_simt_kernel_, walks_grid, walk_arguments,
+                status = sz_regex_launch_rocm_((void const *)sz_regex_rows_rocm_kernel_, walks_grid, walk_arguments,
                                                sz_regex_staged_bytes_simt_k, stream);
         }
         // Retries and group walks read the table too, so where walks may run past it
@@ -768,12 +1031,12 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_rocm_(sz_regex_engine_t const *en
             status = sz_regex_counters_rocm_(round, counters, stream);
         round->storing = 1;
         if (status == sz_success_k)
-            status = sz_regex_launch_rocm_((void const *)sz_regex_sweep_simt_kernel_, grid, chain_arguments, 0, stream);
+            status = sz_regex_launch_rocm_((void const *)sz_regex_sweep_rocm_kernel_, grid, chain_arguments, 0, stream);
         if (status == sz_success_k) {
             dim3 one, block;
             one.x = 1, one.y = 1, one.z = 1;
             block.x = sz_regex_carry_threads_per_block_simt_k, block.y = 1, block.z = 1;
-            status = sz_launch_rocm_((void const *)sz_regex_carry_simt_kernel_, one, block, chain_arguments, 0, stream);
+            status = sz_launch_rocm_((void const *)sz_regex_carry_rocm_kernel_, one, block, chain_arguments, 0, stream);
         }
     }
     return status;
@@ -865,9 +1128,9 @@ STRINGZILLA_INLINE sz_status_t sz_regex_counts_scoped_rocm_(sz_regex_engine_t *e
     // the results being dead by now.
     grid = sz_regex_grid_rocm_(haystacks_count), edges = (sz_size_t *)round.results;
     arguments[0] = &counts, arguments[1] = &counts_stride, arguments[2] = &haystacks_count, arguments[3] = &edges;
-    status = sz_regex_launch_rocm_((void const *)sz_regex_counts_edges_simt_kernel_, grid, arguments, 0, stream);
+    status = sz_regex_launch_rocm_((void const *)sz_regex_counts_edges_rocm_kernel_, grid, arguments, 0, stream);
     if (status != sz_success_k) return status;
-    return sz_regex_launch_rocm_((void const *)sz_regex_counts_simt_kernel_, grid, arguments, 0, stream);
+    return sz_regex_launch_rocm_((void const *)sz_regex_counts_rocm_kernel_, grid, arguments, 0, stream);
 }
 
 STRINGZILLA_INLINE sz_status_t sz_regex_find_scoped_rocm_(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
@@ -924,7 +1187,6 @@ STRINGZILLA_INLINE sz_status_t sz_regex_extract_scoped_rocm_(sz_regex_engine_t *
 #pragma endregion Verbs
 
 /*  Each export makes the stream's device current around its helper, and restores the caller's. */
-#if STRINGZILLA_TARGET_ROCM
 
 STRINGZILLA_API sz_status_t sz_regex_engine_init_rocm(sz_regex_engine_t *engine, sz_strings_view_t const *patterns,
                                                       sz_case_sensitivity_t case_sensitivity,
@@ -995,8 +1257,8 @@ STRINGZILLA_API sz_status_t sz_regex_extract_rocm(sz_regex_engine_t *engine, sz_
 
 #endif // STRINGZILLA_TARGET_ROCM
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
 #endif // STRINGZILLA_ARCH_ROCM_
 #endif // STRINGZILLA_REGEX_ROCM_CUH_

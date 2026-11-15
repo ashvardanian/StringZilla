@@ -10,16 +10,19 @@
 #define STRINGZILLA_UTF8_UNCASED_LOONGSONASX_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_LOONGARCH64_
+#if STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+
 #include "stringzilla/utf8_uncased/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
+#if STRINGZILLA_TARGET_LOONGSONASX // Kernels only: an empty pragma region would fail under -Werror
 /*  This ISA has no dedicated uncased UTF-8 kernels yet; it delegates to the serial
  *  scaffolding so the per-backend symbol set stays uniform across all targets. */
-#if STRINGZILLA_ARCH_LOONGARCH64_
-#if STRINGZILLA_TARGET_LOONGSONASX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("lasx"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -57,10 +60,12 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_order_loongsonasx(sz_cptr_t a, sz_si
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_TARGET_LOONGSONASX
-#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
 #endif // STRINGZILLA_UTF8_UNCASED_LOONGSONASX_H_

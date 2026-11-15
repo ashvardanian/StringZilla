@@ -320,8 +320,9 @@
 /** Keeps a CUDA or HIP device helper out of line. */
 #define STRINGZILLA_DEVICE_NOINLINE __device__ __noinline__
 
-/** Device-resident lookup table storage, without the size limit of CUDA constant memory. */
-#define STRINGZILLA_DEVICE_CONSTANT static __device__
+/** Device lookup table storage inside the one device function reading it, so a unit that never
+ *  calls that function emits no table; a file-scope @c __device__ table ships in every unit. */
+#define STRINGZILLA_DEVICE_CONSTANT static
 #endif
 
 /**
@@ -442,56 +443,99 @@
 #include <stdlib.h> // `abort`
 #endif
 
-/*  Which kits' kernels a unit defines, by default those the compiler's own flags enable. Each tier
- *  header scopes its kernels to their kit with a target pragma, so a unit at the baseline flags may
- *  define any kit the toolchain builds, as the CMake build does from its probes, except LASX and
- *  POWER9, as `lasxintrin.h` and `altivec.h` hide without `-mlasx` and `-mcpu=power9`. */
+/*  Two flags per capability. @c STRINGZILLA_ARCH_<ARCH>_<CAPABILITY>_ says its code compiles in
+ *  this unit: detected here from the unit's own flags, a sound lower bound, and raised or zeroed
+ *  only by this library's build with its probe's verdict, as each tier header scopes its code to
+ *  its kit with a target pragma; it never reads a target. The unit has the capability's kernels
+ *  where @c STRINGZILLA_TARGET_<CAPABILITY> says so, by default a literal from the same detection.
+ *  LASX and POWER9 compile only under `-mlasx` and `-mcpu=power9`, as `lasxintrin.h` and
+ *  `altivec.h` hide without them. */
+#if !defined(STRINGZILLA_ARCH_X8664_WESTMERE_) || (STRINGZILLA_ARCH_X8664_WESTMERE_ && !STRINGZILLA_ARCH_X8664_)
+#undef STRINGZILLA_ARCH_X8664_WESTMERE_
+#if STRINGZILLA_ARCH_X8664_ && defined(__SSE4_2__) && defined(__AES__)
+#define STRINGZILLA_ARCH_X8664_WESTMERE_ (1)
+#elif STRINGZILLA_ARCH_X8664_ && defined(_MSC_VER) && defined(__AVX__)
+#define STRINGZILLA_ARCH_X8664_WESTMERE_ (1) // ! MSVC doesn't expose `__SSE4_2__`, `__AES__` macros
+#else
+#define STRINGZILLA_ARCH_X8664_WESTMERE_ (0)
+#endif
+#endif
 #if !defined(STRINGZILLA_TARGET_WESTMERE) || (STRINGZILLA_TARGET_WESTMERE && !STRINGZILLA_ARCH_X8664_)
 #undef STRINGZILLA_TARGET_WESTMERE
-#if STRINGZILLA_ARCH_X8664_ && defined(__SSE4_2__) && defined(__AES__)
+#if STRINGZILLA_ARCH_X8664_WESTMERE_
 #define STRINGZILLA_TARGET_WESTMERE (1)
-#elif STRINGZILLA_ARCH_X8664_ && defined(_MSC_VER) && defined(__AVX__)
-#define STRINGZILLA_TARGET_WESTMERE (1) // ! MSVC doesn't expose `__SSE4_2__`, `__AES__` macros
 #else
 #define STRINGZILLA_TARGET_WESTMERE (0)
 #endif
 #endif
 
+#if !defined(STRINGZILLA_ARCH_X8664_HASWELL_) || (STRINGZILLA_ARCH_X8664_HASWELL_ && !STRINGZILLA_ARCH_X8664_)
+#undef STRINGZILLA_ARCH_X8664_HASWELL_
+#if STRINGZILLA_ARCH_X8664_ && defined(__AVX2__)
+#define STRINGZILLA_ARCH_X8664_HASWELL_ (1)
+#else
+#define STRINGZILLA_ARCH_X8664_HASWELL_ (0)
+#endif
+#endif
 #if !defined(STRINGZILLA_TARGET_HASWELL) || (STRINGZILLA_TARGET_HASWELL && !STRINGZILLA_ARCH_X8664_)
 #undef STRINGZILLA_TARGET_HASWELL
-#if STRINGZILLA_ARCH_X8664_ && defined(__AVX2__)
+#if STRINGZILLA_ARCH_X8664_HASWELL_
 #define STRINGZILLA_TARGET_HASWELL (1)
 #else
 #define STRINGZILLA_TARGET_HASWELL (0)
 #endif
 #endif
 
+#if !defined(STRINGZILLA_ARCH_X8664_GOLDMONT_) || (STRINGZILLA_ARCH_X8664_GOLDMONT_ && !STRINGZILLA_ARCH_X8664_)
+#undef STRINGZILLA_ARCH_X8664_GOLDMONT_
+#if STRINGZILLA_ARCH_X8664_ && defined(__SHA__)
+#define STRINGZILLA_ARCH_X8664_GOLDMONT_ (1)
+#elif STRINGZILLA_ARCH_X8664_ && defined(_MSC_VER) && defined(__AVX2__)
+#define STRINGZILLA_ARCH_X8664_GOLDMONT_ (1) // ! MSVC doesn't expose `__SHA__` macros
+#else
+#define STRINGZILLA_ARCH_X8664_GOLDMONT_ (0)
+#endif
+#endif
 #if !defined(STRINGZILLA_TARGET_GOLDMONT) || (STRINGZILLA_TARGET_GOLDMONT && !STRINGZILLA_ARCH_X8664_)
 #undef STRINGZILLA_TARGET_GOLDMONT
-#if STRINGZILLA_ARCH_X8664_ && defined(__SHA__)
+#if STRINGZILLA_ARCH_X8664_GOLDMONT_
 #define STRINGZILLA_TARGET_GOLDMONT (1)
-#elif STRINGZILLA_ARCH_X8664_ && defined(_MSC_VER) && defined(__AVX2__)
-#define STRINGZILLA_TARGET_GOLDMONT (1) // ! MSVC doesn't expose `__SHA__` macros
 #else
 #define STRINGZILLA_TARGET_GOLDMONT (0)
 #endif
 #endif
 
+#if !defined(STRINGZILLA_ARCH_X8664_SKYLAKE_) || (STRINGZILLA_ARCH_X8664_SKYLAKE_ && !STRINGZILLA_ARCH_X8664_)
+#undef STRINGZILLA_ARCH_X8664_SKYLAKE_
+#if STRINGZILLA_ARCH_X8664_ && defined(__AVX512F__)
+#define STRINGZILLA_ARCH_X8664_SKYLAKE_ (1)
+#else
+#define STRINGZILLA_ARCH_X8664_SKYLAKE_ (0)
+#endif
+#endif
 #if !defined(STRINGZILLA_TARGET_SKYLAKE) || (STRINGZILLA_TARGET_SKYLAKE && !STRINGZILLA_ARCH_X8664_)
 #undef STRINGZILLA_TARGET_SKYLAKE
-#if STRINGZILLA_ARCH_X8664_ && defined(__AVX512F__)
+#if STRINGZILLA_ARCH_X8664_SKYLAKE_
 #define STRINGZILLA_TARGET_SKYLAKE (1)
 #else
 #define STRINGZILLA_TARGET_SKYLAKE (0)
 #endif
 #endif
 
+#if !defined(STRINGZILLA_ARCH_X8664_ICELAKE_) || (STRINGZILLA_ARCH_X8664_ICELAKE_ && !STRINGZILLA_ARCH_X8664_)
+#undef STRINGZILLA_ARCH_X8664_ICELAKE_
+#if STRINGZILLA_ARCH_X8664_ && defined(__AVX512BW__) && defined(__VAES__)
+#define STRINGZILLA_ARCH_X8664_ICELAKE_ (1)
+#elif STRINGZILLA_ARCH_X8664_ && defined(_MSC_VER) && defined(__AVX512BW__)
+#define STRINGZILLA_ARCH_X8664_ICELAKE_ (1) // ! MSVC doesn't expose `__VAES__` macros
+#else
+#define STRINGZILLA_ARCH_X8664_ICELAKE_ (0)
+#endif
+#endif
 #if !defined(STRINGZILLA_TARGET_ICELAKE) || (STRINGZILLA_TARGET_ICELAKE && !STRINGZILLA_ARCH_X8664_)
 #undef STRINGZILLA_TARGET_ICELAKE
-#if STRINGZILLA_ARCH_X8664_ && defined(__AVX512BW__) && defined(__VAES__)
+#if STRINGZILLA_ARCH_X8664_ICELAKE_
 #define STRINGZILLA_TARGET_ICELAKE (1)
-#elif STRINGZILLA_ARCH_X8664_ && defined(_MSC_VER) && defined(__AVX512BW__)
-#define STRINGZILLA_TARGET_ICELAKE (1) // ! MSVC doesn't expose `__VAES__` macros
 #else
 #define STRINGZILLA_TARGET_ICELAKE (0)
 #endif
@@ -502,21 +546,37 @@
  *  shared byte-lane bridges, like `sz_utf8_rune_pred_to_u64_*` and
  *  @c sz_utf8_vreinterpretq_u8_u4_neon_, assume little-endian lane ↔ byte order and would
  *  mis-execute on big-endian. */
+#if !defined(STRINGZILLA_ARCH_ARM64_NEON_) || (STRINGZILLA_ARCH_ARM64_NEON_ && !STRINGZILLA_ARCH_ARM64_)
+#undef STRINGZILLA_ARCH_ARM64_NEON_
+#if STRINGZILLA_ARCH_ARM64_ && defined(__ARM_NEON) && !STRINGZILLA_ARCH_BIG_ENDIAN_
+#define STRINGZILLA_ARCH_ARM64_NEON_ (1)
+#elif STRINGZILLA_ARCH_ARM64_ && defined(_MSC_VER) && defined(_M_ARM64)
+#define STRINGZILLA_ARCH_ARM64_NEON_ (1) // ! MSVC lacks `__ARM_NEON`, and its AArch64 is always little-endian
+#else
+#define STRINGZILLA_ARCH_ARM64_NEON_ (0)
+#endif
+#endif
 #if !defined(STRINGZILLA_TARGET_NEON) || (STRINGZILLA_TARGET_NEON && !STRINGZILLA_ARCH_ARM64_)
 #undef STRINGZILLA_TARGET_NEON
-#if STRINGZILLA_ARCH_ARM64_ && defined(__ARM_NEON) && !STRINGZILLA_ARCH_BIG_ENDIAN_
+#if STRINGZILLA_ARCH_ARM64_NEON_
 #define STRINGZILLA_TARGET_NEON (1)
-#elif STRINGZILLA_ARCH_ARM64_ && defined(_MSC_VER) && defined(_M_ARM64)
-#define STRINGZILLA_TARGET_NEON (1) // ! MSVC doesn't expose `__ARM_NEON` macros; MSVC AArch64 is always little-endian
 #else
 #define STRINGZILLA_TARGET_NEON (0)
 #endif
 #endif
 
 /*  SVE is optional since Armv8.2-A, but never became mandatory, and MSVC cannot probe for it. */
+#if !defined(STRINGZILLA_ARCH_ARM64_SVE_) || (STRINGZILLA_ARCH_ARM64_SVE_ && !STRINGZILLA_ARCH_ARM64_)
+#undef STRINGZILLA_ARCH_ARM64_SVE_
+#if STRINGZILLA_ARCH_ARM64_ && defined(__ARM_FEATURE_SVE) && !STRINGZILLA_ARCH_BIG_ENDIAN_
+#define STRINGZILLA_ARCH_ARM64_SVE_ (1)
+#else
+#define STRINGZILLA_ARCH_ARM64_SVE_ (0)
+#endif
+#endif
 #if !defined(STRINGZILLA_TARGET_SVE) || (STRINGZILLA_TARGET_SVE && !STRINGZILLA_ARCH_ARM64_)
 #undef STRINGZILLA_TARGET_SVE
-#if STRINGZILLA_ARCH_ARM64_ && defined(__ARM_FEATURE_SVE) && !STRINGZILLA_ARCH_BIG_ENDIAN_
+#if STRINGZILLA_ARCH_ARM64_SVE_
 #define STRINGZILLA_TARGET_SVE (1)
 #else
 #define STRINGZILLA_TARGET_SVE (0)
@@ -524,9 +584,17 @@
 #endif
 
 /*  SVE2 is optional since Armv9.0-A, but never became mandatory, and MSVC cannot probe for it. */
+#if !defined(STRINGZILLA_ARCH_ARM64_SVE2_) || (STRINGZILLA_ARCH_ARM64_SVE2_ && !STRINGZILLA_ARCH_ARM64_)
+#undef STRINGZILLA_ARCH_ARM64_SVE2_
+#if STRINGZILLA_ARCH_ARM64_ && defined(__ARM_FEATURE_SVE2) && !STRINGZILLA_ARCH_BIG_ENDIAN_
+#define STRINGZILLA_ARCH_ARM64_SVE2_ (1)
+#else
+#define STRINGZILLA_ARCH_ARM64_SVE2_ (0)
+#endif
+#endif
 #if !defined(STRINGZILLA_TARGET_SVE2) || (STRINGZILLA_TARGET_SVE2 && !STRINGZILLA_ARCH_ARM64_)
 #undef STRINGZILLA_TARGET_SVE2
-#if STRINGZILLA_ARCH_ARM64_ && defined(__ARM_FEATURE_SVE2) && !STRINGZILLA_ARCH_BIG_ENDIAN_
+#if STRINGZILLA_ARCH_ARM64_SVE2_
 #define STRINGZILLA_TARGET_SVE2 (1)
 #else
 #define STRINGZILLA_TARGET_SVE2 (0)
@@ -534,9 +602,17 @@
 #endif
 
 /*  AES is optional since Armv8.0-A, but never became mandatory, and MSVC cannot probe for it. */
+#if !defined(STRINGZILLA_ARCH_ARM64_NEONAES_) || (STRINGZILLA_ARCH_ARM64_NEONAES_ && !STRINGZILLA_ARCH_ARM64_)
+#undef STRINGZILLA_ARCH_ARM64_NEONAES_
+#if STRINGZILLA_ARCH_ARM64_ && (defined(__ARM_FEATURE_AES) || defined(__ARM_FEATURE_CRYPTO) || STRINGZILLA_OS_APPLE_)
+#define STRINGZILLA_ARCH_ARM64_NEONAES_ (1)
+#else
+#define STRINGZILLA_ARCH_ARM64_NEONAES_ (0)
+#endif
+#endif
 #if !defined(STRINGZILLA_TARGET_NEONAES) || (STRINGZILLA_TARGET_NEONAES && !STRINGZILLA_ARCH_ARM64_)
 #undef STRINGZILLA_TARGET_NEONAES
-#if STRINGZILLA_ARCH_ARM64_ && (defined(__ARM_FEATURE_AES) || defined(__ARM_FEATURE_CRYPTO) || STRINGZILLA_OS_APPLE_)
+#if STRINGZILLA_ARCH_ARM64_NEONAES_
 #define STRINGZILLA_TARGET_NEONAES (1)
 #else
 #define STRINGZILLA_TARGET_NEONAES (0)
@@ -544,9 +620,17 @@
 #endif
 
 /*  SHA2 is optional since Armv8.0-A, but never became mandatory, and MSVC cannot probe for it. */
+#if !defined(STRINGZILLA_ARCH_ARM64_NEONSHA_) || (STRINGZILLA_ARCH_ARM64_NEONSHA_ && !STRINGZILLA_ARCH_ARM64_)
+#undef STRINGZILLA_ARCH_ARM64_NEONSHA_
+#if STRINGZILLA_ARCH_ARM64_ && (defined(__ARM_FEATURE_SHA2) || defined(__ARM_FEATURE_CRYPTO) || STRINGZILLA_OS_APPLE_)
+#define STRINGZILLA_ARCH_ARM64_NEONSHA_ (1)
+#else
+#define STRINGZILLA_ARCH_ARM64_NEONSHA_ (0)
+#endif
+#endif
 #if !defined(STRINGZILLA_TARGET_NEONSHA) || (STRINGZILLA_TARGET_NEONSHA && !STRINGZILLA_ARCH_ARM64_)
 #undef STRINGZILLA_TARGET_NEONSHA
-#if STRINGZILLA_ARCH_ARM64_ && (defined(__ARM_FEATURE_SHA2) || defined(__ARM_FEATURE_CRYPTO) || STRINGZILLA_OS_APPLE_)
+#if STRINGZILLA_ARCH_ARM64_NEONSHA_
 #define STRINGZILLA_TARGET_NEONSHA (1)
 #else
 #define STRINGZILLA_TARGET_NEONSHA (0)
@@ -556,9 +640,17 @@
 /*  SVE2 AES is optional since Armv9.0-A, but never became mandatory, and MSVC cannot probe for it.
  *  GCC spells the feature macro @c __ARM_FEATURE_SVE2AES; Clang spells it
  *  @c __ARM_FEATURE_SVE2_AES. Accept both. */
+#if !defined(STRINGZILLA_ARCH_ARM64_SVE2AES_) || (STRINGZILLA_ARCH_ARM64_SVE2AES_ && !STRINGZILLA_ARCH_ARM64_)
+#undef STRINGZILLA_ARCH_ARM64_SVE2AES_
+#if STRINGZILLA_ARCH_ARM64_ && (defined(__ARM_FEATURE_SVE2AES) || defined(__ARM_FEATURE_SVE2_AES))
+#define STRINGZILLA_ARCH_ARM64_SVE2AES_ (1)
+#else
+#define STRINGZILLA_ARCH_ARM64_SVE2AES_ (0)
+#endif
+#endif
 #if !defined(STRINGZILLA_TARGET_SVE2AES) || (STRINGZILLA_TARGET_SVE2AES && !STRINGZILLA_ARCH_ARM64_)
 #undef STRINGZILLA_TARGET_SVE2AES
-#if STRINGZILLA_ARCH_ARM64_ && (defined(__ARM_FEATURE_SVE2AES) || defined(__ARM_FEATURE_SVE2_AES))
+#if STRINGZILLA_ARCH_ARM64_SVE2AES_
 #define STRINGZILLA_TARGET_SVE2AES (1)
 #else
 #define STRINGZILLA_TARGET_SVE2AES (0)
@@ -613,6 +705,27 @@
  *  header for its helpers leave its kernels to the library. */
 #if !defined(STRINGZILLA_TARGET_SERIAL)
 #define STRINGZILLA_TARGET_SERIAL STRINGZILLA_HEADER_ONLY
+#endif
+
+/*  Every compiler of a vendor builds every generation's building blocks: static inline device
+ *  functions, emitted only where a kernel compiled for that generation calls them. */
+#if STRINGZILLA_ARCH_CUDA_ && defined(__CUDACC__) && !defined(__HIP__)
+#define STRINGZILLA_ARCH_CUDA_AMPERE_ (1)
+#define STRINGZILLA_ARCH_CUDA_HOPPER_ (1)
+#define STRINGZILLA_ARCH_CUDA_BLACKWELL_ (1)
+#else
+#define STRINGZILLA_ARCH_CUDA_AMPERE_ (0)
+#define STRINGZILLA_ARCH_CUDA_HOPPER_ (0)
+#define STRINGZILLA_ARCH_CUDA_BLACKWELL_ (0)
+#endif
+#if STRINGZILLA_ARCH_ROCM_ && defined(__HIP__)
+#define STRINGZILLA_ARCH_ROCM_CDNA3_ (1)
+#define STRINGZILLA_ARCH_ROCM_CDNA4_ (1)
+#define STRINGZILLA_ARCH_ROCM_CDNA5_ (1)
+#else
+#define STRINGZILLA_ARCH_ROCM_CDNA3_ (0)
+#define STRINGZILLA_ARCH_ROCM_CDNA4_ (0)
+#define STRINGZILLA_ARCH_ROCM_CDNA5_ (0)
 #endif
 
 /*  Defining the CUDA kernels, the SIMT baseline every NVIDIA device runs: STRINGZILLA_TARGET_CUDA.
@@ -686,10 +799,19 @@
 
 /*  WebAssembly SIMD128 is opt-in via @c -msimd128 with no runtime probe: an engine validates a
  *  module whole, so the flag alone decides, and a request without it is dropped. */
+#if !defined(STRINGZILLA_ARCH_WASM_V128_) || \
+    (STRINGZILLA_ARCH_WASM_V128_ && !(STRINGZILLA_ARCH_WASM_ && defined(__wasm_simd128__)))
+#undef STRINGZILLA_ARCH_WASM_V128_
+#if STRINGZILLA_ARCH_WASM_ && defined(__wasm_simd128__)
+#define STRINGZILLA_ARCH_WASM_V128_ (1)
+#else
+#define STRINGZILLA_ARCH_WASM_V128_ (0)
+#endif
+#endif
 #if !defined(STRINGZILLA_TARGET_V128) || \
     (STRINGZILLA_TARGET_V128 && !(STRINGZILLA_ARCH_WASM_ && defined(__wasm_simd128__)))
 #undef STRINGZILLA_TARGET_V128
-#if STRINGZILLA_ARCH_WASM_ && defined(__wasm_simd128__)
+#if STRINGZILLA_ARCH_WASM_V128_
 #define STRINGZILLA_TARGET_V128 (1)
 #else
 #define STRINGZILLA_TARGET_V128 (0)
@@ -700,10 +822,19 @@
  *  adding relaxed swizzle, fused multiply-add, lane-select, and integer dot-products. Some
  *  runtimes lower a few relaxed ops sub-optimally, but the level is exposed so native engines
  *  can use them. As with SIMD128, the flag alone decides. */
+#if !defined(STRINGZILLA_ARCH_WASM_V128RELAXED_) || \
+    (STRINGZILLA_ARCH_WASM_V128RELAXED_ && !(STRINGZILLA_ARCH_WASM_ && defined(__wasm_relaxed_simd__)))
+#undef STRINGZILLA_ARCH_WASM_V128RELAXED_
+#if STRINGZILLA_ARCH_WASM_ && defined(__wasm_relaxed_simd__)
+#define STRINGZILLA_ARCH_WASM_V128RELAXED_ (1)
+#else
+#define STRINGZILLA_ARCH_WASM_V128RELAXED_ (0)
+#endif
+#endif
 #if !defined(STRINGZILLA_TARGET_V128RELAXED) || \
     (STRINGZILLA_TARGET_V128RELAXED && !(STRINGZILLA_ARCH_WASM_ && defined(__wasm_relaxed_simd__)))
 #undef STRINGZILLA_TARGET_V128RELAXED
-#if STRINGZILLA_ARCH_WASM_ && defined(__wasm_relaxed_simd__)
+#if STRINGZILLA_ARCH_WASM_V128RELAXED_
 #define STRINGZILLA_TARGET_V128RELAXED (1)
 #else
 #define STRINGZILLA_TARGET_V128RELAXED (0)
@@ -711,9 +842,17 @@
 #endif
 
 /*  RISC-V Vector extension (RVV 1.0) — `-march=rv64gcv`. Length-agnostic registers. */
+#if !defined(STRINGZILLA_ARCH_RISCV64_RVV_) || (STRINGZILLA_ARCH_RISCV64_RVV_ && !STRINGZILLA_ARCH_RISCV64_)
+#undef STRINGZILLA_ARCH_RISCV64_RVV_
+#if STRINGZILLA_ARCH_RISCV64_ && defined(__riscv_vector)
+#define STRINGZILLA_ARCH_RISCV64_RVV_ (1)
+#else
+#define STRINGZILLA_ARCH_RISCV64_RVV_ (0)
+#endif
+#endif
 #if !defined(STRINGZILLA_TARGET_RVV) || (STRINGZILLA_TARGET_RVV && !STRINGZILLA_ARCH_RISCV64_)
 #undef STRINGZILLA_TARGET_RVV
-#if STRINGZILLA_ARCH_RISCV64_ && defined(__riscv_vector)
+#if STRINGZILLA_ARCH_RISCV64_RVV_
 #define STRINGZILLA_TARGET_RVV (1)
 #else
 #define STRINGZILLA_TARGET_RVV (0)
@@ -721,9 +860,18 @@
 #endif
 
 /*  RISC-V Vector Crypto (Zvkned, Zvknhb, Zvkg) — `-march=rv64gcv_zvkned_zvknhb_zvkg`. */
+#if !defined(STRINGZILLA_ARCH_RISCV64_RVVCRYPTO_) || (STRINGZILLA_ARCH_RISCV64_RVVCRYPTO_ && !STRINGZILLA_ARCH_RISCV64_)
+#undef STRINGZILLA_ARCH_RISCV64_RVVCRYPTO_
+#if STRINGZILLA_ARCH_RISCV64_ && defined(__riscv_vector) && defined(__riscv_zvkned) && defined(__riscv_zvknhb) && \
+    defined(__riscv_zvkg)
+#define STRINGZILLA_ARCH_RISCV64_RVVCRYPTO_ (1)
+#else
+#define STRINGZILLA_ARCH_RISCV64_RVVCRYPTO_ (0)
+#endif
+#endif
 #if !defined(STRINGZILLA_TARGET_RVVCRYPTO) || (STRINGZILLA_TARGET_RVVCRYPTO && !STRINGZILLA_ARCH_RISCV64_)
 #undef STRINGZILLA_TARGET_RVVCRYPTO
-#if STRINGZILLA_TARGET_RVV && defined(__riscv_zvkned) && defined(__riscv_zvknhb) && defined(__riscv_zvkg)
+#if STRINGZILLA_ARCH_RISCV64_RVVCRYPTO_
 #define STRINGZILLA_TARGET_RVVCRYPTO (1)
 #else
 #define STRINGZILLA_TARGET_RVVCRYPTO (0)
@@ -731,9 +879,18 @@
 #endif
 
 /*  LoongArch Advanced SIMD eXtension (LASX, 256-bit) — `-mlasx`. */
+#if !defined(STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_) || \
+    (STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_ && !STRINGZILLA_ARCH_LOONGARCH64_)
+#undef STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+#if STRINGZILLA_ARCH_LOONGARCH64_ && defined(__loongarch_asx)
+#define STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_ (1)
+#else
+#define STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_ (0)
+#endif
+#endif
 #if !defined(STRINGZILLA_TARGET_LOONGSONASX) || (STRINGZILLA_TARGET_LOONGSONASX && !STRINGZILLA_ARCH_LOONGARCH64_)
 #undef STRINGZILLA_TARGET_LOONGSONASX
-#if STRINGZILLA_ARCH_LOONGARCH64_ && defined(__loongarch_asx)
+#if STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
 #define STRINGZILLA_TARGET_LOONGSONASX (1)
 #else
 #define STRINGZILLA_TARGET_LOONGSONASX (0)
@@ -741,33 +898,59 @@
 #endif
 
 /*  IBM Power Vector-Scalar eXtension at the POWER9 level, ISA 3.0 — `-mcpu=power9`. */
+#if !defined(STRINGZILLA_ARCH_PPC64_POWERVSX_) || (STRINGZILLA_ARCH_PPC64_POWERVSX_ && !STRINGZILLA_ARCH_PPC64_)
+#undef STRINGZILLA_ARCH_PPC64_POWERVSX_
+#if STRINGZILLA_ARCH_PPC64_ && defined(__VSX__) && defined(__POWER9_VECTOR__)
+#define STRINGZILLA_ARCH_PPC64_POWERVSX_ (1)
+#else
+#define STRINGZILLA_ARCH_PPC64_POWERVSX_ (0)
+#endif
+#endif
 #if !defined(STRINGZILLA_TARGET_POWERVSX) || (STRINGZILLA_TARGET_POWERVSX && !STRINGZILLA_ARCH_PPC64_)
 #undef STRINGZILLA_TARGET_POWERVSX
-#if STRINGZILLA_ARCH_PPC64_ && defined(__VSX__) && defined(__POWER9_VECTOR__)
+#if STRINGZILLA_ARCH_PPC64_POWERVSX_
 #define STRINGZILLA_TARGET_POWERVSX (1)
 #else
 #define STRINGZILLA_TARGET_POWERVSX (0)
 #endif
 #endif
 
-/** Whether a capability's helpers compile here: its own target, or any capability built on it.
- *  @c STRINGZILLA_TARGET_* alone decides where its kernels are defined. Each architecture's base
- *  has a row, and any other capability nothing builds on guards its helpers with its target. */
-#define STRINGZILLA_ARCH_X8664_SKYLAKE_ (STRINGZILLA_TARGET_SKYLAKE || STRINGZILLA_TARGET_ICELAKE)
-#define STRINGZILLA_ARCH_X8664_HASWELL_ (STRINGZILLA_TARGET_HASWELL || STRINGZILLA_ARCH_X8664_SKYLAKE_)
-#define STRINGZILLA_ARCH_X8664_WESTMERE_ (STRINGZILLA_TARGET_WESTMERE || STRINGZILLA_ARCH_X8664_HASWELL_)
-#define STRINGZILLA_ARCH_ARM64_SVE2_ (STRINGZILLA_TARGET_SVE2 || STRINGZILLA_TARGET_SVE2AES)
-#define STRINGZILLA_ARCH_ARM64_SVE_ (STRINGZILLA_TARGET_SVE || STRINGZILLA_ARCH_ARM64_SVE2_)
-#define STRINGZILLA_ARCH_ARM64_NEONAES_ (STRINGZILLA_TARGET_NEONAES || STRINGZILLA_TARGET_SVE2AES)
-#define STRINGZILLA_ARCH_ARM64_NEON_                                                             \
-    (STRINGZILLA_TARGET_NEON || STRINGZILLA_ARCH_ARM64_NEONAES_ || STRINGZILLA_TARGET_NEONSHA || \
-     STRINGZILLA_ARCH_ARM64_SVE_)
-#define STRINGZILLA_ARCH_RISCV64_RVV_ (STRINGZILLA_TARGET_RVV || STRINGZILLA_TARGET_RVVCRYPTO)
-#define STRINGZILLA_ARCH_WASM_V128_ (STRINGZILLA_TARGET_V128 || STRINGZILLA_TARGET_V128RELAXED)
-#define STRINGZILLA_ARCH_CUDA_HOPPER_ (STRINGZILLA_TARGET_HOPPER || STRINGZILLA_TARGET_BLACKWELL)
-#define STRINGZILLA_ARCH_CUDA_AMPERE_ (STRINGZILLA_TARGET_AMPERE || STRINGZILLA_ARCH_CUDA_HOPPER_)
-#define STRINGZILLA_ARCH_ROCM_CDNA4_ (STRINGZILLA_TARGET_CDNA4 || STRINGZILLA_TARGET_CDNA5)
-#define STRINGZILLA_ARCH_ROCM_CDNA3_ (STRINGZILLA_TARGET_CDNA3 || STRINGZILLA_ARCH_ROCM_CDNA4_)
+/*  Building blocks follow what is built on them, top-down. Each target above took a literal 0 or
+ *  1 from its own detection, so raising a base's flag opens its blocks, never its kernels. */
+#if STRINGZILLA_ARCH_X8664_ICELAKE_
+#undef STRINGZILLA_ARCH_X8664_SKYLAKE_
+#define STRINGZILLA_ARCH_X8664_SKYLAKE_ (1)
+#endif
+#if STRINGZILLA_ARCH_X8664_SKYLAKE_
+#undef STRINGZILLA_ARCH_X8664_HASWELL_
+#define STRINGZILLA_ARCH_X8664_HASWELL_ (1)
+#endif
+#if STRINGZILLA_ARCH_X8664_HASWELL_
+#undef STRINGZILLA_ARCH_X8664_WESTMERE_
+#define STRINGZILLA_ARCH_X8664_WESTMERE_ (1)
+#endif
+#if STRINGZILLA_ARCH_ARM64_SVE2AES_
+#undef STRINGZILLA_ARCH_ARM64_SVE2_
+#define STRINGZILLA_ARCH_ARM64_SVE2_ (1)
+#undef STRINGZILLA_ARCH_ARM64_NEONAES_
+#define STRINGZILLA_ARCH_ARM64_NEONAES_ (1)
+#endif
+#if STRINGZILLA_ARCH_ARM64_SVE2_
+#undef STRINGZILLA_ARCH_ARM64_SVE_
+#define STRINGZILLA_ARCH_ARM64_SVE_ (1)
+#endif
+#if STRINGZILLA_ARCH_ARM64_NEONAES_ || STRINGZILLA_ARCH_ARM64_NEONSHA_ || STRINGZILLA_ARCH_ARM64_SVE_
+#undef STRINGZILLA_ARCH_ARM64_NEON_
+#define STRINGZILLA_ARCH_ARM64_NEON_ (1)
+#endif
+#if STRINGZILLA_ARCH_RISCV64_RVVCRYPTO_
+#undef STRINGZILLA_ARCH_RISCV64_RVV_
+#define STRINGZILLA_ARCH_RISCV64_RVV_ (1)
+#endif
+#if STRINGZILLA_ARCH_WASM_V128RELAXED_
+#undef STRINGZILLA_ARCH_WASM_V128_
+#define STRINGZILLA_ARCH_WASM_V128_ (1)
+#endif
 
 /*  Hardware-specific headers for different SIMD intrinsics and register wrappers. */
 #if STRINGZILLA_ARCH_WASM_V128_
@@ -779,7 +962,7 @@
 /*  The LASX and POWER9 intrinsics headers open in the same target region as their kernels.
  *  GCC 15 defines @c __loongarch_asx and @c __POWER9_VECTOR__ there, while Clang defines them
  *  only under `-mlasx` or `-mcpu=power9`. */
-#if STRINGZILLA_TARGET_LOONGSONASX
+#if STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
 #if !defined(__clang__)
 #pragma GCC push_options
 #pragma GCC target("lasx")
@@ -790,7 +973,7 @@
 #pragma GCC pop_options
 #endif
 #endif
-#if STRINGZILLA_TARGET_POWERVSX
+#if STRINGZILLA_ARCH_PPC64_POWERVSX_
 #if !defined(__clang__)
 #pragma GCC push_options
 #pragma GCC target("power9-vector")
@@ -800,12 +983,12 @@
 #pragma GCC pop_options
 #endif
 #endif
-#if STRINGZILLA_ARCH_X8664_WESTMERE_ || STRINGZILLA_TARGET_GOLDMONT
+#if STRINGZILLA_ARCH_X8664_WESTMERE_ || STRINGZILLA_ARCH_X8664_GOLDMONT_
 #include <immintrin.h>
 #if !defined(_MSC_VER) || defined(__clang__)
 #include <x86intrin.h> // `_bit_scan_forward`, `_bit_scan_reverse`
 #endif
-#endif // STRINGZILLA_ARCH_X8664_WESTMERE_ || STRINGZILLA_TARGET_GOLDMONT
+#endif // STRINGZILLA_ARCH_X8664_WESTMERE_ || STRINGZILLA_ARCH_X8664_GOLDMONT_
 #if STRINGZILLA_ARCH_ARM64_NEON_
 #if !defined(_MSC_VER)
 #include <arm_acle.h>
@@ -1494,13 +1677,13 @@ typedef union STRINGZILLA_MAY_ALIAS_ sz_u128_vec_t {
     float64x2_t f64x2;
     float32x4_t f32x4;
 #endif
-#if STRINGZILLA_TARGET_LOONGSONASX
+#if STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
     __m128i lsx;
 #endif
 #if STRINGZILLA_ARCH_WASM_V128_
     v128_t v128;
 #endif
-#if STRINGZILLA_TARGET_POWERVSX
+#if STRINGZILLA_ARCH_PPC64_POWERVSX_
     __vector unsigned char vsx_u8;
     __vector unsigned short vsx_u16;
     __vector unsigned int vsx_u32;
@@ -1535,7 +1718,7 @@ typedef union STRINGZILLA_MAY_ALIAS_ sz_u256_vec_t {
     uint32x4_t u32x4s[2];
     uint64x2_t u64x2s[2];
 #endif
-#if STRINGZILLA_TARGET_LOONGSONASX
+#if STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
     __m256i lasx;
 #endif
 #if STRINGZILLA_ARCH_WASM_V128_

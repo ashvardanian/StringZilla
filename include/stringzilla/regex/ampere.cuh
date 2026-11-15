@@ -19,13 +19,15 @@
 #ifndef STRINGZILLA_REGEX_AMPERE_CUH_
 #define STRINGZILLA_REGEX_AMPERE_CUH_
 
-#include "stringzilla/regex/cuda.cuh"
-#include "stringzilla/strings/ampere.cuh" // `sz_commit_async_ampere_`, `sz_copy_b32_async_ampere_` & kin
+#include "stringzilla/types.h"
 
 #if STRINGZILLA_ARCH_CUDA_
 #if STRINGZILLA_ARCH_CUDA_AMPERE_
 
-#ifdef __cplusplus
+#include "stringzilla/regex/cuda.cuh"
+#include "stringzilla/strings/ampere.cuh" // `sz_commit_async_ampere_`, `sz_copy_b32_async_ampere_` & kin
+
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -58,10 +60,10 @@ STRINGZILLA_DEVICE sz_u8_t const *sz_regex_stage_text_async_ampere_(sz_u8_t *sta
     return origin;
 }
 
-/** @ref sz_regex_mark_simt_kernel_ with each warp finding its tile's first haystack and the tile's
+/** @ref sz_regex_mark_simt_ with each warp finding its tile's first haystack and the tile's
  *  text staged by @ref sz_regex_stage_text_async_ampere_ . */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_mark_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+STRINGZILLA_DEVICE void sz_regex_mark_ampere_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                              sz_regex_round_simt_t round) {
     extern __shared__ sz_u8_t sz_regex_staged_simt_[];
     sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.reverse_rows, round.reverse_cells);
     sz_u8_t *const staged = sz_regex_staged_simt_ + sz_regex_staged_bytes_simt_k +
@@ -130,11 +132,350 @@ static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
 
 #if STRINGZILLA_TARGET_AMPERE
 
+/** @ref sz_regex_scan_tile_simt_ over CUDA's warps in 32 bits, for the starts per chunk,
+ *  of which a step of a tile holds at most 64 per value. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_scan_bounded_ampere_kernel_(sz_size_t *values, sz_size_t count, sz_size_t elements_per_tile,
+                                         sz_size_t *chain, sz_u64_t *states, sz_u64_t *stale) {
+    sz_regex_scan_tile_simt_(values, count, elements_per_tile, chain, states, stale, sz_block_scan_bounded_cuda_,
+                             sz_block_sum_cuda_, sz_chain_tile_simt_, sz_chain_look_back_cuda_);
+}
+
+/** @ref sz_regex_scan_tile_simt_ over CUDA's warps. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_scan_ampere_kernel_(sz_size_t *values, sz_size_t count, sz_size_t elements_per_tile, sz_size_t *chain,
+                                 sz_u64_t *states, sz_u64_t *stale) {
+    sz_regex_scan_tile_simt_(values, count, elements_per_tile, chain, states, stale, sz_block_scan_cuda_,
+                             sz_block_sum_cuda_, sz_chain_tile_simt_, sz_chain_look_back_cuda_);
+}
+
+/** The warp walk of the links that outlived their first thread, with CUDA's cross-lane steps. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_continue_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                     sz_regex_round_simt_t round) {
+    sz_regex_continue_simt_(&engine, haystacks, &round, sz_false_k, sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_,
+                            sz_lanes_any_cuda_);
+}
+
+/** The warp walk of the folded links that outlived their first thread, with CUDA's cross-lane
+ *  steps. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_continue_folded_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                            sz_regex_round_simt_t round) {
+    sz_regex_continue_simt_(&engine, haystacks, &round, sz_true_k, sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_,
+                            sz_lanes_any_cuda_);
+}
+
+/** @ref sz_regex_bound_simt_ over the pass's NFA or positions. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_bound_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_bound_simt_(&engine, haystacks, &round, sz_false_k);
+}
+
+/** @ref sz_regex_bound_simt_ over a body's DFA. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_bound_dfa_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                      sz_regex_round_simt_t round) {
+    sz_regex_bound_simt_(&engine, haystacks, &round, sz_true_k);
+}
+
+/** @ref sz_regex_bound_pieces_simt_ over the pass's NFA or positions. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_bound_pieces_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                         sz_regex_round_simt_t round) {
+    sz_regex_bound_pieces_simt_(&engine, haystacks, &round, sz_false_k);
+}
+
+/** @ref sz_regex_bound_pieces_simt_ over a body's DFA. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_bound_pieces_dfa_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                             sz_regex_round_simt_t round) {
+    sz_regex_bound_pieces_simt_(&engine, haystacks, &round, sz_true_k);
+}
+
+/** @ref sz_regex_affine_simt_ over the pass's NFA or positions. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_affine_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_affine_simt_(&engine, haystacks, &round, sz_false_k);
+}
+
+/** @ref sz_regex_affine_simt_ over a body's DFA. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_affine_dfa_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                       sz_regex_round_simt_t round) {
+    sz_regex_affine_simt_(&engine, haystacks, &round, sz_true_k);
+}
+
+/** @ref sz_regex_affine_double_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_affine_double_ampere_kernel_(sz_regex_round_simt_t round) {
+    sz_regex_affine_double_simt_(round);
+}
+
+/** @ref sz_regex_looks_simt_ over the pass's NFA or positions. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_looks_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_looks_simt_(&engine, haystacks, &round, sz_false_k);
+}
+
+/** @ref sz_regex_looks_simt_ over a body's DFA. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_looks_dfa_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                      sz_regex_round_simt_t round) {
+    sz_regex_looks_simt_(&engine, haystacks, &round, sz_true_k);
+}
+
+/** @ref sz_regex_fill_singles_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_singles_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                    sz_regex_round_simt_t round) {
+    sz_regex_fill_singles_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_prime_chunks_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_prime_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_prime_chunks_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_prime_pieces_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_prime_pieces_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                         sz_regex_round_simt_t round) {
+    sz_regex_prime_pieces_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_compose_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_compose_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                    sz_regex_round_simt_t round) {
+    sz_regex_compose_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_compose_double_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_compose_double_ampere_kernel_(sz_regex_round_simt_t round) {
+    sz_regex_compose_double_simt_(round);
+}
+
+/** @ref sz_regex_mark_prefixes_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_mark_prefixes_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                          sz_regex_round_simt_t round) {
+    sz_regex_mark_prefixes_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_mark_folded_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_mark_folded_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                        sz_regex_round_simt_t round) {
+    sz_regex_mark_folded_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_mark_positions_simt_ over bytes. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_mark_positions_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                           sz_regex_round_simt_t round) {
+    sz_regex_mark_positions_simt_(&engine, haystacks, &round, sz_false_k);
+}
+
+/** @ref sz_regex_mark_positions_simt_ over folded runes. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_mark_positions_folded_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                                  sz_regex_round_simt_t round) {
+    sz_regex_mark_positions_simt_(&engine, haystacks, &round, sz_true_k);
+}
+
+/** @ref sz_regex_list_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_list_ampere_kernel_(sz_regex_round_simt_t round) {
+    sz_regex_list_simt_(round);
+}
+
+/** @ref sz_regex_ends_pike_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_ends_pike_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                      sz_regex_round_simt_t round) {
+    sz_regex_ends_pike_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_ends_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_ends_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_ends_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_links_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_links_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_links_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_resume_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_resume_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_resume_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_links_double_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_links_double_ampere_kernel_(sz_regex_round_simt_t round) {
+    sz_regex_links_double_simt_(round);
+}
+
+/** @ref sz_regex_group_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_group_ampere_kernel_(sz_regex_engine_t engine, sz_regex_round_simt_t round) {
+    sz_regex_group_simt_(engine, round);
+}
+
+/** @ref sz_regex_point_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_point_ampere_kernel_(sz_regex_engine_t engine, sz_regex_round_simt_t round) {
+    sz_regex_point_simt_(engine, round);
+}
+
+/** @ref sz_regex_groups_double_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_groups_double_ampere_kernel_(sz_regex_round_simt_t round) {
+    sz_regex_groups_double_simt_(round);
+}
+
+/** @ref sz_regex_take_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_take_ampere_kernel_(sz_regex_round_simt_t round) {
+    sz_regex_take_simt_(round);
+}
+
+/** @ref sz_regex_retry_folded_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_retry_folded_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                         sz_regex_round_simt_t round) {
+    sz_regex_retry_folded_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_chain_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_chain_ampere_kernel_(sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_chain_simt_(haystacks, round);
+}
+
+/** @ref sz_regex_double_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_double_ampere_kernel_(sz_regex_round_simt_t round) {
+    sz_regex_double_simt_(round);
+}
+
+/** @ref sz_regex_sweep_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_sweep_ampere_kernel_(sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_sweep_simt_(haystacks, round);
+}
+
+/** @ref sz_regex_carry_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_carry_threads_per_block_simt_k)
+    sz_regex_carry_ampere_kernel_(sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_carry_simt_(haystacks, round);
+}
+
+/** @ref sz_regex_counts_edges_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_counts_edges_ampere_kernel_(sz_size_t const *counts, sz_size_t counts_stride, sz_size_t count,
+                                         sz_size_t *edges) {
+    sz_regex_counts_edges_simt_(counts, counts_stride, count, edges);
+}
+
+/** @ref sz_regex_counts_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_counts_ampere_kernel_(sz_size_t *counts, sz_size_t counts_stride, sz_size_t count,
+                                   sz_size_t const *edges) {
+    sz_regex_counts_simt_(counts, counts_stride, count, edges);
+}
+
+/** @ref sz_regex_expand_kept_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_expand_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_expand_kept_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_drift_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_drift_ampere_kernel_(sz_regex_round_simt_t round) {
+    sz_regex_drift_simt_(round);
+}
+
+/** @ref sz_regex_rewrite_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_rewrite_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                    sz_regex_round_simt_t round) {
+    sz_regex_rewrite_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_firsts_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_firsts_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_firsts_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_rows_simt_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_rows_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_rows_simt_(engine, haystacks, round);
+}
+
+/** @ref sz_regex_mark_ampere_ . */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_mark_ampere_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+    sz_regex_mark_ampere_(engine, haystacks, round);
+}
+
 /** The Ampere tier's entry points, staging text with @c cp.async . */
 static sz_regex_entry_points_cuda_t const sz_regex_entry_points_ampere_ = {
     (void const *)sz_regex_mark_ampere_kernel_,
-    (void const *)sz_regex_scan_cuda_kernel_,
-    (void const *)sz_regex_scan_bounded_cuda_kernel_,
+    (void const *)sz_regex_scan_ampere_kernel_,
+    (void const *)sz_regex_scan_bounded_ampere_kernel_,
+    (void const *)sz_regex_bound_ampere_kernel_,
+    (void const *)sz_regex_bound_dfa_ampere_kernel_,
+    (void const *)sz_regex_bound_pieces_ampere_kernel_,
+    (void const *)sz_regex_bound_pieces_dfa_ampere_kernel_,
+    (void const *)sz_regex_affine_ampere_kernel_,
+    (void const *)sz_regex_affine_dfa_ampere_kernel_,
+    (void const *)sz_regex_affine_double_ampere_kernel_,
+    (void const *)sz_regex_looks_ampere_kernel_,
+    (void const *)sz_regex_looks_dfa_ampere_kernel_,
+    (void const *)sz_regex_singles_ampere_kernel_,
+    (void const *)sz_regex_prime_ampere_kernel_,
+    (void const *)sz_regex_prime_pieces_ampere_kernel_,
+    (void const *)sz_regex_compose_ampere_kernel_,
+    (void const *)sz_regex_compose_double_ampere_kernel_,
+    (void const *)sz_regex_mark_prefixes_ampere_kernel_,
+    (void const *)sz_regex_mark_folded_ampere_kernel_,
+    (void const *)sz_regex_mark_positions_ampere_kernel_,
+    (void const *)sz_regex_mark_positions_folded_ampere_kernel_,
+    (void const *)sz_regex_list_ampere_kernel_,
+    (void const *)sz_regex_ends_pike_ampere_kernel_,
+    (void const *)sz_regex_ends_ampere_kernel_,
+    (void const *)sz_regex_links_ampere_kernel_,
+    (void const *)sz_regex_continue_ampere_kernel_,
+    (void const *)sz_regex_continue_folded_ampere_kernel_,
+    (void const *)sz_regex_resume_ampere_kernel_,
+    (void const *)sz_regex_links_double_ampere_kernel_,
+    (void const *)sz_regex_group_ampere_kernel_,
+    (void const *)sz_regex_point_ampere_kernel_,
+    (void const *)sz_regex_groups_double_ampere_kernel_,
+    (void const *)sz_regex_take_ampere_kernel_,
+    (void const *)sz_regex_retry_folded_ampere_kernel_,
+    (void const *)sz_regex_chain_ampere_kernel_,
+    (void const *)sz_regex_double_ampere_kernel_,
+    (void const *)sz_regex_sweep_ampere_kernel_,
+    (void const *)sz_regex_carry_ampere_kernel_,
+    (void const *)sz_regex_counts_edges_ampere_kernel_,
+    (void const *)sz_regex_counts_ampere_kernel_,
+    (void const *)sz_regex_expand_ampere_kernel_,
+    (void const *)sz_regex_drift_ampere_kernel_,
+    (void const *)sz_regex_rewrite_ampere_kernel_,
+    (void const *)sz_regex_firsts_ampere_kernel_,
+    (void const *)sz_regex_rows_ampere_kernel_,
     1,
     sz_cap_ampere_k,
 };
@@ -212,8 +553,8 @@ STRINGZILLA_API sz_status_t sz_regex_extract_ampere(sz_regex_engine_t *engine, s
 
 #endif // STRINGZILLA_TARGET_AMPERE
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
 #endif // STRINGZILLA_ARCH_CUDA_AMPERE_
 #endif // STRINGZILLA_ARCH_CUDA_

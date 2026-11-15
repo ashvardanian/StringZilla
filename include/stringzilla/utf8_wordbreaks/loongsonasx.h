@@ -24,16 +24,18 @@
 #define STRINGZILLA_UTF8_WORDBREAKS_LOONGSONASX_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_LOONGARCH64_
+#if STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+
 #include "stringzilla/utf8_wordbreaks/tables.h"
 #include "stringzilla/utf8_wordbreaks/serial.h"
 #include "stringzilla/utf8_runes/loongsonasx.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_LOONGARCH64_
-#if STRINGZILLA_TARGET_LOONGSONASX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("lasx"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -631,6 +633,8 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_wordbreaks_loongsonasx_( //
     return words + 1;
 }
 
+#if STRINGZILLA_TARGET_LOONGSONASX
+
 STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_loongsonasx(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
                                                            sz_size_t capacity, sz_size_t *count, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
@@ -643,16 +647,19 @@ STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_loongsonasx(sz_cptr_t text, sz_si
 
 #pragma endregion UAX 29 Word Boundaries forward kernel
 
+#endif // STRINGZILLA_TARGET_LOONGSONASX
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_LOONGSONASX
-#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
 #endif // STRINGZILLA_UTF8_WORDBREAKS_LOONGSONASX_H_

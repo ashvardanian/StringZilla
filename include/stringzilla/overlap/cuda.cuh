@@ -18,12 +18,14 @@
 #ifndef STRINGZILLA_OVERLAP_CUDA_CUH_
 #define STRINGZILLA_OVERLAP_CUDA_CUH_
 
-#include "stringzilla/cuda.cuh"
-#include "stringzilla/overlap/simt.cuh"
+#include "stringzilla/types.h"
 
 #if STRINGZILLA_ARCH_CUDA_
 
-#ifdef __cplusplus
+#include "stringzilla/cuda.cuh"
+#include "stringzilla/overlap/simt.cuh"
+
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -311,8 +313,8 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_cuda(sz_overlap_engine_t *engine, 
 
 #endif // STRINGZILLA_TARGET_CUDA
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
 #endif // STRINGZILLA_ARCH_CUDA_
 #endif // STRINGZILLA_OVERLAP_CUDA_CUH_

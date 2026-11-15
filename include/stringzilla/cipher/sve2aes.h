@@ -14,14 +14,16 @@
 #define STRINGZILLA_CIPHER_SVE2AES_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_ARM64_
+#if STRINGZILLA_ARCH_ARM64_SVE2AES_
+
 #include "stringzilla/cipher/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_ARM64_
-#if STRINGZILLA_TARGET_SVE2AES
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve+sve2+sve2-aes"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -62,6 +64,8 @@ STRINGZILLA_INLINE void sz_aes256_key_init_sve2aes_(sz_aes256_key_t *key, sz_u8_
         key->round_keys[word_index] = key->round_keys[word_index - 8] ^ carried;
     }
 }
+
+#if STRINGZILLA_TARGET_SVE2AES
 
 STRINGZILLA_API sz_status_t sz_aes256_key_init_sve2aes(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)],
                                                        sz_stream_t stream) {
@@ -860,16 +864,19 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_sve2aes(sz_aes256_gcm_key_t co
 
 #pragma endregion One Shot Interface
 
+#endif // STRINGZILLA_TARGET_SVE2AES
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_SVE2AES
-#endif // STRINGZILLA_ARCH_ARM64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_ARM64_SVE2AES_
+#endif // STRINGZILLA_ARCH_ARM64_
 
 #endif // STRINGZILLA_CIPHER_SVE2AES_H_

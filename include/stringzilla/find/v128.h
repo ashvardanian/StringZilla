@@ -10,18 +10,20 @@
 #define STRINGZILLA_FIND_V128_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_WASM_
+#if STRINGZILLA_ARCH_WASM_V128_
+
 #include "stringzilla/find/serial.h"
 #include "stringzilla/compare/v128.h" // `sz_equal_v128_`
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
 /*  WebAssembly SIMD128 has a true movemask via @c wasm_i8x16_bitmask, producing one bit per byte
  *  from the most significant bit of each lane. Combined with @c sz_u32_ctz and @c sz_u32_clz we get
  *  the SSE/Westmere-style search. The fixed register width is 16 bytes, like Arm NEON. */
-#if STRINGZILLA_ARCH_WASM_
-#if STRINGZILLA_ARCH_WASM_V128_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
@@ -435,11 +437,12 @@ STRINGZILLA_API sz_status_t sz_rfind_v128(sz_cptr_t haystack, sz_size_t haystack
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_WASM_V128_
 #endif // STRINGZILLA_ARCH_WASM_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_FIND_V128_H_

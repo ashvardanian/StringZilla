@@ -14,17 +14,19 @@
 #define STRINGZILLA_CIPHER_ICELAKE_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_ICELAKE_
+
 #include "stringzilla/cipher/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
 /*  @c avx512vbmi carries the byte permute the counter-mode head uses. The tier already implies
  *  it, and `hash/icelake.h` and `utf8_graphemes/icelake.h` both name it; this string was
  *  short, not narrower. */
-#if STRINGZILLA_ARCH_X8664_
-#if STRINGZILLA_TARGET_ICELAKE
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(                                                                                      \
     __attribute__((                                                                                                \
@@ -119,6 +121,8 @@ STRINGZILLA_INLINE void sz_aes256_key_init_icelake_(sz_aes256_key_t *key, sz_u8_
         secret_low_words_u8x16, _mm_shuffle_epi32(_mm_aeskeygenassist_si128(secret_high_words_u8x16, 0x40), 0xFF));
     _mm_storeu_epi32(key->round_keys + 56, secret_low_words_u8x16);
 }
+
+#if STRINGZILLA_TARGET_ICELAKE
 
 STRINGZILLA_API sz_status_t sz_aes256_key_init_icelake(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)],
                                                        sz_stream_t stream) {
@@ -1019,16 +1023,19 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_icelake(sz_aes256_gcm_key_t co
 
 #pragma endregion One Shot Interface
 
+#endif // STRINGZILLA_TARGET_ICELAKE
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_ICELAKE
-#endif // STRINGZILLA_ARCH_X8664_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_X8664_ICELAKE_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #endif // STRINGZILLA_CIPHER_ICELAKE_H_

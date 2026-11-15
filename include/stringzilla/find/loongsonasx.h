@@ -10,15 +10,17 @@
 #define STRINGZILLA_FIND_LOONGSONASX_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_LOONGARCH64_
+#if STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+
 #include "stringzilla/compare/loongsonasx.h" // `sz_equal_loongsonasx_`
 #include "stringzilla/find/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_LOONGARCH64_
-#if STRINGZILLA_TARGET_LOONGSONASX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("lasx"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -97,6 +99,8 @@ STRINGZILLA_INLINE sz_cptr_t sz_find_byte_loongsonasx_(sz_cptr_t haystack, sz_si
 
     return sz_find_byte_serial_(haystack, haystack_length, needle);
 }
+
+#if STRINGZILLA_TARGET_LOONGSONASX
 
 STRINGZILLA_API sz_status_t sz_find_byte_loongsonasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                                      sz_cptr_t *match, sz_stream_t stream) {
@@ -478,16 +482,19 @@ STRINGZILLA_API sz_status_t sz_rfind_byteset_loongsonasx(sz_cptr_t haystack, sz_
     return sz_success_k;
 }
 
+#endif // STRINGZILLA_TARGET_LOONGSONASX
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_LOONGSONASX
-#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
 #endif // STRINGZILLA_FIND_LOONGSONASX_H_

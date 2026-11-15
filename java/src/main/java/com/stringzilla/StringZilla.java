@@ -98,27 +98,27 @@ public final class StringZilla {
     private static final MethodHandle STRINGZILLA_CAPABILITIES_COMPILED_CPU =
             down("sz_capabilities_compiled_cpu", QUERY);
     private static final MethodHandle STRINGZILLA_CAPABILITIES_ENABLED_CPU = down("sz_capabilities_enabled_cpu", QUERY);
-    private static final MethodHandle STRINGZILLA_THREAD_CONFIGURE_CPU =
-            down("sz_thread_configure_cpu", FunctionDescriptor.of(JAVA_INT, JAVA_LONG));
-    private static final MethodHandle STRINGZILLA_DEVICE_COUNT_CUDA = down("sz_device_count_cuda", QUERY);
+    private static final MethodHandle STRINGZILLA_CONFIGURE_THREAD_CPU =
+            down("sz_configure_thread_cpu", FunctionDescriptor.of(JAVA_INT, JAVA_LONG));
+    private static final MethodHandle STRINGZILLA_COUNT_DEVICES_CUDA = down("sz_count_devices_cuda", QUERY);
     private static final MethodHandle STRINGZILLA_CAPABILITIES_DETECTED_CUDA =
             down("sz_capabilities_detected_cuda", DEVICE_QUERY);
     private static final MethodHandle STRINGZILLA_CAPABILITIES_COMPILED_CUDA =
-            down("sz_capabilities_compiled_cuda", QUERY);
+            down("sz_capabilities_compiled_cuda", DEVICE_QUERY);
     private static final MethodHandle STRINGZILLA_CAPABILITIES_ENABLED_CUDA =
             down("sz_capabilities_enabled_cuda", DEVICE_QUERY);
-    private static final MethodHandle STRINGZILLA_DEVICE_COUNT_ROCM = down("sz_device_count_rocm", QUERY);
+    private static final MethodHandle STRINGZILLA_COUNT_DEVICES_ROCM = down("sz_count_devices_rocm", QUERY);
     private static final MethodHandle STRINGZILLA_CAPABILITIES_DETECTED_ROCM =
             down("sz_capabilities_detected_rocm", DEVICE_QUERY);
     private static final MethodHandle STRINGZILLA_CAPABILITIES_COMPILED_ROCM =
-            down("sz_capabilities_compiled_rocm", QUERY);
+            down("sz_capabilities_compiled_rocm", DEVICE_QUERY);
     private static final MethodHandle STRINGZILLA_CAPABILITIES_ENABLED_ROCM =
             down("sz_capabilities_enabled_rocm", DEVICE_QUERY);
-    private static final MethodHandle STRINGZILLA_DEVICE_COUNT_METAL = down("sz_device_count_metal", QUERY);
+    private static final MethodHandle STRINGZILLA_COUNT_DEVICES_METAL = down("sz_count_devices_metal", QUERY);
     private static final MethodHandle STRINGZILLA_CAPABILITIES_DETECTED_METAL =
             down("sz_capabilities_detected_metal", DEVICE_QUERY);
     private static final MethodHandle STRINGZILLA_CAPABILITIES_COMPILED_METAL =
-            down("sz_capabilities_compiled_metal", QUERY);
+            down("sz_capabilities_compiled_metal", DEVICE_QUERY);
     private static final MethodHandle STRINGZILLA_CAPABILITIES_ENABLED_METAL =
             down("sz_capabilities_enabled_metal", DEVICE_QUERY);
     private static final MethodHandle STRINGZILLA_CAPABILITIES_NAME =
@@ -1176,9 +1176,9 @@ public final class StringZilla {
         public static long count(DeviceKind kind) {
             return switch (kind) {
                 case CPU -> 1;
-                case CUDA -> query(STRINGZILLA_DEVICE_COUNT_CUDA, "sz_device_count_cuda");
-                case ROCM -> query(STRINGZILLA_DEVICE_COUNT_ROCM, "sz_device_count_rocm");
-                case METAL -> query(STRINGZILLA_DEVICE_COUNT_METAL, "sz_device_count_metal");
+                case CUDA -> query(STRINGZILLA_COUNT_DEVICES_CUDA, "sz_count_devices_cuda");
+                case ROCM -> query(STRINGZILLA_COUNT_DEVICES_ROCM, "sz_count_devices_rocm");
+                case METAL -> query(STRINGZILLA_COUNT_DEVICES_METAL, "sz_count_devices_metal");
             };
         }
 
@@ -1192,14 +1192,14 @@ public final class StringZilla {
             };
         }
 
-        /** What this binary holds kernels for on devices of this kind, as a bitmask, whether or not this one runs
-         *  them. Decided at build time. */
+        /** What this binary holds kernels for that this device runs, as a bitmask, whether or not it offers them:
+         *  the build's CPU capabilities, or the GPU units whose codes this device runs. */
         public long capabilitiesCompiled() {
             return switch (kind) {
                 case CPU -> query(STRINGZILLA_CAPABILITIES_COMPILED_CPU, "sz_capabilities_compiled_cpu");
-                case CUDA -> query(STRINGZILLA_CAPABILITIES_COMPILED_CUDA, "sz_capabilities_compiled_cuda");
-                case ROCM -> query(STRINGZILLA_CAPABILITIES_COMPILED_ROCM, "sz_capabilities_compiled_rocm");
-                case METAL -> query(STRINGZILLA_CAPABILITIES_COMPILED_METAL, "sz_capabilities_compiled_metal");
+                case CUDA -> query(STRINGZILLA_CAPABILITIES_COMPILED_CUDA, "sz_capabilities_compiled_cuda", ordinal);
+                case ROCM -> query(STRINGZILLA_CAPABILITIES_COMPILED_ROCM, "sz_capabilities_compiled_rocm", ordinal);
+                case METAL -> query(STRINGZILLA_CAPABILITIES_COMPILED_METAL, "sz_capabilities_compiled_metal", ordinal);
             };
         }
 
@@ -1220,7 +1220,7 @@ public final class StringZilla {
         public void configureThread(long capabilities) {
             if (kind != DeviceKind.CPU) throw new StatusException(this + ".configureThread", STATUS_MISSING_KERNEL);
             try {
-                check("sz_thread_configure_cpu", (int) STRINGZILLA_THREAD_CONFIGURE_CPU.invokeExact(capabilities));
+                check("sz_configure_thread_cpu", (int) STRINGZILLA_CONFIGURE_THREAD_CPU.invokeExact(capabilities));
             } catch (Throwable t) {
                 throw rethrow(t);
             }

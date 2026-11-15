@@ -4,6 +4,8 @@
  *  @date September 29, 2026
  *  @brief The @c cuda kernels and the CUDA device exports, defined once for the library.
  */
+#undef STRINGZILLA_TARGET_AMPERE
+#define STRINGZILLA_TARGET_AMPERE 0
 #undef STRINGZILLA_TARGET_HOPPER
 #define STRINGZILLA_TARGET_HOPPER 0
 #undef STRINGZILLA_TARGET_BLACKWELL
@@ -28,8 +30,8 @@
 #include "stringzilla/utf8_uncased_fold/cuda.cuh"
 #include "stringzilla/utf8_norm/cuda.cuh"
 
-STRINGZILLA_API sz_status_t sz_device_count_cuda(sz_size_t *count) {
-    *count = sz_device_count_cuda_();
+STRINGZILLA_API sz_status_t sz_count_devices_cuda(sz_size_t *count) {
+    *count = sz_count_devices_cuda_();
     return *count ? sz_success_k : sz_missing_gpu_k;
 }
 
@@ -66,4 +68,24 @@ STRINGZILLA_API sz_status_t sz_allocator_init_pinned_cuda(sz_allocator_t *alloca
 
 STRINGZILLA_API sz_status_t sz_stream_synchronize_cuda(sz_stream_t stream) {
     return sz_stream_synchronize_cuda_(stream);
+}
+
+/** The kernel @c sz_capabilities_compiled_cuda asks the runtime to load. */
+extern "C" void const *sz_probe_cuda_(void) { return (void const *)&sz_strings_scan_local_cuda_kernel_; }
+
+/** Whether CUDA device @p ordinal loads @p kernel, as the runtime fails where no code in the binary
+ *  runs there. */
+extern "C" sz_status_t sz_kernel_loads_cuda_(sz_size_t ordinal, void const *kernel, sz_bool_t *loads) {
+    int previous = 0;
+    cudaFuncAttributes attributes;
+    *loads = sz_false_k;
+    if (ordinal >= sz_count_devices_cuda_()) return sz_missing_gpu_k;
+    if (cudaGetDevice(&previous) != cudaSuccess || cudaSetDevice((int)ordinal) != cudaSuccess) {
+        cudaGetLastError();
+        return sz_device_code_mismatch_k;
+    }
+    *loads = cudaFuncGetAttributes(&attributes, kernel) == cudaSuccess ? sz_true_k : sz_false_k;
+    cudaGetLastError();
+    cudaSetDevice(previous);
+    return sz_success_k;
 }

@@ -16,16 +16,17 @@
 #define STRINGZILLA_HASH_RVVCRYPTO_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/hash/serial.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #if STRINGZILLA_ARCH_RISCV64_
-#if STRINGZILLA_TARGET_RVVCRYPTO
+#if STRINGZILLA_ARCH_RISCV64_RVVCRYPTO_
+
+#include "stringzilla/hash/serial.h"
 
 #include <riscv_vector.h>
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
 
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("arch=+v,+zvkned,+zvknhb"))), apply_to = function)
@@ -253,6 +254,8 @@ STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_rvvcrypto_(s
         return sz_hash_state_finalize_rvvcrypto_(state);
     }
 }
+
+#if STRINGZILLA_TARGET_RVVCRYPTO
 
 STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_rvvcrypto(sz_cptr_t start, sz_size_t length,
                                                                               sz_u64_t seed, sz_u64_t *hash,
@@ -1014,16 +1017,19 @@ STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_rvvcrypto(sz_sha256_stat
 
 #pragma endregion RVV Crypto SHA 256 via Zvknhb
 
+#endif // STRINGZILLA_TARGET_RVVCRYPTO
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_RVVCRYPTO
-#endif // STRINGZILLA_ARCH_RISCV64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_RISCV64_RVVCRYPTO_
+#endif // STRINGZILLA_ARCH_RISCV64_
 
 #endif // STRINGZILLA_HASH_RVVCRYPTO_H_

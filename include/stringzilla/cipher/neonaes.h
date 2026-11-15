@@ -13,9 +13,13 @@
 #define STRINGZILLA_CIPHER_NEONAES_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_ARM64_
+#if STRINGZILLA_ARCH_ARM64_NEONAES_
+
 #include "stringzilla/cipher/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -37,8 +41,6 @@ extern "C" {
  *  @c sz_aes256_gcm_key_t were derived for, and it matches the round instruction's throughput:
  *  @c AESE and @c AESMC fuse into a single operation of about three cycles' latency on every core
  *  that has them, so a chain shorter than eight leaves the pipe half idle. */
-#if STRINGZILLA_ARCH_ARM64_
-#if STRINGZILLA_ARCH_ARM64_NEONAES_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd+crypto+aes"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -1008,11 +1010,12 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_neonaes(sz_aes256_gcm_key_t co
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_ARM64_NEONAES_
 #endif // STRINGZILLA_ARCH_ARM64_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_CIPHER_NEONAES_H_

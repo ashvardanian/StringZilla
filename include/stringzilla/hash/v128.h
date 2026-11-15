@@ -10,15 +10,17 @@
 #define STRINGZILLA_HASH_V128_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/hash/serial.h"
-#include "stringzilla/compare/v128.h" // `sz_load_partial_v128_`, `sz_store_partial_v128_`
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #if STRINGZILLA_ARCH_WASM_
 #if STRINGZILLA_ARCH_WASM_V128_
+
+#include "stringzilla/hash/serial.h"
+#include "stringzilla/compare/v128.h" // `sz_load_partial_v128_`, `sz_store_partial_v128_`
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
@@ -669,11 +671,12 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_v128(sz_sha256_state_t const 
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_WASM_V128_
 #endif // STRINGZILLA_ARCH_WASM_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_HASH_V128_H_

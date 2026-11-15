@@ -18,16 +18,18 @@
 #define STRINGZILLA_UTF8_NORM_SVE2_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_ARM64_
+#if STRINGZILLA_ARCH_ARM64_SVE2_
+
 #include "stringzilla/utf8_norm/serial.h"
 #include "stringzilla/utf8_norm/sve.h"
 #include "stringzilla/utf8_uncased_fold/sve2.h" // `sz_utf8_uncased_fold_sve2_`
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_ARM64_
-#if STRINGZILLA_ARCH_ARM64_SVE2_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -72,11 +74,12 @@ STRINGZILLA_API sz_status_t sz_utf8_find_denormalized_sve2(sz_cptr_t source, sz_
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_ARM64_SVE2_
 #endif // STRINGZILLA_ARCH_ARM64_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_UTF8_NORM_SVE2_H_

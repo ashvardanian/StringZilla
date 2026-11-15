@@ -15,15 +15,16 @@
 
 #include "stringzilla/types.h"
 
+#if STRINGZILLA_ARCH_PPC64_
+#if STRINGZILLA_ARCH_PPC64_POWERVSX_
+
 #include "stringzilla/find/powervsx.h" // `sz_find_byteset_powervsx_`
 #include "stringzilla/substrings/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_PPC64_
-#if STRINGZILLA_TARGET_POWERVSX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("power9-vector"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -69,6 +70,8 @@ STRINGZILLA_INLINE sz_substrings_walks_t sz_substrings_walks_powervsx_(void) {
     walks.find_bytes = &sz_substrings_find_bytes_powervsx_;
     return walks;
 }
+
+#if STRINGZILLA_TARGET_POWERVSX
 
 STRINGZILLA_API sz_status_t sz_substrings_engine_init_powervsx(
     sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_case_sensitivity_t case_sensitivity,
@@ -128,16 +131,19 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_powervsx(sz_substrings_eng
 
 #pragma endregion VSX
 
+#endif // STRINGZILLA_TARGET_POWERVSX
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_POWERVSX
-#endif // STRINGZILLA_ARCH_PPC64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_PPC64_POWERVSX_
+#endif // STRINGZILLA_ARCH_PPC64_
 
 #endif // STRINGZILLA_SUBSTRINGS_POWERVSX_H_

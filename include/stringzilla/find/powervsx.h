@@ -10,15 +10,17 @@
 #define STRINGZILLA_FIND_POWERVSX_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_PPC64_
+#if STRINGZILLA_ARCH_PPC64_POWERVSX_
+
 #include "stringzilla/find/serial.h"
 #include "stringzilla/compare/powervsx.h" // `sz_equal_powervsx_`
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_PPC64_
-#if STRINGZILLA_TARGET_POWERVSX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("power9-vector"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -61,6 +63,8 @@ STRINGZILLA_INLINE sz_cptr_t sz_find_byte_powervsx_(sz_cptr_t haystack, sz_size_
                                                      needle_u8x16);
     return match_index < haystack_length ? haystack + match_index : STRINGZILLA_NULL_CHAR;
 }
+
+#if STRINGZILLA_TARGET_POWERVSX
 
 STRINGZILLA_API sz_status_t sz_find_byte_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                                   sz_cptr_t *match, sz_stream_t stream) {
@@ -377,16 +381,19 @@ STRINGZILLA_API sz_status_t sz_rfind_byteset_powervsx(sz_cptr_t haystack, sz_siz
     return sz_success_k;
 }
 
+#endif // STRINGZILLA_TARGET_POWERVSX
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_POWERVSX
-#endif // STRINGZILLA_ARCH_PPC64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_PPC64_POWERVSX_
+#endif // STRINGZILLA_ARCH_PPC64_
 
 #endif // STRINGZILLA_FIND_POWERVSX_H_

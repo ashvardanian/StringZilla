@@ -110,7 +110,6 @@ STRINGZILLA_DEVICE void sz_wait_async_ampere_(unsigned pending) {
 #ifdef __cplusplus
 } // extern "C"
 #endif
-
 #endif // STRINGZILLA_ARCH_CUDA_AMPERE_
 #endif // STRINGZILLA_ARCH_CUDA_
 #endif // STRINGZILLA_STRINGS_AMPERE_CUH_

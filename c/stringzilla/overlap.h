@@ -222,6 +222,18 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_cuda(sz_overlap_engine_t *engine, 
                                                    sz_size_t matches_candidate_stride, sz_stream_t stream);
 #endif
 
+#if STRINGZILLA_TARGET_AMPERE
+/** @copydoc sz_overlap_engine_init */
+STRINGZILLA_API sz_status_t sz_overlap_engine_init_ampere(sz_overlap_engine_t *engine, sz_strings_view_t const *queries,
+                                                          sz_size_t const *window_widths, sz_size_t window_widths_count,
+                                                          sz_size_t candidates_budget, sz_allocator_t *allocator,
+                                                          sz_stream_t stream);
+/** @copydoc sz_overlap_scores */
+STRINGZILLA_API sz_status_t sz_overlap_scores_ampere(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
+                                                     sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
+                                                     sz_size_t matches_candidate_stride, sz_stream_t stream);
+#endif
+
 #if STRINGZILLA_TARGET_BLACKWELL
 /** @copydoc sz_overlap_engine_init */
 STRINGZILLA_API sz_status_t sz_overlap_engine_init_blackwell(sz_overlap_engine_t *engine,
@@ -246,6 +258,42 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_rocm(sz_overlap_engine_t *eng
 STRINGZILLA_API sz_status_t sz_overlap_scores_rocm(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
                                                    sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
                                                    sz_size_t matches_candidate_stride, sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_CDNA3
+/** @copydoc sz_overlap_engine_init */
+STRINGZILLA_API sz_status_t sz_overlap_engine_init_cdna3(sz_overlap_engine_t *engine, sz_strings_view_t const *queries,
+                                                         sz_size_t const *window_widths, sz_size_t window_widths_count,
+                                                         sz_size_t candidates_budget, sz_allocator_t *allocator,
+                                                         sz_stream_t stream);
+/** @copydoc sz_overlap_scores */
+STRINGZILLA_API sz_status_t sz_overlap_scores_cdna3(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
+                                                    sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
+                                                    sz_size_t matches_candidate_stride, sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_CDNA4
+/** @copydoc sz_overlap_engine_init */
+STRINGZILLA_API sz_status_t sz_overlap_engine_init_cdna4(sz_overlap_engine_t *engine, sz_strings_view_t const *queries,
+                                                         sz_size_t const *window_widths, sz_size_t window_widths_count,
+                                                         sz_size_t candidates_budget, sz_allocator_t *allocator,
+                                                         sz_stream_t stream);
+/** @copydoc sz_overlap_scores */
+STRINGZILLA_API sz_status_t sz_overlap_scores_cdna4(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
+                                                    sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
+                                                    sz_size_t matches_candidate_stride, sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_CDNA5
+/** @copydoc sz_overlap_engine_init */
+STRINGZILLA_API sz_status_t sz_overlap_engine_init_cdna5(sz_overlap_engine_t *engine, sz_strings_view_t const *queries,
+                                                         sz_size_t const *window_widths, sz_size_t window_widths_count,
+                                                         sz_size_t candidates_budget, sz_allocator_t *allocator,
+                                                         sz_stream_t stream);
+/** @copydoc sz_overlap_scores */
+STRINGZILLA_API sz_status_t sz_overlap_scores_cdna5(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
+                                                    sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
+                                                    sz_size_t matches_candidate_stride, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_METAL

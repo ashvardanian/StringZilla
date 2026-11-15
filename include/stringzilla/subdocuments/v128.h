@@ -15,15 +15,16 @@
 
 #include "stringzilla/types.h"
 
+#if STRINGZILLA_ARCH_WASM_
+#if STRINGZILLA_ARCH_WASM_V128_
+
 #include "stringzilla/find/v128.h" // `sz_find_byte_v128_`
 #include "stringzilla/subdocuments/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_WASM_
-#if STRINGZILLA_ARCH_WASM_V128_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
@@ -122,11 +123,12 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_v128(sz_subdocuments_engine_t *
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_WASM_V128_
 #endif // STRINGZILLA_ARCH_WASM_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_SUBDOCUMENTS_V128_H_

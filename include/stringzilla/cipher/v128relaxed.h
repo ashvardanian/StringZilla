@@ -12,10 +12,14 @@
 #define STRINGZILLA_CIPHER_V128RELAXED_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_WASM_
+#if STRINGZILLA_ARCH_WASM_V128RELAXED_
+
 #include "stringzilla/cipher/serial.h"
 #include "stringzilla/cipher/v128.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -26,8 +30,6 @@ extern "C" {
  *  negative index, and rely on an out-of-range index answering zero, so relaxing them would make
  *  the result engine dependent. Everything with no relaxed opportunity calls the @c _v128 kernel
  *  rather than restating it. */
-#if STRINGZILLA_ARCH_WASM_
-#if STRINGZILLA_TARGET_V128RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
 #endif
@@ -181,6 +183,8 @@ STRINGZILLA_INLINE void sz_aes256_key_init_v128relaxed_(sz_aes256_key_t *key, sz
                                                     sz_aes256_key_turn_v128relaxed_(odd_round_key_u8x16, 0x40));
     wasm_v128_store(&key->round_keys[56], even_round_key_u8x16);
 }
+
+#if STRINGZILLA_TARGET_V128RELAXED
 
 STRINGZILLA_API sz_status_t sz_aes256_key_init_v128relaxed(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)],
                                                            sz_stream_t stream) {
@@ -486,14 +490,17 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_v128relaxed(sz_aes256_gcm_key_
 
 #pragma endregion One Shot Interface
 
+#endif // STRINGZILLA_TARGET_V128RELAXED
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
-#endif // STRINGZILLA_TARGET_V128RELAXED
-#endif // STRINGZILLA_ARCH_WASM_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_WASM_V128RELAXED_
+#endif // STRINGZILLA_ARCH_WASM_
 
 #endif // STRINGZILLA_CIPHER_V128RELAXED_H_

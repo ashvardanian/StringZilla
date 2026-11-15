@@ -729,9 +729,36 @@ Similarly, in Python, `sz.Capability` flags carry the same masks, and any call c
 ```python
 import stringzilla as sz
 
-sz.cpu_capabilities_enabled()                                # e.g. <Capability.SERIAL|NEON|NEONAES|NEONSHA: 449>
+sz.capabilities_enabled_cpu()                                # e.g. <Capability.SERIAL|NEON|NEONAES|NEONSHA: 449>
 sz.find("haystack", "st", capabilities=sz.Capability.SERIAL) # one call on the scalar kernel
 ```
+
+Six words name a capability's states, from configure to dispatch:
+
+| Word | Question | When | Scope |
+| --- | --- | --- | --- |
+| __probe__ | Can the toolchain build this capability? | configure: `try_compile` of `probes/<capability>.c` | build |
+| __target__ | Is this capability's unit in the build? | compile: `STRINGZILLA_TARGET_<CAPABILITY>` | build |
+| __implied__ | What do the baseline flags already guarantee? | compile, from predefined macros, and at runtime where the OS cannot be asked | build |
+| __compiled__ | Does the binary carry this capability's code for this processor? | runtime: `sz_capabilities_compiled_<group>` | CPU: the build; GPU: each device |
+| __detected__ | Does this processor offer the capability? | runtime: `sz_capabilities_detected_<group>` | processor |
+| __enabled__ | What may dispatch pick? | runtime: `sz_capabilities_enabled_<group>`, detected and compiled | processor |
+
+## Multiversioned and Monoversioned Builds
+
+- __Multiversioned builds are for distribution.__
+  One binary runs well across diverse machines and environments, as each CPU and each GPU picks its own capability at runtime.
+  This is the default, and how the packages, wheels and crates ship.
+- __Monoversioned builds are for throughput and lean deployment.__
+  For common hardware and data-center fleets, the binary carries only the best capability for one machine.
+  It starts fast, loads little, and takes little memory and disk.
+  Outside that machine it refuses cleanly.
+
+The switches are `STRINGZILLA_MULTIVERSIONED`, `STRINGZILLA_MARCH` and the presets, like `xeon4_hopper`, `xeon6_blackwell`, `grace_hopper`, `vera_rubin` and `venice_mi450`.
+A monoversioned build names one machine: one CPU and at most one GPU architecture per vendor, shared by every GPU in it.
+It compiles the best capability for that machine and folds every dispatch row to it, so link-time optimization drops every other kernel.
+On any other machine a call answers `sz_missing_kernel_k`, never a crash and never a slower kernel in silence.
+Sibling GPU capabilities form no chain, so with `STRINGZILLA_MULTIVERSIONED=OFF` a configure listing two CUDA or two ROCm architectures fails.
 
 ## Contributing
 

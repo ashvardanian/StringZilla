@@ -53,7 +53,8 @@ static sz_capability_kernels_t const *sz_substrings_engine_init_capabilities(voi
 #endif
     };
     enum {
-        cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
+        cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+                         sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
                         !STRINGZILLA_MULTIVERSIONED) >>
                        48
     };
@@ -63,17 +64,38 @@ static sz_capability_kernels_t const *sz_substrings_engine_init_capabilities(voi
         cuda_above_k & ~((sz_cap_cuda_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
                                                         : (sz_kernel_punned_t)&sz_substrings_engine_init_cuda,
 #endif
+#if STRINGZILLA_TARGET_AMPERE
+        cuda_above_k & ~((sz_cap_ampere_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_substrings_engine_init_ampere,
+#endif
 #if STRINGZILLA_TARGET_HOPPER
         cuda_above_k & ~((sz_cap_hopper_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
                                                           : (sz_kernel_punned_t)&sz_substrings_engine_init_hopper,
 #endif
     };
-    enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
+    enum {
+        rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM | sz_cap_cdna3_k * STRINGZILLA_TARGET_CDNA3 |
+                         sz_cap_cdna4_k * STRINGZILLA_TARGET_CDNA4 | sz_cap_cdna5_k * STRINGZILLA_TARGET_CDNA5) *
+                        !STRINGZILLA_MULTIVERSIONED) >>
+                       48
+    };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_ROCM
         rocm_above_k & ~((sz_cap_rocm_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
                                                         : (sz_kernel_punned_t)&sz_substrings_engine_init_rocm,
+#endif
+#if STRINGZILLA_TARGET_CDNA3
+        rocm_above_k & ~((sz_cap_cdna3_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                         : (sz_kernel_punned_t)&sz_substrings_engine_init_cdna3,
+#endif
+#if STRINGZILLA_TARGET_CDNA4
+        rocm_above_k & ~((sz_cap_cdna4_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                         : (sz_kernel_punned_t)&sz_substrings_engine_init_cdna4,
+#endif
+#if STRINGZILLA_TARGET_CDNA5
+        rocm_above_k & ~((sz_cap_cdna5_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                         : (sz_kernel_punned_t)&sz_substrings_engine_init_cdna5,
 #endif
     };
     enum { metal_above_k = ((sz_cap_metal_k * STRINGZILLA_TARGET_METAL) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
@@ -91,8 +113,12 @@ static sz_capability_kernels_t const *sz_substrings_engine_init_capabilities(voi
              sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
              sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
-        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER, cuda},
-        {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
+        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+             sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER,
+         cuda},
+        {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM | sz_cap_cdna3_k * STRINGZILLA_TARGET_CDNA3 |
+             sz_cap_cdna4_k * STRINGZILLA_TARGET_CDNA4 | sz_cap_cdna5_k * STRINGZILLA_TARGET_CDNA5,
+         rocm},
         {sz_cap_metal_k * STRINGZILLA_TARGET_METAL, metal},
     };
     return lists;
@@ -137,20 +163,50 @@ static sz_capability_kernels_t const *sz_substrings_contains_capabilities(void) 
                                                : (sz_kernel_punned_t)&sz_substrings_contains_powervsx,
 #endif
     };
-    enum { cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
+    enum {
+        cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+                         sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
+                        !STRINGZILLA_MULTIVERSIONED) >>
+                       48
+    };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_CUDA
         cuda_above_k & ~((sz_cap_cuda_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
                                                         : (sz_kernel_punned_t)&sz_substrings_contains_cuda,
 #endif
+#if STRINGZILLA_TARGET_AMPERE
+        cuda_above_k & ~((sz_cap_ampere_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_substrings_contains_ampere,
+#endif
+#if STRINGZILLA_TARGET_HOPPER
+        cuda_above_k & ~((sz_cap_hopper_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_substrings_contains_hopper,
+#endif
     };
-    enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
+    enum {
+        rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM | sz_cap_cdna3_k * STRINGZILLA_TARGET_CDNA3 |
+                         sz_cap_cdna4_k * STRINGZILLA_TARGET_CDNA4 | sz_cap_cdna5_k * STRINGZILLA_TARGET_CDNA5) *
+                        !STRINGZILLA_MULTIVERSIONED) >>
+                       48
+    };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_ROCM
         rocm_above_k & ~((sz_cap_rocm_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
                                                         : (sz_kernel_punned_t)&sz_substrings_contains_rocm,
+#endif
+#if STRINGZILLA_TARGET_CDNA3
+        rocm_above_k & ~((sz_cap_cdna3_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                         : (sz_kernel_punned_t)&sz_substrings_contains_cdna3,
+#endif
+#if STRINGZILLA_TARGET_CDNA4
+        rocm_above_k & ~((sz_cap_cdna4_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                         : (sz_kernel_punned_t)&sz_substrings_contains_cdna4,
+#endif
+#if STRINGZILLA_TARGET_CDNA5
+        rocm_above_k & ~((sz_cap_cdna5_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                         : (sz_kernel_punned_t)&sz_substrings_contains_cdna5,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
@@ -160,8 +216,12 @@ static sz_capability_kernels_t const *sz_substrings_contains_capabilities(void) 
              sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
              sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
-        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
-        {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
+        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+             sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER,
+         cuda},
+        {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM | sz_cap_cdna3_k * STRINGZILLA_TARGET_CDNA3 |
+             sz_cap_cdna4_k * STRINGZILLA_TARGET_CDNA4 | sz_cap_cdna5_k * STRINGZILLA_TARGET_CDNA5,
+         rocm},
         {0, sz_no_kernels_},
     };
     return lists;
@@ -206,7 +266,8 @@ static sz_capability_kernels_t const *sz_substrings_counts_capabilities(void) {
 #endif
     };
     enum {
-        cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
+        cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+                         sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
                         !STRINGZILLA_MULTIVERSIONED) >>
                        48
     };
@@ -216,17 +277,38 @@ static sz_capability_kernels_t const *sz_substrings_counts_capabilities(void) {
         cuda_above_k & ~((sz_cap_cuda_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
                                                         : (sz_kernel_punned_t)&sz_substrings_counts_cuda,
 #endif
+#if STRINGZILLA_TARGET_AMPERE
+        cuda_above_k & ~((sz_cap_ampere_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_substrings_counts_ampere,
+#endif
 #if STRINGZILLA_TARGET_HOPPER
         cuda_above_k & ~((sz_cap_hopper_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
                                                           : (sz_kernel_punned_t)&sz_substrings_counts_hopper,
 #endif
     };
-    enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
+    enum {
+        rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM | sz_cap_cdna3_k * STRINGZILLA_TARGET_CDNA3 |
+                         sz_cap_cdna4_k * STRINGZILLA_TARGET_CDNA4 | sz_cap_cdna5_k * STRINGZILLA_TARGET_CDNA5) *
+                        !STRINGZILLA_MULTIVERSIONED) >>
+                       48
+    };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_ROCM
         rocm_above_k & ~((sz_cap_rocm_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
                                                         : (sz_kernel_punned_t)&sz_substrings_counts_rocm,
+#endif
+#if STRINGZILLA_TARGET_CDNA3
+        rocm_above_k & ~((sz_cap_cdna3_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                         : (sz_kernel_punned_t)&sz_substrings_counts_cdna3,
+#endif
+#if STRINGZILLA_TARGET_CDNA4
+        rocm_above_k & ~((sz_cap_cdna4_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                         : (sz_kernel_punned_t)&sz_substrings_counts_cdna4,
+#endif
+#if STRINGZILLA_TARGET_CDNA5
+        rocm_above_k & ~((sz_cap_cdna5_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                         : (sz_kernel_punned_t)&sz_substrings_counts_cdna5,
 #endif
     };
     enum { metal_above_k = ((sz_cap_metal_k * STRINGZILLA_TARGET_METAL) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
@@ -244,8 +326,12 @@ static sz_capability_kernels_t const *sz_substrings_counts_capabilities(void) {
              sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
              sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
-        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER, cuda},
-        {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
+        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+             sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER,
+         cuda},
+        {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM | sz_cap_cdna3_k * STRINGZILLA_TARGET_CDNA3 |
+             sz_cap_cdna4_k * STRINGZILLA_TARGET_CDNA4 | sz_cap_cdna5_k * STRINGZILLA_TARGET_CDNA5,
+         rocm},
         {sz_cap_metal_k * STRINGZILLA_TARGET_METAL, metal},
     };
     return lists;
@@ -290,7 +376,8 @@ static sz_capability_kernels_t const *sz_substrings_find_capabilities(void) {
 #endif
     };
     enum {
-        cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
+        cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+                         sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
                         !STRINGZILLA_MULTIVERSIONED) >>
                        48
     };
@@ -300,17 +387,38 @@ static sz_capability_kernels_t const *sz_substrings_find_capabilities(void) {
         cuda_above_k & ~((sz_cap_cuda_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
                                                         : (sz_kernel_punned_t)&sz_substrings_find_cuda,
 #endif
+#if STRINGZILLA_TARGET_AMPERE
+        cuda_above_k & ~((sz_cap_ampere_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_substrings_find_ampere,
+#endif
 #if STRINGZILLA_TARGET_HOPPER
         cuda_above_k & ~((sz_cap_hopper_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
                                                           : (sz_kernel_punned_t)&sz_substrings_find_hopper,
 #endif
     };
-    enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
+    enum {
+        rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM | sz_cap_cdna3_k * STRINGZILLA_TARGET_CDNA3 |
+                         sz_cap_cdna4_k * STRINGZILLA_TARGET_CDNA4 | sz_cap_cdna5_k * STRINGZILLA_TARGET_CDNA5) *
+                        !STRINGZILLA_MULTIVERSIONED) >>
+                       48
+    };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_ROCM
         rocm_above_k & ~((sz_cap_rocm_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
                                                         : (sz_kernel_punned_t)&sz_substrings_find_rocm,
+#endif
+#if STRINGZILLA_TARGET_CDNA3
+        rocm_above_k & ~((sz_cap_cdna3_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                         : (sz_kernel_punned_t)&sz_substrings_find_cdna3,
+#endif
+#if STRINGZILLA_TARGET_CDNA4
+        rocm_above_k & ~((sz_cap_cdna4_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                         : (sz_kernel_punned_t)&sz_substrings_find_cdna4,
+#endif
+#if STRINGZILLA_TARGET_CDNA5
+        rocm_above_k & ~((sz_cap_cdna5_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                         : (sz_kernel_punned_t)&sz_substrings_find_cdna5,
 #endif
     };
     enum { metal_above_k = ((sz_cap_metal_k * STRINGZILLA_TARGET_METAL) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
@@ -328,8 +436,12 @@ static sz_capability_kernels_t const *sz_substrings_find_capabilities(void) {
              sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
              sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
-        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER, cuda},
-        {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
+        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+             sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER,
+         cuda},
+        {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM | sz_cap_cdna3_k * STRINGZILLA_TARGET_CDNA3 |
+             sz_cap_cdna4_k * STRINGZILLA_TARGET_CDNA4 | sz_cap_cdna5_k * STRINGZILLA_TARGET_CDNA5,
+         rocm},
         {sz_cap_metal_k * STRINGZILLA_TARGET_METAL, metal},
     };
     return lists;
@@ -374,7 +486,8 @@ static sz_capability_kernels_t const *sz_substrings_replace_capabilities(void) {
 #endif
     };
     enum {
-        cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
+        cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+                         sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
                         !STRINGZILLA_MULTIVERSIONED) >>
                        48
     };
@@ -384,17 +497,38 @@ static sz_capability_kernels_t const *sz_substrings_replace_capabilities(void) {
         cuda_above_k & ~((sz_cap_cuda_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
                                                         : (sz_kernel_punned_t)&sz_substrings_replace_cuda,
 #endif
+#if STRINGZILLA_TARGET_AMPERE
+        cuda_above_k & ~((sz_cap_ampere_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_substrings_replace_ampere,
+#endif
 #if STRINGZILLA_TARGET_HOPPER
         cuda_above_k & ~((sz_cap_hopper_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
                                                           : (sz_kernel_punned_t)&sz_substrings_replace_hopper,
 #endif
     };
-    enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
+    enum {
+        rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM | sz_cap_cdna3_k * STRINGZILLA_TARGET_CDNA3 |
+                         sz_cap_cdna4_k * STRINGZILLA_TARGET_CDNA4 | sz_cap_cdna5_k * STRINGZILLA_TARGET_CDNA5) *
+                        !STRINGZILLA_MULTIVERSIONED) >>
+                       48
+    };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_ROCM
         rocm_above_k & ~((sz_cap_rocm_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
                                                         : (sz_kernel_punned_t)&sz_substrings_replace_rocm,
+#endif
+#if STRINGZILLA_TARGET_CDNA3
+        rocm_above_k & ~((sz_cap_cdna3_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                         : (sz_kernel_punned_t)&sz_substrings_replace_cdna3,
+#endif
+#if STRINGZILLA_TARGET_CDNA4
+        rocm_above_k & ~((sz_cap_cdna4_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                         : (sz_kernel_punned_t)&sz_substrings_replace_cdna4,
+#endif
+#if STRINGZILLA_TARGET_CDNA5
+        rocm_above_k & ~((sz_cap_cdna5_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                         : (sz_kernel_punned_t)&sz_substrings_replace_cdna5,
 #endif
     };
     enum { metal_above_k = ((sz_cap_metal_k * STRINGZILLA_TARGET_METAL) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
@@ -412,8 +546,12 @@ static sz_capability_kernels_t const *sz_substrings_replace_capabilities(void) {
              sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
              sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
-        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER, cuda},
-        {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
+        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+             sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER,
+         cuda},
+        {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM | sz_cap_cdna3_k * STRINGZILLA_TARGET_CDNA3 |
+             sz_cap_cdna4_k * STRINGZILLA_TARGET_CDNA4 | sz_cap_cdna5_k * STRINGZILLA_TARGET_CDNA5,
+         rocm},
         {sz_cap_metal_k * STRINGZILLA_TARGET_METAL, metal},
     };
     return lists;
@@ -461,7 +599,8 @@ static sz_capability_kernels_t const *sz_substrings_bm25_scores_capabilities(voi
 #endif
     };
     enum {
-        cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
+        cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+                         sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
                         !STRINGZILLA_MULTIVERSIONED) >>
                        48
     };
@@ -471,17 +610,38 @@ static sz_capability_kernels_t const *sz_substrings_bm25_scores_capabilities(voi
         cuda_above_k & ~((sz_cap_cuda_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
                                                         : (sz_kernel_punned_t)&sz_substrings_bm25_scores_cuda,
 #endif
+#if STRINGZILLA_TARGET_AMPERE
+        cuda_above_k & ~((sz_cap_ampere_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_substrings_bm25_scores_ampere,
+#endif
 #if STRINGZILLA_TARGET_HOPPER
         cuda_above_k & ~((sz_cap_hopper_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
                                                           : (sz_kernel_punned_t)&sz_substrings_bm25_scores_hopper,
 #endif
     };
-    enum { rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
+    enum {
+        rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM | sz_cap_cdna3_k * STRINGZILLA_TARGET_CDNA3 |
+                         sz_cap_cdna4_k * STRINGZILLA_TARGET_CDNA4 | sz_cap_cdna5_k * STRINGZILLA_TARGET_CDNA5) *
+                        !STRINGZILLA_MULTIVERSIONED) >>
+                       48
+    };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
 #if STRINGZILLA_TARGET_ROCM
         rocm_above_k & ~((sz_cap_rocm_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
                                                         : (sz_kernel_punned_t)&sz_substrings_bm25_scores_rocm,
+#endif
+#if STRINGZILLA_TARGET_CDNA3
+        rocm_above_k & ~((sz_cap_cdna3_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                         : (sz_kernel_punned_t)&sz_substrings_bm25_scores_cdna3,
+#endif
+#if STRINGZILLA_TARGET_CDNA4
+        rocm_above_k & ~((sz_cap_cdna4_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                         : (sz_kernel_punned_t)&sz_substrings_bm25_scores_cdna4,
+#endif
+#if STRINGZILLA_TARGET_CDNA5
+        rocm_above_k & ~((sz_cap_cdna5_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                         : (sz_kernel_punned_t)&sz_substrings_bm25_scores_cdna5,
 #endif
     };
     enum { metal_above_k = ((sz_cap_metal_k * STRINGZILLA_TARGET_METAL) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
@@ -499,8 +659,12 @@ static sz_capability_kernels_t const *sz_substrings_bm25_scores_capabilities(voi
              sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
              sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
-        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER, cuda},
-        {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
+        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+             sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER,
+         cuda},
+        {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM | sz_cap_cdna3_k * STRINGZILLA_TARGET_CDNA3 |
+             sz_cap_cdna4_k * STRINGZILLA_TARGET_CDNA4 | sz_cap_cdna5_k * STRINGZILLA_TARGET_CDNA5,
+         rocm},
         {sz_cap_metal_k * STRINGZILLA_TARGET_METAL, metal},
     };
     return lists;

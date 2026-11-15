@@ -8,14 +8,16 @@
 #define STRINGZILLA_UTF8_RUNES_V128_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_runes/serial.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #if STRINGZILLA_ARCH_WASM_
 #if STRINGZILLA_ARCH_WASM_V128_
+
+#include "stringzilla/utf8_runes/serial.h"
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
@@ -747,11 +749,12 @@ STRINGZILLA_API sz_status_t sz_utf8_decode_v128( //
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_WASM_V128_
 #endif // STRINGZILLA_ARCH_WASM_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_UTF8_RUNES_V128_H_

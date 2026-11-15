@@ -10,11 +10,15 @@
 #define STRINGZILLA_UTF8_UNCASED_V128_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_WASM_
+#if STRINGZILLA_ARCH_WASM_V128_
+
 #include "stringzilla/find/v128.h"              // `sz_find_v128_`
 #include "stringzilla/utf8_uncased_fold/v128.h" // `sz_ascii_fold_v128_`, `sz_utf8_in_range_v128_`
 #include "stringzilla/utf8_uncased/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -31,8 +35,6 @@ extern "C" {
  *  have seen. Matches the Ice Lake, NEON, and RVV SIMD backends exactly; those may differ from the
  *  serial folded-rune scanner on a few expanding-needle ties, a cross-backend property that is not
  *  specific to WebAssembly. */
-#if STRINGZILLA_ARCH_WASM_
-#if STRINGZILLA_ARCH_WASM_V128_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
@@ -808,11 +810,12 @@ STRINGZILLA_API sz_status_t sz_utf8_find_cased_v128(sz_cptr_t text, sz_size_t le
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_WASM_V128_
 #endif // STRINGZILLA_ARCH_WASM_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_UTF8_UNCASED_V128_H_

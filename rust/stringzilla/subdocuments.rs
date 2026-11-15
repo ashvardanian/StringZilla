@@ -76,7 +76,7 @@ pub enum SubdocumentsFormat {
 /// ```rust
 /// use stringzilla::{Capabilities, Match, Stream, StringsView, SubdocumentsEngine, SubdocumentsFormat};
 ///
-/// let cpu = Stream::default(Capabilities::cpu_enabled());
+/// let cpu = Stream::default(Capabilities::enabled_cpu());
 /// let paths = ["$.store.book[?@.price < 10].title"];
 /// let mut engine = SubdocumentsEngine::new(&paths, SubdocumentsFormat::Json, &cpu).unwrap();
 ///
@@ -131,7 +131,7 @@ pub struct SubdocumentsEngine {
 
 impl SubdocumentsEngine {
     /// Compiles `paths` for `format` with the capabilities of `stream`, like
-    /// [`Capabilities::cpu_enabled`], on the device `stream` names.
+    /// [`Capabilities::enabled_cpu`], on the device `stream` names.
     ///
     /// JSON paths follow RFC 9535, filters and their functions included, and XML paths follow
     /// XPath 1.0 along forward axes. A path that breaks its grammar, or that no single walk can

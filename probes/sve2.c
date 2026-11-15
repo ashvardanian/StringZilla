@@ -5,7 +5,7 @@
  *  @brief Whether the toolchain builds the SVE2 kernels, the Armv9-A scalable vectors kit.
  */
 #define STRINGZILLA_HEADER_ONLY 1
-#define STRINGZILLA_TARGET_SVE2 1
+#define STRINGZILLA_ARCH_ARM64_SVE2_ 1
 #include <stringzilla/find/sve2.h>
 
 /** Passes vectors between calls as the uncased kernels do, which LLVM 20 can't emit for Mach-O. */

@@ -5,7 +5,7 @@
  *  @brief Whether the toolchain builds the SVE2 AES kernels, from the Armv9-A crypto extension.
  */
 #define STRINGZILLA_HEADER_ONLY 1
-#define STRINGZILLA_TARGET_SVE2AES 1
+#define STRINGZILLA_ARCH_ARM64_SVE2AES_ 1
 #include <stringzilla/hash/sve2aes.h>
 
 int main(void) {

@@ -4,6 +4,12 @@
  *  @date September 29, 2026
  *  @brief The @c rocm kernels and the ROCm device exports, defined once for the library.
  */
+#undef STRINGZILLA_TARGET_CDNA3
+#define STRINGZILLA_TARGET_CDNA3 0
+#undef STRINGZILLA_TARGET_CDNA4
+#define STRINGZILLA_TARGET_CDNA4 0
+#undef STRINGZILLA_TARGET_CDNA5
+#define STRINGZILLA_TARGET_CDNA5 0
 #include "stringzilla/strings.h"
 #include "stringzilla/hash.h"
 #include "stringzilla/levenshtein.h"
@@ -24,8 +30,8 @@
 #include "stringzilla/utf8_uncased_fold/rocm.cuh"
 #include "stringzilla/utf8_norm/rocm.cuh"
 
-STRINGZILLA_API sz_status_t sz_device_count_rocm(sz_size_t *count) {
-    *count = sz_device_count_rocm_();
+STRINGZILLA_API sz_status_t sz_count_devices_rocm(sz_size_t *count) {
+    *count = sz_count_devices_rocm_();
     return *count ? sz_success_k : sz_missing_gpu_k;
 }
 
@@ -62,4 +68,23 @@ STRINGZILLA_API sz_status_t sz_allocator_init_pinned_rocm(sz_allocator_t *alloca
 
 STRINGZILLA_API sz_status_t sz_stream_synchronize_rocm(sz_stream_t stream) {
     return sz_stream_synchronize_rocm_(stream);
+}
+
+/** The kernel @c sz_capabilities_compiled_rocm asks the runtime to load. */
+extern "C" void const *sz_probe_rocm_(void) { return (void const *)&sz_strings_scan_local_rocm_kernel_; }
+
+/** Whether ROCm device @p ordinal loads @p kernel, as the runtime fails where no code object in the
+ *  binary runs there. */
+extern "C" sz_status_t sz_kernel_loads_rocm_(sz_size_t ordinal, void const *kernel, sz_bool_t *loads) {
+    int previous = 0;
+    hipFuncAttributes attributes;
+    *loads = sz_false_k;
+    if (ordinal >= sz_count_devices_rocm_()) return sz_missing_gpu_k;
+    if (hipGetDevice(&previous) != hipSuccess || hipSetDevice((int)ordinal) != hipSuccess) {
+        [[maybe_unused]] hipError_t const cleared = hipGetLastError();
+        return sz_device_code_mismatch_k;
+    }
+    *loads = hipFuncGetAttributes(&attributes, kernel) == hipSuccess ? sz_true_k : sz_false_k;
+    [[maybe_unused]] hipError_t const cleared = hipGetLastError(), restored = hipSetDevice(previous);
+    return sz_success_k;
 }

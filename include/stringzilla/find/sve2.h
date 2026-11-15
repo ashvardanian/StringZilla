@@ -10,14 +10,16 @@
 #define STRINGZILLA_FIND_SVE2_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/find/serial.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #if STRINGZILLA_ARCH_ARM64_
 #if STRINGZILLA_ARCH_ARM64_SVE2_
+
+#include "stringzilla/find/serial.h"
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve+sve2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -178,11 +180,12 @@ STRINGZILLA_API sz_status_t sz_rfind_byteset_sve2(sz_cptr_t haystack, sz_size_t 
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_ARM64_SVE2_
 #endif // STRINGZILLA_ARCH_ARM64_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_FIND_SVE2_H_

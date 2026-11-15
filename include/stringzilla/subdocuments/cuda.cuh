@@ -21,68 +21,16 @@
 #ifndef STRINGZILLA_SUBDOCUMENTS_CUDA_CUH_
 #define STRINGZILLA_SUBDOCUMENTS_CUDA_CUH_
 
-#include "stringzilla/cuda.cuh"
-#include "stringzilla/subdocuments/kernels.cuh"
+#include "stringzilla/types.h"
 
 #if STRINGZILLA_ARCH_CUDA_
 
-#ifdef __cplusplus
+#include "stringzilla/cuda.cuh"
+#include "stringzilla/subdocuments/kernels.cuh"
+
+#if defined(__cplusplus)
 extern "C" {
 #endif
-
-#pragma region Warp Walks
-
-/** @ref sz_subdocuments_walk_documents_simt_ with a warp walking each JSON document. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_warp_walk_cuda_kernel_(sz_subdocuments_engine_t engine, sz_strings_view_t documents,
-                                           sz_subdocuments_round_simt_t round) {
-    sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    sz_simt_group_t const group = {32,
-                                   (unsigned)(thread & 31),
-                                   sz_lanes_any_cuda_,
-                                   sz_lanes_ballot_cuda_,
-                                   sz_lanes_first_cuda_,
-                                   sz_lanes_below_cuda_,
-                                   sz_shuffle_index_cuda_,
-                                   sz_shuffle_up_cuda_,
-                                   sz_u32_lanes_prefix_sum_cuda_,
-                                   sz_i32_lanes_prefix_min_cuda_,
-                                   sz_u64_lanes_sum_cuda_,
-                                   sz_group_sync_cuda_};
-    sz_subdocuments_walk_documents_simt_(&engine, &documents, &round, thread / 32, thread & 31, 32, &group);
-}
-
-/** Blocks of the dense warp walk each multiprocessor keeps resident: once every walker has a
- *  document, more warps hiding the walk's latency outweigh the registers they give up. */
-enum { sz_subdocuments_walk_blocks_cuda_k = 4 };
-
-/** @ref sz_subdocuments_warp_walk_cuda_kernel_ for launches of every walker the device holds. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k, sz_subdocuments_walk_blocks_cuda_k)
-    sz_subdocuments_warp_walk_dense_cuda_kernel_(sz_subdocuments_engine_t engine, sz_strings_view_t documents,
-                                                 sz_subdocuments_round_simt_t round) {
-    sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    sz_simt_group_t const group = {32,
-                                   (unsigned)(thread & 31),
-                                   sz_lanes_any_cuda_,
-                                   sz_lanes_ballot_cuda_,
-                                   sz_lanes_first_cuda_,
-                                   sz_lanes_below_cuda_,
-                                   sz_shuffle_index_cuda_,
-                                   sz_shuffle_up_cuda_,
-                                   sz_u32_lanes_prefix_sum_cuda_,
-                                   sz_i32_lanes_prefix_min_cuda_,
-                                   sz_u64_lanes_sum_cuda_,
-                                   sz_group_sync_cuda_};
-    sz_subdocuments_walk_documents_simt_(&engine, &documents, &round, thread / 32, thread & 31, 32, &group);
-}
-
-/** One lane per document marks whether its counting walk found a match, with CUDA's ballot. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_contains_cuda_kernel_(sz_size_t const *counted, sz_u1x8_t *contained, sz_size_t count) {
-    sz_subdocuments_contains_simt_(counted, contained, count, sz_lanes_ballot_cuda_);
-}
-
-#pragma endregion Warp Walks
 
 #pragma region Scans
 
@@ -109,46 +57,83 @@ STRINGZILLA_DEVICE sz_u64_t sz_subdocuments_block_scan_bounded_cuda_(sz_u64_t va
     return (sz_u64_t)exclusive;
 }
 
-/** @ref sz_subdocuments_scan_tile_simt_ over CUDA's warps. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_scan_cuda_kernel_(sz_size_t *values, sz_size_t count, sz_size_t elements_per_tile, sz_size_t *chain,
-                                      sz_u64_t *states) {
-    sz_subdocuments_scan_tile_simt_(values, count, elements_per_tile, chain, states, sz_block_scan_cuda_,
-                                    sz_block_sum_cuda_, sz_chain_tile_simt_, sz_chain_look_back_cuda_);
-}
-
-/** @ref sz_subdocuments_large_reduce_simt_ over CUDA's warps. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_large_reduce_cuda_kernel_(sz_subdocuments_large_simt_t large) {
-    sz_subdocuments_large_reduce_simt_(&large, sz_subdocuments_block_scan_bounded_cuda_);
-}
-
-/** @ref sz_subdocuments_large_carry_simt_ over CUDA's warps. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_large_carry_cuda_kernel_(sz_subdocuments_large_simt_t large) {
-    sz_subdocuments_large_carry_simt_(&large, sz_subdocuments_block_scan_cuda_);
-}
-
-/** @ref sz_subdocuments_large_apply_simt_ over CUDA's warps. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_large_apply_cuda_kernel_(sz_subdocuments_large_simt_t large) {
-    sz_subdocuments_large_apply_simt_(&large, sz_subdocuments_block_scan_bounded_cuda_);
-}
-
 #pragma endregion Scans
+
+#pragma region Warp Walks
+
+/** @ref sz_subdocuments_walk_documents_simt_ with a warp walking each JSON document. */
+STRINGZILLA_DEVICE void sz_subdocuments_warp_walk_cuda_(sz_subdocuments_engine_t engine, sz_strings_view_t documents,
+                                                        sz_subdocuments_round_simt_t round) {
+    sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    sz_simt_group_t const group = {32,
+                                   (unsigned)(thread & 31),
+                                   sz_lanes_any_cuda_,
+                                   sz_lanes_ballot_cuda_,
+                                   sz_lanes_first_cuda_,
+                                   sz_lanes_below_cuda_,
+                                   sz_shuffle_index_cuda_,
+                                   sz_shuffle_up_cuda_,
+                                   sz_u32_lanes_prefix_sum_cuda_,
+                                   sz_i32_lanes_prefix_min_cuda_,
+                                   sz_u64_lanes_sum_cuda_,
+                                   sz_group_sync_cuda_};
+    sz_subdocuments_walk_documents_simt_(&engine, &documents, &round, thread / 32, thread & 31, 32, &group);
+}
+
+/** Blocks of the dense warp walk each multiprocessor keeps resident: once every walker has a
+ *  document, more warps hiding the walk's latency outweigh the registers they give up. */
+enum { sz_subdocuments_walk_blocks_cuda_k = 4 };
+
+#pragma endregion Warp Walks
 
 #pragma region Host Plumbing
 
-/** The kernels where a tier's rounds differ from the CUDA tier's, and the capability its engines
- *  record; every other launch takes the shared kernels. */
+/** The kernels a tier's rounds launch, and the capability its engines record. */
 typedef struct sz_subdocuments_entry_points_cuda_t {
 
     /** Scans the counts in place, as @ref sz_subdocuments_scan_cuda_kernel_ does. */
     void const *scan;
 
     /** Drops refused documents' chunks and publishes the deepest nesting, as
-     *  @ref sz_subdocuments_large_drop_simt_kernel_ does. */
+     *  @ref sz_subdocuments_large_drop_simt_ does. */
     void const *large_drop;
+
+    /** Walks each XML document with a thread, as @ref sz_subdocuments_walk_documents_simt_ does. */
+    void const *walk;
+
+    /** Walks each JSON document with a warp, as @ref sz_subdocuments_warp_walk_cuda_ does, sparsely
+     *  and then densely, for launches of every walker the device holds. */
+    void const *warp_walk;
+    void const *warp_walk_dense;
+
+    /** Marks the documents a counting walk found a match in, as @ref sz_subdocuments_contains_simt_
+     *  does. */
+    void const *contains;
+
+    /** Settles the round's @c large_bytes, then the passes over the large documents' chunks in
+     *  launch order, each as its @c _simt_ body in <tt>subdocuments/kernels.cuh</tt> runs it. */
+    void const *route;
+    void const *large_lengths;
+    void const *large_summary;
+    void const *large_count;
+    void const *large_check;
+    void const *large_tokens;
+    void const *large_minima;
+    void const *large_parents;
+    void const *large_closes;
+    void const *large_sums;
+    void const *large_offsets;
+    void const *large_selectors;
+    void const *large_jump;
+    void const *large_advance;
+    void const *large_walk;
+    void const *large_finish;
+
+    /** The three launches of a scan over the large documents' chunks, as
+     *  @ref sz_subdocuments_large_reduce_simt_ and the two after it run them. */
+    void const *large_reduce;
+    void const *large_carry;
+    void const *large_apply;
 
     /** Blocks each cluster of the counts scan spans, one where it launches without clusters. */
     sz_size_t cluster_blocks;
@@ -197,6 +182,7 @@ STRINGZILLA_INLINE void sz_subdocuments_round_cuda_(sz_subdocuments_engine_t con
 STRINGZILLA_INLINE sz_status_t sz_subdocuments_launch_cuda_(sz_subdocuments_engine_t const *engine,
                                                             sz_strings_view_t const *documents,
                                                             sz_subdocuments_round_simt_t const *round,
+                                                            sz_subdocuments_entry_points_cuda_t const *entry_points,
                                                             sz_stream_t stream) {
     sz_subdocuments_engine_t launched_engine = *engine;
     sz_strings_view_t launched_documents = *documents;
@@ -211,15 +197,16 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_launch_cuda_(sz_subdocuments_engi
     block.x = sz_subdocuments_threads_per_block_simt_k, block.y = 1, block.z = 1;
     sz_bool_t const dense = (sz_bool_t)(round->threads * 32 >= sz_device_multiprocessors_cuda_() *
                                                                    sz_device_threads_per_multiprocessor_cuda_());
-    return sz_launch_cuda_(!warps  ? (void const *)sz_subdocuments_walk_simt_kernel_
-                           : dense ? (void const *)sz_subdocuments_warp_walk_dense_cuda_kernel_
-                                   : (void const *)sz_subdocuments_warp_walk_cuda_kernel_,
+    return sz_launch_cuda_(!warps  ? entry_points->walk
+                           : dense ? entry_points->warp_walk_dense
+                                   : entry_points->warp_walk,
                            grid, block, arguments, 0, stream);
 }
 
 /** Routes @p documents: settles the header's @c large_bytes, which every walk then reads. */
 STRINGZILLA_INLINE sz_status_t sz_subdocuments_route_cuda_(sz_strings_view_t const *documents,
                                                            sz_subdocuments_round_simt_t const *round,
+                                                           sz_subdocuments_entry_points_cuda_t const *entry_points,
                                                            sz_stream_t stream) {
     sz_strings_view_t launched_documents = *documents;
     sz_subdocuments_round_simt_t launched_round = *round;
@@ -231,7 +218,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_route_cuda_(sz_strings_view_t con
         (sz_size_t)sz_subdocuments_blocks_cuda_k);
     grid.y = 1, grid.z = 1;
     block.x = sz_subdocuments_threads_per_block_simt_k, block.y = 1, block.z = 1;
-    return sz_launch_cuda_((void const *)sz_subdocuments_route_simt_kernel_, grid, block, arguments, 0, stream);
+    return sz_launch_cuda_(entry_points->route, grid, block, arguments, 0, stream);
 }
 
 /** Copies the header back to @p header, which joins @p stream. */
@@ -253,21 +240,20 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_large_launch_cuda_(void const *ke
 /** Scans the @p count values at @p values in place, exclusively, in three launches: summing them,
  *  or composing the chunks' effects on the carries when @p compose is set. */
 STRINGZILLA_INLINE sz_status_t sz_subdocuments_large_scan_cuda_(sz_subdocuments_large_simt_t *large, sz_u64_t *values,
-                                                                sz_size_t count, sz_u32_t compose, sz_stream_t stream) {
+                                                                sz_size_t count, sz_u32_t compose,
+                                                                sz_subdocuments_entry_points_cuda_t const *entry_points,
+                                                                sz_stream_t stream) {
     void *arguments[1];
     sz_status_t status;
     large->scanned = values, large->scanned_count = count, large->compose = compose;
     large->scan_tiles = sz_min_of_two(sz_size_divide_round_up(count, sz_subdocuments_threads_per_block_simt_k),
                                       (sz_size_t)sz_subdocuments_scan_tiles_simt_k);
     arguments[0] = large;
-    status = sz_subdocuments_large_launch_cuda_((void const *)sz_subdocuments_large_reduce_cuda_kernel_,
-                                                large->scan_tiles, arguments, stream);
+    status = sz_subdocuments_large_launch_cuda_(entry_points->large_reduce, large->scan_tiles, arguments, stream);
     if (status == sz_success_k)
-        status = sz_subdocuments_large_launch_cuda_((void const *)sz_subdocuments_large_carry_cuda_kernel_, 1,
-                                                    arguments, stream);
+        status = sz_subdocuments_large_launch_cuda_(entry_points->large_carry, 1, arguments, stream);
     if (status == sz_success_k)
-        status = sz_subdocuments_large_launch_cuda_((void const *)sz_subdocuments_large_apply_cuda_kernel_,
-                                                    large->scan_tiles, arguments, stream);
+        status = sz_subdocuments_large_launch_cuda_(entry_points->large_apply, large->scan_tiles, arguments, stream);
     return status;
 }
 
@@ -276,6 +262,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_large_walk_cuda_(sz_subdocuments_
                                                                 sz_strings_view_t const *documents,
                                                                 sz_subdocuments_round_simt_t const *round,
                                                                 sz_subdocuments_large_simt_t const *large,
+                                                                sz_subdocuments_entry_points_cuda_t const *entry_points,
                                                                 sz_stream_t stream) {
     sz_subdocuments_engine_t launched_engine = *engine;
     sz_strings_view_t launched_documents = *documents;
@@ -284,8 +271,8 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_large_walk_cuda_(sz_subdocuments_
     void *arguments[4];
     arguments[0] = &launched_engine, arguments[1] = &launched_documents, arguments[2] = &launched_round;
     arguments[3] = &launched_large;
-    return sz_subdocuments_large_launch_cuda_((void const *)sz_subdocuments_large_walk_simt_kernel_,
-                                              sz_subdocuments_blocks_cuda_k, arguments, stream);
+    return sz_subdocuments_large_launch_cuda_(entry_points->large_walk, sz_subdocuments_blocks_cuda_k, arguments,
+                                              stream);
 }
 
 /** Walks every document @p header lists for chunks, below its first malformed one, as one
@@ -324,25 +311,25 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_large_cuda_(
 
     // Each document's first chunk and the chunks' carries, then their tokens, containers and
     // depths, numbered by scans past the documents their depths or quotes refuse.
-    status = sz_subdocuments_large_launch_cuda_((void const *)sz_subdocuments_large_lengths_simt_kernel_, blocks, alone,
-                                                stream);
-    if (status == sz_success_k) status = sz_subdocuments_large_scan_cuda_(large, large->firsts, listed + 1, 0, stream);
+    status = sz_subdocuments_large_launch_cuda_(entry_points->large_lengths, blocks, alone, stream);
     if (status == sz_success_k)
-        status = sz_subdocuments_large_launch_cuda_((void const *)sz_subdocuments_large_summary_simt_kernel_, blocks,
-                                                    with_documents, stream);
+        status = sz_subdocuments_large_scan_cuda_(large, large->firsts, listed + 1, 0, entry_points, stream);
     if (status == sz_success_k)
-        status = sz_subdocuments_large_scan_cuda_(large, large->transfers, chunks + 1, 1, stream);
+        status = sz_subdocuments_large_launch_cuda_(entry_points->large_summary, blocks, with_documents, stream);
     if (status == sz_success_k)
-        status = sz_subdocuments_large_launch_cuda_((void const *)sz_subdocuments_large_count_simt_kernel_, blocks,
-                                                    with_documents, stream);
-    if (status == sz_success_k) status = sz_subdocuments_large_scan_cuda_(large, large->depths, chunks + 1, 0, stream);
+        status = sz_subdocuments_large_scan_cuda_(large, large->transfers, chunks + 1, 1, entry_points, stream);
     if (status == sz_success_k)
-        status = sz_subdocuments_large_launch_cuda_((void const *)sz_subdocuments_large_check_simt_kernel_, blocks,
-                                                    with_round, stream);
+        status = sz_subdocuments_large_launch_cuda_(entry_points->large_count, blocks, with_documents, stream);
+    if (status == sz_success_k)
+        status = sz_subdocuments_large_scan_cuda_(large, large->depths, chunks + 1, 0, entry_points, stream);
+    if (status == sz_success_k)
+        status = sz_subdocuments_large_launch_cuda_(entry_points->large_check, blocks, with_round, stream);
     if (status == sz_success_k)
         status = sz_subdocuments_large_launch_cuda_(entry_points->large_drop, blocks, with_round, stream);
-    if (status == sz_success_k) status = sz_subdocuments_large_scan_cuda_(large, large->tokens, chunks + 1, 0, stream);
-    if (status == sz_success_k) status = sz_subdocuments_large_scan_cuda_(large, large->opens, chunks + 1, 0, stream);
+    if (status == sz_success_k)
+        status = sz_subdocuments_large_scan_cuda_(large, large->tokens, chunks + 1, 0, entry_points, stream);
+    if (status == sz_success_k)
+        status = sz_subdocuments_large_scan_cuda_(large, large->opens, chunks + 1, 0, entry_points, stream);
     if (status == sz_success_k) status = sz_copy_cuda_(&tokens, large->tokens + chunks, sizeof(tokens), stream);
     if (status == sz_success_k) status = sz_copy_cuda_(&containers, large->opens + chunks, sizeof(containers), stream);
     if (status == sz_success_k) status = sz_subdocuments_read_cuda_(round, header, stream);
@@ -359,27 +346,22 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_large_cuda_(
 
     // Tokens and containers, the parents the pyramid of minima finds, closes,
     // element counts and positions.
-    status = sz_subdocuments_large_launch_cuda_((void const *)sz_subdocuments_large_tokens_simt_kernel_, blocks,
-                                                with_documents, stream);
+    status = sz_subdocuments_large_launch_cuda_(entry_points->large_tokens, blocks, with_documents, stream);
     for (level = 1; status == sz_success_k && level != large->levels; ++level)
-        large->round = level, status = sz_subdocuments_large_launch_cuda_(
-                                  (void const *)sz_subdocuments_large_minima_simt_kernel_, blocks, alone, stream);
+        large->round = level,
+        status = sz_subdocuments_large_launch_cuda_(entry_points->large_minima, blocks, alone, stream);
     if (status == sz_success_k)
-        status = sz_subdocuments_large_launch_cuda_((void const *)sz_subdocuments_large_parents_simt_kernel_, blocks,
-                                                    alone, stream);
+        status = sz_subdocuments_large_launch_cuda_(entry_points->large_parents, blocks, alone, stream);
     if (status == sz_success_k)
-        status = sz_subdocuments_large_launch_cuda_((void const *)sz_subdocuments_large_closes_simt_kernel_, blocks,
-                                                    alone, stream);
+        status = sz_subdocuments_large_launch_cuda_(entry_points->large_closes, blocks, alone, stream);
     if (status == sz_success_k)
-        status = sz_subdocuments_large_launch_cuda_((void const *)sz_subdocuments_large_sums_simt_kernel_, blocks,
-                                                    alone, stream);
-    if (status == sz_success_k) status = sz_subdocuments_large_scan_cuda_(large, large->sums, chunks + 1, 0, stream);
+        status = sz_subdocuments_large_launch_cuda_(entry_points->large_sums, blocks, alone, stream);
     if (status == sz_success_k)
-        status = sz_subdocuments_large_launch_cuda_((void const *)sz_subdocuments_large_offsets_simt_kernel_, blocks,
-                                                    alone, stream);
+        status = sz_subdocuments_large_scan_cuda_(large, large->sums, chunks + 1, 0, entry_points, stream);
     if (status == sz_success_k)
-        status = sz_subdocuments_large_launch_cuda_((void const *)sz_subdocuments_large_selectors_simt_kernel_, blocks,
-                                                    with_text, stream);
+        status = sz_subdocuments_large_launch_cuda_(entry_points->large_offsets, blocks, alone, stream);
+    if (status == sz_success_k)
+        status = sz_subdocuments_large_launch_cuda_(entry_points->large_selectors, blocks, with_text, stream);
 
     // Live sets advance once per step of the longest path, each time after
     // gathering what ancestors carry.
@@ -387,20 +369,19 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_large_cuda_(
     for (iteration = 0; status == sz_success_k && iteration <= iterations; ++iteration) {
         for (jump = 0; large->descendants && status == sz_success_k && jump <= rounds; ++jump)
             large->round = jump,
-            status = sz_subdocuments_large_launch_cuda_((void const *)sz_subdocuments_large_jump_simt_kernel_, blocks,
-                                                        with_engine, stream);
+            status = sz_subdocuments_large_launch_cuda_(entry_points->large_jump, blocks, with_engine, stream);
         large->carried_buffer = rounds & 1;
         if (status == sz_success_k && iteration != iterations)
-            status = sz_subdocuments_large_launch_cuda_((void const *)sz_subdocuments_large_advance_simt_kernel_,
-                                                        blocks, with_engine, stream);
+            status = sz_subdocuments_large_launch_cuda_(entry_points->large_advance, blocks, with_engine, stream);
     }
 
     // Counting checks every token and scans the matches, from which storing walks again.
-    if (status == sz_success_k) status = sz_subdocuments_large_walk_cuda_(engine, documents, round, large, stream);
-    if (status == sz_success_k) status = sz_subdocuments_large_scan_cuda_(large, large->matches, chunks + 1, 0, stream);
     if (status == sz_success_k)
-        status = sz_subdocuments_large_launch_cuda_((void const *)sz_subdocuments_large_finish_simt_kernel_, blocks,
-                                                    with_round, stream);
+        status = sz_subdocuments_large_walk_cuda_(engine, documents, round, large, entry_points, stream);
+    if (status == sz_success_k)
+        status = sz_subdocuments_large_scan_cuda_(large, large->matches, chunks + 1, 0, entry_points, stream);
+    if (status == sz_success_k)
+        status = sz_subdocuments_large_launch_cuda_(entry_points->large_finish, blocks, with_round, stream);
     return status;
 }
 
@@ -447,8 +428,8 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walks_cuda_(
     header.large_count = 0, header.large_chunks = 0, header.deepest = 0, header.large_bytes = STRINGZILLA_SIZE_MAX;
     status = sz_copy_cuda_(round.header, &header, sizeof(header), stream);
     if (status == sz_success_k && round.large_bytes != STRINGZILLA_SIZE_MAX)
-        status = sz_subdocuments_route_cuda_(documents, &round, stream);
-    if (status == sz_success_k) status = sz_subdocuments_launch_cuda_(engine, documents, &round, stream);
+        status = sz_subdocuments_route_cuda_(documents, &round, entry_points, stream);
+    if (status == sz_success_k) status = sz_subdocuments_launch_cuda_(engine, documents, &round, entry_points, stream);
     if (status == sz_success_k) status = sz_subdocuments_read_cuda_(&round, &header, stream);
 
     // The listed documents walk again side by side, on stacks as deep as the deepest needs, which
@@ -465,7 +446,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walks_cuda_(
             sz_subdocuments_round_cuda_(engine, count, staging, stacks, &round);
             round.listed = 1, round.items = (sz_size_t)header.deep_count, round.threads = deep_threads;
             round.frames = deep_frames;
-            status = sz_subdocuments_launch_cuda_(engine, documents, &round, stream);
+            status = sz_subdocuments_launch_cuda_(engine, documents, &round, entry_points, stream);
         }
         if (status == sz_success_k) status = sz_subdocuments_read_cuda_(&round, &header, stream);
     }
@@ -492,7 +473,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walks_cuda_(
                                          (sz_size_t)sz_subdocuments_blocks_cuda_k);
         grid.y = 1, grid.z = 1;
         block.x = sz_subdocuments_threads_per_block_simt_k, block.y = 1, block.z = 1;
-        return sz_launch_cuda_((void const *)sz_subdocuments_contains_cuda_kernel_, grid, block, arguments, 0, stream);
+        return sz_launch_cuda_(entry_points->contains, grid, block, arguments, 0, stream);
     }
     if (counts) return sz_success_k;
 
@@ -519,13 +500,14 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walks_cuda_(
     }
     round.storing = 1, round.listed = 0, round.items = count, round.threads = threads;
     round.frames = sz_subdocuments_frames_simt_k;
-    if (status == sz_success_k) status = sz_subdocuments_launch_cuda_(engine, documents, &round, stream);
+    if (status == sz_success_k) status = sz_subdocuments_launch_cuda_(engine, documents, &round, entry_points, stream);
     round.listed = 1, round.items = (sz_size_t)header.deep_count, round.threads = deep_threads,
     round.frames = deep_frames;
     if (status == sz_success_k && header.deep_count)
-        status = sz_subdocuments_launch_cuda_(engine, documents, &round, stream);
+        status = sz_subdocuments_launch_cuda_(engine, documents, &round, entry_points, stream);
     if (status == sz_success_k && header.large_count)
-        large.storing = 1, status = sz_subdocuments_large_walk_cuda_(engine, documents, &round, &large, stream);
+        large.storing = 1,
+        status = sz_subdocuments_large_walk_cuda_(engine, documents, &round, &large, entry_points, stream);
     return status;
 }
 
@@ -609,13 +591,172 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_find_scoped_cuda_(
 
 #pragma endregion Verbs
 
-/*  Each export makes the stream's device current around its helper, and restores the caller's. */
+/*  The shared passes, each over its body in <tt>subdocuments/kernels.cuh</tt>. */
 #if STRINGZILLA_TARGET_CUDA
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_walk_cuda_kernel_(sz_subdocuments_engine_t engine, sz_strings_view_t documents,
+                                      sz_subdocuments_round_simt_t round) {
+    sz_subdocuments_walk_documents_simt_(&engine, &documents, &round, (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x,
+                                         0, 1, (sz_simt_group_t const *)STRINGZILLA_NULL);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_contains_cuda_kernel_(sz_size_t const *counted, sz_u1x8_t *contained, sz_size_t count) {
+    sz_subdocuments_contains_simt_(counted, contained, count, sz_lanes_ballot_cuda_);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_route_cuda_kernel_(sz_strings_view_t documents, sz_subdocuments_round_simt_t round) {
+    sz_subdocuments_route_simt_(documents, round);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_lengths_cuda_kernel_(sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_lengths_simt_(large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_summary_cuda_kernel_(sz_strings_view_t documents, sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_summary_simt_(documents, large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_count_cuda_kernel_(sz_strings_view_t documents, sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_count_simt_(documents, large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_check_cuda_kernel_(sz_subdocuments_round_simt_t round, sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_check_simt_(round, large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_tokens_cuda_kernel_(sz_strings_view_t documents, sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_tokens_simt_(documents, large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_minima_cuda_kernel_(sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_minima_simt_(large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_parents_cuda_kernel_(sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_parents_simt_(large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_closes_cuda_kernel_(sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_closes_simt_(large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_sums_cuda_kernel_(sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_sums_simt_(large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_offsets_cuda_kernel_(sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_offsets_simt_(large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_selectors_cuda_kernel_(sz_subdocuments_engine_t engine, sz_strings_view_t documents,
+                                                 sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_selectors_simt_(engine, documents, large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_jump_cuda_kernel_(sz_subdocuments_engine_t engine, sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_jump_simt_(engine, large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_advance_cuda_kernel_(sz_subdocuments_engine_t engine, sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_advance_simt_(engine, large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_walk_cuda_kernel_(sz_subdocuments_engine_t engine, sz_strings_view_t documents,
+                                            sz_subdocuments_round_simt_t round, sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_walk_simt_(engine, documents, round, large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_finish_cuda_kernel_(sz_subdocuments_round_simt_t round, sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_finish_simt_(round, large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_drop_cuda_kernel_(sz_subdocuments_round_simt_t round, sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_drop_simt_(round, large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_warp_walk_cuda_kernel_(sz_subdocuments_engine_t engine, sz_strings_view_t documents,
+                                           sz_subdocuments_round_simt_t round) {
+    sz_subdocuments_warp_walk_cuda_(engine, documents, round);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k, sz_subdocuments_walk_blocks_cuda_k)
+    sz_subdocuments_warp_walk_dense_cuda_kernel_(sz_subdocuments_engine_t engine, sz_strings_view_t documents,
+                                                 sz_subdocuments_round_simt_t round) {
+    sz_subdocuments_warp_walk_cuda_(engine, documents, round);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_reduce_cuda_kernel_(sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_reduce_simt_(&large, sz_subdocuments_block_scan_bounded_cuda_);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_carry_cuda_kernel_(sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_carry_simt_(&large, sz_subdocuments_block_scan_cuda_);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_apply_cuda_kernel_(sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_apply_simt_(&large, sz_subdocuments_block_scan_bounded_cuda_);
+}
+
+/** @ref sz_subdocuments_scan_tile_simt_ over CUDA's warps. */
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_scan_cuda_kernel_(sz_size_t *values, sz_size_t count, sz_size_t elements_per_tile, sz_size_t *chain,
+                                      sz_u64_t *states) {
+    sz_subdocuments_scan_tile_simt_(values, count, elements_per_tile, chain, states, sz_block_scan_cuda_,
+                                    sz_block_sum_cuda_, sz_chain_tile_simt_, sz_chain_look_back_cuda_);
+}
+
+/*  Each export makes the stream's device current around its helper, and restores the caller's. */
 
 /** The CUDA tier's entry points, scanning through @c shfl.sync and publishing depths by atomics. */
 static sz_subdocuments_entry_points_cuda_t const sz_subdocuments_entry_points_cuda_ = {
     (void const *)sz_subdocuments_scan_cuda_kernel_,
-    (void const *)sz_subdocuments_large_drop_simt_kernel_,
+    (void const *)sz_subdocuments_large_drop_cuda_kernel_,
+    (void const *)sz_subdocuments_walk_cuda_kernel_,
+    (void const *)sz_subdocuments_warp_walk_cuda_kernel_,
+    (void const *)sz_subdocuments_warp_walk_dense_cuda_kernel_,
+    (void const *)sz_subdocuments_contains_cuda_kernel_,
+    (void const *)sz_subdocuments_route_cuda_kernel_,
+    (void const *)sz_subdocuments_large_lengths_cuda_kernel_,
+    (void const *)sz_subdocuments_large_summary_cuda_kernel_,
+    (void const *)sz_subdocuments_large_count_cuda_kernel_,
+    (void const *)sz_subdocuments_large_check_cuda_kernel_,
+    (void const *)sz_subdocuments_large_tokens_cuda_kernel_,
+    (void const *)sz_subdocuments_large_minima_cuda_kernel_,
+    (void const *)sz_subdocuments_large_parents_cuda_kernel_,
+    (void const *)sz_subdocuments_large_closes_cuda_kernel_,
+    (void const *)sz_subdocuments_large_sums_cuda_kernel_,
+    (void const *)sz_subdocuments_large_offsets_cuda_kernel_,
+    (void const *)sz_subdocuments_large_selectors_cuda_kernel_,
+    (void const *)sz_subdocuments_large_jump_cuda_kernel_,
+    (void const *)sz_subdocuments_large_advance_cuda_kernel_,
+    (void const *)sz_subdocuments_large_walk_cuda_kernel_,
+    (void const *)sz_subdocuments_large_finish_cuda_kernel_,
+    (void const *)sz_subdocuments_large_reduce_cuda_kernel_,
+    (void const *)sz_subdocuments_large_carry_cuda_kernel_,
+    (void const *)sz_subdocuments_large_apply_cuda_kernel_,
     1,
     sz_cap_cuda_k,
 };
@@ -672,8 +813,8 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_cuda(sz_subdocuments_engine_t *
 
 #endif // STRINGZILLA_TARGET_CUDA
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
 #endif // STRINGZILLA_ARCH_CUDA_
 #endif // STRINGZILLA_SUBDOCUMENTS_CUDA_CUH_

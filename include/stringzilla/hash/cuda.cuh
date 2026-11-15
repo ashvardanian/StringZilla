@@ -10,16 +10,30 @@
 #ifndef STRINGZILLA_HASH_CUDA_CUH_
 #define STRINGZILLA_HASH_CUDA_CUH_
 
-#include "stringzilla/cuda.cuh"
-#include "stringzilla/hash/simt.cuh"
+#include "stringzilla/types.h"
 
 #if STRINGZILLA_ARCH_CUDA_
 
-#ifdef __cplusplus
+#include "stringzilla/cuda.cuh"
+#include "stringzilla/hash/simt.cuh"
+
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
 #if STRINGZILLA_TARGET_CUDA
+
+/** @ref sz_sha256_multistate_update_simt_ as a CUDA kernel. */
+static __global__ void __launch_bounds__(sz_sha256_threads_per_block_simt_k)
+    sz_sha256_multistate_update_cuda_kernel_(sz_sha256_state_t *states, sz_strings_view_t texts) {
+    sz_sha256_multistate_update_simt_(states, texts);
+}
+
+/** @ref sz_sha256_multistate_digest_simt_ as a CUDA kernel. */
+static __global__ void __launch_bounds__(sz_sha256_threads_per_block_simt_k)
+    sz_sha256_multistate_digest_cuda_kernel_(sz_sha256_state_t const *states, sz_size_t count, sz_u8_t *digests) {
+    sz_sha256_multistate_digest_simt_(states, count, digests);
+}
 
 STRINGZILLA_INLINE sz_status_t sz_sha256_multistate_update_cuda_(sz_sha256_state_t *states,
                                                                  sz_strings_view_t const *texts, sz_stream_t stream) {
@@ -28,7 +42,7 @@ STRINGZILLA_INLINE sz_status_t sz_sha256_multistate_update_cuda_(sz_sha256_state
     if (!sz_strings_accessible_cuda_(texts) || !sz_memory_accessible_cuda_(states)) return sz_device_memory_mismatch_k;
     void *arguments[] = {&states, &launched_texts};
     dim3 const grid((unsigned)sz_size_divide_round_up(texts->count, sz_sha256_threads_per_block_simt_k));
-    return sz_launch_cuda_((void const *)&sz_sha256_multistate_update_simt_kernel_, grid,
+    return sz_launch_cuda_((void const *)&sz_sha256_multistate_update_cuda_kernel_, grid,
                            dim3(sz_sha256_threads_per_block_simt_k), arguments, 0, stream);
 }
 
@@ -39,7 +53,7 @@ STRINGZILLA_INLINE sz_status_t sz_sha256_multistate_digest_cuda_(sz_sha256_state
     if (!sz_memory_accessible_cuda_(states) || !sz_memory_accessible_cuda_(digests)) return sz_device_memory_mismatch_k;
     void *arguments[] = {&states, &states_count, &digests};
     dim3 const grid((unsigned)sz_size_divide_round_up(states_count, sz_sha256_threads_per_block_simt_k));
-    return sz_launch_cuda_((void const *)&sz_sha256_multistate_digest_simt_kernel_, grid,
+    return sz_launch_cuda_((void const *)&sz_sha256_multistate_digest_cuda_kernel_, grid,
                            dim3(sz_sha256_threads_per_block_simt_k), arguments, 0, stream);
 }
 
@@ -65,8 +79,8 @@ STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_cuda(sz_sha256_state_t c
 
 #endif // STRINGZILLA_TARGET_CUDA
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
 
 #endif // STRINGZILLA_ARCH_CUDA_

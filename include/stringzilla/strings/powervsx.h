@@ -10,16 +10,18 @@
 #define STRINGZILLA_STRINGS_POWERVSX_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_PPC64_
+#if STRINGZILLA_ARCH_PPC64_POWERVSX_
+
 #include "stringzilla/find/powervsx.h" // `sz_find_byteset_powervsx_`
 #include "stringzilla/utf8_norm.h"     // `sz_utf8_norm_powervsx`, `sz_utf8_find_denormalized_powervsx`
 #include "stringzilla/strings/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_PPC64_
-#if STRINGZILLA_TARGET_POWERVSX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("power9-vector"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -93,6 +95,8 @@ STRINGZILLA_INLINE sz_strings_walks_t sz_strings_walks_powervsx_(void) {
     return walks;
 }
 
+#if STRINGZILLA_TARGET_POWERVSX
+
 STRINGZILLA_API sz_status_t sz_strings_to_tape_powervsx(sz_strings_view_t const *strings, sz_size_t const *order,
                                                         sz_size_t count, sz_allocator_t *allocator,
                                                         sz_strings_span_t *tape, sz_stream_t stream) {
@@ -142,16 +146,19 @@ STRINGZILLA_API sz_status_t sz_strings_normalize_powervsx(sz_strings_view_t cons
     return sz_strings_normalize_with_(strings, order, count, form, allocator, tape, &sz_utf8_norm_powervsx);
 }
 
+#endif // STRINGZILLA_TARGET_POWERVSX
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_POWERVSX
-#endif // STRINGZILLA_ARCH_PPC64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_PPC64_POWERVSX_
+#endif // STRINGZILLA_ARCH_PPC64_
 
 #endif // STRINGZILLA_STRINGS_POWERVSX_H_

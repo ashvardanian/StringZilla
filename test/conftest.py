@@ -53,7 +53,7 @@ def pytest_report_header() -> list[str]:
         f"- Platform: {platform.platform()}",
         f"- Architecture: {platform.machine()}",
         f"- StringZilla: {sz.__version__} from {sz.__file__}",
-        f"- Capabilities: {sz.cpu_capabilities_enabled()!r}",
+        f"- Capabilities: {sz.capabilities_enabled_cpu()!r}",
         f"- NumPy: {np.__version__ if numpy_available else 'none'}",
         f"- PyArrow: {pa.__version__ if pyarrow_available else 'none'}",
         f"- Seed: {SETTINGS.seed}",

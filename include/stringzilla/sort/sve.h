@@ -10,15 +10,17 @@
 #define STRINGZILLA_SORT_SVE_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/sort/serial.h"
-#include "stringzilla/sort/neon.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #if STRINGZILLA_ARCH_ARM64_
 #if STRINGZILLA_ARCH_ARM64_SVE_
+
+#include "stringzilla/sort/serial.h"
+#include "stringzilla/sort/neon.h"
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -388,11 +390,12 @@ STRINGZILLA_API sz_status_t sz_sort_uncased_order_sve(                        //
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_ARM64_SVE_
 #endif // STRINGZILLA_ARCH_ARM64_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_SORT_SVE_H_

@@ -10,10 +10,14 @@
 #define STRINGZILLA_FIND_V128RELAXED_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_WASM_
+#if STRINGZILLA_ARCH_WASM_V128RELAXED_
+
 #include "stringzilla/find/serial.h"
 #include "stringzilla/find/v128.h" // baseline SIMD128 fallbacks
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -26,8 +30,6 @@ extern "C" {
  *  @c rfind_byte, @c find, and @c rfind delegate to the baseline. @c relaxed_swizzle is the one
  *  find-family win, and it is already used by the byteset kernels below, whose bit-table index is
  *  provably in [0, 7], so relaxed equals strict. */
-#if STRINGZILLA_ARCH_WASM_
-#if STRINGZILLA_TARGET_V128RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
 #endif
@@ -36,6 +38,8 @@ STRINGZILLA_INLINE sz_cptr_t sz_find_byte_v128relaxed_(sz_cptr_t haystack, sz_si
                                                        sz_cptr_t needle) {
     return sz_find_byte_v128_(haystack, haystack_length, needle);
 }
+
+#if STRINGZILLA_TARGET_V128RELAXED
 
 STRINGZILLA_API sz_status_t sz_find_byte_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                                      sz_cptr_t *match, sz_stream_t stream) {
@@ -200,14 +204,17 @@ STRINGZILLA_API sz_status_t sz_rfind_byteset_v128relaxed(sz_cptr_t haystack, sz_
     return sz_success_k;
 }
 
+#endif // STRINGZILLA_TARGET_V128RELAXED
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
-#endif // STRINGZILLA_TARGET_V128RELAXED
-#endif // STRINGZILLA_ARCH_WASM_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_WASM_V128RELAXED_
+#endif // STRINGZILLA_ARCH_WASM_
 
 #endif // STRINGZILLA_FIND_V128RELAXED_H_

@@ -15,15 +15,19 @@
 #ifndef STRINGZILLA_OVERLAP_CDNA5_CUH_
 #define STRINGZILLA_OVERLAP_CDNA5_CUH_
 
+#include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_ROCM_
+#if STRINGZILLA_ARCH_ROCM_CDNA5_
+
 #include "stringzilla/overlap/rocm.cuh"
 #include "stringzilla/levenshtein/cdna5.cuh" // `sz_shuffle_up_cdna5_`
 
-#if STRINGZILLA_ARCH_ROCM_
-#if STRINGZILLA_TARGET_CDNA5
-
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
+
+#if STRINGZILLA_TARGET_CDNA5
 
 static __global__ void __launch_bounds__(sz_overlap_candidates_per_block_rocm_k)
     sz_overlap_scores_cdna5_kernel_(sz_overlap_engine_t engine, sz_strings_view_t candidates, sz_u32_t *matches,
@@ -61,9 +65,11 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_cdna5(sz_overlap_engine_t *engine,
                                           (void const *)sz_overlap_bounded_scores_cdna5_kernel_, stream);
 }
 
-#ifdef __cplusplus
-}
-#endif
 #endif // STRINGZILLA_TARGET_CDNA5
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+#endif // STRINGZILLA_ARCH_ROCM_CDNA5_
 #endif // STRINGZILLA_ARCH_ROCM_
 #endif // STRINGZILLA_OVERLAP_CDNA5_CUH_

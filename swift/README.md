@@ -201,14 +201,14 @@ print(try cpu.capabilitiesEnabled.contains(.neon)) // `Capabilities` is an `Opti
 
 // The two raw axes, when you specifically mean one of them:
 let onThisCpu = try cpu.capabilitiesDetected
-let inThisBinary = cpu.capabilitiesCompiled
+let inThisBinary = try cpu.capabilitiesCompiled
 
 // Prepare each thread that runs kernels:
 try cpu.configureThread(cpu.capabilitiesEnabled)
 ```
 
 - `capabilitiesDetected` is what the device can execute, from CPUID or HWCAP on the CPU.
-- `capabilitiesCompiled` is what this binary contains for devices of its kind, from the ISA probes at build time.
+- `capabilitiesCompiled` is what this binary contains for the device, from the ISA probes at build time and, on a GPU, the codes each unit carries.
 - `capabilitiesEnabled` is what dispatch uses, both axes at once, and on the CPU always contains `.serial`.
 - `configureThread(_:)` prepares the calling thread for the kernels of its argument, once per thread that runs them.
 

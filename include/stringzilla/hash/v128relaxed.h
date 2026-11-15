@@ -10,10 +10,14 @@
 #define STRINGZILLA_HASH_V128RELAXED_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_WASM_
+#if STRINGZILLA_ARCH_WASM_V128RELAXED_
+
 #include "stringzilla/hash/serial.h"
 #include "stringzilla/hash/v128.h" // baseline SIMD128 fallbacks
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -34,8 +38,6 @@ extern "C" {
  *  multi-instruction sequence and may be SLOWER than the baseline @c extadd path; native
  *  relaxed-simd engines lower it to a single MAC and win. The level is exposed regardless;
  *  correctness is exact. */
-#if STRINGZILLA_ARCH_WASM_
-#if STRINGZILLA_TARGET_V128RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
 #endif
@@ -80,6 +82,8 @@ STRINGZILLA_INLINE sz_u64_t sz_bytesum_v128relaxed_(sz_cptr_t text, sz_size_t le
     while (length--) sum += *(sz_u8_t const *)text++;
     return sum;
 }
+
+#if STRINGZILLA_TARGET_V128RELAXED
 
 STRINGZILLA_API sz_status_t sz_bytesum_v128relaxed(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum,
                                                    sz_stream_t stream) {
@@ -532,14 +536,17 @@ STRINGZILLA_API sz_status_t sz_hash_multiseed_v128relaxed(sz_cptr_t text, sz_siz
 
 #pragma endregion Hash with relaxed SIMD AES
 
+#endif // STRINGZILLA_TARGET_V128RELAXED
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
-#endif // STRINGZILLA_TARGET_V128RELAXED
-#endif // STRINGZILLA_ARCH_WASM_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_WASM_V128RELAXED_
+#endif // STRINGZILLA_ARCH_WASM_
 
 #endif // STRINGZILLA_HASH_V128RELAXED_H_

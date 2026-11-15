@@ -11,15 +11,18 @@
 #ifndef STRINGZILLA_UTF8_UNCASED_FOLD_CUDA_CUH_
 #define STRINGZILLA_UTF8_UNCASED_FOLD_CUDA_CUH_
 
+#include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_CUDA_
+
 #include "stringzilla/cuda.cuh"
 #include "stringzilla/utf8_uncased_fold/simt.cuh"
 
-#if STRINGZILLA_ARCH_CUDA_
-#if STRINGZILLA_TARGET_CUDA
-
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
+
+#if STRINGZILLA_TARGET_CUDA
 
 /** Bytes one thread folds at the least, which keeps a short text to few tiles. */
 enum { sz_utf8_uncased_fold_thread_bytes_cuda_k = 64 };
@@ -82,9 +85,11 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_cuda(sz_cptr_t source, sz_size_
     return sz_utf8_uncased_fold_scoped_cuda_(source, source_length, target, target_length, stream);
 }
 
-#ifdef __cplusplus
-}
-#endif
 #endif // STRINGZILLA_TARGET_CUDA
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_CUDA_
 #endif // STRINGZILLA_UTF8_UNCASED_FOLD_CUDA_CUH_

@@ -25,14 +25,16 @@
 #define STRINGZILLA_UTF8_NORM_LOONGSONASX_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_LOONGARCH64_
+#if STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+
 #include "stringzilla/utf8_norm/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_LOONGARCH64_
-#if STRINGZILLA_TARGET_LOONGSONASX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("lasx"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -141,6 +143,8 @@ STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_norm_classify_loongsonasx_(sz_cptr_t tex
     return sz_utf8_norm_verify_block_(&position, end, end, form_flag, &previous_canonical_combining_class);
 }
 
+#if STRINGZILLA_TARGET_LOONGSONASX
+
 STRINGZILLA_API sz_status_t sz_utf8_norm_loongsonasx(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
                                                      sz_ptr_t target, sz_size_t *target_length, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
@@ -158,16 +162,19 @@ STRINGZILLA_API sz_status_t sz_utf8_find_denormalized_loongsonasx(sz_cptr_t sour
     return sz_success_k;
 }
 
+#endif // STRINGZILLA_TARGET_LOONGSONASX
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_LOONGSONASX
-#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
 #endif // STRINGZILLA_UTF8_NORM_LOONGSONASX_H_

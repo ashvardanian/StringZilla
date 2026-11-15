@@ -72,19 +72,20 @@ extern "C" {
     pub(crate) fn sz_capabilities_detected_cpu(capabilities: *mut sz_capability_t) -> sz_status_t;
     pub(crate) fn sz_capabilities_compiled_cpu(capabilities: *mut sz_capability_t) -> sz_status_t;
     pub(crate) fn sz_capabilities_enabled_cpu(capabilities: *mut sz_capability_t) -> sz_status_t;
-    pub(crate) fn sz_thread_configure_cpu(capabilities: sz_capability_t) -> sz_status_t;
-    pub(crate) fn sz_device_count_cuda(count: *mut sz_size_t) -> sz_status_t;
+    pub(crate) fn sz_configure_thread_cpu(capabilities: sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_count_devices_cuda(count: *mut sz_size_t) -> sz_status_t;
     pub(crate) fn sz_capabilities_detected_cuda(ordinal: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
-    pub(crate) fn sz_capabilities_compiled_cuda(capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_capabilities_compiled_cuda(ordinal: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
     pub(crate) fn sz_capabilities_enabled_cuda(ordinal: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
-    pub(crate) fn sz_device_count_rocm(count: *mut sz_size_t) -> sz_status_t;
+    pub(crate) fn sz_count_devices_rocm(count: *mut sz_size_t) -> sz_status_t;
     pub(crate) fn sz_capabilities_detected_rocm(ordinal: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
-    pub(crate) fn sz_capabilities_compiled_rocm(capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_capabilities_compiled_rocm(ordinal: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
     pub(crate) fn sz_capabilities_enabled_rocm(ordinal: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
-    pub(crate) fn sz_device_count_metal(count: *mut sz_size_t) -> sz_status_t;
+    pub(crate) fn sz_count_devices_metal(count: *mut sz_size_t) -> sz_status_t;
     pub(crate) fn sz_capabilities_detected_metal(ordinal: sz_size_t, capabilities: *mut sz_capability_t)
         -> sz_status_t;
-    pub(crate) fn sz_capabilities_compiled_metal(capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_capabilities_compiled_metal(ordinal: sz_size_t, capabilities: *mut sz_capability_t)
+        -> sz_status_t;
     pub(crate) fn sz_capabilities_enabled_metal(ordinal: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
     pub(crate) fn sz_stream_init_cuda(ordinal: sz_size_t, stream: *mut sz_stream_t) -> sz_status_t;
     pub(crate) fn sz_stream_free_cuda(stream: sz_stream_t) -> sz_status_t;

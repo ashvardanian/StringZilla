@@ -352,7 +352,7 @@ STRINGZILLA_INLINE void sz_prefetch_cuda_(void const *pointer, sz_size_t bytes, 
 #pragma region Devices
 
 /** How many CUDA devices the runtime sees, or zero. */
-STRINGZILLA_INLINE sz_size_t sz_device_count_cuda_(void) {
+STRINGZILLA_INLINE sz_size_t sz_count_devices_cuda_(void) {
     int count = 0;
     return cudaGetDeviceCount(&count) == cudaSuccess ? (sz_size_t)count : 0;
 }
@@ -362,7 +362,7 @@ STRINGZILLA_INLINE sz_size_t sz_device_count_cuda_(void) {
 STRINGZILLA_INLINE sz_status_t sz_capabilities_detected_cuda_(sz_size_t ordinal, sz_capability_t *capabilities) {
     int multiprocessors = 0, major = 0;
     *capabilities = 0;
-    if (ordinal >= sz_device_count_cuda_()) return sz_missing_gpu_k;
+    if (ordinal >= sz_count_devices_cuda_()) return sz_missing_gpu_k;
     if (cudaDeviceGetAttribute(&multiprocessors, cudaDevAttrMultiProcessorCount, (int)ordinal) != cudaSuccess ||
         cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, (int)ordinal) != cudaSuccess)
         return sz_device_code_mismatch_k;
@@ -380,7 +380,7 @@ STRINGZILLA_INLINE sz_status_t sz_stream_init_cuda_(sz_size_t ordinal, sz_stream
     sz_status_t status = sz_success_k;
     cudaStream_t created = STRINGZILLA_NULL;
     *stream = STRINGZILLA_NULL;
-    if (ordinal >= sz_device_count_cuda_()) return sz_missing_gpu_k;
+    if (ordinal >= sz_count_devices_cuda_()) return sz_missing_gpu_k;
     if (cudaGetDevice(&caller) != cudaSuccess || cudaSetDevice((int)ordinal) != cudaSuccess) return sz_missing_gpu_k;
     if (cudaStreamCreate(&created) != cudaSuccess) status = sz_bad_alloc_k;
     sz_device_leave_cuda_(caller);
@@ -540,8 +540,8 @@ STRINGZILLA_DEVICE sz_size_t sz_chain_look_back_cuda_(sz_u64_t *states, sz_size_
  *  here. */
 #if STRINGZILLA_HEADER_ONLY
 
-STRINGZILLA_API sz_status_t sz_device_count_cuda(sz_size_t *count) {
-    *count = sz_device_count_cuda_();
+STRINGZILLA_API sz_status_t sz_count_devices_cuda(sz_size_t *count) {
+    *count = sz_count_devices_cuda_();
     return *count ? sz_success_k : sz_missing_gpu_k;
 }
 

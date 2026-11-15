@@ -23,15 +23,17 @@
 #define STRINGZILLA_UTF8_NORM_V128_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_uncased_fold/v128.h" // `sz_utf8_gather64_v128_`, `sz_utf8_uncased_fold_v128_`
-#include "stringzilla/utf8_norm/serial.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #if STRINGZILLA_ARCH_WASM_
 #if STRINGZILLA_ARCH_WASM_V128_
+
+#include "stringzilla/utf8_uncased_fold/v128.h" // `sz_utf8_gather64_v128_`, `sz_utf8_uncased_fold_v128_`
+#include "stringzilla/utf8_norm/serial.h"
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
@@ -126,11 +128,12 @@ STRINGZILLA_API sz_status_t sz_utf8_find_denormalized_v128(sz_cptr_t source, sz_
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_WASM_V128_
 #endif // STRINGZILLA_ARCH_WASM_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_UTF8_NORM_V128_H_

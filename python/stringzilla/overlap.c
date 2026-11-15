@@ -289,8 +289,8 @@ static char const doc_OverlapEngine[] =                                         
     "  widths (sequence of int): Window widths in bytes, the last axis of every output.\n"           //
     "  candidates_budget (int, optional): The most candidates one round may carry on a device,\n"    //
     "    ignored on the CPU.\n"                                                                      //
-    "  capabilities (Capability, optional): A producer's mask, like cuda_capabilities_enabled(0),\n" //
-    "    defaulting to cpu_capabilities_enabled().\n"                                                //
+    "  capabilities (Capability, optional): A producer's mask, like capabilities_enabled_cuda(0),\n" //
+    "    defaulting to capabilities_enabled_cpu().\n"                                                //
     "  stream (int, optional): A stream of that vendor as an integer, naming the device, or None\n"  //
     "    for the default.\n"                                                                         //
     "Example:\n"                                                                                     //

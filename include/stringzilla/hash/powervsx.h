@@ -10,14 +10,16 @@
 #define STRINGZILLA_HASH_POWERVSX_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_PPC64_
+#if STRINGZILLA_ARCH_PPC64_POWERVSX_
+
 #include "stringzilla/hash/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_PPC64_
-#if STRINGZILLA_TARGET_POWERVSX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("power9-vector"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -53,6 +55,8 @@ STRINGZILLA_INLINE sz_u64_t sz_bytesum_powervsx_(sz_cptr_t text, sz_size_t lengt
     while (length--) sum += *(sz_u8_t const *)text++;
     return sum;
 }
+
+#if STRINGZILLA_TARGET_POWERVSX
 
 STRINGZILLA_API sz_status_t sz_bytesum_powervsx(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum,
                                                 sz_stream_t stream) {
@@ -929,16 +933,19 @@ STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_powervsx(sz_sha256_state
 
 #pragma endregion SHA256
 
+#endif // STRINGZILLA_TARGET_POWERVSX
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_POWERVSX
-#endif // STRINGZILLA_ARCH_PPC64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_PPC64_POWERVSX_
+#endif // STRINGZILLA_ARCH_PPC64_
 
 #endif // STRINGZILLA_HASH_POWERVSX_H_

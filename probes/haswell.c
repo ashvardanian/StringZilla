@@ -5,7 +5,7 @@
  *  @brief Whether the toolchain builds the Haswell kernels, the x86-64 AVX2 and BMI2 kit.
  */
 #define STRINGZILLA_HEADER_ONLY 1
-#define STRINGZILLA_TARGET_HASWELL 1
+#define STRINGZILLA_ARCH_X8664_HASWELL_ 1
 #include <stringzilla/find/haswell.h>
 
 int main(void) {

@@ -10,14 +10,16 @@
 #define STRINGZILLA_HASH_HASWELL_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/hash/serial.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_ARCH_X8664_HASWELL_
+
+#include "stringzilla/hash/serial.h"
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -663,11 +665,12 @@ STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_haswell(sz_sha256_state_
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_X8664_HASWELL_
 #endif // STRINGZILLA_ARCH_X8664_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_HASH_HASWELL_H_

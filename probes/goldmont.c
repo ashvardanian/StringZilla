@@ -5,7 +5,7 @@
  *  @brief Whether the toolchain builds the Goldmont kernels, the x86-64 SHA-NI kit.
  */
 #define STRINGZILLA_HEADER_ONLY 1
-#define STRINGZILLA_TARGET_GOLDMONT 1
+#define STRINGZILLA_ARCH_X8664_GOLDMONT_ 1
 #include <stringzilla/hash/goldmont.h>
 
 int main(void) {

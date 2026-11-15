@@ -746,8 +746,8 @@ static char const doc_SubstringsEngine[] =                                      
     "  hot_states (int, optional): States kept in the dense hot rows; None sizes them automatically.\n" //
     "  matches_budget (int, optional): Matches one round may emit, read by a device tier only.\n"       //
     "  haystacks_budget (int, optional): Haystacks one round may carry, read by a device tier only.\n"  //
-    "  capabilities (Capability, optional): A producer's mask, like cuda_capabilities_enabled(0),\n"    //
-    "    defaulting to cpu_capabilities_enabled().\n"                                                   //
+    "  capabilities (Capability, optional): A producer's mask, like capabilities_enabled_cuda(0),\n"    //
+    "    defaulting to capabilities_enabled_cpu().\n"                                                   //
     "  stream (int, optional): A stream of that vendor as an integer, naming the device, or None\n"     //
     "    for the default.\n"                                                                            //
     "Example:\n"                                                                                        //

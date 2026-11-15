@@ -5,7 +5,7 @@
  *  @brief Whether the toolchain builds the Ice Lake kernels, x86-64 AVX-512 with VBMI, VNNI, VAES.
  */
 #define STRINGZILLA_HEADER_ONLY 1
-#define STRINGZILLA_TARGET_ICELAKE 1
+#define STRINGZILLA_ARCH_X8664_ICELAKE_ 1
 #include <stringzilla/hash/icelake.h>
 
 int main(void) {

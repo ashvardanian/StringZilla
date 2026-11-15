@@ -10,9 +10,15 @@
 #define STRINGZILLA_HASH_RVV_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_RISCV64_
+#if STRINGZILLA_ARCH_RISCV64_RVV_
+
 #include "stringzilla/hash/serial.h"
 
-#ifdef __cplusplus
+#include <riscv_vector.h>
+
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -26,11 +32,6 @@ extern "C" {
  *  byte load down to @c u8m4 (half the per-strip throughput), and that loss dwarfs the
  *  saving from a single cheap per-strip @c vwredsumu. So the cheap-reduction-per-strip form
  *  below is kept deliberately. */
-#if STRINGZILLA_ARCH_RISCV64_
-#if STRINGZILLA_ARCH_RISCV64_RVV_
-
-#include <riscv_vector.h>
-
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("arch=+v"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -591,11 +592,12 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_rvv(sz_sha256_state_t const *
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_RISCV64_RVV_
 #endif // STRINGZILLA_ARCH_RISCV64_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_HASH_RVV_H_

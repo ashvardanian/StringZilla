@@ -581,12 +581,50 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_cuda(sz_substrings_engine_
                                                            sz_size_t scores_stride, sz_stream_t stream);
 #endif
 
+#if STRINGZILLA_TARGET_AMPERE
+/** @copydoc sz_substrings_engine_init */
+STRINGZILLA_API sz_status_t sz_substrings_engine_init_ampere(
+    sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_case_sensitivity_t case_sensitivity,
+    sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
+    sz_size_t haystacks_budget, sz_allocator_t *allocator, sz_stream_t stream);
+/** @copydoc sz_substrings_contains */
+STRINGZILLA_API sz_status_t sz_substrings_contains_ampere(sz_substrings_engine_t *engine,
+                                                          sz_strings_view_t const *haystacks, sz_u1x8_t *contained,
+                                                          sz_stream_t stream);
+/** @copydoc sz_substrings_counts */
+STRINGZILLA_API sz_status_t sz_substrings_counts_ampere(sz_substrings_engine_t *engine,
+                                                        sz_strings_view_t const *haystacks, sz_size_t *counts,
+                                                        sz_size_t counts_stride, sz_stream_t stream);
+/** @copydoc sz_substrings_find */
+STRINGZILLA_API sz_status_t sz_substrings_find_ampere(sz_substrings_engine_t *engine,
+                                                      sz_strings_view_t const *haystacks, sz_match_t *matches,
+                                                      sz_size_t matches_capacity, sz_size_t *matches_offsets,
+                                                      sz_stream_t stream);
+/** @copydoc sz_substrings_replace */
+STRINGZILLA_API sz_status_t sz_substrings_replace_ampere(sz_substrings_engine_t *engine,
+                                                         sz_strings_view_t const *haystacks,
+                                                         sz_strings_view_t const *replacements, sz_ptr_t target,
+                                                         sz_size_t target_capacity, sz_size_t *offsets,
+                                                         sz_stream_t stream);
+/** @copydoc sz_substrings_bm25_scores */
+STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_ampere(sz_substrings_engine_t *engine,
+                                                             sz_strings_view_t const *haystacks,
+                                                             sz_f32_t const *document_lengths,
+                                                             sz_substrings_bm25_t const *parameters,
+                                                             sz_f32_t const *needle_weights, sz_f32_t *scores,
+                                                             sz_size_t scores_stride, sz_stream_t stream);
+#endif
+
 #if STRINGZILLA_TARGET_HOPPER
 /** @copydoc sz_substrings_engine_init */
 STRINGZILLA_API sz_status_t sz_substrings_engine_init_hopper(
     sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
     sz_size_t haystacks_budget, sz_allocator_t *allocator, sz_stream_t stream);
+/** @copydoc sz_substrings_contains */
+STRINGZILLA_API sz_status_t sz_substrings_contains_hopper(sz_substrings_engine_t *engine,
+                                                          sz_strings_view_t const *haystacks, sz_u1x8_t *contained,
+                                                          sz_stream_t stream);
 /** @copydoc sz_substrings_counts */
 STRINGZILLA_API sz_status_t sz_substrings_counts_hopper(sz_substrings_engine_t *engine,
                                                         sz_strings_view_t const *haystacks, sz_size_t *counts,
@@ -642,6 +680,105 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_rocm(sz_substrings_engine_
                                                            sz_substrings_bm25_t const *parameters,
                                                            sz_f32_t const *needle_weights, sz_f32_t *scores,
                                                            sz_size_t scores_stride, sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_CDNA3
+/** @copydoc sz_substrings_engine_init */
+STRINGZILLA_API sz_status_t sz_substrings_engine_init_cdna3(
+    sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_case_sensitivity_t case_sensitivity,
+    sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
+    sz_size_t haystacks_budget, sz_allocator_t *allocator, sz_stream_t stream);
+/** @copydoc sz_substrings_contains */
+STRINGZILLA_API sz_status_t sz_substrings_contains_cdna3(sz_substrings_engine_t *engine,
+                                                         sz_strings_view_t const *haystacks, sz_u1x8_t *contained,
+                                                         sz_stream_t stream);
+/** @copydoc sz_substrings_counts */
+STRINGZILLA_API sz_status_t sz_substrings_counts_cdna3(sz_substrings_engine_t *engine,
+                                                       sz_strings_view_t const *haystacks, sz_size_t *counts,
+                                                       sz_size_t counts_stride, sz_stream_t stream);
+/** @copydoc sz_substrings_find */
+STRINGZILLA_API sz_status_t sz_substrings_find_cdna3(sz_substrings_engine_t *engine, sz_strings_view_t const *haystacks,
+                                                     sz_match_t *matches, sz_size_t matches_capacity,
+                                                     sz_size_t *matches_offsets, sz_stream_t stream);
+/** @copydoc sz_substrings_replace */
+STRINGZILLA_API sz_status_t sz_substrings_replace_cdna3(sz_substrings_engine_t *engine,
+                                                        sz_strings_view_t const *haystacks,
+                                                        sz_strings_view_t const *replacements, sz_ptr_t target,
+                                                        sz_size_t target_capacity, sz_size_t *offsets,
+                                                        sz_stream_t stream);
+/** @copydoc sz_substrings_bm25_scores */
+STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_cdna3(sz_substrings_engine_t *engine,
+                                                            sz_strings_view_t const *haystacks,
+                                                            sz_f32_t const *document_lengths,
+                                                            sz_substrings_bm25_t const *parameters,
+                                                            sz_f32_t const *needle_weights, sz_f32_t *scores,
+                                                            sz_size_t scores_stride, sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_CDNA4
+/** @copydoc sz_substrings_engine_init */
+STRINGZILLA_API sz_status_t sz_substrings_engine_init_cdna4(
+    sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_case_sensitivity_t case_sensitivity,
+    sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
+    sz_size_t haystacks_budget, sz_allocator_t *allocator, sz_stream_t stream);
+/** @copydoc sz_substrings_contains */
+STRINGZILLA_API sz_status_t sz_substrings_contains_cdna4(sz_substrings_engine_t *engine,
+                                                         sz_strings_view_t const *haystacks, sz_u1x8_t *contained,
+                                                         sz_stream_t stream);
+/** @copydoc sz_substrings_counts */
+STRINGZILLA_API sz_status_t sz_substrings_counts_cdna4(sz_substrings_engine_t *engine,
+                                                       sz_strings_view_t const *haystacks, sz_size_t *counts,
+                                                       sz_size_t counts_stride, sz_stream_t stream);
+/** @copydoc sz_substrings_find */
+STRINGZILLA_API sz_status_t sz_substrings_find_cdna4(sz_substrings_engine_t *engine, sz_strings_view_t const *haystacks,
+                                                     sz_match_t *matches, sz_size_t matches_capacity,
+                                                     sz_size_t *matches_offsets, sz_stream_t stream);
+/** @copydoc sz_substrings_replace */
+STRINGZILLA_API sz_status_t sz_substrings_replace_cdna4(sz_substrings_engine_t *engine,
+                                                        sz_strings_view_t const *haystacks,
+                                                        sz_strings_view_t const *replacements, sz_ptr_t target,
+                                                        sz_size_t target_capacity, sz_size_t *offsets,
+                                                        sz_stream_t stream);
+/** @copydoc sz_substrings_bm25_scores */
+STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_cdna4(sz_substrings_engine_t *engine,
+                                                            sz_strings_view_t const *haystacks,
+                                                            sz_f32_t const *document_lengths,
+                                                            sz_substrings_bm25_t const *parameters,
+                                                            sz_f32_t const *needle_weights, sz_f32_t *scores,
+                                                            sz_size_t scores_stride, sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_CDNA5
+/** @copydoc sz_substrings_engine_init */
+STRINGZILLA_API sz_status_t sz_substrings_engine_init_cdna5(
+    sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_case_sensitivity_t case_sensitivity,
+    sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
+    sz_size_t haystacks_budget, sz_allocator_t *allocator, sz_stream_t stream);
+/** @copydoc sz_substrings_contains */
+STRINGZILLA_API sz_status_t sz_substrings_contains_cdna5(sz_substrings_engine_t *engine,
+                                                         sz_strings_view_t const *haystacks, sz_u1x8_t *contained,
+                                                         sz_stream_t stream);
+/** @copydoc sz_substrings_counts */
+STRINGZILLA_API sz_status_t sz_substrings_counts_cdna5(sz_substrings_engine_t *engine,
+                                                       sz_strings_view_t const *haystacks, sz_size_t *counts,
+                                                       sz_size_t counts_stride, sz_stream_t stream);
+/** @copydoc sz_substrings_find */
+STRINGZILLA_API sz_status_t sz_substrings_find_cdna5(sz_substrings_engine_t *engine, sz_strings_view_t const *haystacks,
+                                                     sz_match_t *matches, sz_size_t matches_capacity,
+                                                     sz_size_t *matches_offsets, sz_stream_t stream);
+/** @copydoc sz_substrings_replace */
+STRINGZILLA_API sz_status_t sz_substrings_replace_cdna5(sz_substrings_engine_t *engine,
+                                                        sz_strings_view_t const *haystacks,
+                                                        sz_strings_view_t const *replacements, sz_ptr_t target,
+                                                        sz_size_t target_capacity, sz_size_t *offsets,
+                                                        sz_stream_t stream);
+/** @copydoc sz_substrings_bm25_scores */
+STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_cdna5(sz_substrings_engine_t *engine,
+                                                            sz_strings_view_t const *haystacks,
+                                                            sz_f32_t const *document_lengths,
+                                                            sz_substrings_bm25_t const *parameters,
+                                                            sz_f32_t const *needle_weights, sz_f32_t *scores,
+                                                            sz_size_t scores_stride, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_METAL

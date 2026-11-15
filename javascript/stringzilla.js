@@ -75,9 +75,9 @@ class Device {
         return compiled.capabilitiesDetected(deviceKindIndex(this.kind), this.ordinal);
     }
 
-    /** The capabilities compiled into this build for devices of this kind, as a bitmask. */
+    /** The capabilities compiled into this build that this device runs, as a bitmask. */
     capabilitiesCompiled() {
-        return compiled.capabilitiesCompiled(deviceKindIndex(this.kind));
+        return compiled.capabilitiesCompiled(deviceKindIndex(this.kind), this.ordinal);
     }
 
     /** The capabilities this device's calls run: detected and compiled at once, as a bitmask.

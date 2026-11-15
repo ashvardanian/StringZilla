@@ -2,6 +2,7 @@
 //
 // File: golang/capabilities_test.go
 // Author: Ash Vardanian
+// Date: September 25, 2026
 
 package sz_test
 
@@ -32,9 +33,13 @@ func TestCapabilityNames(t *testing.T) {
 		sz.CapLoongsonASX: "loongsonasx",
 		sz.CapPowerVSX:    "powervsx",
 		sz.CapCUDA:        "cuda",
+		sz.CapAmpere:      "ampere",
 		sz.CapHopper:      "hopper",
 		sz.CapBlackwell:   "blackwell",
 		sz.CapROCm:        "rocm",
+		sz.CapCDNA3:       "cdna3",
+		sz.CapCDNA4:       "cdna4",
+		sz.CapCDNA5:       "cdna5",
 		sz.CapMetal:       "metal",
 	} {
 		if got := capability.String(); got != expected {
@@ -51,7 +56,8 @@ func TestCapabilitiesEnabled(t *testing.T) {
 	}
 	t.Logf("StringZilla enabled capabilities: %v", enabled)
 	detected, _ := cpu.CapabilitiesDetected()
-	if enabled != detected&cpu.CapabilitiesCompiled() || !enabled.Has(sz.CapSerial) {
+	compiled, _ := cpu.CapabilitiesCompiled()
+	if enabled != detected&compiled || !enabled.Has(sz.CapSerial) {
 		t.Fatalf("CapabilitiesEnabled() = %v, expected serial plus detected and compiled capabilities", enabled)
 	}
 }
@@ -78,8 +84,9 @@ func TestDevices(t *testing.T) {
 			continue
 		}
 		gpu, err := sz.NewDevice(kind, 0)
-		if err != nil || gpu.CapabilitiesCompiled()&sz.CapCPUs != 0 {
-			t.Errorf("NewDevice(%d, 0) = %v, compiling %v", kind, err, gpu.CapabilitiesCompiled())
+		compiled, _ := gpu.CapabilitiesCompiled()
+		if err != nil || compiled&sz.CapCPUs != 0 {
+			t.Errorf("NewDevice(%d, 0) = %v, compiling %v", kind, err, compiled)
 		}
 		if _, err := gpu.ConfigureThread(sz.CapAny); err == nil {
 			t.Errorf("a GPU of kind %d configured a CPU thread", kind)

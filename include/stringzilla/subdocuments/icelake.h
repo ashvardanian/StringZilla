@@ -15,15 +15,16 @@
 
 #include "stringzilla/types.h"
 
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_ICELAKE_
+
 #include "stringzilla/find/skylake.h" // `sz_find_byte_skylake_`
 #include "stringzilla/subdocuments/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_X8664_
-#if STRINGZILLA_TARGET_ICELAKE
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(                                                                                        \
     __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt,evex512"))), \
@@ -59,6 +60,8 @@ STRINGZILLA_INLINE sz_subdocuments_block_t sz_subdocuments_classify_icelake_(sz_
                                          _mm512_test_epi8_mask(classes_u8x64, _mm512_set1_epi8(0x0C)),
                                          _mm512_test_epi8_mask(classes_u8x64, _mm512_set1_epi8((char)0xC0)), carry);
 }
+
+#if STRINGZILLA_TARGET_ICELAKE
 
 STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_icelake(
     sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths, sz_subdocuments_format_t format,
@@ -97,16 +100,19 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_icelake(sz_subdocuments_engine_
 
 #pragma endregion Ice Lake
 
+#endif // STRINGZILLA_TARGET_ICELAKE
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_ICELAKE
-#endif // STRINGZILLA_ARCH_X8664_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_X8664_ICELAKE_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #endif // STRINGZILLA_SUBDOCUMENTS_ICELAKE_H_

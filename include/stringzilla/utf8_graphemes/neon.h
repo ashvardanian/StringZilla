@@ -6,14 +6,19 @@
  */
 #ifndef STRINGZILLA_UTF8_GRAPHEMES_NEON_H_
 #define STRINGZILLA_UTF8_GRAPHEMES_NEON_H_
+
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_graphemes/serial.h"
-#include "stringzilla/utf8_runes/neon.h"
-#ifdef __cplusplus
-extern "C" {
-#endif
+
 #if STRINGZILLA_ARCH_ARM64_
 #if STRINGZILLA_ARCH_ARM64_NEON_
+
+#include "stringzilla/utf8_graphemes/serial.h"
+#include "stringzilla/utf8_runes/neon.h"
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -102,9 +107,11 @@ STRINGZILLA_API sz_status_t sz_utf8_graphemes_neon(sz_cptr_t text, sz_size_t len
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_ARM64_NEON_
 #endif // STRINGZILLA_ARCH_ARM64_
-#ifdef __cplusplus
-}
-#endif
 #endif

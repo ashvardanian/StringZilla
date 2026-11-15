@@ -1721,7 +1721,7 @@ inline device ulong const *sz_regex_flow_edge_metal_(thread sz_regex_round_metal
 
 /**
  *  @brief Bounds the set each chunk's walk of the round's flow hands downstream, one thread per
- *      chunk in each thread's share of the walks, as @c sz_regex_bound_simt_kernel_ does.
+ *      chunk in each thread's share of the walks, as @c sz_regex_bound_simt_ does.
  *
  *  A walk widening upstream stops at the haystack's edge or the segment's, where the set it starts
  *  from is known, so no walk leaves its segment; one still undecided past
@@ -1875,9 +1875,8 @@ kernel void sz_regex_flow_pieces_metal_kernel_(device uchar *engine [[buffer(0)]
     }
 }
 
-/** Maps the undecided elements each chunk hands on from those its upstream neighbour hands it,
- *  one thread per chunk in each thread's share of the walks, as
- *  @c sz_regex_affine_simt_kernel_ does. */
+/** Maps the undecided elements each chunk hands on from those its upstream neighbour hands it, one
+ *  thread per chunk in each thread's share of the walks, as @c sz_regex_affine_simt_ does. */
 kernel void sz_regex_affine_metal_kernel_(device uchar *engine [[buffer(0)]], device uchar *scratch [[buffer(1)]],
                                           device uchar const *haystacks [[buffer(2)]],
                                           device uchar const *haystacks_offsets [[buffer(3)]],
@@ -1928,7 +1927,7 @@ kernel void sz_regex_affine_metal_kernel_(device uchar *engine [[buffer(0)]], de
 }
 
 /** One round of pointer doubling over the chunks' affine maps,
- *  as @c sz_regex_affine_double_simt_kernel_ does. */
+ *  as @c sz_regex_affine_double_simt_ does. */
 kernel void sz_regex_affine_double_metal_kernel_(device uchar *scratch [[buffer(1)]],
                                                  constant sz_regex_arguments_metal_t &arguments [[buffer(10)]],
                                                  uint position [[thread_position_in_grid]],
@@ -1968,7 +1967,7 @@ kernel void sz_regex_affine_double_metal_kernel_(device uchar *scratch [[buffer(
 
 /** Walks each chunk's pieces from the sets handed to them, recording where the lookarounds of the
  *  round's pass hold, one thread per chunk in each thread's share of the walks, as
- *  @c sz_regex_looks_simt_kernel_ does. */
+ *  @c sz_regex_looks_simt_ does. */
 kernel void sz_regex_looks_metal_kernel_(device uchar *engine [[buffer(0)]], device uchar *scratch [[buffer(1)]],
                                          device uchar const *haystacks [[buffer(2)]],
                                          device uchar const *haystacks_offsets [[buffer(3)]],
@@ -2008,8 +2007,8 @@ kernel void sz_regex_looks_metal_kernel_(device uchar *engine [[buffer(0)]], dev
 }
 
 /** Writes the one-byte lookarounds holding at every slot of one chunk into the segment's half of
- *  the table, negated ones flipped, one thread per chunk, as @c sz_regex_singles_simt_kernel_
- *  does, for the passes to add to. */
+ *  the table, negated ones flipped, one thread per chunk, as @c sz_regex_singles_simt_ does, for
+ *  the passes to add to. */
 kernel void sz_regex_singles_metal_kernel_(device uchar *engine [[buffer(0)]], device uchar *scratch [[buffer(1)]],
                                            device uchar const *haystacks [[buffer(2)]],
                                            device uchar const *haystacks_offsets [[buffer(3)]],
@@ -2126,7 +2125,7 @@ inline ulong sz_regex_prime_edge_metal_(sz_regex_folding_metal_t folded,
 
 /**
  *  @brief Settles every wide chunk, one thread per run of unsettled chunks holding one, as
- *      @c sz_regex_prime_pieces_simt_kernel_ does.
+ *      @c sz_regex_prime_pieces_simt_ does.
  *
  *  The run's rightmost wide chunk walks its haystack right to left from the nearest exact state
  *  right of it: a settled chunk's entry, the reverse start where the haystack ends, or the next
@@ -2346,8 +2345,8 @@ kernel void sz_regex_mark_metal_kernel_(device uchar *engine [[buffer(0)]], devi
 constant uint sz_regex_prefixes_depth_metal_k = 3;
 
 /** Marks every slot of one chunk whose bytes keep some bucket of the engine's prefixes at every
- *  offset inside its haystack, one thread per chunk, as @c sz_regex_mark_prefixes_simt_kernel_
- *  does, in place of the start-finding walk and its priming; a haystack's last slot never is. */
+ *  offset inside its haystack, one thread per chunk, as @c sz_regex_mark_prefixes_simt_ does, in
+ *  place of the start-finding walk and its priming; a haystack's last slot never is. */
 kernel void sz_regex_mark_prefixes_metal_kernel_(device uchar *engine [[buffer(0)]],
                                                  device uchar *scratch [[buffer(1)]],
                                                  device uchar const *haystacks [[buffer(2)]],
@@ -2382,7 +2381,7 @@ kernel void sz_regex_mark_prefixes_metal_kernel_(device uchar *engine [[buffer(0
 }
 
 /** Marks every slot of one chunk where a match of a folded walk starts, one thread per chunk, from
- *  the entry priming left, as @c sz_regex_mark_folded_simt_kernel_ does. */
+ *  the entry priming left, as @c sz_regex_mark_folded_simt_ does. */
 kernel void sz_regex_mark_folded_metal_kernel_(
     device uchar *engine [[buffer(0)]], device uchar *scratch [[buffer(1)]],
     device uchar const *haystacks [[buffer(2)]], device uchar const *haystacks_offsets [[buffer(3)]],
@@ -3120,7 +3119,7 @@ kernel void sz_regex_take_metal_kernel_(device uchar *scratch [[buffer(1)]],
 /** Settles every folded candidate whose first rune found no match once the links settled, one
  *  thread per candidate: one whose unit folds to several runes tries the later ones, as
  *  @ref sz_regex_match_at_metal_ tries them, each walked to its end without links, as
- *  @c sz_regex_retry_folded_simt_kernel_ does. */
+ *  @c sz_regex_retry_folded_simt_ does. */
 kernel void sz_regex_retry_folded_metal_kernel_(
     device uchar *engine [[buffer(0)]], device uchar *scratch [[buffer(1)]],
     device uchar const *haystacks [[buffer(2)]], device uchar const *haystacks_offsets [[buffer(3)]],
@@ -3431,7 +3430,7 @@ kernel void sz_regex_drift_metal_kernel_(device uchar *scratch [[buffer(1)]],
 }
 
 /** Writes one chunk's share of the rewritten haystacks, one thread per chunk in each thread's share
- *  of the walks, as @c sz_regex_rewrite_simt_kernel_ does. */
+ *  of the walks, as @c sz_regex_rewrite_simt_ does. */
 kernel void sz_regex_rewrite_metal_kernel_(
     device uchar *engine [[buffer(0)]], device uchar *scratch [[buffer(1)]],
     device uchar const *haystacks [[buffer(2)]], device uchar const *haystacks_offsets [[buffer(3)]],
@@ -3479,7 +3478,7 @@ kernel void sz_regex_rewrite_metal_kernel_(
 }
 
 /** Finds every haystack's first kept match of the extracted pattern and counts its rows, one thread
- *  per chunk in each thread's share of the walks, as @c sz_regex_firsts_simt_kernel_ does. */
+ *  per chunk in each thread's share of the walks, as @c sz_regex_firsts_simt_ does. */
 kernel void sz_regex_firsts_metal_kernel_(device uchar *engine [[buffer(0)]], device uchar *scratch [[buffer(1)]],
                                           device uchar const *haystacks [[buffer(2)]],
                                           device uchar const *haystacks_offsets [[buffer(3)]],

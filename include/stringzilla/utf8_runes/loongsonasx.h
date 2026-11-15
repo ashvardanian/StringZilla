@@ -8,14 +8,16 @@
 #define STRINGZILLA_UTF8_RUNES_LOONGSONASX_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_LOONGARCH64_
+#if STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+
 #include "stringzilla/utf8_runes/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_LOONGARCH64_
-#if STRINGZILLA_TARGET_LOONGSONASX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("lasx"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -533,6 +535,8 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_loongsonasx_( //
     return cursor;
 }
 
+#if STRINGZILLA_TARGET_LOONGSONASX
+
 STRINGZILLA_API sz_status_t sz_utf8_decode_loongsonasx( //
     sz_cptr_t text, sz_size_t length,                   //
     sz_rune_t *runes, sz_size_t runes_capacity,         //
@@ -1021,16 +1025,19 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_forward_loongsonasx_( //
 
 #pragma endregion Word boundaries windowed substrate
 
+#endif // STRINGZILLA_TARGET_LOONGSONASX
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_LOONGSONASX
-#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
 #endif // STRINGZILLA_UTF8_RUNES_LOONGSONASX_H_

@@ -19,7 +19,7 @@ std::size_t test_cross_metal(environment_t const &env, std::size_t ordinal) {
     std::size_t const capability_failures = run_test(env.settings, "test_metal_capabilities_unit", [&] {
         sz_size_t devices = 0;
         sz_capability_t reported = 0;
-        verify(sz_device_count_metal(&devices) == sz_success_k && devices != 0);
+        verify(sz_count_devices_metal(&devices) == sz_success_k && devices != 0);
         verify(sz_capabilities_detected_metal(ordinal, &reported) == sz_success_k && reported == sz_cap_metal_k);
         verify(sz_capabilities_detected_metal(devices, &reported) == sz_missing_gpu_k);
     });

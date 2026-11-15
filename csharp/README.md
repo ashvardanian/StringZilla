@@ -161,7 +161,7 @@ Console.WriteLine(Sz.Version);
 - `Device.Cpu` is the host CPU, which every build has, and `new Device(kind, ordinal)` is device `ordinal` of `DeviceKind.Cuda`, `Rocm` or `Metal`.
 - `Device.Count(kind)` is how many devices of `kind` the process sees: one CPU, or the GPUs its runtime counts.
 - `CapabilitiesDetected` is what the device can execute, from CPUID or HWCAP on the CPU.
-- `CapabilitiesCompiled` is what this binary contains for devices of that kind, from the ISA probes at build time.
+- `CapabilitiesCompiled` is what this binary contains for the device, from the ISA probes at build time and, on a GPU, the codes each unit carries.
 - `CapabilitiesEnabled` is what dispatch uses, both axes at once, and on the CPU always contains serial.
 - `ConfigureThread(capabilities)` prepares the calling thread for the kernels of `capabilities`, usually `CapabilitiesEnabled`, once per thread that runs them.
 - `Sz.CapabilitiesName(capabilities)` spells a mask as comma-separated capability names.

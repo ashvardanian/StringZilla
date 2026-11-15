@@ -11,15 +11,18 @@
 #ifndef STRINGZILLA_UTF8_UNCASED_FOLD_ROCM_CUH_
 #define STRINGZILLA_UTF8_UNCASED_FOLD_ROCM_CUH_
 
+#include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_ROCM_
+
 #include "stringzilla/rocm.cuh"
 #include "stringzilla/utf8_uncased_fold/simt.cuh"
 
-#if STRINGZILLA_ARCH_ROCM_
-#if STRINGZILLA_TARGET_ROCM
-
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
+
+#if STRINGZILLA_TARGET_ROCM
 
 /** Bytes one thread folds at the least, which keeps a short text to few tiles. */
 enum { sz_utf8_uncased_fold_thread_bytes_rocm_k = 64 };
@@ -82,9 +85,11 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_rocm(sz_cptr_t source, sz_size_
     return sz_utf8_uncased_fold_scoped_rocm_(source, source_length, target, target_length, stream);
 }
 
-#ifdef __cplusplus
-}
-#endif
 #endif // STRINGZILLA_TARGET_ROCM
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_ROCM_
 #endif // STRINGZILLA_UTF8_UNCASED_FOLD_ROCM_CUH_

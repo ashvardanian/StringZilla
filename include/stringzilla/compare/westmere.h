@@ -10,14 +10,16 @@
 #define STRINGZILLA_COMPARE_WESTMERE_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/compare/serial.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_ARCH_X8664_WESTMERE_
+
+#include "stringzilla/compare/serial.h"
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("sse4.2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -139,11 +141,12 @@ STRINGZILLA_API sz_status_t sz_equal_westmere(sz_cptr_t a, sz_cptr_t b, sz_size_
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_X8664_WESTMERE_
 #endif // STRINGZILLA_ARCH_X8664_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_COMPARE_WESTMERE_H_

@@ -511,10 +511,6 @@ STRINGZILLA_INLINE sz_regex_engine_t sz_regex_engine_rebase_simt_(sz_regex_engin
  *  kernels below. The round's own passes, which read its buffers, stay steps rather than walks. */
 #pragma region Steps
 
-/** The lookaround table of a walk with none, which every block lookup reads as absent. */
-STRINGZILLA_DEVICE_CONSTANT sz_regex_looks_simt_t const sz_regex_no_looks_simt_ = {STRINGZILLA_NULL, STRINGZILLA_NULL,
-                                                                                   0, 0, 0};
-
 /** Stages @p cells of @p rows, the class map and the blocks into dynamic shared memory, for walks
  *  with no lookarounds that prime from @p images, or null; every thread of the block takes part,
  *  so a kernel calls it before any thread can leave. */
@@ -524,11 +520,13 @@ STRINGZILLA_DEVICE sz_regex_table_simt_t sz_regex_stage_table_simt_(sz_regex_eng
     extern __shared__ sz_u8_t sz_regex_staged_simt_[];
     sz_u32_t *const blocks = (sz_u32_t *)(sz_regex_staged_simt_ + 256);
     sz_u32_t *const head = (sz_u32_t *)(sz_regex_staged_simt_ + sz_regex_staged_bytes_simt_k);
+    /*  The lookaround table of a walk with none, which every block lookup reads as absent. */
+    STRINGZILLA_DEVICE_CONSTANT sz_regex_looks_simt_t const no_looks = {STRINGZILLA_NULL, STRINGZILLA_NULL, 0, 0, 0};
     sz_regex_table_simt_t table;
     sz_u32_t index;
     table.classes = sz_regex_staged_simt_, table.blocks = blocks, table.head = head;
     table.rows = rows, table.images = images, table.head_cells = cells;
-    table.looks = &sz_regex_no_looks_simt_, table.edge_column = engine->classes_count;
+    table.looks = &no_looks, table.edge_column = engine->classes_count;
     for (index = threadIdx.x; index < 256; index += blockDim.x)
         sz_regex_staged_simt_[index] = engine->byte_to_class[index];
     for (index = threadIdx.x; index < sz_regex_blocks_simt_k; index += blockDim.x)

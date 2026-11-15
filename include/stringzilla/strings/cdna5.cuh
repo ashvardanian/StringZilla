@@ -16,7 +16,7 @@
 #include "stringzilla/rocm.cuh"
 
 #if STRINGZILLA_ARCH_ROCM_
-#if STRINGZILLA_TARGET_CDNA5
+#if STRINGZILLA_ARCH_ROCM_CDNA5_
 
 #ifdef __cplusplus
 extern "C" {
@@ -84,7 +84,6 @@ STRINGZILLA_DEVICE sz_size_t sz_block_sum_cdna5_(sz_size_t value, sz_size_t *sha
 #ifdef __cplusplus
 } // extern "C"
 #endif
-
-#endif // STRINGZILLA_TARGET_CDNA5
+#endif // STRINGZILLA_ARCH_ROCM_CDNA5_
 #endif // STRINGZILLA_ARCH_ROCM_
 #endif // STRINGZILLA_STRINGS_CDNA5_CUH_

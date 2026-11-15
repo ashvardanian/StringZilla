@@ -32,8 +32,8 @@ STRINGZILLA_API sz_metal_context_t *sz_metal_contexts_(os_unfair_lock_t *context
     return contexts;
 }
 
-STRINGZILLA_API sz_status_t sz_device_count_metal(sz_size_t *count) {
-    *count = sz_device_count_metal_();
+STRINGZILLA_API sz_status_t sz_count_devices_metal(sz_size_t *count) {
+    *count = sz_count_devices_metal_();
     return *count ? sz_success_k : sz_missing_gpu_k;
 }
 

@@ -10,18 +10,20 @@
 #define STRINGZILLA_STRINGS_RVV_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_RISCV64_
+#if STRINGZILLA_ARCH_RISCV64_RVV_
+
 #include "stringzilla/find/rvv.h"  // `sz_find_byteset_rvv_`
 #include "stringzilla/utf8_norm.h" // `sz_utf8_norm_rvv`, `sz_utf8_find_denormalized_rvv`
 #include "stringzilla/strings/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
 /*  The lookup gathers `lut[index[i]]` from memory with @c vluxei8, so every byte is a valid index
  *  at any @c VLEN, and the @c vsetvl loop covers every tail, leaving no serial path. */
-#if STRINGZILLA_ARCH_RISCV64_
-#if STRINGZILLA_ARCH_RISCV64_RVV_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("arch=+v"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -108,11 +110,12 @@ STRINGZILLA_API sz_status_t sz_strings_normalize_rvv(sz_strings_view_t const *st
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_RISCV64_RVV_
 #endif // STRINGZILLA_ARCH_RISCV64_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_STRINGS_RVV_H_

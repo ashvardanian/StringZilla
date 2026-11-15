@@ -10,14 +10,16 @@
 #define STRINGZILLA_HASH_GOLDMONT_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_GOLDMONT_
+
 #include "stringzilla/hash/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_X8664_
-#if STRINGZILLA_TARGET_GOLDMONT
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("sse3,ssse3,sse4.1,sha"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -200,6 +202,8 @@ STRINGZILLA_INLINE void sz_sha256_process_block_goldmont_(
     _mm_storeu_si128((__m128i *)&hash[4], state1_u32x4);
 }
 
+#if STRINGZILLA_TARGET_GOLDMONT
+
 STRINGZILLA_API sz_status_t sz_sha256_state_init_goldmont(sz_sha256_state_t *state_ptr, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // Vectorize the load/store of 8x u32s using 2x 128-bit SSE loads
@@ -356,16 +360,19 @@ STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_goldmont(sz_sha256_state
     return sz_success_k;
 }
 
+#endif // STRINGZILLA_TARGET_GOLDMONT
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_GOLDMONT
-#endif // STRINGZILLA_ARCH_X8664_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_X8664_GOLDMONT_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #endif // STRINGZILLA_HASH_GOLDMONT_H_

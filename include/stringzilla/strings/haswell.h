@@ -10,16 +10,18 @@
 #define STRINGZILLA_STRINGS_HASWELL_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_HASWELL_
+
 #include "stringzilla/find/haswell.h" // `sz_find_byteset_haswell_`
 #include "stringzilla/utf8_norm.h"    // `sz_utf8_norm_haswell`, `sz_utf8_find_denormalized_haswell`
 #include "stringzilla/strings/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_X8664_
-#if STRINGZILLA_ARCH_X8664_HASWELL_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -226,11 +228,12 @@ STRINGZILLA_API sz_status_t sz_strings_normalize_haswell(sz_strings_view_t const
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_X8664_HASWELL_
 #endif // STRINGZILLA_ARCH_X8664_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_STRINGS_HASWELL_H_

@@ -26,6 +26,12 @@ std::size_t test_cross_cuda(environment_t const &env, std::size_t ordinal) {
                                       (major >= 9 ? sz_cap_hopper_k : 0) | (major >= 10 ? sz_cap_blackwell_k : 0);
         verify(sz_capabilities_detected_cuda(ordinal, &reported) == sz_success_k && reported == tiers);
         verify(sz_capabilities_detected_cuda(devices, &reported) == sz_missing_gpu_k);
+        // The runtime loads a unit's probe kernel where one of that unit's codes runs here.
+        sz_capability_t const held = sz_cap_cuda_k | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
+                                     sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER |
+                                     sz_cap_blackwell_k * STRINGZILLA_TARGET_BLACKWELL;
+        verify(sz_capabilities_compiled_cuda(ordinal, &reported) == sz_success_k && reported == (tiers & held));
+        verify(sz_capabilities_compiled_cuda(devices, &reported) == sz_missing_gpu_k);
     });
     auto const selected = sz::device_t::make(sz::device_kind_t::cuda_k, ordinal);
     verify(selected.status == status_t::success_k);

@@ -1072,13 +1072,13 @@ static char const doc_Strings_copy[] =                                          
     "capabilities read in place and the host reads as a normal read-only Strings.\n"                   //
     "\n"                                                                                               //
     "Args:\n"                                                                                          //
-    "  capabilities (int): A producer's mask, like sz.cuda_capabilities_enabled(0).\n"                 //
+    "  capabilities (int): A producer's mask, like sz.capabilities_enabled_cuda(0).\n"                 //
     "  stream (int, optional): A stream of that vendor as an integer, naming the device the tape is\n" //
     "    made on, or None for the default.\n"                                                          //
     "Returns:\n"                                                                                       //
     "  Strings: A tape owning its unified memory, freed with it.\n"                                    //
     "Example:\n"                                                                                       //
-    "  >>> tape = sz.Strings(['kitten', 'sitting']).copy(sz.cpu_capabilities_enabled())\n"             //
+    "  >>> tape = sz.Strings(['kitten', 'sitting']).copy(sz.capabilities_enabled_cpu())\n"             //
     "  >>> [str(text) for text in tape]\n"                                                             //
     "  ['kitten', 'sitting']";
 

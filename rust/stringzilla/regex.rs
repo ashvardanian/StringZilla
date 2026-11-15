@@ -71,7 +71,7 @@ extern "C" {
 /// ```rust
 /// use stringzilla::{Capabilities, CaseSensitivity, Match, RegexEngine, Stream, StringsView};
 ///
-/// let cpu = Stream::default(Capabilities::cpu_enabled());
+/// let cpu = Stream::default(Capabilities::enabled_cpu());
 /// let mut engine = RegexEngine::new(&["[0-9]+", "[a-z]+"], CaseSensitivity::Cased, &cpu).unwrap();
 ///
 /// let documents = StringsView::from_slices(&["abc 123 de", "!"]);
@@ -131,7 +131,7 @@ pub struct RegexEngine {
 }
 
 impl RegexEngine {
-    /// Compiles `patterns` with the capabilities of `stream`, like [`Capabilities::cpu_enabled`],
+    /// Compiles `patterns` with the capabilities of `stream`, like [`Capabilities::enabled_cpu`],
     /// on the device `stream` names.
     ///
     /// A pattern outside the supported syntax, like a backreference, a capturing group inside a
@@ -258,7 +258,7 @@ impl RegexEngine {
     /// ```rust
     /// use stringzilla::{Capabilities, CaseSensitivity, Match, RegexEngine, Stream, StringsView};
     ///
-    /// let cpu = Stream::default(Capabilities::cpu_enabled());
+    /// let cpu = Stream::default(Capabilities::enabled_cpu());
     /// let mut engine = RegexEngine::new(&["(\\d+)-(\\d+)"], CaseSensitivity::Cased, &cpu).unwrap();
     ///
     /// let documents = StringsView::from_slices(&["a 12-34", "none"]);

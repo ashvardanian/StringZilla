@@ -20,44 +20,16 @@
 #ifndef STRINGZILLA_SUBDOCUMENTS_ROCM_CUH_
 #define STRINGZILLA_SUBDOCUMENTS_ROCM_CUH_
 
-#include "stringzilla/rocm.cuh"
-#include "stringzilla/subdocuments/kernels.cuh"
+#include "stringzilla/types.h"
 
 #if STRINGZILLA_ARCH_ROCM_
 
-#ifdef __cplusplus
+#include "stringzilla/rocm.cuh"
+#include "stringzilla/subdocuments/kernels.cuh"
+
+#if defined(__cplusplus)
 extern "C" {
 #endif
-
-#pragma region Warp Walks
-
-/** @ref sz_subdocuments_walk_documents_simt_ with 32 lanes walking each JSON document. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_warp_walk_rocm_kernel_(sz_subdocuments_engine_t engine, sz_strings_view_t documents,
-                                           sz_subdocuments_round_simt_t round) {
-    sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    sz_simt_group_t const group = {32,
-                                   (unsigned)(thread & 31),
-                                   sz_lanes_any_rocm_,
-                                   sz_lanes_ballot_rocm_,
-                                   sz_lanes_first_rocm_,
-                                   sz_lanes_below_rocm_,
-                                   sz_shuffle_index_rocm_,
-                                   sz_shuffle_up_rocm_,
-                                   sz_u32_lanes_prefix_sum_rocm_,
-                                   sz_i32_lanes_prefix_min_rocm_,
-                                   sz_u64_lanes_sum_rocm_,
-                                   sz_group_sync_rocm_};
-    sz_subdocuments_walk_documents_simt_(&engine, &documents, &round, thread / 32, thread & 31, 32, &group);
-}
-
-/** One lane per document marks whether its counting walk found a match, with HIP's ballot. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_contains_rocm_kernel_(sz_size_t const *counted, sz_u1x8_t *contained, sz_size_t count) {
-    sz_subdocuments_contains_simt_(counted, contained, count, sz_lanes_ballot_rocm_);
-}
-
-#pragma endregion Warp Walks
 
 #pragma region Scans
 
@@ -84,38 +56,11 @@ STRINGZILLA_DEVICE sz_u64_t sz_subdocuments_block_scan_bounded_rocm_(sz_u64_t va
     return (sz_u64_t)exclusive;
 }
 
-/** @ref sz_subdocuments_scan_tile_simt_ over ROCm's 32-lane halves of wavefronts. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_scan_rocm_kernel_(sz_size_t *values, sz_size_t count, sz_size_t elements_per_tile, sz_size_t *chain,
-                                      sz_u64_t *states) {
-    sz_subdocuments_scan_tile_simt_(values, count, elements_per_tile, chain, states, sz_block_scan_rocm_,
-                                    sz_block_sum_rocm_, sz_chain_tile_simt_, sz_chain_look_back_rocm_);
-}
-
-/** @ref sz_subdocuments_large_reduce_simt_ over ROCm's 32-lane halves of wavefronts. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_large_reduce_rocm_kernel_(sz_subdocuments_large_simt_t large) {
-    sz_subdocuments_large_reduce_simt_(&large, sz_subdocuments_block_scan_bounded_rocm_);
-}
-
-/** @ref sz_subdocuments_large_carry_simt_ over ROCm's 32-lane halves of wavefronts. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_large_carry_rocm_kernel_(sz_subdocuments_large_simt_t large) {
-    sz_subdocuments_large_carry_simt_(&large, sz_subdocuments_block_scan_rocm_);
-}
-
-/** @ref sz_subdocuments_large_apply_simt_ over ROCm's 32-lane halves of wavefronts. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_large_apply_rocm_kernel_(sz_subdocuments_large_simt_t large) {
-    sz_subdocuments_large_apply_simt_(&large, sz_subdocuments_block_scan_bounded_rocm_);
-}
-
 #pragma endregion Scans
 
 #pragma region Host Plumbing
 
-/** The kernels a tier's walks and scans launch, and the capability its engines record; every other
- *  launch takes the shared kernels. */
+/** The kernels a tier's rounds launch, and the capability its engines record. */
 typedef struct sz_subdocuments_entry_points_rocm_t {
 
     /** Walks each JSON document with 32 lanes, as
@@ -130,6 +75,36 @@ typedef struct sz_subdocuments_entry_points_rocm_t {
     void const *large_reduce;
     void const *large_carry;
     void const *large_apply;
+
+    /** Walks each XML document with a thread, as @ref sz_subdocuments_walk_documents_simt_ does. */
+    void const *walk;
+
+    /** Marks the documents a counting walk found a match in, as @ref sz_subdocuments_contains_simt_
+     *  does. */
+    void const *contains;
+
+    /** Settles the round's @c large_bytes, then the passes over the large documents' chunks in
+     *  launch order, each as its @c _simt_ body in <tt>subdocuments/kernels.cuh</tt> runs it. */
+    void const *route;
+    void const *large_lengths;
+    void const *large_summary;
+    void const *large_count;
+    void const *large_check;
+    void const *large_tokens;
+    void const *large_minima;
+    void const *large_parents;
+    void const *large_closes;
+    void const *large_sums;
+    void const *large_offsets;
+    void const *large_selectors;
+    void const *large_jump;
+    void const *large_advance;
+    void const *large_walk;
+    void const *large_finish;
+
+    /** Drops refused documents' chunks and publishes the deepest nesting, as
+     *  @ref sz_subdocuments_large_drop_simt_ does. */
+    void const *large_drop;
 
     /** The capability the tier's engines record. */
     sz_capability_t capability;
@@ -187,13 +162,13 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_launch_rocm_(sz_subdocuments_engi
                                                sz_subdocuments_threads_per_block_simt_k);
     grid.y = 1, grid.z = 1;
     block.x = sz_subdocuments_threads_per_block_simt_k, block.y = 1, block.z = 1;
-    return sz_launch_rocm_(warps ? entry_points->warp_walk : (void const *)sz_subdocuments_walk_simt_kernel_, grid,
-                           block, arguments, 0, stream);
+    return sz_launch_rocm_(warps ? entry_points->warp_walk : entry_points->walk, grid, block, arguments, 0, stream);
 }
 
 /** Routes @p documents: settles the header's @c large_bytes, which every walk then reads. */
 STRINGZILLA_INLINE sz_status_t sz_subdocuments_route_rocm_(sz_strings_view_t const *documents,
                                                            sz_subdocuments_round_simt_t const *round,
+                                                           sz_subdocuments_entry_points_rocm_t const *entry_points,
                                                            sz_stream_t stream) {
     sz_strings_view_t launched_documents = *documents;
     sz_subdocuments_round_simt_t launched_round = *round;
@@ -205,7 +180,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_route_rocm_(sz_strings_view_t con
         (sz_size_t)sz_subdocuments_blocks_rocm_k);
     grid.y = 1, grid.z = 1;
     block.x = sz_subdocuments_threads_per_block_simt_k, block.y = 1, block.z = 1;
-    return sz_launch_rocm_((void const *)sz_subdocuments_route_simt_kernel_, grid, block, arguments, 0, stream);
+    return sz_launch_rocm_(entry_points->route, grid, block, arguments, 0, stream);
 }
 
 /** Copies the header back to @p header, which joins @p stream. */
@@ -249,6 +224,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_large_walk_rocm_(sz_subdocuments_
                                                                 sz_strings_view_t const *documents,
                                                                 sz_subdocuments_round_simt_t const *round,
                                                                 sz_subdocuments_large_simt_t const *large,
+                                                                sz_subdocuments_entry_points_rocm_t const *entry_points,
                                                                 sz_stream_t stream) {
     sz_subdocuments_engine_t launched_engine = *engine;
     sz_strings_view_t launched_documents = *documents;
@@ -257,8 +233,8 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_large_walk_rocm_(sz_subdocuments_
     void *arguments[4];
     arguments[0] = &launched_engine, arguments[1] = &launched_documents, arguments[2] = &launched_round;
     arguments[3] = &launched_large;
-    return sz_subdocuments_large_launch_rocm_((void const *)sz_subdocuments_large_walk_simt_kernel_,
-                                              sz_subdocuments_blocks_rocm_k, arguments, stream);
+    return sz_subdocuments_large_launch_rocm_(entry_points->large_walk, sz_subdocuments_blocks_rocm_k, arguments,
+                                              stream);
 }
 
 /** Walks every document @p header lists for chunks, below its first malformed one, as one
@@ -297,26 +273,21 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_large_rocm_(
 
     // Each document's first chunk and the chunks' carries, then their tokens, containers and
     // depths, numbered by scans past the documents their depths or quotes refuse.
-    status = sz_subdocuments_large_launch_rocm_((void const *)sz_subdocuments_large_lengths_simt_kernel_, blocks, alone,
-                                                stream);
+    status = sz_subdocuments_large_launch_rocm_(entry_points->large_lengths, blocks, alone, stream);
     if (status == sz_success_k)
         status = sz_subdocuments_large_scan_rocm_(large, large->firsts, listed + 1, 0, entry_points, stream);
     if (status == sz_success_k)
-        status = sz_subdocuments_large_launch_rocm_((void const *)sz_subdocuments_large_summary_simt_kernel_, blocks,
-                                                    with_documents, stream);
+        status = sz_subdocuments_large_launch_rocm_(entry_points->large_summary, blocks, with_documents, stream);
     if (status == sz_success_k)
         status = sz_subdocuments_large_scan_rocm_(large, large->transfers, chunks + 1, 1, entry_points, stream);
     if (status == sz_success_k)
-        status = sz_subdocuments_large_launch_rocm_((void const *)sz_subdocuments_large_count_simt_kernel_, blocks,
-                                                    with_documents, stream);
+        status = sz_subdocuments_large_launch_rocm_(entry_points->large_count, blocks, with_documents, stream);
     if (status == sz_success_k)
         status = sz_subdocuments_large_scan_rocm_(large, large->depths, chunks + 1, 0, entry_points, stream);
     if (status == sz_success_k)
-        status = sz_subdocuments_large_launch_rocm_((void const *)sz_subdocuments_large_check_simt_kernel_, blocks,
-                                                    with_round, stream);
+        status = sz_subdocuments_large_launch_rocm_(entry_points->large_check, blocks, with_round, stream);
     if (status == sz_success_k)
-        status = sz_subdocuments_large_launch_rocm_((void const *)sz_subdocuments_large_drop_simt_kernel_, blocks,
-                                                    with_round, stream);
+        status = sz_subdocuments_large_launch_rocm_(entry_points->large_drop, blocks, with_round, stream);
     if (status == sz_success_k)
         status = sz_subdocuments_large_scan_rocm_(large, large->tokens, chunks + 1, 0, entry_points, stream);
     if (status == sz_success_k)
@@ -337,28 +308,22 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_large_rocm_(
 
     // Tokens and containers, the parents the pyramid of minima finds, closes,
     // element counts and positions.
-    status = sz_subdocuments_large_launch_rocm_((void const *)sz_subdocuments_large_tokens_simt_kernel_, blocks,
-                                                with_documents, stream);
+    status = sz_subdocuments_large_launch_rocm_(entry_points->large_tokens, blocks, with_documents, stream);
     for (level = 1; status == sz_success_k && level != large->levels; ++level)
-        large->round = level, status = sz_subdocuments_large_launch_rocm_(
-                                  (void const *)sz_subdocuments_large_minima_simt_kernel_, blocks, alone, stream);
+        large->round = level,
+        status = sz_subdocuments_large_launch_rocm_(entry_points->large_minima, blocks, alone, stream);
     if (status == sz_success_k)
-        status = sz_subdocuments_large_launch_rocm_((void const *)sz_subdocuments_large_parents_simt_kernel_, blocks,
-                                                    alone, stream);
+        status = sz_subdocuments_large_launch_rocm_(entry_points->large_parents, blocks, alone, stream);
     if (status == sz_success_k)
-        status = sz_subdocuments_large_launch_rocm_((void const *)sz_subdocuments_large_closes_simt_kernel_, blocks,
-                                                    alone, stream);
+        status = sz_subdocuments_large_launch_rocm_(entry_points->large_closes, blocks, alone, stream);
     if (status == sz_success_k)
-        status = sz_subdocuments_large_launch_rocm_((void const *)sz_subdocuments_large_sums_simt_kernel_, blocks,
-                                                    alone, stream);
+        status = sz_subdocuments_large_launch_rocm_(entry_points->large_sums, blocks, alone, stream);
     if (status == sz_success_k)
         status = sz_subdocuments_large_scan_rocm_(large, large->sums, chunks + 1, 0, entry_points, stream);
     if (status == sz_success_k)
-        status = sz_subdocuments_large_launch_rocm_((void const *)sz_subdocuments_large_offsets_simt_kernel_, blocks,
-                                                    alone, stream);
+        status = sz_subdocuments_large_launch_rocm_(entry_points->large_offsets, blocks, alone, stream);
     if (status == sz_success_k)
-        status = sz_subdocuments_large_launch_rocm_((void const *)sz_subdocuments_large_selectors_simt_kernel_, blocks,
-                                                    with_text, stream);
+        status = sz_subdocuments_large_launch_rocm_(entry_points->large_selectors, blocks, with_text, stream);
 
     // Live sets advance once per step of the longest path, each time after
     // gathering what ancestors carry.
@@ -366,21 +331,19 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_large_rocm_(
     for (iteration = 0; status == sz_success_k && iteration <= iterations; ++iteration) {
         for (jump = 0; large->descendants && status == sz_success_k && jump <= rounds; ++jump)
             large->round = jump,
-            status = sz_subdocuments_large_launch_rocm_((void const *)sz_subdocuments_large_jump_simt_kernel_, blocks,
-                                                        with_engine, stream);
+            status = sz_subdocuments_large_launch_rocm_(entry_points->large_jump, blocks, with_engine, stream);
         large->carried_buffer = rounds & 1;
         if (status == sz_success_k && iteration != iterations)
-            status = sz_subdocuments_large_launch_rocm_((void const *)sz_subdocuments_large_advance_simt_kernel_,
-                                                        blocks, with_engine, stream);
+            status = sz_subdocuments_large_launch_rocm_(entry_points->large_advance, blocks, with_engine, stream);
     }
 
     // Counting checks every token and scans the matches, from which storing walks again.
-    if (status == sz_success_k) status = sz_subdocuments_large_walk_rocm_(engine, documents, round, large, stream);
+    if (status == sz_success_k)
+        status = sz_subdocuments_large_walk_rocm_(engine, documents, round, large, entry_points, stream);
     if (status == sz_success_k)
         status = sz_subdocuments_large_scan_rocm_(large, large->matches, chunks + 1, 0, entry_points, stream);
     if (status == sz_success_k)
-        status = sz_subdocuments_large_launch_rocm_((void const *)sz_subdocuments_large_finish_simt_kernel_, blocks,
-                                                    with_round, stream);
+        status = sz_subdocuments_large_launch_rocm_(entry_points->large_finish, blocks, with_round, stream);
     return status;
 }
 
@@ -427,7 +390,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walks_rocm_(
     header.large_count = 0, header.large_chunks = 0, header.deepest = 0, header.large_bytes = STRINGZILLA_SIZE_MAX;
     status = sz_copy_rocm_(round.header, &header, sizeof(header), stream);
     if (status == sz_success_k && round.large_bytes != STRINGZILLA_SIZE_MAX)
-        status = sz_subdocuments_route_rocm_(documents, &round, stream);
+        status = sz_subdocuments_route_rocm_(documents, &round, entry_points, stream);
     if (status == sz_success_k) status = sz_subdocuments_launch_rocm_(engine, documents, &round, entry_points, stream);
     if (status == sz_success_k) status = sz_subdocuments_read_rocm_(&round, &header, stream);
 
@@ -472,7 +435,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walks_rocm_(
                                          (sz_size_t)sz_subdocuments_blocks_rocm_k);
         grid.y = 1, grid.z = 1;
         block.x = sz_subdocuments_threads_per_block_simt_k, block.y = 1, block.z = 1;
-        return sz_launch_rocm_((void const *)sz_subdocuments_contains_rocm_kernel_, grid, block, arguments, 0, stream);
+        return sz_launch_rocm_(entry_points->contains, grid, block, arguments, 0, stream);
     }
     if (counts) return sz_success_k;
 
@@ -501,7 +464,8 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walks_rocm_(
     if (status == sz_success_k && header.deep_count)
         status = sz_subdocuments_launch_rocm_(engine, documents, &round, entry_points, stream);
     if (status == sz_success_k && header.large_count)
-        large.storing = 1, status = sz_subdocuments_large_walk_rocm_(engine, documents, &round, &large, stream);
+        large.storing = 1,
+        status = sz_subdocuments_large_walk_rocm_(engine, documents, &round, &large, entry_points, stream);
     return status;
 }
 
@@ -581,14 +545,183 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_find_scoped_rocm_(
 
 #pragma endregion Verbs
 
-/*  Each export makes the stream's device current around its helper, and restores the caller's. */
+/*  The shared passes, each over its body in <tt>subdocuments/kernels.cuh</tt>. */
 #if STRINGZILLA_TARGET_ROCM
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_walk_rocm_kernel_(sz_subdocuments_engine_t engine, sz_strings_view_t documents,
+                                      sz_subdocuments_round_simt_t round) {
+    sz_subdocuments_walk_documents_simt_(&engine, &documents, &round, (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x,
+                                         0, 1, (sz_simt_group_t const *)STRINGZILLA_NULL);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_contains_rocm_kernel_(sz_size_t const *counted, sz_u1x8_t *contained, sz_size_t count) {
+    sz_subdocuments_contains_simt_(counted, contained, count, sz_lanes_ballot_rocm_);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_route_rocm_kernel_(sz_strings_view_t documents, sz_subdocuments_round_simt_t round) {
+    sz_subdocuments_route_simt_(documents, round);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_lengths_rocm_kernel_(sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_lengths_simt_(large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_summary_rocm_kernel_(sz_strings_view_t documents, sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_summary_simt_(documents, large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_count_rocm_kernel_(sz_strings_view_t documents, sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_count_simt_(documents, large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_check_rocm_kernel_(sz_subdocuments_round_simt_t round, sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_check_simt_(round, large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_tokens_rocm_kernel_(sz_strings_view_t documents, sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_tokens_simt_(documents, large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_minima_rocm_kernel_(sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_minima_simt_(large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_parents_rocm_kernel_(sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_parents_simt_(large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_closes_rocm_kernel_(sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_closes_simt_(large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_sums_rocm_kernel_(sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_sums_simt_(large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_offsets_rocm_kernel_(sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_offsets_simt_(large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_selectors_rocm_kernel_(sz_subdocuments_engine_t engine, sz_strings_view_t documents,
+                                                 sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_selectors_simt_(engine, documents, large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_jump_rocm_kernel_(sz_subdocuments_engine_t engine, sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_jump_simt_(engine, large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_advance_rocm_kernel_(sz_subdocuments_engine_t engine, sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_advance_simt_(engine, large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_walk_rocm_kernel_(sz_subdocuments_engine_t engine, sz_strings_view_t documents,
+                                            sz_subdocuments_round_simt_t round, sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_walk_simt_(engine, documents, round, large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_finish_rocm_kernel_(sz_subdocuments_round_simt_t round, sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_finish_simt_(round, large);
+}
+
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_drop_rocm_kernel_(sz_subdocuments_round_simt_t round, sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_drop_simt_(round, large);
+}
+
+/** @ref sz_subdocuments_scan_tile_simt_ over ROCm's 32-lane halves of wavefronts. */
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_scan_rocm_kernel_(sz_size_t *values, sz_size_t count, sz_size_t elements_per_tile, sz_size_t *chain,
+                                      sz_u64_t *states) {
+    sz_subdocuments_scan_tile_simt_(values, count, elements_per_tile, chain, states, sz_block_scan_rocm_,
+                                    sz_block_sum_rocm_, sz_chain_tile_simt_, sz_chain_look_back_rocm_);
+}
+
+/** @ref sz_subdocuments_large_reduce_simt_ over ROCm's 32-lane halves of wavefronts. */
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_reduce_rocm_kernel_(sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_reduce_simt_(&large, sz_subdocuments_block_scan_bounded_rocm_);
+}
+
+/** @ref sz_subdocuments_large_carry_simt_ over ROCm's 32-lane halves of wavefronts. */
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_carry_rocm_kernel_(sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_carry_simt_(&large, sz_subdocuments_block_scan_rocm_);
+}
+
+/** @ref sz_subdocuments_large_apply_simt_ over ROCm's 32-lane halves of wavefronts. */
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_large_apply_rocm_kernel_(sz_subdocuments_large_simt_t large) {
+    sz_subdocuments_large_apply_simt_(&large, sz_subdocuments_block_scan_bounded_rocm_);
+}
+
+/** @ref sz_subdocuments_walk_documents_simt_ with 32 lanes walking each JSON document. */
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_warp_walk_rocm_kernel_(sz_subdocuments_engine_t engine, sz_strings_view_t documents,
+                                           sz_subdocuments_round_simt_t round) {
+    sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    sz_simt_group_t const group = {32,
+                                   (unsigned)(thread & 31),
+                                   sz_lanes_any_rocm_,
+                                   sz_lanes_ballot_rocm_,
+                                   sz_lanes_first_rocm_,
+                                   sz_lanes_below_rocm_,
+                                   sz_shuffle_index_rocm_,
+                                   sz_shuffle_up_rocm_,
+                                   sz_u32_lanes_prefix_sum_rocm_,
+                                   sz_i32_lanes_prefix_min_rocm_,
+                                   sz_u64_lanes_sum_rocm_,
+                                   sz_group_sync_rocm_};
+    sz_subdocuments_walk_documents_simt_(&engine, &documents, &round, thread / 32, thread & 31, 32, &group);
+}
+
+/*  Each export makes the stream's device current around its helper, and restores the caller's. */
 
 /** The ROCm tier's entry points, walking and scanning through @c ds_bpermute . */
 static sz_subdocuments_entry_points_rocm_t const sz_subdocuments_entry_points_rocm_ = {
-    (void const *)sz_subdocuments_warp_walk_rocm_kernel_,    (void const *)sz_subdocuments_scan_rocm_kernel_,
-    (void const *)sz_subdocuments_large_reduce_rocm_kernel_, (void const *)sz_subdocuments_large_carry_rocm_kernel_,
-    (void const *)sz_subdocuments_large_apply_rocm_kernel_,  sz_cap_rocm_k,
+    (void const *)sz_subdocuments_warp_walk_rocm_kernel_,
+    (void const *)sz_subdocuments_scan_rocm_kernel_,
+    (void const *)sz_subdocuments_large_reduce_rocm_kernel_,
+    (void const *)sz_subdocuments_large_carry_rocm_kernel_,
+    (void const *)sz_subdocuments_large_apply_rocm_kernel_,
+    (void const *)sz_subdocuments_walk_rocm_kernel_,
+    (void const *)sz_subdocuments_contains_rocm_kernel_,
+    (void const *)sz_subdocuments_route_rocm_kernel_,
+    (void const *)sz_subdocuments_large_lengths_rocm_kernel_,
+    (void const *)sz_subdocuments_large_summary_rocm_kernel_,
+    (void const *)sz_subdocuments_large_count_rocm_kernel_,
+    (void const *)sz_subdocuments_large_check_rocm_kernel_,
+    (void const *)sz_subdocuments_large_tokens_rocm_kernel_,
+    (void const *)sz_subdocuments_large_minima_rocm_kernel_,
+    (void const *)sz_subdocuments_large_parents_rocm_kernel_,
+    (void const *)sz_subdocuments_large_closes_rocm_kernel_,
+    (void const *)sz_subdocuments_large_sums_rocm_kernel_,
+    (void const *)sz_subdocuments_large_offsets_rocm_kernel_,
+    (void const *)sz_subdocuments_large_selectors_rocm_kernel_,
+    (void const *)sz_subdocuments_large_jump_rocm_kernel_,
+    (void const *)sz_subdocuments_large_advance_rocm_kernel_,
+    (void const *)sz_subdocuments_large_walk_rocm_kernel_,
+    (void const *)sz_subdocuments_large_finish_rocm_kernel_,
+    (void const *)sz_subdocuments_large_drop_rocm_kernel_,
+    sz_cap_rocm_k,
 };
 
 STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_rocm(
@@ -643,8 +776,8 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_rocm(sz_subdocuments_engine_t *
 
 #endif // STRINGZILLA_TARGET_ROCM
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
 #endif // STRINGZILLA_ARCH_ROCM_
 #endif // STRINGZILLA_SUBDOCUMENTS_ROCM_CUH_

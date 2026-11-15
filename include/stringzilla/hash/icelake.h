@@ -10,16 +10,18 @@
 #define STRINGZILLA_HASH_ICELAKE_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_ICELAKE_
+
 #include "stringzilla/hash/serial.h"
 #include "stringzilla/hash/westmere.h"
 #include "stringzilla/hash/skylake.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_X8664_
-#if STRINGZILLA_TARGET_ICELAKE
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(                                                                                          \
     __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vnni,bmi,bmi2,aes,vaes,evex512"))), \
@@ -160,6 +162,8 @@ STRINGZILLA_INLINE sz_u64_t sz_bytesum_icelake_(sz_cptr_t text, sz_size_t length
         return _mm512_reduce_add_epi64(_mm512_add_epi64(sums_vec.zmm, sums_reversed_vec.zmm));
     }
 }
+
+#if STRINGZILLA_TARGET_ICELAKE
 
 STRINGZILLA_API sz_status_t sz_bytesum_icelake(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum,
                                                sz_stream_t stream) {
@@ -732,16 +736,19 @@ STRINGZILLA_API sz_status_t sz_hash_multiseed_icelake(sz_cptr_t text, sz_size_t 
     return sz_success_k;
 }
 
+#endif // STRINGZILLA_TARGET_ICELAKE
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_ICELAKE
-#endif // STRINGZILLA_ARCH_X8664_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_X8664_ICELAKE_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #endif // STRINGZILLA_HASH_ICELAKE_H_

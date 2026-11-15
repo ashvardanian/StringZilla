@@ -1293,17 +1293,17 @@ def to_csv(
 
 # region Runtime Dispatch
 
-def cpu_capabilities_detected() -> Capability:
+def capabilities_detected_cpu() -> Capability:
     """Get the capabilities this CPU can execute.
 
     Detected from CPUID or HWCAP. Says nothing about whether the kernels were compiled in, which
-    `cpu_capabilities_compiled` reports.
+    `capabilities_compiled_cpu` reports.
 
     Signature:
-        >>> def cpu_capabilities_detected() -> sz.Capability: ...
+        >>> def capabilities_detected_cpu() -> sz.Capability: ...
     """
 
-def cpu_capabilities_compiled() -> Capability:
+def capabilities_compiled_cpu() -> Capability:
     """Get the CPU capabilities whose kernels were compiled into this binary.
 
     Decided at build time. Independent of the hardware: a binary built with a broken probe toolchain
@@ -1311,19 +1311,19 @@ def cpu_capabilities_compiled() -> Capability:
     makes a scalar build hard to spot.
 
     Signature:
-        >>> def cpu_capabilities_compiled() -> sz.Capability: ...
+        >>> def capabilities_compiled_cpu() -> sz.Capability: ...
     """
 
-def cpu_capabilities_enabled() -> Capability:
+def capabilities_enabled_cpu() -> Capability:
     """Get the CPU capabilities kernels run with, unless a call passes `capabilities=`.
 
-    It is `cpu_capabilities_detected() & cpu_capabilities_compiled()`, and always has SERIAL.
+    It is `capabilities_detected_cpu() & capabilities_compiled_cpu()`, and always has SERIAL.
 
     Signature:
-        >>> def cpu_capabilities_enabled() -> sz.Capability: ...
+        >>> def capabilities_enabled_cpu() -> sz.Capability: ...
     """
 
-def cpu_configure_thread(capabilities: Capability, /) -> None:
+def configure_thread_cpu(capabilities: Capability, /) -> None:
     """Prepare the calling thread for kernels of `capabilities`.
 
     Call it on every thread that runs kernels, before the first of them.
@@ -1332,45 +1332,45 @@ def cpu_configure_thread(capabilities: Capability, /) -> None:
         capabilities (Capability): The mask kernels on this thread run with.
 
     Signature:
-        >>> def cpu_configure_thread(capabilities, /) -> None: ...
+        >>> def configure_thread_cpu(capabilities, /) -> None: ...
     """
 
-def cuda_count_devices() -> int:
-    """Count the devices of one GPU vendor this process sees: `cuda_count_devices`, and the `rocm_`
-    and `metal_` ones alike.
+def count_devices_cuda() -> int:
+    """Count the devices of one GPU vendor this process sees: `count_devices_cuda`, and the `_rocm`
+    and `_metal` ones alike.
 
     Raises:
         RuntimeError: No device of that vendor answers, or this build lacks its kernels.
 
     Signature:
-        >>> def cuda_count_devices() -> int: ...
+        >>> def count_devices_cuda() -> int: ...
     """
 
-def rocm_count_devices() -> int:
-    """Count the devices of one GPU vendor this process sees: `cuda_count_devices`, and the `rocm_`
-    and `metal_` ones alike.
+def count_devices_rocm() -> int:
+    """Count the devices of one GPU vendor this process sees: `count_devices_cuda`, and the `_rocm`
+    and `_metal` ones alike.
 
     Raises:
         RuntimeError: No device of that vendor answers, or this build lacks its kernels.
 
     Signature:
-        >>> def cuda_count_devices() -> int: ...
+        >>> def count_devices_cuda() -> int: ...
     """
 
-def metal_count_devices() -> int:
-    """Count the devices of one GPU vendor this process sees: `cuda_count_devices`, and the `rocm_`
-    and `metal_` ones alike.
+def count_devices_metal() -> int:
+    """Count the devices of one GPU vendor this process sees: `count_devices_cuda`, and the `_rocm`
+    and `_metal` ones alike.
 
     Raises:
         RuntimeError: No device of that vendor answers, or this build lacks its kernels.
 
     Signature:
-        >>> def cuda_count_devices() -> int: ...
+        >>> def count_devices_cuda() -> int: ...
     """
 
-def cuda_capabilities_detected(ordinal: int, /) -> Capability:
+def capabilities_detected_cuda(ordinal: int, /) -> Capability:
     """Get the capabilities a GPU can execute, by its runtime's ordinal, whether or not the kernels
-    were compiled in: `cuda_capabilities_detected`, and the `rocm_` and `metal_` ones alike.
+    were compiled in: `capabilities_detected_cuda`, and the `_rocm` and `_metal` ones alike.
 
     Returns:
         Capability: GPU bits sit above every member, so they print as a number.
@@ -1379,12 +1379,12 @@ def cuda_capabilities_detected(ordinal: int, /) -> Capability:
         RuntimeError: No device with that ordinal answers.
 
     Signature:
-        >>> def cuda_capabilities_detected(ordinal, /) -> sz.Capability: ...
+        >>> def capabilities_detected_cuda(ordinal, /) -> sz.Capability: ...
     """
 
-def rocm_capabilities_detected(ordinal: int, /) -> Capability:
+def capabilities_detected_rocm(ordinal: int, /) -> Capability:
     """Get the capabilities a GPU can execute, by its runtime's ordinal, whether or not the kernels
-    were compiled in: `cuda_capabilities_detected`, and the `rocm_` and `metal_` ones alike.
+    were compiled in: `capabilities_detected_cuda`, and the `_rocm` and `_metal` ones alike.
 
     Returns:
         Capability: GPU bits sit above every member, so they print as a number.
@@ -1393,12 +1393,12 @@ def rocm_capabilities_detected(ordinal: int, /) -> Capability:
         RuntimeError: No device with that ordinal answers.
 
     Signature:
-        >>> def cuda_capabilities_detected(ordinal, /) -> sz.Capability: ...
+        >>> def capabilities_detected_cuda(ordinal, /) -> sz.Capability: ...
     """
 
-def metal_capabilities_detected(ordinal: int, /) -> Capability:
+def capabilities_detected_metal(ordinal: int, /) -> Capability:
     """Get the capabilities a GPU can execute, by its runtime's ordinal, whether or not the kernels
-    were compiled in: `cuda_capabilities_detected`, and the `rocm_` and `metal_` ones alike.
+    were compiled in: `capabilities_detected_cuda`, and the `_rocm` and `_metal` ones alike.
 
     Returns:
         Capability: GPU bits sit above every member, so they print as a number.
@@ -1407,36 +1407,48 @@ def metal_capabilities_detected(ordinal: int, /) -> Capability:
         RuntimeError: No device with that ordinal answers.
 
     Signature:
-        >>> def cuda_capabilities_detected(ordinal, /) -> sz.Capability: ...
+        >>> def capabilities_detected_cuda(ordinal, /) -> sz.Capability: ...
     """
 
-def cuda_capabilities_compiled() -> Capability:
-    """Get the capabilities of one GPU vendor whose kernels were compiled into this binary, whether or
-    not a device runs them: `cuda_capabilities_compiled`, and the `rocm_` and `metal_` ones alike.
+def capabilities_compiled_cuda(ordinal: int, /) -> Capability:
+    """Get the capabilities whose kernels this binary holds code for that a GPU runs, by its runtime's
+    ordinal, whether or not it offers them: `capabilities_compiled_cuda`, and the `_rocm` and `_metal`
+    ones alike.
+
+    Raises:
+        RuntimeError: No device with that ordinal answers.
 
     Signature:
-        >>> def cuda_capabilities_compiled() -> sz.Capability: ...
+        >>> def capabilities_compiled_cuda(ordinal, /) -> sz.Capability: ...
     """
 
-def rocm_capabilities_compiled() -> Capability:
-    """Get the capabilities of one GPU vendor whose kernels were compiled into this binary, whether or
-    not a device runs them: `cuda_capabilities_compiled`, and the `rocm_` and `metal_` ones alike.
+def capabilities_compiled_rocm(ordinal: int, /) -> Capability:
+    """Get the capabilities whose kernels this binary holds code for that a GPU runs, by its runtime's
+    ordinal, whether or not it offers them: `capabilities_compiled_cuda`, and the `_rocm` and `_metal`
+    ones alike.
+
+    Raises:
+        RuntimeError: No device with that ordinal answers.
 
     Signature:
-        >>> def cuda_capabilities_compiled() -> sz.Capability: ...
+        >>> def capabilities_compiled_cuda(ordinal, /) -> sz.Capability: ...
     """
 
-def metal_capabilities_compiled() -> Capability:
-    """Get the capabilities of one GPU vendor whose kernels were compiled into this binary, whether or
-    not a device runs them: `cuda_capabilities_compiled`, and the `rocm_` and `metal_` ones alike.
+def capabilities_compiled_metal(ordinal: int, /) -> Capability:
+    """Get the capabilities whose kernels this binary holds code for that a GPU runs, by its runtime's
+    ordinal, whether or not it offers them: `capabilities_compiled_cuda`, and the `_rocm` and `_metal`
+    ones alike.
+
+    Raises:
+        RuntimeError: No device with that ordinal answers.
 
     Signature:
-        >>> def cuda_capabilities_compiled() -> sz.Capability: ...
+        >>> def capabilities_compiled_cuda(ordinal, /) -> sz.Capability: ...
     """
 
-def cuda_capabilities_enabled(ordinal: int, /) -> Capability:
+def capabilities_enabled_cuda(ordinal: int, /) -> Capability:
     """Get the capabilities kernels run with on a GPU, by its runtime's ordinal, both detected and
-    compiled: `cuda_capabilities_enabled`, and the `rocm_` and `metal_` ones alike. Engines,
+    compiled: `capabilities_enabled_cuda`, and the `_rocm` and `_metal` ones alike. Engines,
     `Strings.copy` and `synchronize` take this mask, which names the vendor, and a stream, which names
     the device.
 
@@ -1444,12 +1456,12 @@ def cuda_capabilities_enabled(ordinal: int, /) -> Capability:
         RuntimeError: No device with that ordinal answers.
 
     Signature:
-        >>> def cuda_capabilities_enabled(ordinal, /) -> sz.Capability: ...
+        >>> def capabilities_enabled_cuda(ordinal, /) -> sz.Capability: ...
     """
 
-def rocm_capabilities_enabled(ordinal: int, /) -> Capability:
+def capabilities_enabled_rocm(ordinal: int, /) -> Capability:
     """Get the capabilities kernels run with on a GPU, by its runtime's ordinal, both detected and
-    compiled: `cuda_capabilities_enabled`, and the `rocm_` and `metal_` ones alike. Engines,
+    compiled: `capabilities_enabled_cuda`, and the `_rocm` and `_metal` ones alike. Engines,
     `Strings.copy` and `synchronize` take this mask, which names the vendor, and a stream, which names
     the device.
 
@@ -1457,12 +1469,12 @@ def rocm_capabilities_enabled(ordinal: int, /) -> Capability:
         RuntimeError: No device with that ordinal answers.
 
     Signature:
-        >>> def cuda_capabilities_enabled(ordinal, /) -> sz.Capability: ...
+        >>> def capabilities_enabled_cuda(ordinal, /) -> sz.Capability: ...
     """
 
-def metal_capabilities_enabled(ordinal: int, /) -> Capability:
+def capabilities_enabled_metal(ordinal: int, /) -> Capability:
     """Get the capabilities kernels run with on a GPU, by its runtime's ordinal, both detected and
-    compiled: `cuda_capabilities_enabled`, and the `rocm_` and `metal_` ones alike. Engines,
+    compiled: `capabilities_enabled_cuda`, and the `_rocm` and `_metal` ones alike. Engines,
     `Strings.copy` and `synchronize` take this mask, which names the vendor, and a stream, which names
     the device.
 
@@ -1470,12 +1482,12 @@ def metal_capabilities_enabled(ordinal: int, /) -> Capability:
         RuntimeError: No device with that ordinal answers.
 
     Signature:
-        >>> def cuda_capabilities_enabled(ordinal, /) -> sz.Capability: ...
+        >>> def capabilities_enabled_cuda(ordinal, /) -> sz.Capability: ...
     """
 
-def cuda_stream_init(ordinal: int, /) -> int:
+def stream_init_cuda(ordinal: int, /) -> int:
     """Create a stream on a GPU, by its runtime's ordinal, which names that device to the engines,
-    `Strings.copy` and `synchronize` it is passed to: `cuda_stream_init`, and the `rocm_` and `metal_`
+    `Strings.copy` and `synchronize` it is passed to: `stream_init_cuda`, and the `_rocm` and `_metal`
     ones alike. Free it with the matching `*_stream_free` once its work is synchronized.
 
     Returns:
@@ -1485,12 +1497,12 @@ def cuda_stream_init(ordinal: int, /) -> int:
         RuntimeError: No device with that ordinal answers, or this build lacks its vendor.
 
     Signature:
-        >>> def cuda_stream_init(ordinal, /) -> int: ...
+        >>> def stream_init_cuda(ordinal, /) -> int: ...
     """
 
-def rocm_stream_init(ordinal: int, /) -> int:
+def stream_init_rocm(ordinal: int, /) -> int:
     """Create a stream on a GPU, by its runtime's ordinal, which names that device to the engines,
-    `Strings.copy` and `synchronize` it is passed to: `cuda_stream_init`, and the `rocm_` and `metal_`
+    `Strings.copy` and `synchronize` it is passed to: `stream_init_cuda`, and the `_rocm` and `_metal`
     ones alike. Free it with the matching `*_stream_free` once its work is synchronized.
 
     Returns:
@@ -1500,12 +1512,12 @@ def rocm_stream_init(ordinal: int, /) -> int:
         RuntimeError: No device with that ordinal answers, or this build lacks its vendor.
 
     Signature:
-        >>> def cuda_stream_init(ordinal, /) -> int: ...
+        >>> def stream_init_cuda(ordinal, /) -> int: ...
     """
 
-def metal_stream_init(ordinal: int, /) -> int:
+def stream_init_metal(ordinal: int, /) -> int:
     """Create a stream on a GPU, by its runtime's ordinal, which names that device to the engines,
-    `Strings.copy` and `synchronize` it is passed to: `cuda_stream_init`, and the `rocm_` and `metal_`
+    `Strings.copy` and `synchronize` it is passed to: `stream_init_cuda`, and the `_rocm` and `_metal`
     ones alike. Free it with the matching `*_stream_free` once its work is synchronized.
 
     Returns:
@@ -1515,31 +1527,31 @@ def metal_stream_init(ordinal: int, /) -> int:
         RuntimeError: No device with that ordinal answers, or this build lacks its vendor.
 
     Signature:
-        >>> def cuda_stream_init(ordinal, /) -> int: ...
+        >>> def stream_init_cuda(ordinal, /) -> int: ...
     """
 
-def cuda_stream_free(stream: int, /) -> None:
-    """Free a stream `cuda_stream_init` made, and the `rocm_` and `metal_` ones alike, once
+def stream_free_cuda(stream: int, /) -> None:
+    """Free a stream `stream_init_cuda` made, and the `_rocm` and `_metal` ones alike, once
     `synchronize` joined whatever was queued on it; nothing may use the stream afterwards.
 
     Signature:
-        >>> def cuda_stream_free(stream, /) -> None: ...
+        >>> def stream_free_cuda(stream, /) -> None: ...
     """
 
-def rocm_stream_free(stream: int, /) -> None:
-    """Free a stream `cuda_stream_init` made, and the `rocm_` and `metal_` ones alike, once
+def stream_free_rocm(stream: int, /) -> None:
+    """Free a stream `stream_init_cuda` made, and the `_rocm` and `_metal` ones alike, once
     `synchronize` joined whatever was queued on it; nothing may use the stream afterwards.
 
     Signature:
-        >>> def cuda_stream_free(stream, /) -> None: ...
+        >>> def stream_free_cuda(stream, /) -> None: ...
     """
 
-def metal_stream_free(stream: int, /) -> None:
-    """Free a stream `cuda_stream_init` made, and the `rocm_` and `metal_` ones alike, once
+def stream_free_metal(stream: int, /) -> None:
+    """Free a stream `stream_init_cuda` made, and the `_rocm` and `_metal` ones alike, once
     `synchronize` joined whatever was queued on it; nothing may use the stream afterwards.
 
     Signature:
-        >>> def cuda_stream_free(stream, /) -> None: ...
+        >>> def stream_free_cuda(stream, /) -> None: ...
     """
 
 def synchronize(capabilities: Capability, stream: int | None = None) -> None:
@@ -2285,8 +2297,8 @@ class LevenshteinEngine:
     Args:
       queries (Strings): Patterns every candidate is scored against.
       symbol (str, optional): 'bytes' counts byte edits, 'runes' counts UTF-8 rune edits.
-      capabilities (Capability, optional): A producer's mask, like cuda_capabilities_enabled(0),
-        defaulting to cpu_capabilities_enabled().
+      capabilities (Capability, optional): A producer's mask, like capabilities_enabled_cuda(0),
+        defaulting to capabilities_enabled_cpu().
       stream (int, optional): A stream of that vendor as an integer, naming the device, or None
         for the default.
     Example:
@@ -2336,8 +2348,8 @@ class OverlapEngine:
       widths (sequence of int): Window widths in bytes, the last axis of every output.
       candidates_budget (int, optional): The most candidates one round may carry on a device,
         ignored on the CPU.
-      capabilities (Capability, optional): A producer's mask, like cuda_capabilities_enabled(0),
-        defaulting to cpu_capabilities_enabled().
+      capabilities (Capability, optional): A producer's mask, like capabilities_enabled_cuda(0),
+        defaulting to capabilities_enabled_cpu().
       stream (int, optional): A stream of that vendor as an integer, naming the device, or None
         for the default.
     Example:
@@ -2573,8 +2585,8 @@ class RegexEngine:
       patterns (Strings): The vocabulary to compile; a malformed pattern raises a ValueError
         naming its index.
       case_sensitivity (str, optional): 'cased' matches bytes, 'uncased' folds both sides.
-      capabilities (Capability, optional): A producer's mask, like cuda_capabilities_enabled(0),
-        defaulting to cpu_capabilities_enabled().
+      capabilities (Capability, optional): A producer's mask, like capabilities_enabled_cuda(0),
+        defaulting to capabilities_enabled_cpu().
       stream (int, optional): A stream of that vendor as an integer, naming the device, or None
         for the default.
     Example:
@@ -2699,8 +2711,8 @@ class SubdocumentsEngine:
       paths (Strings): RFC 9535 JSONPath queries, or for XML, XPath 1.0 location paths along
         forward axes.
       format (str, optional): 'json' or 'xml', the grammar of every document.
-      capabilities (Capability, optional): A producer's mask, like cuda_capabilities_enabled(0),
-        defaulting to cpu_capabilities_enabled().
+      capabilities (Capability, optional): A producer's mask, like capabilities_enabled_cuda(0),
+        defaulting to capabilities_enabled_cpu().
       stream (int, optional): A stream of that vendor as an integer, naming the device, or None
         for the default.
     Raises:
@@ -2783,8 +2795,8 @@ class SubstringsEngine:
       hot_states (int, optional): States kept in the dense hot rows; None sizes them automatically.
       matches_budget (int, optional): Matches one round may emit, read by a device tier only.
       haystacks_budget (int, optional): Haystacks one round may carry, read by a device tier only.
-      capabilities (Capability, optional): A producer's mask, like cuda_capabilities_enabled(0),
-        defaulting to cpu_capabilities_enabled().
+      capabilities (Capability, optional): A producer's mask, like capabilities_enabled_cuda(0),
+        defaulting to capabilities_enabled_cpu().
       stream (int, optional): A stream of that vendor as an integer, naming the device, or None
         for the default.
     Example:
@@ -3184,13 +3196,13 @@ class Strings:
         capabilities read in place and the host reads as a normal read-only Strings.
 
         Args:
-          capabilities (int): A producer's mask, like sz.cuda_capabilities_enabled(0).
+          capabilities (int): A producer's mask, like sz.capabilities_enabled_cuda(0).
           stream (int, optional): A stream of that vendor as an integer, naming the device the tape is
             made on, or None for the default.
         Returns:
           Strings: A tape owning its unified memory, freed with it.
         Example:
-          >>> tape = sz.Strings(['kitten', 'sitting']).copy(sz.cpu_capabilities_enabled())
+          >>> tape = sz.Strings(['kitten', 'sitting']).copy(sz.capabilities_enabled_cpu())
           >>> [str(text) for text in tape]
           ['kitten', 'sitting']
         """

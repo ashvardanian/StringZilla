@@ -50,7 +50,9 @@
  *  - @c STRINGZILLA_SWAR_THRESHOLD=24 - length from which SWAR replaces serial byte-level loops.
  *  - @c STRINGZILLA_DEFAULT_ALIGNMENT=? - default alignment and allocation-size heuristics.
  *
- *  Different generations of CPUs and SIMD capabilities can be toggled with the following macros:
+ *  Each generation of CPUs and SIMD capabilities has its kernels under one of the following macros,
+ *  defaulting to what the compiler's flags enable; 0 drops them, and 1 without those flags only
+ *  declares the kernels a linked library defines:
  *
  *  - @c STRINGZILLA_TARGET_WESTMERE=? - whether to use SSE4.2 and AES-NI instructions on x86_64.
  *  - @c STRINGZILLA_TARGET_GOLDMONT=? - whether to use SHA-NI instructions on x86_64.

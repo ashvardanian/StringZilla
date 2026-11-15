@@ -10,10 +10,14 @@
 #define STRINGZILLA_FIND_WESTMERE_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_WESTMERE_
+
 #include "stringzilla/compare/westmere.h" // `sz_equal_westmere_`
 #include "stringzilla/find/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -22,8 +26,6 @@ extern "C" {
  *
  *  Bit scans are @c bsf and @c bsr: before Haswell @c lzcnt decodes as @c bsr and miscounts, and a
  *  @c bmi target would let the compiler emit @c blsr or @c andn, which these parts lack. */
-#if STRINGZILLA_ARCH_X8664_
-#if STRINGZILLA_ARCH_X8664_WESTMERE_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("sse4.2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -200,11 +202,12 @@ STRINGZILLA_API sz_status_t sz_rfind_westmere(sz_cptr_t haystack, sz_size_t hays
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_X8664_WESTMERE_
 #endif // STRINGZILLA_ARCH_X8664_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_FIND_WESTMERE_H_

@@ -31,16 +31,18 @@
 #define STRINGZILLA_UTF8_WORDBREAKS_POWERVSX_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_PPC64_
+#if STRINGZILLA_ARCH_PPC64_POWERVSX_
+
 #include "stringzilla/utf8_wordbreaks/tables.h"
 #include "stringzilla/utf8_wordbreaks/serial.h"
 #include "stringzilla/utf8_runes/powervsx.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_PPC64_
-#if STRINGZILLA_TARGET_POWERVSX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("power9-vector"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -595,42 +597,42 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_wordbreaks_powervsx_( //
     return words + 1;
 }
 
-STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
-                                                        sz_size_t capacity, sz_size_t *count, sz_stream_t stream) {
-    sz_assert_(stream == STRINGZILLA_NULL);
-    *count = sz_utf8_wordbreaks_powervsx_(text, length, lengths, capacity);
-    sz_assert_(sz_utf8_segments_consistent_(length, capacity, *count, lengths));
-    return sz_success_k;
-}
-
 #pragma endregion Forward driver
 
 #pragma endregion UAX 29 Word Boundaries forward kernel
 
-#else // STRINGZILLA_ARCH_BIG_ENDIAN_
+#endif // !STRINGZILLA_ARCH_BIG_ENDIAN_
 
-/*  The vectorized substrate (movemasks, @c vec_perm neighbours) is validated only for the
- *  little-endian element order shipped on ppc64le CI; the big-endian entry defers to the serial
- *  reference rather than ship an untested branch. */
+#if STRINGZILLA_TARGET_POWERVSX
+
 STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
                                                         sz_size_t capacity, sz_size_t *count, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
+#if !STRINGZILLA_ARCH_BIG_ENDIAN_
+    *count = sz_utf8_wordbreaks_powervsx_(text, length, lengths, capacity);
+    sz_assert_(sz_utf8_segments_consistent_(length, capacity, *count, lengths));
+#else
+    /*  The vectorized substrate (movemasks, @c vec_perm neighbours) is validated only for the
+     *  little-endian element order shipped on ppc64le CI; the big-endian entry defers to the serial
+     *  reference rather than ship an untested branch. */
     *count = sz_utf8_wordbreaks_serial_(text, length, lengths, capacity);
+#endif
     return sz_success_k;
 }
 
-#endif // !STRINGZILLA_ARCH_BIG_ENDIAN_
+#endif // STRINGZILLA_TARGET_POWERVSX
 
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_POWERVSX
-#endif // STRINGZILLA_ARCH_PPC64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_PPC64_POWERVSX_
+#endif // STRINGZILLA_ARCH_PPC64_
 
 #endif // STRINGZILLA_UTF8_WORDBREAKS_POWERVSX_H_

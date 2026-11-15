@@ -10,18 +10,18 @@
 #define STRINGZILLA_INTERSECT_WESTMERE_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_WESTMERE_
+
 #include "stringzilla/intersect/serial.h" // `sz_intersect_serial_`
 #include "stringzilla/hash/westmere.h"    // `sz_hash_westmere_`
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-/*  Only a kernel lives here, so the whole body follows the kernel's own target: a region with no
- *  function in it would leave the target attribute unused. */
-#if STRINGZILLA_ARCH_X8664_
-#if STRINGZILLA_ARCH_X8664_WESTMERE_
-#if STRINGZILLA_TARGET_WESTMERE
+#if STRINGZILLA_TARGET_WESTMERE // Kernels only: an empty pragma region would fail under -Werror
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("sse4.2,aes"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -44,11 +44,12 @@ STRINGZILLA_API sz_status_t sz_intersect_westmere(                              
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_TARGET_WESTMERE
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_X8664_WESTMERE_
 #endif // STRINGZILLA_ARCH_X8664_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_INTERSECT_WESTMERE_H_

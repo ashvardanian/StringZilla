@@ -6,13 +6,18 @@
  */
 #ifndef STRINGZILLA_OVERLAP_NEON_H_
 #define STRINGZILLA_OVERLAP_NEON_H_
+
 #include "stringzilla/types.h"
-#include "stringzilla/overlap/serial.h"
-#ifdef __cplusplus
-extern "C" {
-#endif
+
 #if STRINGZILLA_ARCH_ARM64_
 #if STRINGZILLA_ARCH_ARM64_NEON_
+
+#include "stringzilla/overlap/serial.h"
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -146,6 +151,7 @@ STRINGZILLA_INLINE sz_size_t sz_overlap_u32x4_btree_probe_neon(sz_overlap_btree_
     }
     return matches;
 }
+
 #if STRINGZILLA_TARGET_NEON
 
 STRINGZILLA_API sz_status_t sz_overlap_engine_init_neon(sz_overlap_engine_t *engine, sz_strings_view_t const *queries,
@@ -303,9 +309,11 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_neon(sz_overlap_engine_t *engine, 
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_ARM64_NEON_
 #endif // STRINGZILLA_ARCH_ARM64_
-#ifdef __cplusplus
-}
-#endif
 #endif

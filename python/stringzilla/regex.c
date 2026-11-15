@@ -588,8 +588,8 @@ static char const doc_RegexEngine[] =                                           
     "  patterns (Strings): The vocabulary to compile; a malformed pattern raises a ValueError\n"       //
     "    naming its index.\n"                                                                          //
     "  case_sensitivity (str, optional): 'cased' matches bytes, 'uncased' folds both sides.\n"         //
-    "  capabilities (Capability, optional): A producer's mask, like cuda_capabilities_enabled(0),\n"   //
-    "    defaulting to cpu_capabilities_enabled().\n"                                                  //
+    "  capabilities (Capability, optional): A producer's mask, like capabilities_enabled_cuda(0),\n"   //
+    "    defaulting to capabilities_enabled_cpu().\n"                                                  //
     "  stream (int, optional): A stream of that vendor as an integer, naming the device, or None\n"    //
     "    for the default.\n"                                                                           //
     "Example:\n"                                                                                       //

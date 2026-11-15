@@ -10,17 +10,19 @@
 #define STRINGZILLA_STRINGS_SVE_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_ARM64_
+#if STRINGZILLA_ARCH_ARM64_SVE_
+
 #include "stringzilla/find/neon.h" // `sz_find_byteset_neon_`
 #include "stringzilla/utf8_norm.h" // `sz_utf8_norm_sve`, `sz_utf8_find_denormalized_sve`
 #include "stringzilla/strings/serial.h"
 #include "stringzilla/strings/neon.h" // `sz_strings_lookup_bytes_neon_`
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_ARM64_
-#if STRINGZILLA_ARCH_ARM64_SVE_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -166,11 +168,12 @@ STRINGZILLA_API sz_status_t sz_strings_normalize_sve(sz_strings_view_t const *st
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_ARM64_SVE_
 #endif // STRINGZILLA_ARCH_ARM64_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_STRINGS_SVE_H_

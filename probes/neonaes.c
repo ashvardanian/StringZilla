@@ -5,7 +5,7 @@
  *  @brief Whether the toolchain builds the NEON AES kernels, from the Armv8-A crypto extension.
  */
 #define STRINGZILLA_HEADER_ONLY 1
-#define STRINGZILLA_TARGET_NEONAES 1
+#define STRINGZILLA_ARCH_ARM64_NEONAES_ 1
 #include <stringzilla/hash/neonaes.h>
 
 int main(void) {

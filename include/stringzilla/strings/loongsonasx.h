@@ -10,16 +10,18 @@
 #define STRINGZILLA_STRINGS_LOONGSONASX_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_LOONGARCH64_
+#if STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+
 #include "stringzilla/find/loongsonasx.h" // `sz_find_byteset_loongsonasx_`
 #include "stringzilla/utf8_norm.h"        // `sz_utf8_norm_loongsonasx`, `sz_utf8_find_denormalized_loongsonasx`
 #include "stringzilla/strings/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_LOONGARCH64_
-#if STRINGZILLA_TARGET_LOONGSONASX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("lasx"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -168,6 +170,8 @@ STRINGZILLA_INLINE sz_strings_walks_t sz_strings_walks_loongsonasx_(void) {
     return walks;
 }
 
+#if STRINGZILLA_TARGET_LOONGSONASX
+
 STRINGZILLA_API sz_status_t sz_strings_to_tape_loongsonasx(sz_strings_view_t const *strings, sz_size_t const *order,
                                                            sz_size_t count, sz_allocator_t *allocator,
                                                            sz_strings_span_t *tape, sz_stream_t stream) {
@@ -217,16 +221,19 @@ STRINGZILLA_API sz_status_t sz_strings_normalize_loongsonasx(sz_strings_view_t c
     return sz_strings_normalize_with_(strings, order, count, form, allocator, tape, &sz_utf8_norm_loongsonasx);
 }
 
+#endif // STRINGZILLA_TARGET_LOONGSONASX
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_LOONGSONASX
-#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
 #endif // STRINGZILLA_STRINGS_LOONGSONASX_H_

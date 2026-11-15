@@ -15,16 +15,17 @@
 #define STRINGZILLA_LEVENSHTEIN_SKYLAKE_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/levenshtein/serial.h"
-#include "stringzilla/utf8_runes/haswell.h" // `sz_utf8_decode_haswell_`
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_ARCH_X8664_SKYLAKE_
-#pragma region Skylake Implementation
+
+#include "stringzilla/levenshtein/serial.h"
+#include "stringzilla/utf8_runes/haswell.h" // `sz_utf8_decode_haswell_`
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(__attribute__((target("avx,avx512f,bmi,bmi2,popcnt,evex512"))), apply_to = function)
 #elif defined(__clang__)
@@ -33,6 +34,8 @@ extern "C" {
 #pragma GCC push_options
 #pragma GCC target("avx", "avx512f", "bmi", "bmi2", "popcnt")
 #endif
+
+#pragma region Skylake Implementation
 
 /** Eight candidates' running scores, one per 64-bit ZMM position. */
 typedef struct sz_levenshtein_u64x8_state_skylake_t {
@@ -621,17 +624,19 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_skylake(sz_levenshtein_engi
 
 #endif // STRINGZILLA_TARGET_SKYLAKE
 
+#pragma endregion Skylake Implementation
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#pragma endregion Skylake Implementation
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_X8664_SKYLAKE_
 #endif // STRINGZILLA_ARCH_X8664_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_LEVENSHTEIN_SKYLAKE_H_

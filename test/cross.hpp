@@ -4538,10 +4538,10 @@ inline regex_rewriting_t const regex_serial_rewriting_ {sz_regex_replace_serial,
  *  start pass and the PikeVM. */
 inline sz_status_t regex_compile_(std::vector<std::string> const &patterns, sz_case_sensitivity_t sensitivity,
                                   sz_size_t reverse_budget, sz_size_t forward_budget, sz_allocator_t *allocator,
-                                  sz_regex_engine_t *engine) {
+                                  sz_regex_engine_t *engine, sz_capability_t capability) {
     std::vector<sz_string_view_t> views;
     sz_strings_view_t const strings = strings_over_(patterns, views);
-    return sz_regex_engine_compile_(engine, &strings, sensitivity, nullptr, sz_cap_serial_k, allocator, reverse_budget,
+    return sz_regex_engine_compile_(engine, &strings, sensitivity, nullptr, capability, allocator, reverse_budget,
                                     forward_budget, nullptr);
 }
 
@@ -4613,14 +4613,16 @@ inline void check_regex_known_(regex_tier_t const &tier, regex_known_t const &kn
     sz_regex_engine_t engine;
     verify(tier.init(&engine, &patterns, sensitivity, nullptr, &heap.allocator, nullptr) == sz_success_k);
     verify(regex_matches_(tier, &engine, known.haystacks) == known.expected);
+    // A monoversioned table holds only the kernel its init picked, so forced engines record it too.
+    sz_capability_t const capability = engine.capability;
     sz_regex_engine_free(&engine, nullptr);
-    verify(regex_compile_(known.patterns, sensitivity, 0, sz_regex_forward_budget_k, &heap.allocator, &engine) ==
-           sz_success_k);
+    verify(regex_compile_(known.patterns, sensitivity, 0, sz_regex_forward_budget_k, &heap.allocator, &engine,
+                          capability) == sz_success_k);
     verify(engine.positions_words != 0);
     verify(regex_matches_(tier, &engine, known.haystacks) == known.expected);
     sz_regex_engine_free(&engine, nullptr);
-    verify(regex_compile_(known.patterns, sensitivity, sz_regex_reverse_budget_k, 0, &heap.allocator, &engine) ==
-           sz_success_k);
+    verify(regex_compile_(known.patterns, sensitivity, sz_regex_reverse_budget_k, 0, &heap.allocator, &engine,
+                          capability) == sz_success_k);
     verify(engine.forward_rows == nullptr);
     verify(regex_matches_(tier, &engine, known.haystacks) == known.expected);
     sz_regex_engine_free(&engine, nullptr);
@@ -4638,8 +4640,9 @@ inline void check_regex_replace_(regex_tier_t const &tier, sz_kernel_regex_repla
     sz_regex_engine_t engine;
     verify(tier.init(&engine, &strings, sensitivity, nullptr, &heap.allocator, nullptr) == sz_success_k);
     verify(regex_replaced_(replace, &engine, haystacks, replacements) == expected);
+    sz_capability_t const capability = engine.capability;
     sz_regex_engine_free(&engine, nullptr);
-    verify(regex_compile_(patterns, sensitivity, 0, 0, &heap.allocator, &engine) == sz_success_k);
+    verify(regex_compile_(patterns, sensitivity, 0, 0, &heap.allocator, &engine, capability) == sz_success_k);
     verify(regex_replaced_(replace, &engine, haystacks, replacements) == expected);
     sz_regex_engine_free(&engine, nullptr);
     verify(heap.live_allocations == 0);
@@ -4683,8 +4686,9 @@ inline void check_regex_extract_(regex_tier_t const &tier, sz_kernel_regex_extra
     sz_regex_engine_t engine;
     verify(tier.init(&engine, &strings, sensitivity, nullptr, &heap.allocator, nullptr) == sz_success_k);
     verify(regex_extracted_(extract, &engine, pattern, haystacks) == expected);
+    sz_capability_t const capability = engine.capability;
     sz_regex_engine_free(&engine, nullptr);
-    verify(regex_compile_(patterns, sensitivity, 0, 0, &heap.allocator, &engine) == sz_success_k);
+    verify(regex_compile_(patterns, sensitivity, 0, 0, &heap.allocator, &engine, capability) == sz_success_k);
     verify(regex_extracted_(extract, &engine, pattern, haystacks) == expected);
     sz_regex_engine_free(&engine, nullptr);
     verify(heap.live_allocations == 0);
@@ -4701,8 +4705,8 @@ inline void check_regex_against_serial_(regex_tier_t const &tier, regex_rewritin
     sz_strings_view_t const strings = strings_over_(patterns, views);
     sz_regex_engine_t engine, reference;
     verify(tier.init(&engine, &strings, sensitivity, nullptr, &heap.allocator, nullptr) == sz_success_k);
-    verify(regex_compile_(patterns, sensitivity, reverse_budget, forward_budget, &heap.allocator, &reference) ==
-           sz_success_k);
+    verify(regex_compile_(patterns, sensitivity, reverse_budget, forward_budget, &heap.allocator, &reference,
+                          sz_cap_serial_k) == sz_success_k);
     verify(regex_matches_(tier, &engine, haystacks) == regex_matches_(regex_serial_, &reference, haystacks));
     if (rewriting.replace) {
         std::vector<std::string> const replacements(patterns.size(), "<$1|$0>");

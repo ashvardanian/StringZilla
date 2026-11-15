@@ -20,14 +20,16 @@
 #ifndef STRINGZILLA_SUBSTRINGS_HOPPER_CUH_
 #define STRINGZILLA_SUBSTRINGS_HOPPER_CUH_
 
-#include "stringzilla/substrings/cuda.cuh"
-#include "stringzilla/strings/ampere.cuh" // `sz_block_sum_ampere_`, `sz_block_sum_bounded_ampere_`
-#include "stringzilla/strings/hopper.cuh" // `sz_chain_look_back_hopper_`, `sz_chain_tile_hopper_` & kin
+#include "stringzilla/types.h"
 
 #if STRINGZILLA_ARCH_CUDA_
 #if STRINGZILLA_ARCH_CUDA_HOPPER_
 
-#ifdef __cplusplus
+#include "stringzilla/substrings/cuda.cuh"
+#include "stringzilla/strings/ampere.cuh" // `sz_block_sum_ampere_`, `sz_block_sum_bounded_ampere_`
+#include "stringzilla/strings/hopper.cuh" // `sz_chain_look_back_hopper_`, `sz_chain_tile_hopper_` & kin
+
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -74,9 +76,11 @@ static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
 
 /**
  *  @brief Writes the score of every haystack the round's pairs table held whole, and scores each
- *      of the rest with a cluster: its blocks walk contiguous chunks, each needle counting into
- *      the tally of the block its index falls to modulo the cluster, then each block sums the
- *      terms of its own tally into the first block's sum, one atomic per warp.
+ *      of the rest with a cluster.
+ *
+ *  The cluster's blocks walk contiguous chunks, each needle counting into the tally of the block
+ *  its index falls to modulo the cluster, then each block sums the terms of its own tally into the
+ *  first block's sum, one atomic per warp.
  *
  *  Launched only in clusters of @c sz_cluster_blocks_cuda_k blocks, each with the dynamic shared
  *  memory @ref sz_substrings_bm25_prepare_simt_ lays out. A cluster whose haystacks the table held
@@ -86,11 +90,12 @@ static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
  *  haystack raises while the walkers of this one may still raise the other.
  */
 static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
-    sz_substrings_bm25_hopper_kernel_(sz_substrings_engine_t engine, sz_strings_view_t haystacks,
-                                      sz_f32_t const *document_lengths, sz_substrings_bm25_t parameters,
-                                      sz_f32_t const *needle_weights, sz_u32_t *overflow_rows, sz_f32_t *scores,
-                                      sz_size_t scores_stride, sz_u32_t staged_accepts_words, sz_u32_t staged_count,
-                                      unsigned long long const *sums, sz_size_t const *overflowed) {
+    sz_substrings_bm25_clustered_hopper_kernel_(sz_substrings_engine_t engine, sz_strings_view_t haystacks,
+                                                sz_f32_t const *document_lengths, sz_substrings_bm25_t parameters,
+                                                sz_f32_t const *needle_weights, sz_u32_t *overflow_rows,
+                                                sz_f32_t *scores, sz_size_t scores_stride,
+                                                sz_u32_t staged_accepts_words, sz_u32_t staged_count,
+                                                unsigned long long const *sums, sz_size_t const *overflowed) {
     __shared__ sz_substrings_tally_simt_t shards[sz_cluster_blocks_cuda_k];
     __shared__ sz_u32_t spilled[2];
     sz_u32_t const cluster_rank = sz_cluster_rank_hopper_();
@@ -165,12 +170,233 @@ static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
 
 #pragma endregion Scoring Kernel
 
+/** @ref sz_substrings_chunk_counts_simt_ . */
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_chunk_counts_hopper_kernel_(sz_substrings_engine_t engine, sz_strings_view_t haystacks,
+                                              sz_size_t *chunk_offsets) {
+    sz_substrings_chunk_counts_simt_(engine, haystacks, chunk_offsets);
+}
+
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_walk_cased_hopper_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
+                                            sz_strings_view_t haystacks, sz_size_t const *chunk_offsets,
+                                            sz_size_t *chunk_slots) {
+    sz_substrings_walk_chunks_simt_(&engine, sz_cased_k, sz_substrings_gpu_sizing_k, staged_count, haystacks,
+                                    chunk_offsets, chunk_slots, 0, STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL,
+                                    0, STRINGZILLA_NULL, STRINGZILLA_NULL);
+}
+
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_walk_uncased_hopper_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
+                                              sz_strings_view_t haystacks, sz_size_t const *chunk_offsets,
+                                              sz_size_t *chunk_slots) {
+    sz_substrings_walk_chunks_simt_(&engine, sz_uncased_k, sz_substrings_gpu_sizing_k, staged_count, haystacks,
+                                    chunk_offsets, chunk_slots, 0, STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL,
+                                    0, STRINGZILLA_NULL, STRINGZILLA_NULL);
+}
+
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_mark_cased_hopper_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
+                                            sz_strings_view_t haystacks, sz_size_t const *chunk_offsets,
+                                            sz_size_t *chunk_slots) {
+    sz_substrings_walk_chunks_simt_(&engine, sz_cased_k, sz_substrings_gpu_marking_k, staged_count, haystacks,
+                                    chunk_offsets, chunk_slots, 0, STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL,
+                                    0, STRINGZILLA_NULL, STRINGZILLA_NULL);
+}
+
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_mark_uncased_hopper_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
+                                              sz_strings_view_t haystacks, sz_size_t const *chunk_offsets,
+                                              sz_size_t *chunk_slots) {
+    sz_substrings_walk_chunks_simt_(&engine, sz_uncased_k, sz_substrings_gpu_marking_k, staged_count, haystacks,
+                                    chunk_offsets, chunk_slots, 0, STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL,
+                                    0, STRINGZILLA_NULL, STRINGZILLA_NULL);
+}
+
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_keep_cased_hopper_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
+                                            sz_strings_view_t haystacks, sz_size_t const *chunk_offsets,
+                                            sz_size_t *chunk_slots, sz_size_t slots_count, sz_u32_t *kept,
+                                            sz_substrings_spill_simt_t *spills, sz_size_t *spilled,
+                                            sz_size_t spills_capacity) {
+    sz_substrings_walk_chunks_simt_(&engine, sz_cased_k, sz_substrings_gpu_sizing_k, staged_count, haystacks,
+                                    chunk_offsets, chunk_slots, slots_count, kept, spills, spilled, spills_capacity,
+                                    STRINGZILLA_NULL, STRINGZILLA_NULL);
+}
+
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_keep_uncased_hopper_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
+                                              sz_strings_view_t haystacks, sz_size_t const *chunk_offsets,
+                                              sz_size_t *chunk_slots, sz_size_t slots_count, sz_u32_t *kept,
+                                              sz_substrings_spill_simt_t *spills, sz_size_t *spilled,
+                                              sz_size_t spills_capacity) {
+    sz_substrings_walk_chunks_simt_(&engine, sz_uncased_k, sz_substrings_gpu_sizing_k, staged_count, haystacks,
+                                    chunk_offsets, chunk_slots, slots_count, kept, spills, spilled, spills_capacity,
+                                    STRINGZILLA_NULL, STRINGZILLA_NULL);
+}
+
+/** @ref sz_substrings_gather_simt_ . */
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_gather_hopper_kernel_(sz_substrings_engine_t engine, sz_strings_view_t haystacks,
+                                        sz_size_t const *chunk_offsets, sz_substrings_report_t const *report,
+                                        sz_size_t const *chunk_slots, sz_size_t slots_count, sz_u32_t const *kept,
+                                        sz_substrings_spill_simt_t const *spills, sz_size_t const *spilled,
+                                        sz_match_t *matches) {
+    sz_substrings_gather_simt_(engine, haystacks, chunk_offsets, report, chunk_slots, slots_count, kept, spills,
+                               spilled, matches);
+}
+
+/** @ref sz_substrings_bm25_pairs_simt_ . */
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_bm25_pairs_hopper_kernel_(sz_substrings_pairs_simt_t pairs, sz_strings_view_t haystacks,
+                                            sz_f32_t const *document_lengths, sz_substrings_bm25_t parameters,
+                                            sz_f32_t const *needle_weights, unsigned long long *sums) {
+    sz_substrings_bm25_pairs_simt_(pairs, haystacks, document_lengths, parameters, needle_weights, sums);
+}
+
+/** @ref sz_substrings_link_simt_ . */
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_link_hopper_kernel_(sz_match_t const *matches, sz_substrings_report_t const *report,
+                                      sz_size_t longest, sz_substrings_overlap_policy_t policy, sz_size_t *jumps,
+                                      sz_size_t *keep) {
+    sz_substrings_link_simt_(matches, report, longest, policy, jumps, keep);
+}
+
+/** @ref sz_substrings_double_simt_ . */
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_double_hopper_kernel_(sz_substrings_report_t const *report, sz_size_t const *jumps,
+                                        sz_size_t *doubled, sz_size_t *keep) {
+    sz_substrings_double_simt_(report, jumps, doubled, keep);
+}
+
+/** @ref sz_substrings_compact_simt_ . */
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_compact_hopper_kernel_(sz_match_t const *matches, sz_substrings_report_t *report,
+                                         sz_size_t const *keep_offsets, sz_match_t *survivors) {
+    sz_substrings_compact_simt_(matches, report, keep_offsets, survivors);
+}
+
+/** @ref sz_substrings_haystack_offsets_simt_ . */
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_haystack_offsets_hopper_kernel_(sz_size_t const *chunk_offsets, sz_size_t const *chunk_slots,
+                                                  sz_size_t const *keep_offsets, sz_substrings_report_t const *report,
+                                                  sz_size_t *haystack_offsets, sz_size_t count) {
+    sz_substrings_haystack_offsets_simt_(chunk_offsets, chunk_slots, keep_offsets, report, haystack_offsets, count);
+}
+
+/** @ref sz_substrings_counts_simt_ . */
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_counts_hopper_kernel_(sz_size_t const *haystack_offsets, sz_size_t *counts, sz_size_t counts_stride,
+                                        sz_size_t count) {
+    sz_substrings_counts_simt_(haystack_offsets, counts, counts_stride, count);
+}
+
+/** @ref sz_substrings_store_matches_simt_ . */
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_store_matches_hopper_kernel_(sz_match_t const *reported, sz_substrings_report_t const *report,
+                                               sz_match_t *matches, sz_size_t matches_capacity) {
+    sz_substrings_store_matches_simt_(reported, report, matches, matches_capacity);
+}
+
+/** @ref sz_substrings_stored_simt_ . */
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_stored_hopper_kernel_(sz_substrings_report_t *report, sz_size_t matches_capacity) {
+    sz_substrings_stored_simt_(report, matches_capacity);
+}
+
+/** @ref sz_substrings_rewrite_copy_simt_ . */
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_rewrite_copy_hopper_kernel_(sz_strings_view_t haystacks, sz_strings_view_t replacements,
+                                              sz_size_t const *haystack_offsets, sz_match_t const *matches,
+                                              sz_size_t const *gap_offsets, sz_size_t const *output_offsets,
+                                              sz_substrings_report_t const *report, sz_ptr_t output) {
+    sz_substrings_rewrite_copy_simt_(haystacks, replacements, haystack_offsets, matches, gap_offsets, output_offsets,
+                                     report, output);
+}
+
+/** @ref sz_substrings_target_simt_ . */
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_target_hopper_kernel_(sz_size_t const *rewritten_at, sz_size_t target_ceiling,
+                                        sz_substrings_report_t *report) {
+    sz_substrings_target_simt_(rewritten_at, target_ceiling, report);
+}
+
+/** One lane per haystack marks whether its boundaries enclose a match, with CUDA's ballot. */
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_contains_hopper_kernel_(sz_size_t const *haystack_offsets, sz_u1x8_t *contained, sz_size_t count) {
+    sz_substrings_contains_simt_(haystack_offsets, contained, count, sz_lanes_ballot_cuda_);
+}
+
+/** @ref sz_substrings_bm25_simt_ over CUDA's warps. */
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_bm25_hopper_kernel_(sz_substrings_engine_t engine, sz_strings_view_t haystacks,
+                                      sz_f32_t const *document_lengths, sz_substrings_bm25_t parameters,
+                                      sz_f32_t const *needle_weights, sz_u32_t *overflow_rows, sz_f32_t *scores,
+                                      sz_size_t scores_stride, sz_u32_t staged_accepts_words, sz_u32_t staged_count,
+                                      unsigned long long const *sums, sz_size_t const *overflowed) {
+    sz_substrings_bm25_simt_(engine, haystacks, document_lengths, parameters, needle_weights, overflow_rows, scores,
+                             scores_stride, staged_accepts_words, staged_count, sums, overflowed,
+                             sz_u64_lanes_sum_cuda_);
+}
+
+/** The cased pairs walk, counting each pair once per counter among the warp's lanes. */
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_pairs_cased_hopper_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
+                                             sz_strings_view_t haystacks, sz_size_t const *chunk_offsets,
+                                             sz_substrings_pairs_simt_t pairs) {
+    sz_substrings_walk_chunks_simt_(&engine, sz_cased_k, sz_substrings_gpu_tallying_k, staged_count, haystacks,
+                                    chunk_offsets, STRINGZILLA_NULL, 0, STRINGZILLA_NULL, STRINGZILLA_NULL,
+                                    STRINGZILLA_NULL, 0, &pairs, sz_u32_increment_cuda_);
+}
+
+/** The uncased pairs walk, counting each pair once per counter among the warp's lanes. */
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_pairs_uncased_hopper_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
+                                               sz_strings_view_t haystacks, sz_size_t const *chunk_offsets,
+                                               sz_substrings_pairs_simt_t pairs) {
+    sz_substrings_walk_chunks_simt_(&engine, sz_uncased_k, sz_substrings_gpu_tallying_k, staged_count, haystacks,
+                                    chunk_offsets, STRINGZILLA_NULL, 0, STRINGZILLA_NULL, STRINGZILLA_NULL,
+                                    STRINGZILLA_NULL, 0, &pairs, sz_u32_increment_cuda_);
+}
+
+/** @ref sz_substrings_rewrite_offsets_simt_ over CUDA's warps. */
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_rewrite_offsets_hopper_kernel_(sz_strings_view_t haystacks, sz_strings_view_t replacements,
+                                                 sz_size_t const *haystack_offsets, sz_match_t const *matches,
+                                                 sz_substrings_report_t const *report, sz_size_t *gap_offsets,
+                                                 sz_size_t *output_sizes) {
+    sz_substrings_rewrite_offsets_simt_(haystacks, replacements, haystack_offsets, matches, report, gap_offsets,
+                                        output_sizes, sz_block_scan_cuda_);
+}
+
 /** The Hopper tier's entry points, its tile scans looking back once per cluster. */
 static sz_substrings_entry_points_cuda_t const sz_substrings_entry_points_hopper_ = {
     (void const *)sz_substrings_scan_hopper_kernel_,
     (void const *)sz_substrings_scan_bounded_hopper_kernel_,
     (void const *)sz_substrings_scan_sized_hopper_kernel_,
-    (void const *)sz_substrings_rewrite_offsets_cuda_kernel_,
+    (void const *)sz_substrings_rewrite_offsets_hopper_kernel_,
+    (void const *)sz_substrings_chunk_counts_hopper_kernel_,
+    (void const *)sz_substrings_walk_cased_hopper_kernel_,
+    (void const *)sz_substrings_walk_uncased_hopper_kernel_,
+    (void const *)sz_substrings_mark_cased_hopper_kernel_,
+    (void const *)sz_substrings_mark_uncased_hopper_kernel_,
+    (void const *)sz_substrings_keep_cased_hopper_kernel_,
+    (void const *)sz_substrings_keep_uncased_hopper_kernel_,
+    (void const *)sz_substrings_gather_hopper_kernel_,
+    (void const *)sz_substrings_link_hopper_kernel_,
+    (void const *)sz_substrings_double_hopper_kernel_,
+    (void const *)sz_substrings_compact_hopper_kernel_,
+    (void const *)sz_substrings_haystack_offsets_hopper_kernel_,
+    (void const *)sz_substrings_counts_hopper_kernel_,
+    (void const *)sz_substrings_store_matches_hopper_kernel_,
+    (void const *)sz_substrings_stored_hopper_kernel_,
+    (void const *)sz_substrings_rewrite_copy_hopper_kernel_,
+    (void const *)sz_substrings_target_hopper_kernel_,
+    (void const *)sz_substrings_contains_hopper_kernel_,
+    (void const *)sz_substrings_pairs_cased_hopper_kernel_,
+    (void const *)sz_substrings_pairs_uncased_hopper_kernel_,
+    (void const *)sz_substrings_bm25_pairs_hopper_kernel_,
+    (void const *)sz_substrings_bm25_hopper_kernel_,
     sz_cluster_blocks_cuda_k,
     sz_cap_hopper_k,
 };
@@ -223,13 +449,13 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_hopper(sz_substrings_engin
                                                              sz_size_t scores_stride, sz_stream_t stream) {
     return sz_substrings_bm25_scores_scoped_cuda_(
         engine, haystacks, document_lengths, parameters, needle_weights, scores, scores_stride,
-        (void const *)sz_substrings_bm25_hopper_kernel_, &sz_substrings_entry_points_hopper_, stream);
+        (void const *)sz_substrings_bm25_clustered_hopper_kernel_, &sz_substrings_entry_points_hopper_, stream);
 }
 
 #endif // STRINGZILLA_TARGET_HOPPER
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
 #endif // STRINGZILLA_ARCH_CUDA_HOPPER_
 #endif // STRINGZILLA_ARCH_CUDA_

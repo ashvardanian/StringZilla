@@ -1454,7 +1454,7 @@ def capability_sweep():
     API, derived from the live hardware so no test hardcodes which backend its kernel uses.
 
     Returns: the serial baseline, then each enabled SIMD capability on its own (atop serial), then all of
-    them together. Built from ``cpu_capabilities_enabled()``, so it adapts to the host (NEON / NEON-AES /
+    them together. Built from ``capabilities_enabled_cpu()``, so it adapts to the host (NEON / NEON-AES /
     NEON-SHA on Arm; Westmere/Haswell/Skylake/Ice Lake on x86) and collapses to just ``SERIAL`` on a
     machine with no SIMD capability. Each config is one ``sz.Capability`` mask, passed to a call as its
     ``capabilities=config`` argument. Sweeping every config across
@@ -1464,7 +1464,7 @@ def capability_sweep():
     """
     import stringzilla as sz
 
-    enabled = sz.cpu_capabilities_enabled()
+    enabled = sz.capabilities_enabled_cpu()
     simd = [capability for capability in sz.Capability if capability in enabled and capability != sz.Capability.SERIAL]
     sweep = [sz.Capability.SERIAL] + [sz.Capability.SERIAL | capability for capability in simd]
     if len(simd) > 1:

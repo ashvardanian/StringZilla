@@ -22,14 +22,16 @@
 #define STRINGZILLA_SORT_RVV_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/sort/serial.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #if STRINGZILLA_ARCH_RISCV64_
 #if STRINGZILLA_ARCH_RISCV64_RVV_
+
+#include "stringzilla/sort/serial.h"
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("arch=+v"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -399,11 +401,12 @@ STRINGZILLA_API sz_status_t sz_sort_uncased_order_rvv(                        //
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_RISCV64_RVV_
 #endif // STRINGZILLA_ARCH_RISCV64_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_SORT_RVV_H_

@@ -10,14 +10,16 @@
 #define STRINGZILLA_COMPARE_RVV_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/compare/serial.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #if STRINGZILLA_ARCH_RISCV64_
 #if STRINGZILLA_ARCH_RISCV64_RVV_
+
+#include "stringzilla/compare/serial.h"
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("arch=+v"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -83,11 +85,12 @@ STRINGZILLA_API sz_status_t sz_order_rvv(sz_cptr_t a, sz_size_t a_length, sz_cpt
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_RISCV64_RVV_
 #endif // STRINGZILLA_ARCH_RISCV64_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_COMPARE_RVV_H_

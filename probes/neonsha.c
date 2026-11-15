@@ -5,7 +5,7 @@
  *  @brief Whether the toolchain builds the NEON SHA2 kernels, from the Armv8-A crypto extension.
  */
 #define STRINGZILLA_HEADER_ONLY 1
-#define STRINGZILLA_TARGET_NEONSHA 1
+#define STRINGZILLA_ARCH_ARM64_NEONSHA_ 1
 #include <stringzilla/hash/neonsha.h>
 
 int main(void) {

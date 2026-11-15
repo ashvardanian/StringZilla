@@ -8,15 +8,17 @@
 #define STRINGZILLA_UTF8_TOKENS_POWERVSX_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_PPC64_
+#if STRINGZILLA_ARCH_PPC64_POWERVSX_
+
 #include "stringzilla/utf8_tokens/serial.h"
 #include "stringzilla/utf8_runes/powervsx.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_PPC64_
-#if STRINGZILLA_TARGET_POWERVSX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("power9-vector"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -161,6 +163,8 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_newlines_powervsx_( //
                                          match_offsets, match_lengths));
     return count;
 }
+
+#if STRINGZILLA_TARGET_POWERVSX
 
 STRINGZILLA_API sz_status_t sz_utf8_newlines_powervsx(                              //
     sz_cptr_t text, sz_size_t length,                                               //
@@ -607,16 +611,19 @@ STRINGZILLA_API sz_status_t sz_utf8_delimiters_powervsx(                        
  *  and emit the proven boundaries, deferring every uncertain position to @c _serial so that the
  *  output stays byte-exact. */
 
+#endif // STRINGZILLA_TARGET_POWERVSX
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_POWERVSX
-#endif // STRINGZILLA_ARCH_PPC64_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_PPC64_POWERVSX_
+#endif // STRINGZILLA_ARCH_PPC64_
 
 #endif // STRINGZILLA_UTF8_TOKENS_POWERVSX_H_

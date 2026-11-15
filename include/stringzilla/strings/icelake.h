@@ -10,16 +10,18 @@
 #define STRINGZILLA_STRINGS_ICELAKE_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_ICELAKE_
+
 #include "stringzilla/find/icelake.h" // `sz_find_byteset_icelake_`
 #include "stringzilla/utf8_norm.h"    // `sz_utf8_norm_icelake`, `sz_utf8_find_denormalized_icelake`
 #include "stringzilla/strings/serial.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_X8664_
-#if STRINGZILLA_TARGET_ICELAKE
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(                                                                                         \
     __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,popcnt,evex512"))), \
@@ -442,6 +444,8 @@ STRINGZILLA_INLINE sz_status_t sz_strings_unescape_url_run_icelake_(sz_strings_v
     return sz_success_k;
 }
 
+#if STRINGZILLA_TARGET_ICELAKE
+
 STRINGZILLA_API sz_status_t sz_strings_to_tape_icelake(sz_strings_view_t const *strings, sz_size_t const *order,
                                                        sz_size_t count, sz_allocator_t *allocator,
                                                        sz_strings_span_t *tape, sz_stream_t stream) {
@@ -623,16 +627,19 @@ STRINGZILLA_API sz_status_t sz_strings_join_icelake(sz_strings_view_t const *col
     return sz_success_k;
 }
 
+#endif // STRINGZILLA_TARGET_ICELAKE
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_ICELAKE
-#endif // STRINGZILLA_ARCH_X8664_
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
+
+#endif // STRINGZILLA_ARCH_X8664_ICELAKE_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #endif // STRINGZILLA_STRINGS_ICELAKE_H_

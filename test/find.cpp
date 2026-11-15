@@ -99,10 +99,14 @@ void test_find_unit() {
     verify(sz_find_best(hello, hello_length, "wor", 3, &unused, sz_cap_metal_k, nullptr) == sz_missing_kernel_k);
     sz_kernel_punned_t kernel = nullptr;
     sz_capability_t capability = 0;
-    verify(sz_find_kernel_punned(sz_kernel_find_k, sz_cap_serial_k, &kernel, &capability) == sz_success_k);
-    verify(capability == sz_cap_serial_k);
-    verify(kernel_result<sz_cptr_t>((sz_kernel_find_t)kernel, hello, hello_length, "wor", 3) == hello + 6);
+    // A monoversioned table holds one kernel per operation, so only it may lack the serial kernel.
+    sz_status_t const serial = sz_find_kernel_punned(sz_kernel_find_k, sz_cap_serial_k, &kernel, &capability);
+    verify((serial == sz_success_k && capability == sz_cap_serial_k) ||
+           (!STRINGZILLA_MULTIVERSIONED && serial == sz_missing_kernel_k));
+    if (serial == sz_success_k)
+        verify(kernel_result<sz_cptr_t>((sz_kernel_find_t)kernel, hello, hello_length, "wor", 3) == hello + 6);
     verify(sz_find_kernel_punned(sz_kernel_find_k, sz::default_capabilities(), &kernel, &capability) == sz_success_k);
+    verify((capability & (capability - 1)) == 0);
     verify(kernel_result<sz_cptr_t>((sz_kernel_find_t)kernel, hello, hello_length, "wor", 3) ==
            kernel_result<sz_cptr_t>(cpu_best<sz_find_best>, hello, hello_length, "wor", 3));
 

@@ -10,18 +10,18 @@
 #define STRINGZILLA_INTERSECT_NEONAES_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_ARM64_
+#if STRINGZILLA_ARCH_ARM64_NEONAES_
+
 #include "stringzilla/intersect/serial.h" // `sz_intersect_serial_`
 #include "stringzilla/hash/neonaes.h"     // `sz_hash_neonaes_`
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-/*  Only a kernel lives here, so the whole body follows the kernel's own target: a region with no
- *  function in it would leave the target attribute unused. */
-#if STRINGZILLA_ARCH_ARM64_
-#if STRINGZILLA_ARCH_ARM64_NEONAES_
-#if STRINGZILLA_TARGET_NEONAES
+#if STRINGZILLA_TARGET_NEONAES // Kernels only: an empty pragma region would fail under -Werror
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd+crypto+aes"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -45,11 +45,12 @@ STRINGZILLA_API sz_status_t sz_intersect_neonaes(                               
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_TARGET_NEONAES
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_ARM64_NEONAES_
 #endif // STRINGZILLA_ARCH_ARM64_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_INTERSECT_NEONAES_H_

@@ -16,16 +16,18 @@
 #define STRINGZILLA_UTF8_GRAPHEMES_HASWELL_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_HASWELL_
+
 #include "stringzilla/utf8_graphemes/tables.h"
 #include "stringzilla/utf8_graphemes/serial.h"
 #include "stringzilla/utf8_runes/haswell.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
-#if STRINGZILLA_ARCH_X8664_
-#if STRINGZILLA_ARCH_X8664_HASWELL_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,popcnt"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -516,11 +518,12 @@ STRINGZILLA_API sz_status_t sz_utf8_graphemes_haswell(sz_cptr_t text, sz_size_t 
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_X8664_HASWELL_
 #endif // STRINGZILLA_ARCH_X8664_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_UTF8_GRAPHEMES_HASWELL_H_

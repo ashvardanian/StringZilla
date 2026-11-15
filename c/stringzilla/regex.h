@@ -407,6 +407,60 @@ STRINGZILLA_API sz_status_t sz_regex_extract_cuda(sz_regex_engine_t *engine, sz_
                                                   sz_stream_t stream);
 #endif
 
+#if STRINGZILLA_TARGET_AMPERE
+/** @copydoc sz_regex_engine_init */
+STRINGZILLA_API sz_status_t sz_regex_engine_init_ampere(sz_regex_engine_t *engine, sz_strings_view_t const *patterns,
+                                                        sz_case_sensitivity_t case_sensitivity,
+                                                        sz_size_t *malformed_index, sz_allocator_t *allocator,
+                                                        sz_stream_t stream);
+/** @copydoc sz_regex_contains */
+STRINGZILLA_API sz_status_t sz_regex_contains_ampere(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
+                                                     sz_u1x8_t *contained, sz_stream_t stream);
+/** @copydoc sz_regex_counts */
+STRINGZILLA_API sz_status_t sz_regex_counts_ampere(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
+                                                   sz_size_t *counts, sz_size_t counts_stride, sz_stream_t stream);
+/** @copydoc sz_regex_find */
+STRINGZILLA_API sz_status_t sz_regex_find_ampere(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
+                                                 sz_match_t *matches, sz_size_t matches_capacity,
+                                                 sz_size_t *matches_offsets, sz_stream_t stream);
+/** @copydoc sz_regex_replace */
+STRINGZILLA_API sz_status_t sz_regex_replace_ampere(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
+                                                    sz_strings_view_t const *replacements, sz_ptr_t target,
+                                                    sz_size_t target_capacity, sz_size_t *offsets, sz_stream_t stream);
+/** @copydoc sz_regex_extract */
+STRINGZILLA_API sz_status_t sz_regex_extract_ampere(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
+                                                    sz_size_t pattern_index, sz_match_t *groups,
+                                                    sz_size_t groups_capacity, sz_size_t *groups_offsets,
+                                                    sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_HOPPER
+/** @copydoc sz_regex_engine_init */
+STRINGZILLA_API sz_status_t sz_regex_engine_init_hopper(sz_regex_engine_t *engine, sz_strings_view_t const *patterns,
+                                                        sz_case_sensitivity_t case_sensitivity,
+                                                        sz_size_t *malformed_index, sz_allocator_t *allocator,
+                                                        sz_stream_t stream);
+/** @copydoc sz_regex_contains */
+STRINGZILLA_API sz_status_t sz_regex_contains_hopper(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
+                                                     sz_u1x8_t *contained, sz_stream_t stream);
+/** @copydoc sz_regex_counts */
+STRINGZILLA_API sz_status_t sz_regex_counts_hopper(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
+                                                   sz_size_t *counts, sz_size_t counts_stride, sz_stream_t stream);
+/** @copydoc sz_regex_find */
+STRINGZILLA_API sz_status_t sz_regex_find_hopper(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
+                                                 sz_match_t *matches, sz_size_t matches_capacity,
+                                                 sz_size_t *matches_offsets, sz_stream_t stream);
+/** @copydoc sz_regex_replace */
+STRINGZILLA_API sz_status_t sz_regex_replace_hopper(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
+                                                    sz_strings_view_t const *replacements, sz_ptr_t target,
+                                                    sz_size_t target_capacity, sz_size_t *offsets, sz_stream_t stream);
+/** @copydoc sz_regex_extract */
+STRINGZILLA_API sz_status_t sz_regex_extract_hopper(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
+                                                    sz_size_t pattern_index, sz_match_t *groups,
+                                                    sz_size_t groups_capacity, sz_size_t *groups_offsets,
+                                                    sz_stream_t stream);
+#endif
+
 #if STRINGZILLA_TARGET_ROCM
 /** @copydoc sz_regex_engine_init */
 STRINGZILLA_API sz_status_t sz_regex_engine_init_rocm(sz_regex_engine_t *engine, sz_strings_view_t const *patterns,

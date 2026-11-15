@@ -22,12 +22,14 @@
 #ifndef STRINGZILLA_LEVENSHTEIN_METAL_H_
 #define STRINGZILLA_LEVENSHTEIN_METAL_H_
 
-#include "stringzilla/metal.h"
-#include "stringzilla/levenshtein/serial.h"
+#include "stringzilla/types.h"
 
 #if STRINGZILLA_ARCH_METAL_
 
-#ifdef __cplusplus
+#include "stringzilla/metal.h"
+#include "stringzilla/levenshtein/serial.h"
+
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -493,8 +495,8 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_metal(sz_levenshtein_engine
 
 #endif // STRINGZILLA_TARGET_METAL
 
-#ifdef __cplusplus
-}
+#if defined(__cplusplus)
+} // extern "C"
 #endif
 
 #endif // STRINGZILLA_ARCH_METAL_

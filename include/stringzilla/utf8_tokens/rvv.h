@@ -8,18 +8,20 @@
 #define STRINGZILLA_UTF8_TOKENS_RVV_H_
 
 #include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_RISCV64_
+#if STRINGZILLA_ARCH_RISCV64_RVV_
+
 #include "stringzilla/utf8_runes/serial.h" // `sz_rune_decode_unchecked`
 #include "stringzilla/utf8_tokens/serial.h"
 #include "stringzilla/utf8_runes/rvv.h"
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
 /*  Cap the logical tile so a @c u16 iota addresses every lane. RVV 1.0 allows @c VLEN up to 64 Kib,
  *  so @c e8m4 @c VLMAX reaches at most 32768, well within a @c u16 index. */
-#if STRINGZILLA_ARCH_RISCV64_
-#if STRINGZILLA_ARCH_RISCV64_RVV_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("arch=+v"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -390,7 +392,6 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_delimiters_rvv_( //
  *  shifted-difference @b (start,length) stream. Any non-ASCII or edge window takes one scalar
  *  codepoint step; malformed UTF-8, which a single window scan cannot reproduce, is routed
  *  wholesale to serial by the well-formedness gate below. */
-
 #if STRINGZILLA_TARGET_RVV
 
 STRINGZILLA_API sz_status_t sz_utf8_newlines_rvv(                                   //
@@ -432,11 +433,12 @@ STRINGZILLA_API sz_status_t sz_utf8_delimiters_rvv(                             
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
+
+#if defined(__cplusplus)
+} // extern "C"
+#endif
+
 #endif // STRINGZILLA_ARCH_RISCV64_RVV_
 #endif // STRINGZILLA_ARCH_RISCV64_
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_UTF8_TOKENS_RVV_H_
