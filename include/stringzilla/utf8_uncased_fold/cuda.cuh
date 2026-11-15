@@ -3,7 +3,7 @@
  *  @author Ash Vardanian
  *  @date October 3, 2026
  *  @brief CUDA host side of UTF-8 case folding: the tiles a round cuts a text into, its one launch,
- *      and the @c _cuda export, over the kernel of <tt>utf8_uncased_fold/simt.cuh</tt>.
+ *      and the @c _cuda export, over the walk of <tt>utf8_uncased_fold/simt.cuh</tt>.
  *
  *  @sa include/stringzilla/utf8_uncased_fold/simt.cuh
  *  @sa include/stringzilla/utf8_uncased_fold/rocm.cuh
@@ -23,6 +23,13 @@ extern "C" {
 
 /** Bytes one thread folds at the least, which keeps a short text to few tiles. */
 enum { sz_utf8_uncased_fold_thread_bytes_cuda_k = 64 };
+
+/** @ref sz_utf8_uncased_fold_tile_simt_ over CUDA's warps. */
+static __global__ void __launch_bounds__(sz_utf8_uncased_fold_threads_simt_k)
+    sz_utf8_uncased_fold_cuda_kernel_(sz_u8_t const *source, sz_size_t length, sz_size_t tile_bytes, sz_size_t tiles,
+                                      sz_u8_t *target, sz_size_t *target_length) {
+    sz_utf8_uncased_fold_tile_simt_(source, length, tile_bytes, tiles, target, target_length, sz_block_scan_cuda_);
+}
 
 /**
  *  @brief Folds @p source into @p target on the caller's current device, the length landing in
@@ -56,7 +63,7 @@ STRINGZILLA_INLINE sz_status_t sz_utf8_uncased_fold_cuda_(sz_cptr_t source, sz_s
     block.x = sz_utf8_uncased_fold_threads_simt_k, block.y = 1, block.z = 1;
     arguments[0] = &launch_source, arguments[1] = &launch_length, arguments[2] = &tile_bytes;
     arguments[3] = &tiles, arguments[4] = &launch_target, arguments[5] = &launch_target_length;
-    return sz_launch_cuda_((void const *)sz_utf8_uncased_fold_simt_kernel_, grid, block, arguments, 0, stream);
+    return sz_launch_cuda_((void const *)sz_utf8_uncased_fold_cuda_kernel_, grid, block, arguments, 0, stream);
 }
 
 STRINGZILLA_INLINE sz_status_t sz_utf8_uncased_fold_scoped_cuda_(sz_cptr_t source, sz_size_t source_length,

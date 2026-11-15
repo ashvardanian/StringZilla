@@ -65,29 +65,69 @@ STRINGZILLA_DEVICE int sz_u32_popcount_simt_(sz_u32_t word) { return __popc(word
 STRINGZILLA_DEVICE sz_size_t sz_size_log2i_nonzero_simt_(sz_size_t x) { return (sz_size_t)(63 - sz_u64_clz_simt_(x)); }
 
 /**
- *  @brief The block's exclusive prefix sum of @p value, with the block's own total left
- *      in @p total.
+ *  @brief The block's exclusive prefix sum of @p value, its own total left in @p total.
  *
- *  A Hillis-Steele scan over @p shared, which the caller sizes at one entry per thread. Thirty
- *  lines rather than a dependency: a block scan is the only collective these kernels need, and
- *  pulling a template library into a C tier for it would cost the property the tier exists for.
+ *  Each group of @p lanes scans itself with @p lanes_prefix_sum, one barrier publishes every
+ *  group's total into @p shared, an entry per group, and every thread then adds the totals before
+ *  its own, cheaper than a group scanning them behind another barrier; a trailing barrier frees
+ *  @p shared. The block is @p threads, a whole number of groups, and a literal at every caller, so
+ *  the loop over the groups unrolls. Thirty lines rather than a dependency: a block scan is the
+ *  only collective these kernels need, and pulling a template library into a C tier for it would
+ *  cost the property the tier exists for.
  */
-STRINGZILLA_DEVICE sz_size_t sz_block_scan_simt_(sz_size_t value, sz_size_t *shared, sz_size_t *total) {
-    unsigned const lane = threadIdx.x;
-    unsigned offset;
-    sz_size_t inclusive;
-    shared[lane] = value;
+STRINGZILLA_DEVICE sz_size_t sz_block_scan_simt_(sz_size_t value, sz_size_t *shared, sz_size_t *total, unsigned lanes,
+                                                 unsigned threads, sz_u64_t (*lanes_prefix_sum)(sz_u64_t)) {
+    unsigned const group = threadIdx.x / lanes, groups = threads / lanes;
+    sz_size_t const inclusive = (sz_size_t)lanes_prefix_sum((sz_u64_t)value);
+    sz_size_t exclusive = inclusive - value, sum = 0;
+    if (threadIdx.x % lanes == lanes - 1) shared[group] = inclusive;
     __syncthreads();
-    for (offset = 1; offset < blockDim.x; offset *= 2) {
-        sz_size_t const addend = lane >= offset ? shared[lane - offset] : 0;
-        __syncthreads();
-        shared[lane] += addend;
-        __syncthreads();
+    for (unsigned other = 0; other != groups; ++other) {
+        sz_size_t const other_total = shared[other];
+        exclusive += other < group ? other_total : 0;
+        sum += other_total;
     }
-    inclusive = shared[lane];
-    *total = shared[blockDim.x - 1];
+    *total = sum;
     __syncthreads(); // ! The caller reuses `shared` for the next tile.
-    return inclusive - value;
+    return exclusive;
+}
+
+/**
+ *  @brief @ref sz_block_scan_simt_ over 32-bit lanes, for a block of values whose every partial sum
+ *      fits a signed 32-bit integer, widened with its sign on return.
+ *
+ *  Each step of @p lanes_prefix_sum moves one 32-bit value rather than two, and @p shared holds a
+ *  32-bit entry per group.
+ */
+STRINGZILLA_DEVICE sz_size_t sz_block_scan_bounded_simt_(sz_size_t value, sz_u32_t *shared, sz_size_t *total,
+                                                         unsigned lanes, unsigned threads,
+                                                         sz_u32_t (*lanes_prefix_sum)(sz_u32_t)) {
+    unsigned const group = threadIdx.x / lanes, groups = threads / lanes;
+    sz_u32_t const inclusive = lanes_prefix_sum((sz_u32_t)value);
+    sz_u32_t exclusive = inclusive - (sz_u32_t)value, sum = 0;
+    if (threadIdx.x % lanes == lanes - 1) shared[group] = inclusive;
+    __syncthreads();
+    for (unsigned other = 0; other != groups; ++other) {
+        sz_u32_t const other_total = shared[other];
+        exclusive += other < group ? other_total : 0;
+        sum += other_total;
+    }
+    *total = (sz_size_t)(sz_i64_t)(sz_i32_t)sum;
+    __syncthreads(); // ! The caller reuses `shared` for the next tile.
+    return (sz_size_t)(sz_i64_t)(sz_i32_t)exclusive;
+}
+
+/** The block's sum of @p value in every thread, as @ref sz_block_scan_simt_ totals it, behind one
+ *  barrier and no trailing one: a caller reusing @p shared orders that reuse with its own. */
+STRINGZILLA_DEVICE sz_size_t sz_block_sum_simt_(sz_size_t value, sz_size_t *shared, unsigned lanes, unsigned threads,
+                                                sz_u64_t (*lanes_prefix_sum)(sz_u64_t)) {
+    unsigned const groups = threads / lanes;
+    sz_size_t const inclusive = (sz_size_t)lanes_prefix_sum((sz_u64_t)value);
+    sz_size_t sum = 0;
+    if (threadIdx.x % lanes == lanes - 1) shared[threadIdx.x / lanes] = inclusive;
+    __syncthreads();
+    for (unsigned other = 0; other != groups; ++other) sum += shared[other];
+    return sum;
 }
 
 /** The aligned word at @p word, its bytes from @p end on read as zeros, as the word holding a
@@ -144,6 +184,15 @@ typedef struct sz_simt_group_t {
 
     /** The value of the lane the second argument below this one, a low lane keeping its own. */
     sz_u32_t (*shuffle_up)(sz_u32_t, unsigned);
+
+    /** The sum of a value over this lane and every lane below it. */
+    sz_u32_t (*prefix_sum)(sz_u32_t);
+
+    /** The least of a value over this lane and every lane below it. */
+    sz_i32_t (*prefix_min)(sz_i32_t);
+
+    /** The sum of a value over every lane of the group, in each of them. */
+    sz_u64_t (*sum)(sz_u64_t);
 
     /** Orders the group's lanes and their memory at this point, and no lane outside the group. */
     void (*sync)(void);
@@ -271,6 +320,12 @@ STRINGZILLA_DEVICE sz_size_t sz_chain_ticket_simt_(sz_size_t *slot) {
     return ticket;
 }
 
+/** This block's tile among @p tiles, its ticket, or @c STRINGZILLA_SIZE_MAX for a block past them,
+ *  which takes none; every thread calls it, and a block taking a ticket ends in a barrier. */
+STRINGZILLA_DEVICE sz_size_t sz_chain_tile_simt_(sz_size_t *chain, sz_size_t tiles) {
+    return blockIdx.x < tiles ? sz_chain_ticket_simt_(chain) : STRINGZILLA_SIZE_MAX;
+}
+
 /** Where tile @p ticket of @p tiles writes, once every tile before it chained, publishing its own
  *  @p total for the ones after; every thread calls it, and it ends in a barrier. */
 STRINGZILLA_DEVICE sz_size_t sz_chain_offset_simt_(sz_size_t *slot, sz_size_t ticket, sz_size_t tiles,
@@ -290,27 +345,41 @@ STRINGZILLA_DEVICE sz_size_t sz_chain_offset_simt_(sz_size_t *slot, sz_size_t ti
     return offset;
 }
 
-/** Where tile @p ticket writes, summing the tiles before it by decoupled look-back over @p states,
- *  one cleared word per tile, where it publishes its own @p total first; every thread calls it, and
- *  it ends in a barrier. A word carries its total in 62 bits, read back sign-extended, so totals of
- *  signed deltas that wrap below zero scan as exactly as counts do. */
-STRINGZILLA_DEVICE sz_size_t sz_chain_look_back_simt_(sz_u64_t *states, sz_size_t ticket, sz_size_t total) {
+/**
+ *  @brief Where tile @p ticket writes, summing the tiles before it by decoupled look-back over
+ *      @p states, one cleared word per tile, where it publishes its own @p total first; every
+ *      thread calls it, and it ends in a barrier.
+ *
+ *  A word carries its total in 62 bits, read back sign-extended, so totals of signed deltas that
+ *  wrap below zero scan as exactly as counts do. The first 32 lanes read up to 32 predecessors per
+ *  step, the nearest first: @p ballot finds the nearest word holding the sum up to its tile, and
+ *  @p lanes_prefix_sum adds the words up to it, so one step covers 32 tiles.
+ */
+STRINGZILLA_DEVICE sz_size_t sz_chain_look_back_simt_(sz_u64_t *states, sz_size_t ticket, sz_size_t total,
+                                                      sz_u32_t (*ballot)(int), sz_u64_t (*lanes_prefix_sum)(sz_u64_t)) {
     __shared__ sz_size_t offset;
-    if (threadIdx.x == 0) {
+    // A vote rather than the index alone shows the compiler a whole group takes the branch.
+    if (ballot(threadIdx.x < 32)) {
         // Bit 62 marks a word holding its tile's own total, bit 63 one holding the sum up to it.
         sz_u64_t const own = 1ull << 62, inclusive = 1ull << 63, value = own - 1;
         sz_u64_t volatile *const published = (sz_u64_t volatile *)states;
-        sz_size_t prefix = 0, look = ticket;
-        published[ticket] = (ticket ? own : inclusive) | (total & value);
-        while (look-- != 0) {
-            sz_u64_t state;
-            do state = published[look];
-            while (!state);
-            prefix += (sz_size_t)((sz_i64_t)(state << 2) >> 2);
-            if (state & inclusive) break;
+        unsigned const lane = threadIdx.x;
+        sz_size_t prefix = 0, window = ticket;
+        if (lane == 31) published[ticket] = (ticket ? own : inclusive) | (total & value);
+        // Tile zero publishes its sum, so a window reaching it always closes.
+        while (window != 0) {
+            sz_u64_t const state = lane < window ? published[window - 1 - lane] : inclusive;
+            sz_u32_t const closed = ballot((state & inclusive) != 0), ready = ballot(state != 0);
+            sz_u32_t const needed = closed ? (closed & (0u - closed)) * 2u - 1u : 0xFFFFFFFFu;
+            if ((ready & needed) != needed) continue;
+            prefix += (sz_size_t)lanes_prefix_sum(needed >> lane & 1u ? (sz_u64_t)((sz_i64_t)(state << 2) >> 2) : 0);
+            if (closed) break;
+            window -= 32;
         }
-        if (ticket) published[ticket] = inclusive | ((prefix + total) & value);
-        offset = prefix;
+        if (lane == 31) {
+            if (ticket) published[ticket] = inclusive | ((prefix + total) & value);
+            offset = prefix;
+        }
     }
     __syncthreads();
     return offset;

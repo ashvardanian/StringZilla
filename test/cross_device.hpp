@@ -2717,13 +2717,31 @@ inline constexpr unsigned walk_lanes_k = 32;
 /** The group of 32 lanes this thread walks with: a CUDA warp, or half of a ROCm wavefront. */
 __device__ inline sz_simt_group_t walk_group_() {
 #if STRINGZILLA_ARCH_CUDA_
-    return {walk_lanes_k,           threadIdx.x % walk_lanes_k, sz_lanes_any_cuda_,
-            sz_lanes_ballot_cuda_,  sz_lanes_first_cuda_,       sz_lanes_below_cuda_,
-            sz_shuffle_index_cuda_, sz_shuffle_up_cuda_,        sz_group_sync_cuda_};
+    return {walk_lanes_k,
+            threadIdx.x % walk_lanes_k,
+            sz_lanes_any_cuda_,
+            sz_lanes_ballot_cuda_,
+            sz_lanes_first_cuda_,
+            sz_lanes_below_cuda_,
+            sz_shuffle_index_cuda_,
+            sz_shuffle_up_cuda_,
+            sz_u32_lanes_prefix_sum_cuda_,
+            sz_i32_lanes_prefix_min_cuda_,
+            sz_u64_lanes_sum_cuda_,
+            sz_group_sync_cuda_};
 #else
-    return {walk_lanes_k,           threadIdx.x % walk_lanes_k, sz_lanes_any_rocm_,
-            sz_lanes_ballot_rocm_,  sz_lanes_first_rocm_,       sz_lanes_below_rocm_,
-            sz_shuffle_index_rocm_, sz_shuffle_up_rocm_,        sz_group_sync_rocm_};
+    return {walk_lanes_k,
+            threadIdx.x % walk_lanes_k,
+            sz_lanes_any_rocm_,
+            sz_lanes_ballot_rocm_,
+            sz_lanes_first_rocm_,
+            sz_lanes_below_rocm_,
+            sz_shuffle_index_rocm_,
+            sz_shuffle_up_rocm_,
+            sz_u32_lanes_prefix_sum_rocm_,
+            sz_i32_lanes_prefix_min_rocm_,
+            sz_u64_lanes_sum_rocm_,
+            sz_group_sync_rocm_};
 #endif
 }
 

@@ -4,6 +4,8 @@ This directory holds the kernels behind `sz_levenshtein_distances`, which scores
 A batch is prepared by `sz_levenshtein_engine_init` for the best capability of a mask and the device its stream names, over bytes or over UTF-8 runes as `sz_levenshtein_symbol_t` spells it, and released by `sz_levenshtein_engine_free`.
 The operation has a serial baseline plus per-ISA SIMD backends — `haswell`, `skylake`, `icelake` on x86, `neon` on Arm, `rvv` on RISC-V and `powervsx` on Power — and `cuda`, `rocm` and `metal` backends on the device.
 The CUDA and ROCm kernels share `simt.cuh`, each vendor launches them from its own host code in `cuda.cuh` and `rocm.cuh`, which `src/capabilities/cuda.cu` and `src/capabilities/rocm.hip` compile into the library, and the Metal ones live in `metal.h` with the `metal.metal` shaders, which `src/capabilities/metal.c` compiles.
+The `ampere` and `blackwell` tiers over CUDA and the `cdna3`, `cdna4` and `cdna5` tiers over ROCm compile the same walks into kernels of their own, in `ampere.cuh`, `blackwell.cuh`, `cdna3.cuh`, `cdna4.cuh` and `cdna5.cuh`, each built by the unit of the same name in `src/capabilities/`.
+On `ampere` a warped candidate without a bound sums its lanes' deltas in one `redux.sync` rather than a scan up the warp.
 Each capability has its own init kernel, which records that capability in the engine, and every round runs the same capability's kernel on the device of its own stream; Ice Lake has no rune arm, so its kernel scores a rune batch with Skylake's.
 The `cuda`, `rocm` and `metal` collection backends use an internal tiled wavefront for long byte pairs and dynamic Myers state for long rune queries.
 Empty and mixed-length queries use the same engine and scoring API.
@@ -50,6 +52,12 @@ UTF-8 rows use the harness's byte-based cell-update count, rather than a count o
 | CUDA @ 18× Nvidia SM103       | 27.87 GCUPS |  3,780 GCUPS |
 | Blackwell @ 18× Nvidia SM103  |           … |  3,621 GCUPS |
 | CUDA @ Nvidia SM120           |  3.59 GCUPS |            … |
+| ROCm @ AMD gfx942             |           … |            … |
+| CDNA3 @ AMD gfx942            |           … |            … |
+| ROCm @ AMD gfx950             |           … |            … |
+| CDNA4 @ AMD gfx950            |           … |            … |
+| ROCm @ AMD gfx1250            |           … |            … |
+| CDNA5 @ AMD gfx1250           |           … |            … |
 
 ## Batches Over UTF-8 Strings
 
@@ -77,6 +85,12 @@ UTF-8 rows use the harness's byte-based cell-update count, rather than a count o
 | CUDA @ 18× Nvidia SM103       | 31.23 GCUPS |  3,872 GCUPS |
 | Blackwell @ 18× Nvidia SM103  |           … |  3,576 GCUPS |
 | CUDA @ Nvidia SM120           |           … |            … |
+| ROCm @ AMD gfx942             |           … |            … |
+| CDNA3 @ AMD gfx942            |           … |            … |
+| ROCm @ AMD gfx950             |           … |            … |
+| CDNA4 @ AMD gfx950            |           … |            … |
+| ROCm @ AMD gfx1250            |           … |            … |
+| CDNA5 @ AMD gfx1250           |           … |            … |
 
 ## Long Byte Collections
 
@@ -95,5 +109,11 @@ Cells are milliseconds for equal-length strings over four byte values, reporting
 | CUDA @ 148× Nvidia SM100      |            … |            … |
 | Hopper @ 148× Nvidia SM100    |            … |            … |
 | Blackwell @ 148× Nvidia SM100 |            … |            … |
+| ROCm @ AMD gfx942             |            … |            … |
+| CDNA3 @ AMD gfx942            |            … |            … |
+| ROCm @ AMD gfx950             |            … |            … |
+| CDNA4 @ AMD gfx950            |            … |            … |
+| ROCm @ AMD gfx1250            |            … |            … |
+| CDNA5 @ AMD gfx1250           |            … |            … |
 
 The collection keeps short pairs on the Myers kernels because tiled launch costs outweigh their parallelism at shorter lengths.

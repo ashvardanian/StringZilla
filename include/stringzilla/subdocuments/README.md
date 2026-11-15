@@ -117,6 +117,9 @@ A DOCTYPE is skipped when it has no internal subset, and refused when it has one
 A tape or a DOM materializes structure that a query then navigates, and most of that structure belongs to values no path selects.
 Here the paths are known before the documents, so the automaton decides at each container whether anything below it can matter, and the bytes of everything that cannot are classified once and never revisited.
 The same shape carries to devices, where classification is a prefix XOR and depth a prefix sum, and the live sets advance one depth level at a time.
+On AMD the `cdna3`, `cdna4` and `cdna5` tiers, in `cdna3.cuh`, `cdna4.cuh` and `cdna5.cuh`, take those prefix sums and depth minima across a walk's 32 lanes through DPP rather than the LDS crossbar, and scan the counts with each wavefront scanning itself and the block meeting once.
+On NVIDIA the `ampere` tier, in `ampere.cuh`, totals the counts scan's tiles with `redux.sync` and publishes how deep the large documents nest once per warp rather than once per chunk.
+The `hopper` tier, in `hopper.cuh`, launches the counts scan in clusters of eight blocks, whose first block takes one ticket for all of them and looks back once over their aggregate.
 
 ## Methodology
 

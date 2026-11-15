@@ -169,35 +169,32 @@ static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_
                                          0, 1, (sz_simt_group_t const *)STRINGZILLA_NULL);
 }
 
-/** Scans one ticket's own tile of @p values in place, seeded by the totals the tiles before
- *  it chained through @p chain, so the whole scan is one launch, as
- *  @c sz_regex_scan_simt_kernel_ does. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_scan_simt_kernel_(sz_size_t *values, sz_size_t count, sz_size_t elements_per_tile,
-                                      sz_size_t *chain) {
+/** Scans the tile @p ticket hands the block in place with @p block_scan, seeded by the totals the
+ *  tiles before it publish in the cleared @p states for @p look_back to read, so the whole scan is
+ *  one launch, as @c sz_regex_scan_tile_simt_ does; its own total takes one @p block_sum . */
+STRINGZILLA_DEVICE void sz_subdocuments_scan_tile_simt_(
+    sz_size_t *values, sz_size_t count, sz_size_t elements_per_tile, sz_size_t *chain, sz_u64_t *states,
+    sz_size_t (*block_scan)(sz_size_t, sz_size_t *, sz_size_t *, unsigned),
+    sz_size_t (*block_sum)(sz_size_t, sz_size_t *, unsigned), sz_size_t (*ticket)(sz_size_t *, sz_size_t),
+    sz_size_t (*look_back)(sz_u64_t *, sz_size_t, sz_size_t)) {
     __shared__ sz_size_t shared[sz_subdocuments_threads_per_block_simt_k];
     sz_size_t const tiles = sz_size_divide_round_up(count, elements_per_tile);
     sz_size_t tile, begin, end, running = 0, first;
-    if (blockIdx.x >= tiles) return;
-    tile = sz_chain_ticket_simt_(chain);
+    tile = ticket(chain, tiles);
+    if (tile == STRINGZILLA_SIZE_MAX) return;
     begin = tile * elements_per_tile;
     end = sz_min_of_two(begin + elements_per_tile, count);
-    for (first = begin; first < end; first += blockDim.x) {
-        sz_size_t const index = first + threadIdx.x;
-        sz_size_t total = 0;
-        sz_block_scan_simt_(index < end ? values[index] : 0, shared, &total);
-        running += total;
-        __syncthreads();
-    }
-    running = sz_chain_offset_simt_(chain, tile, tiles, running);
+    for (first = begin + threadIdx.x; first < end; first += blockDim.x) running += values[first];
+    running = block_sum(running, shared, sz_subdocuments_threads_per_block_simt_k);
+    // The look-back ends in the barrier that frees `shared` for the scans after it.
+    running = look_back(states, tile, running);
     for (first = begin; first < end; first += blockDim.x) {
         sz_size_t const index = first + threadIdx.x;
         sz_size_t const value = index < end ? values[index] : 0;
         sz_size_t total = 0;
-        sz_size_t const exclusive = sz_block_scan_simt_(value, shared, &total);
+        sz_size_t const exclusive = block_scan(value, shared, &total, sz_subdocuments_threads_per_block_simt_k);
         if (index < end) values[index] = running + exclusive;
         running += total;
-        __syncthreads();
     }
 }
 
@@ -241,53 +238,58 @@ static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_
     }
 }
 
-/** Reduces each block's own tile of @c scanned into @c tiles, the first of
- *  a scan's three launches. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_large_reduce_simt_kernel_(sz_subdocuments_large_simt_t large) {
+/** Reduces each block's own tile of @c scanned into @c tiles with @p block_scan, the first of a
+ *  scan's three launches. */
+STRINGZILLA_DEVICE void sz_subdocuments_large_reduce_simt_(sz_subdocuments_large_simt_t const *large,
+                                                           sz_u64_t (*block_scan)(sz_u64_t, sz_u64_t *, sz_u32_t,
+                                                                                  sz_u64_t *, unsigned)) {
     __shared__ sz_u64_t shared[sz_subdocuments_threads_per_block_simt_k];
-    sz_size_t const count = large.scanned_count, per_tile = sz_size_divide_round_up(count, large.scan_tiles);
+    sz_size_t const count = large->scanned_count, per_tile = sz_size_divide_round_up(count, large->scan_tiles);
     sz_size_t const begin = sz_min_of_two((sz_size_t)blockIdx.x * per_tile, count);
     sz_size_t const end = sz_min_of_two(begin + per_tile, count);
     sz_u64_t running = 0, total;
     for (sz_size_t first = begin; first < end; first += blockDim.x) {
         sz_size_t const index = first + threadIdx.x;
-        sz_subdocuments_block_scan_simt_(index < end ? large.scanned[index] : 0, shared, large.compose, &total);
-        running = sz_subdocuments_combine_simt_(running, total, large.compose);
+        block_scan(index < end ? large->scanned[index] : 0, shared, large->compose, &total,
+                   sz_subdocuments_threads_per_block_simt_k);
+        running = sz_subdocuments_combine_simt_(running, total, large->compose);
     }
-    if (threadIdx.x == 0) large.tiles[blockIdx.x] = running;
+    if (threadIdx.x == 0) large->tiles[blockIdx.x] = running;
 }
 
-/** Scans @c tiles in place on one block, the second of a scan's three launches. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_large_carry_simt_kernel_(sz_subdocuments_large_simt_t large) {
+/** Scans @c tiles in place on one block with @p block_scan, the second of a scan's three
+ *  launches. */
+STRINGZILLA_DEVICE void sz_subdocuments_large_carry_simt_(sz_subdocuments_large_simt_t const *large,
+                                                          sz_u64_t (*block_scan)(sz_u64_t, sz_u64_t *, sz_u32_t,
+                                                                                 sz_u64_t *, unsigned)) {
     __shared__ sz_u64_t shared[sz_subdocuments_threads_per_block_simt_k];
     sz_u64_t running = 0, total;
-    for (sz_size_t first = 0; first < large.scan_tiles; first += blockDim.x) {
+    for (sz_size_t first = 0; first < large->scan_tiles; first += blockDim.x) {
         sz_size_t const index = first + threadIdx.x;
-        sz_u64_t const exclusive = sz_subdocuments_block_scan_simt_(index < large.scan_tiles ? large.tiles[index] : 0,
-                                                                    shared, large.compose, &total);
-        if (index < large.scan_tiles)
-            large.tiles[index] = sz_subdocuments_combine_simt_(running, exclusive, large.compose);
-        running = sz_subdocuments_combine_simt_(running, total, large.compose);
+        sz_u64_t const exclusive = block_scan(index < large->scan_tiles ? large->tiles[index] : 0, shared,
+                                              large->compose, &total, sz_subdocuments_threads_per_block_simt_k);
+        if (index < large->scan_tiles)
+            large->tiles[index] = sz_subdocuments_combine_simt_(running, exclusive, large->compose);
+        running = sz_subdocuments_combine_simt_(running, total, large->compose);
     }
 }
 
-/** Scans each block's own tile of @c scanned in place from the carry before it, the
- *  last of three launches. */
-static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
-    sz_subdocuments_large_apply_simt_kernel_(sz_subdocuments_large_simt_t large) {
+/** Scans each block's own tile of @c scanned in place from the carry before it with
+ *  @p block_scan, the last of three launches. */
+STRINGZILLA_DEVICE void sz_subdocuments_large_apply_simt_(sz_subdocuments_large_simt_t const *large,
+                                                          sz_u64_t (*block_scan)(sz_u64_t, sz_u64_t *, sz_u32_t,
+                                                                                 sz_u64_t *, unsigned)) {
     __shared__ sz_u64_t shared[sz_subdocuments_threads_per_block_simt_k];
-    sz_size_t const count = large.scanned_count, per_tile = sz_size_divide_round_up(count, large.scan_tiles);
+    sz_size_t const count = large->scanned_count, per_tile = sz_size_divide_round_up(count, large->scan_tiles);
     sz_size_t const begin = sz_min_of_two((sz_size_t)blockIdx.x * per_tile, count);
     sz_size_t const end = sz_min_of_two(begin + per_tile, count);
-    sz_u64_t running = large.tiles[blockIdx.x], total;
+    sz_u64_t running = large->tiles[blockIdx.x], total;
     for (sz_size_t first = begin; first < end; first += blockDim.x) {
         sz_size_t const index = first + threadIdx.x;
-        sz_u64_t const exclusive = sz_subdocuments_block_scan_simt_(index < end ? large.scanned[index] : 0, shared,
-                                                                    large.compose, &total);
-        if (index < end) large.scanned[index] = sz_subdocuments_combine_simt_(running, exclusive, large.compose);
-        running = sz_subdocuments_combine_simt_(running, total, large.compose);
+        sz_u64_t const exclusive = block_scan(index < end ? large->scanned[index] : 0, shared, large->compose, &total,
+                                              sz_subdocuments_threads_per_block_simt_k);
+        if (index < end) large->scanned[index] = sz_subdocuments_combine_simt_(running, exclusive, large->compose);
+        running = sz_subdocuments_combine_simt_(running, total, large->compose);
     }
 }
 
@@ -344,21 +346,30 @@ static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_
     }
 }
 
-/** Drops the chunks of every refused document, so no token or container is numbered in one, and
- *  publishes the deepest any kept document nests. */
+/** Drops @p chunk where its document was refused, so no token or container is numbered in it, and
+ *  returns how deep it nests within a kept document, zero for none; a large document spans at most
+ *  0xFFFFFFFF bytes, so no depth passes 32 bits. */
+STRINGZILLA_DEVICE sz_u32_t sz_subdocuments_large_drop_chunk_simt_(sz_subdocuments_large_simt_t const *large,
+                                                                   sz_size_t chunk) {
+    sz_size_t const slot = sz_subdocuments_slot_simt_(large, (sz_u64_t const *)STRINGZILLA_NULL, chunk);
+    sz_i64_t highest;
+    if (slot == large->listed) return 0;
+    if (large->malformed[slot]) {
+        large->tokens[chunk] = 0, large->opens[chunk] = 0;
+        return 0;
+    }
+    highest = (sz_i64_t)(large->depths[chunk] - large->depths[large->firsts[slot]] + (large->extremes[chunk] >> 32));
+    return highest > 0 ? (sz_u32_t)highest : 0;
+}
+
+/** Drops the chunks of every refused document and publishes the deepest any kept document nests,
+ *  a chunk per thread, with an atomic per chunk. */
 static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
     sz_subdocuments_large_drop_simt_kernel_(sz_subdocuments_round_simt_t round, sz_subdocuments_large_simt_t large) {
     for (sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; chunk < large.chunks;
          chunk += large.threads) {
-        sz_size_t const slot = sz_subdocuments_slot_simt_(&large, (sz_u64_t const *)STRINGZILLA_NULL, chunk);
-        sz_i64_t highest;
-        if (slot == large.listed) continue;
-        if (large.malformed[slot]) {
-            large.tokens[chunk] = 0, large.opens[chunk] = 0;
-            continue;
-        }
-        highest = (sz_i64_t)(large.depths[chunk] - large.depths[large.firsts[slot]] + (large.extremes[chunk] >> 32));
-        if (highest > 0) atomicMax((unsigned long long *)&round.header->deepest, (unsigned long long)highest);
+        sz_u32_t const highest = sz_subdocuments_large_drop_chunk_simt_(&large, chunk);
+        if (highest) atomicMax((unsigned long long *)&round.header->deepest, (unsigned long long)highest);
     }
 }
 

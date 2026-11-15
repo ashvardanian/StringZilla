@@ -4,6 +4,8 @@
  *  @date September 29, 2026
  *  @brief GPU engine benchmarks - the CUDA kernels against the CPU tiers this build carries.
  */
+#include "stringzilla/stringzilla.hpp" // `strings<>::view`, which `types.hpp` only declares
+
 #include "harness.hpp"
 
 #if STRINGZILLA_ARCH_CUDA_
@@ -73,6 +75,34 @@ int bench_cross_cuda(environment_t &env, std::size_t ordinal) {
 #else
     sz_unused_(env);
 #endif
+#if STRINGZILLA_TARGET_AMPERE
+    if (runtime.capabilities & sz_cap_ampere_k) {
+        simt_backend_t const ampere {"ampere",
+                                     runtime,
+                                     sz_levenshtein_engine_init_ampere,
+                                     sz_levenshtein_distances_ampere,
+                                     sz_overlap_engine_init_ampere,
+                                     sz_overlap_scores_ampere,
+                                     sz_substrings_engine_init_ampere,
+                                     sz_substrings_counts_ampere,
+                                     sz_substrings_find_ampere,
+                                     sz_substrings_replace_ampere,
+                                     sz_substrings_bm25_scores_ampere,
+                                     sz_regex_engine_init_ampere,
+                                     sz_regex_counts_ampere,
+                                     sz_regex_find_ampere,
+                                     sz_regex_replace_ampere,
+                                     sz_regex_extract_ampere,
+                                     sz_subdocuments_engine_init_ampere,
+                                     sz_subdocuments_counts_ampere,
+                                     sz_subdocuments_find_ampere,
+                                     sz_utf8_uncased_fold_cuda,
+                                     sz_utf8_norm_cuda,
+                                     sz_sha256_multistate_update_cuda,
+                                     sz_sha256_multistate_digest_cuda};
+        result += bench_cross_simt_engines(env, ampere);
+    }
+#endif
 #if STRINGZILLA_TARGET_HOPPER
     if (runtime.capabilities & sz_cap_hopper_k) {
         simt_backend_t const hopper {"hopper",
@@ -86,19 +116,19 @@ int bench_cross_cuda(environment_t &env, std::size_t ordinal) {
                                      sz_substrings_find_hopper,
                                      sz_substrings_replace_hopper,
                                      sz_substrings_bm25_scores_hopper,
-                                     sz_regex_engine_init_cuda,
-                                     sz_regex_counts_cuda,
-                                     sz_regex_find_cuda,
-                                     sz_regex_replace_cuda,
-                                     sz_regex_extract_cuda,
-                                     sz_subdocuments_engine_init_cuda,
-                                     sz_subdocuments_counts_cuda,
-                                     sz_subdocuments_find_cuda,
+                                     sz_regex_engine_init_hopper,
+                                     sz_regex_counts_hopper,
+                                     sz_regex_find_hopper,
+                                     sz_regex_replace_hopper,
+                                     sz_regex_extract_hopper,
+                                     sz_subdocuments_engine_init_hopper,
+                                     sz_subdocuments_counts_hopper,
+                                     sz_subdocuments_find_hopper,
                                      sz_utf8_uncased_fold_cuda,
                                      sz_utf8_norm_cuda,
                                      sz_sha256_multistate_update_cuda,
                                      sz_sha256_multistate_digest_cuda};
-        result += bench_cross_simt_substrings(env, hopper);
+        result += bench_cross_simt_searches(env, hopper);
     }
 #endif
 #if STRINGZILLA_TARGET_BLACKWELL

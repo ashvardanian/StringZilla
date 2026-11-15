@@ -72,6 +72,90 @@ int bench_cross_rocm(environment_t &env, std::size_t ordinal) {
 #else
     sz_unused_(env);
 #endif
+#if STRINGZILLA_TARGET_CDNA3
+    if (runtime.capabilities & sz_cap_cdna3_k) {
+        simt_backend_t const cdna3 {"cdna3",
+                                    runtime,
+                                    sz_levenshtein_engine_init_cdna3,
+                                    sz_levenshtein_distances_cdna3,
+                                    sz_overlap_engine_init_cdna3,
+                                    sz_overlap_scores_cdna3,
+                                    sz_substrings_engine_init_rocm,
+                                    sz_substrings_counts_rocm,
+                                    sz_substrings_find_rocm,
+                                    sz_substrings_replace_rocm,
+                                    sz_substrings_bm25_scores_rocm,
+                                    sz_regex_engine_init_rocm,
+                                    sz_regex_counts_rocm,
+                                    sz_regex_find_rocm,
+                                    sz_regex_replace_rocm,
+                                    sz_regex_extract_rocm,
+                                    sz_subdocuments_engine_init_rocm,
+                                    sz_subdocuments_counts_rocm,
+                                    sz_subdocuments_find_rocm,
+                                    sz_utf8_uncased_fold_rocm,
+                                    sz_utf8_norm_rocm,
+                                    sz_sha256_multistate_update_rocm,
+                                    sz_sha256_multistate_digest_rocm};
+        result += bench_cross_simt_levenshtein_overlap(env, cdna3);
+    }
+#endif
+#if STRINGZILLA_TARGET_CDNA4
+    if (runtime.capabilities & sz_cap_cdna4_k) {
+        simt_backend_t const cdna4 {"cdna4",
+                                    runtime,
+                                    sz_levenshtein_engine_init_cdna4,
+                                    sz_levenshtein_distances_cdna4,
+                                    sz_overlap_engine_init_cdna4,
+                                    sz_overlap_scores_cdna4,
+                                    sz_substrings_engine_init_rocm,
+                                    sz_substrings_counts_rocm,
+                                    sz_substrings_find_rocm,
+                                    sz_substrings_replace_rocm,
+                                    sz_substrings_bm25_scores_rocm,
+                                    sz_regex_engine_init_rocm,
+                                    sz_regex_counts_rocm,
+                                    sz_regex_find_rocm,
+                                    sz_regex_replace_rocm,
+                                    sz_regex_extract_rocm,
+                                    sz_subdocuments_engine_init_rocm,
+                                    sz_subdocuments_counts_rocm,
+                                    sz_subdocuments_find_rocm,
+                                    sz_utf8_uncased_fold_rocm,
+                                    sz_utf8_norm_rocm,
+                                    sz_sha256_multistate_update_rocm,
+                                    sz_sha256_multistate_digest_rocm};
+        result += bench_cross_simt_levenshtein_overlap(env, cdna4);
+    }
+#endif
+#if STRINGZILLA_TARGET_CDNA5
+    if (runtime.capabilities & sz_cap_cdna5_k) {
+        simt_backend_t const cdna5 {"cdna5",
+                                    runtime,
+                                    sz_levenshtein_engine_init_cdna5,
+                                    sz_levenshtein_distances_cdna5,
+                                    sz_overlap_engine_init_cdna5,
+                                    sz_overlap_scores_cdna5,
+                                    sz_substrings_engine_init_rocm,
+                                    sz_substrings_counts_rocm,
+                                    sz_substrings_find_rocm,
+                                    sz_substrings_replace_rocm,
+                                    sz_substrings_bm25_scores_rocm,
+                                    sz_regex_engine_init_rocm,
+                                    sz_regex_counts_rocm,
+                                    sz_regex_find_rocm,
+                                    sz_regex_replace_rocm,
+                                    sz_regex_extract_rocm,
+                                    sz_subdocuments_engine_init_rocm,
+                                    sz_subdocuments_counts_rocm,
+                                    sz_subdocuments_find_rocm,
+                                    sz_utf8_uncased_fold_rocm,
+                                    sz_utf8_norm_rocm,
+                                    sz_sha256_multistate_update_rocm,
+                                    sz_sha256_multistate_digest_rocm};
+        result += bench_cross_simt_levenshtein_overlap(env, cdna5);
+    }
+#endif
     return result;
 #else
     sz_unused_(env);

@@ -622,6 +622,14 @@
 #define STRINGZILLA_TARGET_CUDA STRINGZILLA_ARCH_CUDA_
 #endif
 
+/*  Defining the Ampere kernels, which reduce across a warp with @c redux.sync and copy into shared
+ *  memory with @c cp.async , for compute capability 8.0 on: STRINGZILLA_TARGET_AMPERE. Off unless
+ *  the build says its codes run them, and forced off where the unit is not compiled as CUDA. */
+#if !defined(STRINGZILLA_TARGET_AMPERE) || (STRINGZILLA_TARGET_AMPERE && !STRINGZILLA_ARCH_CUDA_)
+#undef STRINGZILLA_TARGET_AMPERE
+#define STRINGZILLA_TARGET_AMPERE 0
+#endif
+
 /*  Defining the Hopper kernels, which group blocks into clusters sharing their shared memory, for
  *  compute capability 9.0 on: STRINGZILLA_TARGET_HOPPER. Off unless the build says its codes run
  *  them, and forced off where the unit is not compiled as CUDA. */
@@ -643,6 +651,30 @@
 #if !defined(STRINGZILLA_TARGET_ROCM) || (STRINGZILLA_TARGET_ROCM && !STRINGZILLA_ARCH_ROCM_)
 #undef STRINGZILLA_TARGET_ROCM
 #define STRINGZILLA_TARGET_ROCM STRINGZILLA_ARCH_ROCM_
+#endif
+
+/*  Defining the CDNA3 kernels, whose one-lane shifts move through a DPP shift of the whole 64-lane
+ *  wavefront, for gfx942: STRINGZILLA_TARGET_CDNA3. Off unless the build says its targets run
+ *  them, and forced off where the unit is not compiled as HIP. */
+#if !defined(STRINGZILLA_TARGET_CDNA3) || (STRINGZILLA_TARGET_CDNA3 && !STRINGZILLA_ARCH_ROCM_)
+#undef STRINGZILLA_TARGET_CDNA3
+#define STRINGZILLA_TARGET_CDNA3 0
+#endif
+
+/*  Defining the CDNA4 kernels, which take the CDNA3 wavefront shift on gfx950:
+ *  STRINGZILLA_TARGET_CDNA4. Off unless the build says its targets run them, and forced off where
+ *  the unit is not compiled as HIP. */
+#if !defined(STRINGZILLA_TARGET_CDNA4) || (STRINGZILLA_TARGET_CDNA4 && !STRINGZILLA_ARCH_ROCM_)
+#undef STRINGZILLA_TARGET_CDNA4
+#define STRINGZILLA_TARGET_CDNA4 0
+#endif
+
+/*  Defining the CDNA5 kernels, whose one-lane shifts move through DPP row shifts bridged by
+ *  @c v_permlanex16 on a 32-lane wavefront, for gfx1250 and gfx1251: STRINGZILLA_TARGET_CDNA5. Off
+ *  unless the build says its targets run them, and forced off where a unit is not HIP. */
+#if !defined(STRINGZILLA_TARGET_CDNA5) || (STRINGZILLA_TARGET_CDNA5 && !STRINGZILLA_ARCH_ROCM_)
+#undef STRINGZILLA_TARGET_CDNA5
+#define STRINGZILLA_TARGET_CDNA5 0
 #endif
 
 /*  Defining the Metal kernels, the SIMT baseline every Apple7 device runs:
@@ -732,6 +764,10 @@
      STRINGZILLA_ARCH_ARM64_SVE_)
 #define STRINGZILLA_ARCH_RISCV64_RVV_ (STRINGZILLA_TARGET_RVV || STRINGZILLA_TARGET_RVVCRYPTO)
 #define STRINGZILLA_ARCH_WASM_V128_ (STRINGZILLA_TARGET_V128 || STRINGZILLA_TARGET_V128RELAXED)
+#define STRINGZILLA_ARCH_CUDA_HOPPER_ (STRINGZILLA_TARGET_HOPPER || STRINGZILLA_TARGET_BLACKWELL)
+#define STRINGZILLA_ARCH_CUDA_AMPERE_ (STRINGZILLA_TARGET_AMPERE || STRINGZILLA_ARCH_CUDA_HOPPER_)
+#define STRINGZILLA_ARCH_ROCM_CDNA4_ (STRINGZILLA_TARGET_CDNA4 || STRINGZILLA_TARGET_CDNA5)
+#define STRINGZILLA_ARCH_ROCM_CDNA3_ (STRINGZILLA_TARGET_CDNA3 || STRINGZILLA_ARCH_ROCM_CDNA4_)
 
 /*  Hardware-specific headers for different SIMD intrinsics and register wrappers. */
 #if STRINGZILLA_ARCH_WASM_V128_

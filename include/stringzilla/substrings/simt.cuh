@@ -141,11 +141,14 @@ typedef struct sz_substrings_sink_simt_t {
     sz_size_t *spilled;
     sz_size_t spills_capacity, chunk_index;
 
-    /** Tallying: the block's tally, or @c STRINGZILLA_NULL to count into the round's @c pairs under
-     *  the walked haystack. */
+    /** Tallying: the @c shards of the tally, needle @c n counting into shard <tt>n % shards</tt>, or
+     *  @c STRINGZILLA_NULL to count into the round's @c pairs under the walked haystack, each count
+     *  through @c increment . */
     sz_substrings_tally_simt_t const *tally;
+    sz_size_t shards;
     sz_substrings_pairs_simt_t const *pairs;
     sz_size_t haystack_index;
+    sz_u32_t (*increment)(sz_u32_t *);
 } sz_substrings_sink_simt_t;
 
 /**
@@ -354,14 +357,17 @@ STRINGZILLA_DEVICE sz_size_t sz_substrings_last_not_above_simt_(sz_size_t const 
     return low;
 }
 
-/** Counts one occurrence of @p needle, seating it in a free slot on first sight. */
-STRINGZILLA_DEVICE void sz_substrings_tally_simt_(sz_substrings_tally_simt_t const *tally, sz_u32_t needle) {
+/** Counts one occurrence of @p needle into its shard of the @p shards at @p tallies, seating it in
+ *  a free slot on first sight; a direct shard @c s keeps needle <tt>s + shards * slot</tt>. */
+STRINGZILLA_DEVICE void sz_substrings_tally_simt_(sz_substrings_tally_simt_t const *tallies, sz_size_t shards,
+                                                  sz_u32_t needle) {
+    sz_substrings_tally_simt_t const *const tally = tallies + needle % shards;
     sz_u32_t const key = needle + 1;
     // Volatile, so a probe re-reads a slot a rival may have seated since.
     sz_u32_t const volatile *const seated_keys = tally->keys;
     sz_u32_t slot, probe;
     if (tally->layout == sz_substrings_tally_direct_simt_k) {
-        atomicAdd(tally->counts + needle, 1u);
+        atomicAdd(tally->counts + needle / shards, 1u);
         return;
     }
     slot = (sz_u32_t)(((sz_u64_t)key * 0x9E3779B97F4A7C15ull) >> (64 - sz_substrings_tally_slot_bits_simt_k));
@@ -392,7 +398,7 @@ STRINGZILLA_DEVICE void sz_substrings_pair_simt_(sz_substrings_sink_simt_t const
         sz_u64_t seated = seated_keys[slot];
         if (seated == 0) seated = atomicCAS((unsigned long long *)pairs->keys + slot, 0ull, key);
         if (seated == 0 || seated == key) {
-            atomicAdd(pairs->counts + slot, 1u);
+            sink->increment(pairs->counts + slot);
             return;
         }
         slot = slot + 1 == pairs->capacity ? 0 : slot + 1;
@@ -503,7 +509,7 @@ STRINGZILLA_DEVICE void sz_substrings_emit_simt_(sz_substrings_engine_t const *e
         // the haystack are the same test.
         if (delta + 1 < output.folded_match_bytes) continue;
         if (pass == sz_substrings_gpu_tallying_k) {
-            if (sink->tally) sz_substrings_tally_simt_(sink->tally, output.needle_index);
+            if (sink->tally) sz_substrings_tally_simt_(sink->tally, sink->shards, output.needle_index);
             else sz_substrings_pair_simt_(sink, output.needle_index);
             ++*found;
         }
@@ -580,24 +586,25 @@ STRINGZILLA_DEVICE sz_i64_t sz_substrings_bm25_fixed_term_simt_(sz_substrings_bm
 
 /** Sums in fixed point the terms of the @p tally slots and overflow entries from @p first on, every
  *  @p step th, zeroing each as it reads it, so the next haystack starts clean; its callers add up
- *  what each thread returns. */
+ *  what each thread returns. The tally is shard @p shard of @p shards , as
+ *  @ref sz_substrings_tally_simt_ counts into them. */
 STRINGZILLA_DEVICE sz_i64_t sz_substrings_bm25_terms_simt_(sz_substrings_tally_simt_t const *tally,
                                                            sz_size_t table_slots, sz_size_t needles_count,
                                                            sz_substrings_bm25_t const *parameters, sz_f64_t norm,
                                                            sz_f32_t const *needle_weights, sz_size_t first,
-                                                           sz_size_t step) {
+                                                           sz_size_t step, sz_size_t shard, sz_size_t shards) {
     sz_i64_t mine = 0;
     sz_size_t slot, needle;
     for (slot = first; slot < table_slots; slot += step) {
         sz_u32_t const frequency = tally->counts[slot];
         if (!frequency) continue;
-        needle = tally->keys ? (sz_size_t)tally->keys[slot] - 1 : slot;
+        needle = tally->keys ? (sz_size_t)tally->keys[slot] - 1 : shard + shards * slot;
         mine += sz_substrings_bm25_fixed_term_simt_(parameters, norm, needle_weights[needle], frequency);
         tally->counts[slot] = 0;
         if (tally->keys) tally->keys[slot] = 0;
     }
     if (*tally->overflowed)
-        for (needle = first; needle < needles_count; needle += step) {
+        for (needle = shard + shards * first; needle < needles_count; needle += shards * step) {
             sz_u32_t const frequency = tally->overflow[needle];
             if (!frequency) continue;
             mine += sz_substrings_bm25_fixed_term_simt_(parameters, norm, needle_weights[needle], frequency);
@@ -612,15 +619,18 @@ STRINGZILLA_DEVICE sz_f32_t sz_substrings_bm25_fixed_score_simt_(unsigned long l
 }
 
 /** Sums the terms of the block's own @p tally into @p score, zeroing every slot, overflow entry and
- *  the sum itself as it reads them, so the next haystack starts clean. */
+ *  the sum itself as it reads them, so the next haystack starts clean; each group of 32 lanes adds
+ *  its terms with @p lanes_sum and the sum takes one atomic per group. */
 STRINGZILLA_DEVICE void sz_substrings_bm25_score_simt_(sz_substrings_tally_simt_t const *tally, sz_size_t table_slots,
                                                        sz_size_t needles_count, sz_substrings_bm25_t const *parameters,
                                                        sz_f64_t norm, sz_f32_t const *needle_weights,
-                                                       unsigned long long *block_sum, sz_f32_t *score) {
+                                                       unsigned long long *block_sum, sz_f32_t *score,
+                                                       sz_u64_t (*lanes_sum)(sz_u64_t)) {
     sz_i64_t const mine = sz_substrings_bm25_terms_simt_(tally, table_slots, needles_count, parameters, norm,
-                                                         needle_weights, threadIdx.x, blockDim.x);
+                                                         needle_weights, threadIdx.x, blockDim.x, 0, 1);
     // Two's complement makes the unsigned sum of signed terms the signed sum, bit for bit.
-    if (mine) atomicAdd(block_sum, (unsigned long long)mine);
+    sz_u64_t const group_total = lanes_sum((sz_u64_t)mine);
+    if (threadIdx.x % 32 == 0 && group_total) atomicAdd(block_sum, (unsigned long long)group_total);
     __syncthreads();
     if (threadIdx.x == 0) {
         *score = sz_substrings_bm25_fixed_score_simt_(*block_sum);
@@ -834,7 +844,7 @@ STRINGZILLA_DEVICE sz_size_t sz_substrings_walk_chunk_uncased_simt_(sz_substring
                                                        folded_length);
             if (resolved.repeats) continue;
             if (pass == sz_substrings_gpu_tallying_k) {
-                if (sink->tally) sz_substrings_tally_simt_(sink->tally, output.needle_index);
+                if (sink->tally) sz_substrings_tally_simt_(sink->tally, sink->shards, output.needle_index);
                 else sz_substrings_pair_simt_(sink, output.needle_index);
                 ++found;
             }
@@ -848,11 +858,12 @@ STRINGZILLA_DEVICE sz_size_t sz_substrings_walk_chunk_uncased_simt_(sz_substring
     return found;
 }
 
-/** Walks one haystack's share of chunks, the @p thread th of @p threads, into @p tally. */
+/** Walks one haystack's share of chunks, the @p thread th of @p threads, into the @p shards of
+ *  @p tally . */
 STRINGZILLA_DEVICE void sz_substrings_bm25_walk_simt_(sz_substrings_engine_t const *engine,
                                                       sz_substrings_staged_simt_t const *staged, sz_cptr_t haystack,
                                                       sz_size_t length, sz_size_t thread, sz_size_t threads,
-                                                      sz_substrings_tally_simt_t const *tally) {
+                                                      sz_substrings_tally_simt_t const *tally, sz_size_t shards) {
     // Never narrower than the longest match, past which a chunk re-walks more warm-up than it owns.
     sz_size_t const warm_up = sz_max_of_two((sz_size_t)engine->max_source_match_bytes, (sz_size_t)1);
     sz_size_t const chunk_bytes = sz_max_of_two(sz_size_divide_round_up(length, threads), warm_up);
@@ -861,8 +872,8 @@ STRINGZILLA_DEVICE void sz_substrings_bm25_walk_simt_(sz_substrings_engine_t con
     sz_size_t const chunk_end = sz_min_of_two(chunk_begin + chunk_bytes, length);
     sz_substrings_sink_simt_t sink;
     sink.kept = STRINGZILLA_NULL, sink.stride = 0, sink.spills = STRINGZILLA_NULL, sink.spilled = STRINGZILLA_NULL;
-    sink.spills_capacity = 0, sink.chunk_index = 0, sink.tally = tally;
-    sink.pairs = STRINGZILLA_NULL, sink.haystack_index = 0;
+    sink.spills_capacity = 0, sink.chunk_index = 0, sink.tally = tally, sink.shards = shards;
+    sink.pairs = STRINGZILLA_NULL, sink.haystack_index = 0, sink.increment = STRINGZILLA_NULL;
     if (engine->case_sensitivity == sz_uncased_k)
         sz_substrings_walk_chunk_uncased_simt_(engine, staged, haystack, length, chunk_begin, chunk_end,
                                                sz_substrings_gpu_tallying_k, &sink);

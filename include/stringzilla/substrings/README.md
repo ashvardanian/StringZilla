@@ -38,6 +38,9 @@ Over nucleotides every byte is live and the skip switches itself off, while a sp
 ## The Device
 
 The device backends are `cuda` and `rocm`, whose kernels share `simt.cuh`, each launched from its own host code in `cuda.cuh` and `rocm.cuh`, which `src/capabilities/cuda.cu` and `src/capabilities/rocm.hip` compile into the library, and `metal`, whose kernels live in `metal.h` with the `metal.metal` shaders, which `src/capabilities/metal.c` compiles.
+The `cdna3`, `cdna4` and `cdna5` tiers over ROCm, in `cdna3.cuh`, `cdna4.cuh` and `cdna5.cuh`, each built by the unit of the same name in `src/capabilities/`, scan through DPP, each wavefront scanning itself and the block meeting once.
+The `ampere` tier over CUDA, in `ampere.cuh`, totals each scan's tiles with `redux.sync`, one per warp where the tile's chunks or keep flags fit 32 bits and two otherwise.
+The `hopper` tier, in `hopper.cuh`, launches the scans in clusters of eight blocks, whose first block takes one ticket for all of them and looks back once over their aggregate.
 All three parallelize over haystack __chunks__ rather than over haystacks, so a corpus of one long document and a corpus of a million short ones fill the device the same way.
 A chunk reports every match ending inside it and primes itself from the bytes before its own start, clamped to its own haystack, so every match is found exactly once.
 A leftmost cover is settled after the walk instead, since inside it would cost every thread a ring wide enough for the longest match.
@@ -46,7 +49,7 @@ Their walk that counts a chunk's matches also keeps them, the first four beside 
 A thread there walks one chain rather than eight: the resident warps already hide the transition's latency, and more chains per thread cost the registers those warps need.
 BM25 on CUDA and ROCm runs a round like a count's over the same chunks, every match counted into a hashed table of `(haystack, needle)` pairs the arena holds, two slots per budgeted match, so a short haystack keeps as many threads walking as a long one.
 A second kernel adds each pair's term to its haystack's sum, in fixed point so the order of additions cannot move a score, and leaves the table clear for the next round.
-A haystack one of whose pairs found no slot is scored again by a block with a shared-memory tally sized by the vocabulary, hashing a wider one and spilling past it, or on Hopper, when the batch holds fewer haystacks than the device holds blocks, by a whole cluster counting into its first block's tally through distributed shared memory.
+A haystack one of whose pairs found no slot is scored again by a block with a shared-memory tally sized by the vocabulary, hashing a wider one and spilling past it, or on Hopper, when the batch holds fewer haystacks than the device holds blocks, by a whole cluster whose tally is sharded across its blocks by needle through distributed shared memory, each block then summing the terms of its own shard.
 A device engine's arena is sized once, by `sz_substrings_engine_init` from `matches_budget` and `haystacks_budget`, so a round carrying more haystacks is refused with `sz_unexpected_dimensions_k` and matches past the budget surface as the report's `shortfall`.
 Every round of one engine shares that arena and its report, so the caller orders them, on one stream or with events between two, and reads the report only after joining the round that wrote it.
 A device round over no haystacks returns at once and leaves the report as the round before it wrote it.

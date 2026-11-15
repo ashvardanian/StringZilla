@@ -158,10 +158,12 @@ STRINGZILLA_DEVICE sz_size_t sz_utf8_uncased_fold_span_simt_(sz_u8_t const *sour
 #if STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_ROCM
 
 /** Folds one tile of @p source, @p tile_bytes wide, of the @p tiles a round cuts it into, measuring
- *  each thread's stretch first and writing it once the chain says where the tile begins. */
-static __global__ void __launch_bounds__(sz_utf8_uncased_fold_threads_simt_k)
-    sz_utf8_uncased_fold_simt_kernel_(sz_u8_t const *source, sz_size_t length, sz_size_t tile_bytes, sz_size_t tiles,
-                                      sz_u8_t *target, sz_size_t *target_length) {
+ *  each thread's stretch first and writing it once the chain says where the tile begins; the
+ *  stretches scan with @p block_scan. */
+STRINGZILLA_DEVICE void sz_utf8_uncased_fold_tile_simt_(sz_u8_t const *source, sz_size_t length, sz_size_t tile_bytes,
+                                                        sz_size_t tiles, sz_u8_t *target, sz_size_t *target_length,
+                                                        sz_size_t (*block_scan)(sz_size_t, sz_size_t *, sz_size_t *,
+                                                                                unsigned)) {
     __shared__ sz_size_t shared[sz_utf8_uncased_fold_threads_simt_k];
     sz_size_t const ticket = sz_chain_ticket_simt_(target_length);
     sz_size_t const tile_begin = ticket * tile_bytes, tile_end = sz_min_of_two(tile_begin + tile_bytes, length);
@@ -171,8 +173,9 @@ static __global__ void __launch_bounds__(sz_utf8_uncased_fold_threads_simt_k)
     sz_size_t const end = sz_chain_utf8_cut_simt_(
         source, length, sz_min_of_two(tile_begin + (threadIdx.x + 1) * thread_bytes, tile_end));
     sz_size_t tile_total;
-    sz_size_t const preceding = sz_block_scan_simt_(
-        sz_utf8_uncased_fold_span_simt_(source, length, begin, end, STRINGZILLA_NULL), shared, &tile_total);
+    sz_size_t const preceding = block_scan(
+        sz_utf8_uncased_fold_span_simt_(source, length, begin, end, STRINGZILLA_NULL), shared, &tile_total,
+        sz_utf8_uncased_fold_threads_simt_k);
     sz_size_t const tile_offset = sz_chain_offset_simt_(target_length, ticket, tiles, tile_total);
     sz_utf8_uncased_fold_span_simt_(source, length, begin, end, target + tile_offset + preceding);
 }

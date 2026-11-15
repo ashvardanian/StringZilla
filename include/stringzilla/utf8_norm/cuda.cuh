@@ -3,7 +3,7 @@
  *  @author Ash Vardanian
  *  @date October 3, 2026
  *  @brief CUDA host side of Unicode normalization: the tables' upload, the tiles a round cuts a
- *      text into, its one launch, and the @c _cuda export, over the kernel of <tt>utf8_norm/simt.cuh</tt>.
+ *      text into, its one launch, and the @c _cuda export, over the walk of <tt>utf8_norm/simt.cuh</tt>.
  *
  *  @sa include/stringzilla/utf8_norm/simt.cuh
  *  @sa include/stringzilla/utf8_norm/rocm.cuh
@@ -23,6 +23,13 @@ extern "C" {
 
 /** Bytes one thread normalizes at the least, which keeps a short text to few tiles. */
 enum { sz_utf8_norm_thread_bytes_cuda_k = 64 };
+
+/** @ref sz_utf8_norm_tile_simt_ over CUDA's warps. */
+static __global__ void __launch_bounds__(sz_utf8_norm_threads_simt_k)
+    sz_utf8_norm_cuda_kernel_(sz_u8_t const *text, sz_size_t length, sz_normal_form_t form, sz_size_t tile_bytes,
+                              sz_size_t tiles, sz_u8_t *target, sz_size_t *target_length) {
+    sz_utf8_norm_tile_simt_(text, length, form, tile_bytes, tiles, target, target_length, sz_block_scan_cuda_);
+}
 
 /** Copies every table the device lookups read into the device's copies, in order on @p stream. */
 STRINGZILLA_INLINE sz_status_t sz_utf8_norm_upload_cuda_(sz_stream_t stream) {
@@ -93,7 +100,7 @@ STRINGZILLA_INLINE sz_status_t sz_utf8_norm_cuda_(sz_cptr_t source, sz_size_t so
     arguments[0] = &launch_source, arguments[1] = &launch_length, arguments[2] = &launch_form;
     arguments[3] = &tile_bytes, arguments[4] = &tiles, arguments[5] = &launch_target;
     arguments[6] = &launch_target_length;
-    return sz_launch_cuda_((void const *)sz_utf8_norm_simt_kernel_, grid, block, arguments, 0, stream);
+    return sz_launch_cuda_((void const *)sz_utf8_norm_cuda_kernel_, grid, block, arguments, 0, stream);
 }
 
 STRINGZILLA_INLINE sz_status_t sz_utf8_norm_scoped_cuda_(sz_cptr_t source, sz_size_t source_length,

@@ -154,7 +154,8 @@ STRINGZILLA_DEVICE void sz_levenshtein_sweep_simt_(
 /*  One entry point per word count, each passing its own literal, so every query length gets its
  *  own register budget - thirty-eight registers at one word against ninety-six at sixteen, which
  *  one shared kernel would have to spend on every launch, and each vendor's launcher picks one. */
-#if STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_BLACKWELL || STRINGZILLA_TARGET_ROCM
+#if STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_AMPERE || STRINGZILLA_TARGET_BLACKWELL || STRINGZILLA_TARGET_ROCM || \
+    STRINGZILLA_TARGET_CDNA3 || STRINGZILLA_TARGET_CDNA4 || STRINGZILLA_TARGET_CDNA5
 
 static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
     sz_levenshtein_distances_w1_simt_kernel_( //
@@ -284,7 +285,7 @@ static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max
                                sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
-#endif // STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_BLACKWELL || STRINGZILLA_TARGET_ROCM
+#endif // STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_AMPERE || STRINGZILLA_TARGET_BLACKWELL || STRINGZILLA_TARGET_ROCM
 
 #pragma endregion Myers Threaded
 
@@ -360,12 +361,14 @@ STRINGZILLA_DEVICE void sz_levenshtein_group_step_simt_(sz_u64_t *positive, sz_u
  *  dead word contributes nothing, and the last word drops the bits past the last symbol.
  *
  *  @param[in] symbols The candidate's symbols as lane zero counted them.
+ *  @param[in] u32_lanes_sum The tier's sum over a whole warp, which a warp-wide group takes in
+ *      place of the scan, or null.
  */
 STRINGZILLA_DEVICE sz_ssize_t sz_levenshtein_group_distance_simt_(
     sz_u64_t const *positive, sz_u64_t const *negative, sz_size_t words_per_lane, sz_size_t words,
     sz_u64_t last_symbol_bit, sz_size_t symbols, sz_size_t score, sz_ssize_t radius, sz_levenshtein_group_lanes_t lanes,
     unsigned lane, sz_u32_t (*shuffle_up)(sz_u32_t, unsigned, unsigned),
-    sz_u32_t (*shuffle_index)(sz_u32_t, unsigned, unsigned)) {
+    sz_u32_t (*shuffle_index)(sz_u32_t, unsigned, unsigned), sz_u32_t (*u32_lanes_sum)(sz_u32_t)) {
     sz_size_t const first_word = (sz_size_t)lane * words_per_lane;
     sz_size_t const score_lane = (words - 1) / words_per_lane;
     if (radius != STRINGZILLA_SSIZE_MAX) {
@@ -383,12 +386,16 @@ STRINGZILLA_DEVICE sz_ssize_t sz_levenshtein_group_distance_simt_(
         deltas += sz_u64_popcount_simt_(positive[word] & live) - sz_u64_popcount_simt_(negative[word] & live);
     }
     if (lanes == sz_levenshtein_group_thread_k) return (sz_ssize_t)symbols + deltas;
-    // An inclusive scan up the group leaves the sum on its last lane.
-    for (unsigned offset = 1; offset < (unsigned)lanes; offset <<= 1) {
-        int const below = (int)shuffle_up((sz_u32_t)deltas, offset, (unsigned)lanes);
-        if (lane >= offset) deltas += below;
+    // Two's complement makes the unsigned sum of the deltas their signed sum, bit for bit.
+    if (u32_lanes_sum && lanes == sz_levenshtein_group_warp_k) deltas = (int)u32_lanes_sum((sz_u32_t)deltas);
+    else {
+        // An inclusive scan up the group leaves the sum on its last lane.
+        for (unsigned offset = 1; offset < (unsigned)lanes; offset <<= 1) {
+            int const below = (int)shuffle_up((sz_u32_t)deltas, offset, (unsigned)lanes);
+            if (lane >= offset) deltas += below;
+        }
+        deltas = (int)shuffle_index((sz_u32_t)deltas, (unsigned)lanes - 1, (unsigned)lanes);
     }
-    deltas = (int)shuffle_index((sz_u32_t)deltas, (unsigned)lanes - 1, (unsigned)lanes);
     sz_size_t const lane_zero_symbols = (sz_size_t)shuffle_index((sz_u32_t)symbols, 0, (unsigned)lanes) |
                                         ((sz_size_t)shuffle_index((sz_u32_t)(symbols >> 32), 0, (unsigned)lanes) << 32);
     return (sz_ssize_t)lane_zero_symbols + deltas;
@@ -421,12 +428,14 @@ STRINGZILLA_DEVICE sz_ssize_t sz_levenshtein_group_distance_simt_(
  *  @param[in] lane This lane's index within its group.
  *  @param[in] shuffle_up The vendor's shuffle up across an aligned group of that width.
  *  @param[in] shuffle_index The vendor's indexed shuffle across that group.
+ *  @param[in] u32_lanes_sum The tier's sum over a whole warp, or null to scan through the shuffles.
  *  @return The same on every lane of the group.
  */
 STRINGZILLA_DEVICE sz_ssize_t sz_levenshtein_group_score_simt_(
     sz_levenshtein_query_t const *query_pointer, sz_cptr_t text, sz_size_t length, sz_size_t words_per_lane,
     sz_levenshtein_group_lanes_t lanes, sz_ssize_t radius, unsigned lane,
-    sz_u32_t (*shuffle_up)(sz_u32_t, unsigned, unsigned), sz_u32_t (*shuffle_index)(sz_u32_t, unsigned, unsigned)) {
+    sz_u32_t (*shuffle_up)(sz_u32_t, unsigned, unsigned), sz_u32_t (*shuffle_index)(sz_u32_t, unsigned, unsigned),
+    sz_u32_t (*u32_lanes_sum)(sz_u32_t)) {
     sz_levenshtein_query_t const query = *query_pointer;
     sz_size_t const words = sz_levenshtein_query_words(query.length);
     sz_size_t const first_word = (sz_size_t)lane * words_per_lane;
@@ -480,7 +489,7 @@ STRINGZILLA_DEVICE sz_ssize_t sz_levenshtein_group_score_simt_(
         carry = (unsigned)positive_carry | ((unsigned)negative_carry << 1);
     }
     return sz_levenshtein_group_distance_simt_(positive, negative, words_per_lane, words, last_symbol_bit, length,
-                                               score, radius, lanes, lane, shuffle_up, shuffle_index);
+                                               score, radius, lanes, lane, shuffle_up, shuffle_index, u32_lanes_sum);
 }
 
 /**
@@ -497,14 +506,16 @@ STRINGZILLA_DEVICE sz_ssize_t sz_levenshtein_group_score_simt_(
  *  The radius test bounds the runes left by the bytes lane zero has not decoded plus the runes it
  *  decoded ahead of the score lane, since no rune is shorter than a byte.
  *
- *  @p words_per_lane , @p lanes , @p lane , @p radius and both shuffles are as the byte scorer's.
+ *  @p words_per_lane , @p lanes , @p lane , @p radius , both shuffles and the warp's sum are as
+ *  the byte scorer's.
  *
  *  @return The same on every lane of the group.
  */
 STRINGZILLA_DEVICE sz_ssize_t sz_levenshtein_group_score_utf8_simt_(
     sz_levenshtein_query_t const *query_pointer, sz_cptr_t text, sz_size_t length, sz_size_t words_per_lane,
     sz_levenshtein_group_lanes_t lanes, sz_ssize_t radius, unsigned lane,
-    sz_u32_t (*shuffle_up)(sz_u32_t, unsigned, unsigned), sz_u32_t (*shuffle_index)(sz_u32_t, unsigned, unsigned)) {
+    sz_u32_t (*shuffle_up)(sz_u32_t, unsigned, unsigned), sz_u32_t (*shuffle_index)(sz_u32_t, unsigned, unsigned),
+    sz_u32_t (*u32_lanes_sum)(sz_u32_t)) {
     sz_levenshtein_query_t const query = *query_pointer;
     sz_size_t const words = sz_levenshtein_query_words(query.length);
     sz_size_t const first_word = (sz_size_t)lane * words_per_lane;
@@ -556,7 +567,7 @@ STRINGZILLA_DEVICE sz_ssize_t sz_levenshtein_group_score_utf8_simt_(
         carry = (unsigned)positive_carry | ((unsigned)negative_carry << 1);
     }
     return sz_levenshtein_group_distance_simt_(positive, negative, words_per_lane, words, last_symbol_bit, runes, score,
-                                               radius, lanes, lane, shuffle_up, shuffle_index);
+                                               radius, lanes, lane, shuffle_up, shuffle_index, u32_lanes_sum);
 }
 
 #pragma endregion Myers Groups
@@ -608,6 +619,7 @@ STRINGZILLA_DEVICE int sz_levenshtein_warp_first_simt_(
  *      candidate past it stops.
  *  @param[in] shuffle_up The vendor's shuffle up across an aligned group of lanes.
  *  @param[in] shuffle_index The vendor's indexed shuffle across that group.
+ *  @param[in] u32_lanes_sum The tier's sum over the warp, or null to scan through the shuffles.
  *  @param[in] broadcast The vendor's step from lane zero across the warp.
  *  @param[in] open The tile queue's opening step, which differs per generation.
  *  @param[in] draw The tile queue's drawing step, which differs per generation.
@@ -616,7 +628,8 @@ STRINGZILLA_DEVICE void sz_levenshtein_warp_sweep_simt_(
     sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t bound, sz_size_t words_per_lane,
     sz_u32_t (*shuffle_up)(sz_u32_t, unsigned, unsigned), sz_u32_t (*shuffle_index)(sz_u32_t, unsigned, unsigned),
-    sz_u32_t (*broadcast)(sz_u32_t), void (*open)(sz_tile_queue_t *, sz_size_t, sz_size_t, sz_size_t),
+    sz_u32_t (*u32_lanes_sum)(sz_u32_t), sz_u32_t (*broadcast)(sz_u32_t),
+    void (*open)(sz_tile_queue_t *, sz_size_t, sz_size_t, sz_size_t),
     int (*draw)(sz_tile_queue_t *, sz_size_t, sz_size_t, sz_u32_t *, sz_size_t *)) {
     __shared__ sz_tile_queue_t queue;
     sz_size_t const tile_size = sz_size_divide_round_up(candidates.count, gridDim.x);
@@ -632,7 +645,8 @@ STRINGZILLA_DEVICE void sz_levenshtein_warp_sweep_simt_(
         sz_levenshtein_query_t const query = sz_levenshtein_engine_row_(&engine, query_index);
         sz_ssize_t const distance = sz_levenshtein_group_score_simt_(
             &query, sz_strings_start_simt_(candidates, candidate), sz_strings_length_simt_(candidates, candidate),
-            words_per_lane, sz_levenshtein_group_warp_k, radius, threadIdx.x & 31u, shuffle_up, shuffle_index);
+            words_per_lane, sz_levenshtein_group_warp_k, radius, threadIdx.x & 31u, shuffle_up, shuffle_index,
+            u32_lanes_sum);
         if ((threadIdx.x & 31u) == 0)
             distances[query_index * distances_stride + candidate] = sz_levenshtein_bounded_((sz_size_t)distance, bound);
     }
@@ -898,7 +912,8 @@ STRINGZILLA_DEVICE void sz_levenshtein_sweep_utf8_simt_(
 
 /*  One rune entry point per word count, each passing its own literal, for the reason the byte tier
  *  states: a word count the compiler cannot see spills the verticals to local memory. */
-#if STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_BLACKWELL || STRINGZILLA_TARGET_ROCM
+#if STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_AMPERE || STRINGZILLA_TARGET_BLACKWELL || STRINGZILLA_TARGET_ROCM || \
+    STRINGZILLA_TARGET_CDNA3 || STRINGZILLA_TARGET_CDNA4 || STRINGZILLA_TARGET_CDNA5
 
 static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
     sz_levenshtein_distances_utf8_w1_simt_kernel_( //
@@ -1028,7 +1043,7 @@ static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max
                                     sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
-#endif // STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_BLACKWELL || STRINGZILLA_TARGET_ROCM
+#endif // STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_AMPERE || STRINGZILLA_TARGET_BLACKWELL || STRINGZILLA_TARGET_ROCM
 
 #pragma endregion Myers UTF 8
 
@@ -1040,7 +1055,8 @@ STRINGZILLA_DEVICE void sz_levenshtein_warp_sweep_utf8_simt_(
     sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t bound, sz_size_t words_per_lane,
     sz_u32_t (*shuffle_up)(sz_u32_t, unsigned, unsigned), sz_u32_t (*shuffle_index)(sz_u32_t, unsigned, unsigned),
-    sz_u32_t (*broadcast)(sz_u32_t), void (*open)(sz_tile_queue_t *, sz_size_t, sz_size_t, sz_size_t),
+    sz_u32_t (*u32_lanes_sum)(sz_u32_t), sz_u32_t (*broadcast)(sz_u32_t),
+    void (*open)(sz_tile_queue_t *, sz_size_t, sz_size_t, sz_size_t),
     int (*draw)(sz_tile_queue_t *, sz_size_t, sz_size_t, sz_u32_t *, sz_size_t *)) {
     __shared__ sz_tile_queue_t queue;
     sz_size_t const tile_size = sz_size_divide_round_up(candidates.count, gridDim.x);
@@ -1056,7 +1072,8 @@ STRINGZILLA_DEVICE void sz_levenshtein_warp_sweep_utf8_simt_(
         sz_levenshtein_query_t const query = sz_levenshtein_engine_row_(&engine, query_index);
         sz_ssize_t const distance = sz_levenshtein_group_score_utf8_simt_(
             &query, sz_strings_start_simt_(candidates, candidate), sz_strings_length_simt_(candidates, candidate),
-            words_per_lane, sz_levenshtein_group_warp_k, radius, threadIdx.x & 31u, shuffle_up, shuffle_index);
+            words_per_lane, sz_levenshtein_group_warp_k, radius, threadIdx.x & 31u, shuffle_up, shuffle_index,
+            u32_lanes_sum);
         if ((threadIdx.x & 31u) == 0)
             distances[query_index * distances_stride + candidate] = sz_levenshtein_bounded_((sz_size_t)distance, bound);
     }
@@ -1278,20 +1295,12 @@ static __global__ void __launch_bounds__(sz_levenshtein_length_keys_simt_k)
         atomicAdd((unsigned long long *)(counts + threadIdx.x), (unsigned long long)tally[threadIdx.x]);
 }
 
-/** Turns @p counts into the first position of every key, in one block. */
-static __global__ void __launch_bounds__(sz_levenshtein_length_keys_simt_k)
-    sz_levenshtein_length_offsets_simt_kernel_(sz_size_t *counts) {
-    __shared__ sz_size_t scanned[sz_levenshtein_length_keys_simt_k];
-    sz_size_t total;
-    counts[threadIdx.x] = sz_block_scan_simt_(counts[threadIdx.x], scanned, &total);
-}
-
 /** Writes every candidate's index at the next free position of its key, from the @p cursors the
  *  scan left: a block reserves its run of each key with one atomic and ranks inside it in shared
- *  memory, so a round of similar lengths contends on no single global counter. */
-static __global__ void __launch_bounds__(sz_levenshtein_length_keys_simt_k)
-    sz_levenshtein_length_scatter_simt_kernel_(sz_strings_view_t candidates, sz_size_t *cursors,
-                                               sz_size_t *candidate_order) {
+ *  memory through @p increment , so similar lengths contend on no single global counter. */
+STRINGZILLA_DEVICE void sz_levenshtein_length_scatter_simt_(sz_strings_view_t candidates, sz_size_t *cursors,
+                                                            sz_size_t *candidate_order,
+                                                            sz_u32_t (*increment)(sz_u32_t *)) {
     __shared__ sz_u32_t tally[sz_levenshtein_length_keys_simt_k];
     __shared__ sz_size_t first[sz_levenshtein_length_keys_simt_k];
     for (sz_size_t base = (sz_size_t)blockIdx.x * blockDim.x; base < candidates.count;
@@ -1303,7 +1312,7 @@ static __global__ void __launch_bounds__(sz_levenshtein_length_keys_simt_k)
         __syncthreads();
         if (index < candidates.count) {
             key = sz_levenshtein_length_key_simt_(sz_strings_length_simt_(candidates, index));
-            rank = atomicAdd(&tally[key], 1u);
+            rank = increment(&tally[key]);
         }
         __syncthreads();
         if (tally[threadIdx.x])

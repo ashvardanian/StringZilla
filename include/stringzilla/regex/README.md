@@ -49,6 +49,8 @@ The end-finding DFA's first steps, from every start state under every lookaround
 A search jumps to the next position whose bytes keep some bucket at every offset, testing both nibbles of every byte against per-offset bucket tables, and the end walk from there settles whether a match starts there, so a false candidate costs a walk that dies within a step or two.
 The paths must pass few positions, judged with every byte at least a sixteenth as frequent as any, as text is: two literal bytes pass, a single byte or a wide class like `[0-9]` does not, and neither does a vocabulary that can match empty.
 GPUs mark such candidates a slot per thread from the bucket tables, in place of the start-finding walk and its priming, and their end walks settle them as they settle any start.
+On NVIDIA the `ampere` tier, in `ampere.cuh`, stages each tile of text for the start-finding walk with `cp.async`, every warp finding the tile's first haystack itself, so a tile takes two barriers rather than three.
+The `hopper` tier, in `hopper.cuh`, keeps that walk and launches the scans in clusters of eight blocks, whose first block takes one ticket for all of them and looks back once over their aggregate.
 
 An end walk that runs past its match, looking for a longer one, can cover the starts of the next matches: every `a` of a line without a later `z` walks to the line's end under `a[^\n]*z|a`.
 So every 16 bytes a walk leaves its state at a checkpoint, and a later walk holding the same state there stops: it walks the same bytes from there on, so it takes that walk's match if that one ended past the checkpoint, or its own last match before it.

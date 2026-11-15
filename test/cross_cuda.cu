@@ -20,10 +20,10 @@ std::size_t test_cross_cuda(environment_t const &env, std::size_t ordinal) {
         sz_size_t devices = 0;
         sz_capability_t reported = 0;
         int major = 0;
-        verify(sz_device_count_cuda(&devices) == sz_success_k && devices != 0);
+        verify(sz_count_devices_cuda(&devices) == sz_success_k && devices != 0);
         verify(cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, (int)ordinal) == cudaSuccess);
-        sz_capability_t const tiers = sz_cap_cuda_k | (major >= 9 ? sz_cap_hopper_k : 0) |
-                                      (major >= 10 ? sz_cap_blackwell_k : 0);
+        sz_capability_t const tiers = sz_cap_cuda_k | (major >= 8 ? sz_cap_ampere_k : 0) |
+                                      (major >= 9 ? sz_cap_hopper_k : 0) | (major >= 10 ? sz_cap_blackwell_k : 0);
         verify(sz_capabilities_detected_cuda(ordinal, &reported) == sz_success_k && reported == tiers);
         verify(sz_capabilities_detected_cuda(devices, &reported) == sz_missing_gpu_k);
     });
@@ -88,6 +88,39 @@ std::size_t test_cross_cuda(environment_t const &env, std::size_t ordinal) {
     check_device_strings_(check, cuda_runtime, strings_cuda);
     check_device_walks_(check, cuda_runtime, "cuda");
 #endif
+#if STRINGZILLA_TARGET_AMPERE
+    device_backend_t ampere_runtime = runtime;
+    ampere_runtime.capabilities &= sz_cap_cuda_k | sz_cap_ampere_k;
+    device_kernels const ampere {
+        "ampere",
+        ampere_runtime,
+        sz_levenshtein_distances_ampere,
+        sz_overlap_scores_ampere,
+        sz_substrings_contains_ampere,
+        sz_substrings_counts_ampere,
+        sz_substrings_find_ampere,
+        sz_substrings_replace_ampere,
+        sz_substrings_bm25_scores_ampere,
+        sz_regex_contains_ampere,
+        sz_regex_counts_ampere,
+        sz_regex_find_ampere,
+        sz_regex_replace_ampere,
+        sz_regex_extract_ampere,
+        sz_subdocuments_contains_ampere,
+        sz_subdocuments_counts_ampere,
+        sz_subdocuments_find_ampere,
+        sz_utf8_uncased_fold_cuda,
+        sz_utf8_norm_cuda,
+        sz_sha256_multistate_update_cuda,
+        sz_sha256_multistate_digest_cuda,
+    };
+    check.section("Cross Ampere", sz_cap_ampere_k);
+    check_device_levenshtein_(check, ampere);
+    check_device_overlap_(check, ampere);
+    check_device_substrings_(check, ampere);
+    check_device_regex_(check, ampere);
+    check_device_subdocuments_(check, ampere);
+#endif
 #if STRINGZILLA_TARGET_HOPPER
     device_backend_t hopper_runtime = runtime;
     hopper_runtime.capabilities &= sz_cap_cuda_k | sz_cap_hopper_k;
@@ -96,19 +129,19 @@ std::size_t test_cross_cuda(environment_t const &env, std::size_t ordinal) {
         hopper_runtime,
         sz_levenshtein_distances_cuda,
         sz_overlap_scores_cuda,
-        sz_substrings_contains_cuda,
+        sz_substrings_contains_hopper,
         sz_substrings_counts_hopper,
         sz_substrings_find_hopper,
         sz_substrings_replace_hopper,
         sz_substrings_bm25_scores_hopper,
-        sz_regex_contains_cuda,
-        sz_regex_counts_cuda,
-        sz_regex_find_cuda,
-        sz_regex_replace_cuda,
-        sz_regex_extract_cuda,
-        sz_subdocuments_contains_cuda,
-        sz_subdocuments_counts_cuda,
-        sz_subdocuments_find_cuda,
+        sz_regex_contains_hopper,
+        sz_regex_counts_hopper,
+        sz_regex_find_hopper,
+        sz_regex_replace_hopper,
+        sz_regex_extract_hopper,
+        sz_subdocuments_contains_hopper,
+        sz_subdocuments_counts_hopper,
+        sz_subdocuments_find_hopper,
         sz_utf8_uncased_fold_cuda,
         sz_utf8_norm_cuda,
         sz_sha256_multistate_update_cuda,
@@ -116,6 +149,8 @@ std::size_t test_cross_cuda(environment_t const &env, std::size_t ordinal) {
     };
     check.section("Cross Hopper", sz_cap_hopper_k);
     check_device_substrings_(check, hopper);
+    check_device_regex_(check, hopper);
+    check_device_subdocuments_(check, hopper);
 #endif
 #if STRINGZILLA_TARGET_BLACKWELL
     device_backend_t blackwell_runtime = runtime;

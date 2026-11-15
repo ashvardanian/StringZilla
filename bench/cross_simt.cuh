@@ -906,10 +906,32 @@ inline int bench_cross_simt(environment_t &env, simt_backend_t const &backend) {
     return 0;
 }
 
-/** The substrings rows of a later CUDA tier, which carries no other family's kernels. */
-inline int bench_cross_simt_substrings(environment_t &env, simt_backend_t const &backend) {
+/** The engine families' rows of a later CUDA tier, whose UTF-8 and SHA-256 kernels are the CUDA
+ *  tier's own. */
+inline int bench_cross_simt_engines(environment_t &env, simt_backend_t const &backend) {
+    try {
+        corpus_t const &corpus = env.corpora.multilingual_lines();
+        bench_levenshtein_simt(backend, env, corpus);
+        bench_overlap_simt(backend, env, corpus);
+        bench_substrings_simt(backend, env, corpus);
+        bench_regex_simt(backend, env, env.corpora.multilingual_slice());
+        bench_subdocuments_simt(backend, env);
+    }
+    catch (std::exception const &e) {
+        fmt::println(stderr, "Failed with: {}", e.what());
+        return 1;
+    }
+
+    return 0;
+}
+
+/** The substrings, regex and subdocuments rows of a later CUDA tier, which carries no Levenshtein
+ *  or overlap kernels. */
+inline int bench_cross_simt_searches(environment_t &env, simt_backend_t const &backend) {
     try {
         bench_substrings_simt(backend, env, env.corpora.multilingual_lines());
+        bench_regex_simt(backend, env, env.corpora.multilingual_slice());
+        bench_subdocuments_simt(backend, env);
     }
     catch (std::exception const &e) {
         fmt::println(stderr, "Failed with: {}", e.what());

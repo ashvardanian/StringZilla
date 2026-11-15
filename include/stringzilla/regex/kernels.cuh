@@ -21,38 +21,37 @@ extern "C" {
  *  <tt>regex/simt.cuh</tt> do the walking. */
 #pragma region Kernels
 
-/** Scans one ticket's own tile of @p values in place, as @c sz_substrings_scan_tile_simt_ does,
- *  seeded by the totals the tiles before it publish in @p states, so one launch makes a whole scan;
+/** Scans the tile @p ticket hands the block in place, as @c sz_substrings_scan_tile_simt_ does,
+ *  seeded by the totals the tiles before it publish in @p states and @p look_back reads, so one
+ *  launch makes a whole scan;
  *  it clears @p stale, the states the next scan takes. */
-static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
-    sz_regex_scan_simt_kernel_(sz_size_t *values, sz_size_t count, sz_size_t elements_per_tile, sz_size_t *chain,
-                               sz_u64_t *states, sz_u64_t *stale) {
+STRINGZILLA_DEVICE void sz_regex_scan_tile_simt_(sz_size_t *values, sz_size_t count, sz_size_t elements_per_tile,
+                                                 sz_size_t *chain, sz_u64_t *states, sz_u64_t *stale,
+                                                 sz_size_t (*block_scan)(sz_size_t, sz_size_t *, sz_size_t *, unsigned),
+                                                 sz_size_t (*block_sum)(sz_size_t, sz_size_t *, unsigned),
+                                                 sz_size_t (*ticket)(sz_size_t *, sz_size_t),
+                                                 sz_size_t (*look_back)(sz_u64_t *, sz_size_t, sz_size_t)) {
     __shared__ sz_size_t shared[sz_regex_threads_per_block_simt_k];
     sz_size_t const tiles = sz_size_divide_round_up(count, elements_per_tile);
     sz_size_t tile, begin, end, running = 0, first;
-    if (blockIdx.x >= tiles) return;
-    tile = sz_chain_ticket_simt_(chain);
+    tile = ticket(chain, tiles);
+    if (tile == STRINGZILLA_SIZE_MAX) return;
     begin = tile * elements_per_tile;
     end = sz_min_of_two(begin + elements_per_tile, count);
     for (first = tile * blockDim.x + threadIdx.x; first < sz_chain_tiles_max_k; first += tiles * blockDim.x)
         stale[first] = 0;
-    for (first = begin; first < end; first += blockDim.x) {
-        sz_size_t const index = first + threadIdx.x;
-        sz_size_t total = 0;
-        sz_block_scan_simt_(index < end ? values[index] : 0, shared, &total);
-        running += total;
-        __syncthreads();
-    }
-    running = sz_chain_look_back_simt_(states, tile, running);
+    for (first = begin + threadIdx.x; first < end; first += blockDim.x) running += values[first];
+    running = block_sum(running, shared, sz_regex_threads_per_block_simt_k);
+    // The look-back ends in the barrier that frees `shared` for the scans after it.
+    running = look_back(states, tile, running);
     if (tile + 1 == tiles && threadIdx.x == 0) *chain = 0;
     for (first = begin; first < end; first += blockDim.x) {
         sz_size_t const index = first + threadIdx.x;
         sz_size_t const value = index < end ? values[index] : 0;
         sz_size_t total = 0;
-        sz_size_t const exclusive = sz_block_scan_simt_(value, shared, &total);
+        sz_size_t const exclusive = block_scan(value, shared, &total, sz_regex_threads_per_block_simt_k);
         if (index < end) values[index] = running + exclusive;
         running += total;
-        __syncthreads();
     }
 }
 

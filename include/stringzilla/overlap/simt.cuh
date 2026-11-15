@@ -274,9 +274,12 @@ STRINGZILLA_DEVICE sz_size_t sz_overlap_tile_chunks_simt_(sz_strings_view_t cons
 enum { sz_overlap_gpu_endings_per_check_k = 32 };
 
 /** The sum of @p value over this lane's aligned group of @p lanes lanes, a power of two up to a
- *  warp, in every lane of the group, by halves; groups may diverge from one another. */
+ *  warp, in every lane of the group: by @p u64_lanes_sum where a tier gives one and the group is
+ *  the warp, and otherwise by halves; groups may diverge from one another. */
 STRINGZILLA_DEVICE sz_size_t sz_overlap_lanes_sum_simt_(sz_size_t value, unsigned lane, unsigned lanes,
-                                                        sz_u32_t (*shuffle_index)(sz_u32_t, unsigned, unsigned)) {
+                                                        sz_u32_t (*shuffle_index)(sz_u32_t, unsigned, unsigned),
+                                                        sz_u64_t (*u64_lanes_sum)(sz_u64_t)) {
+    if (u64_lanes_sum && lanes == 32) return (sz_size_t)u64_lanes_sum((sz_u64_t)value);
     for (unsigned offset = lanes / 2; offset != 0; offset >>= 1) {
         sz_u32_t const low = shuffle_index((sz_u32_t)value, lane ^ offset, lanes);
         sz_u32_t const high = shuffle_index((sz_u32_t)((sz_u64_t)value >> 32), lane ^ offset, lanes);
@@ -308,17 +311,22 @@ STRINGZILLA_DEVICE sz_size_t sz_overlap_lanes_sum_simt_(sz_size_t value, unsigne
  *      runs need to cover the widest window, past which more lanes only roll more priming bytes.
  *  @param[in] shuffle_index The vendor's cross-lane step within a group, which groups may take
  *      apart from one another.
+ *  @param[in] any The vendor's vote within a group, which every branch around a shuffle takes, as
+ *      the compiler then sees the group converged at the shuffle.
+ *  @param[in] u32_lanes_sum The tier's sum over a warp of one width's matches, or null to sum them
+ *      by halves through @p shuffle_index ; only a group of the whole warp takes it.
+ *  @param[in] u64_lanes_sum The tier's sum over a warp of the windows matched and pending, below
+ *      2^59, or null to sum them by halves.
  *  @param[out] counts The pair's @b [widths_count] matches, or null for their sum alone.
  *  @return The same count in every lane: exact whenever it leaves at most @p radius misses, and
  *      otherwise a count that leaves more.
  */
-STRINGZILLA_DEVICE sz_size_t sz_overlap_candidate_walk_simt_(sz_overlap_btree_simt_t const *btree, sz_bool_t staged,
-                                                             sz_u32_t const *widths, sz_u32_t const *powers,
-                                                             sz_size_t widths_count, sz_size_t query_length,
-                                                             sz_size_t query_windows, sz_cptr_t text, sz_size_t length,
-                                                             sz_size_t radius, unsigned lane, unsigned lanes,
-                                                             sz_u32_t (*shuffle_index)(sz_u32_t, unsigned, unsigned),
-                                                             sz_u32_t *counts) {
+STRINGZILLA_DEVICE sz_size_t sz_overlap_candidate_walk_simt_(
+    sz_overlap_btree_simt_t const *btree, sz_bool_t staged, sz_u32_t const *widths, sz_u32_t const *powers,
+    sz_size_t widths_count, sz_size_t query_length, sz_size_t query_windows, sz_cptr_t text, sz_size_t length,
+    sz_size_t radius, unsigned lane, unsigned lanes, sz_u32_t (*shuffle_index)(sz_u32_t, unsigned, unsigned),
+    int (*any)(int, unsigned), sz_u32_t (*u32_lanes_sum)(sz_u32_t), sz_u64_t (*u64_lanes_sum)(sz_u64_t),
+    sz_u32_t *counts) {
     sz_size_t const candidate_windows = sz_overlap_windows(length, widths, widths_count);
     sz_size_t const longer = sz_max_of_two(candidate_windows, query_windows);
     sz_size_t const needed = longer > radius ? longer - radius : 0;
@@ -331,7 +339,7 @@ STRINGZILLA_DEVICE sz_size_t sz_overlap_candidate_walk_simt_(sz_overlap_btree_si
 
     // A candidate too short to come within the radius walks no group and lands in the epilogue.
     sz_size_t first_width = candidate_windows < needed ? widths_count : 0;
-    for (; first_width < widths_count; first_width += sz_overlap_gpu_widths_per_walk_k) {
+    for (; any(first_width < widths_count, lanes); first_width += sz_overlap_gpu_widths_per_walk_k) {
         sz_u32_t const *const group_widths = widths + first_width;
         sz_size_t const group_count = sz_min_of_two(widths_count - first_width,
                                                     (sz_size_t)sz_overlap_gpu_widths_per_walk_k);
@@ -348,7 +356,7 @@ STRINGZILLA_DEVICE sz_size_t sz_overlap_candidate_walk_simt_(sz_overlap_btree_si
         // As many passes in every lane, so the checks between them see the whole warp.
         sz_size_t const passes = sz_size_divide_round_up(run + warm_up, sz_overlap_gpu_endings_per_check_k);
         sz_size_t reached = 0, pass = 0, group_matched = 0;
-        for (; pass != passes; ++pass) {
+        for (; any(pass != passes, lanes); ++pass) {
             sz_size_t const until = sz_min_of_two(reached + sz_overlap_gpu_endings_per_check_k, walk_bytes);
             if (reached < until) {
                 sz_overlap_roll_simt_((sz_u8_t const *)text + walk_begin, reached, until, warm_bytes, group_widths,
@@ -360,25 +368,30 @@ STRINGZILLA_DEVICE sz_size_t sz_overlap_candidate_walk_simt_(sz_overlap_btree_si
                            sz_overlap_windows(probed_from, group_widths, group_count);
                 reached = until;
             }
-            if (!needed) continue;
+            if (!any(needed != 0, lanes)) continue;
             group_matched = 0;
 #pragma unroll
             for (index = 0; index != sz_overlap_gpu_widths_per_walk_k; ++index) group_matched += matches[index];
-            if (sz_overlap_lanes_sum_simt_(matched + group_matched + pending, lane, lanes, shuffle_index) < needed)
+            if (any(sz_overlap_lanes_sum_simt_(matched + group_matched + pending, lane, lanes, shuffle_index,
+                                               u64_lanes_sum) < needed,
+                    lanes))
                 break;
         }
         group_matched = 0;
 #pragma unroll
         for (index = 0; index != sz_overlap_gpu_widths_per_walk_k; ++index) group_matched += matches[index];
         matched += group_matched;
-        if (pass != passes) break;
+        if (any(pass != passes, lanes)) break;
 #pragma unroll
         for (index = 0; index != sz_overlap_gpu_widths_per_walk_k; ++index) {
-            if (!counts || index >= group_count) break;
+            if (any(!counts || index >= group_count, lanes)) break;
             sz_size_t const width = group_widths[index];
             sz_size_t const windows = width && width <= length ? length - width + 1 : 0;
             sz_size_t const own_query_windows = width && width <= query_length ? query_length - width + 1 : 0;
-            sz_size_t const total = sz_overlap_lanes_sum_simt_(matches[index], lane, lanes, shuffle_index);
+            sz_size_t const total = u32_lanes_sum && lanes == 32
+                                        ? (sz_size_t)u32_lanes_sum(matches[index])
+                                        : sz_overlap_lanes_sum_simt_(matches[index], lane, lanes, shuffle_index,
+                                                                     u64_lanes_sum);
             sz_size_t const counted = windows && own_query_windows ? total : 0;
             scored += counted;
             if (lane == 0) counts[first_width + index] = (sz_u32_t)counted;
@@ -388,7 +401,7 @@ STRINGZILLA_DEVICE sz_size_t sz_overlap_candidate_walk_simt_(sz_overlap_btree_si
     // Whichever check stopped the pair, past the radius every width counts zero.
     if (counts && longer - scored > radius)
         for (sz_size_t index = lane; index < widths_count; index += lanes) counts[index] = 0;
-    return sz_overlap_lanes_sum_simt_(matched, lane, lanes, shuffle_index);
+    return sz_overlap_lanes_sum_simt_(matched, lane, lanes, shuffle_index, u64_lanes_sum);
 }
 
 /**
@@ -507,13 +520,17 @@ STRINGZILLA_DEVICE void sz_overlap_scores_simt_(sz_overlap_engine_t engine, sz_s
  *
  *  @param[in] misses_bound The radius as @ref sz_overlap_misses_bound_ rounds it.
  *  @param[in] shuffle_index The vendor's cross-lane step within a group of lanes.
+ *  @param[in] any The vendor's vote within a group of lanes.
+ *  @param[in] u32_lanes_sum The tier's 32-bit sum over a warp, or null for the shuffles.
+ *  @param[in] u64_lanes_sum The tier's 64-bit sum over a warp, or null for the shuffles.
  *  @param[in] open The tile queue's opening step, which differs per generation.
  *  @param[in] next The tile queue's drawing step, which differs per generation.
  */
 STRINGZILLA_DEVICE void sz_overlap_bounded_scores_simt_(
     sz_overlap_engine_t engine, sz_strings_view_t candidates, sz_u32_t *matches, sz_size_t matches_query_stride,
     sz_size_t matches_candidate_stride, sz_size_t staged_nodes_count, sz_u32_t misses_bound,
-    sz_u32_t (*shuffle_index)(sz_u32_t, unsigned, unsigned),
+    sz_u32_t (*shuffle_index)(sz_u32_t, unsigned, unsigned), int (*any)(int, unsigned),
+    sz_u32_t (*u32_lanes_sum)(sz_u32_t), sz_u64_t (*u64_lanes_sum)(sz_u64_t),
     void (*open)(sz_tile_queue_t *, sz_size_t, sz_size_t, sz_size_t),
     int (*next)(sz_tile_queue_t *, sz_u32_t *, sz_u32_t *)) {
     extern __shared__ sz_u32_t sz_overlap_shared_simt_[];
@@ -542,7 +559,7 @@ STRINGZILLA_DEVICE void sz_overlap_bounded_scores_simt_(
             __syncthreads();
             sz_overlap_btree_simt_t const staged_tree = {staged_nodes, levels, level_bases};
             sz_overlap_btree_simt_t const global_tree = {query_nodes, levels, level_bases};
-            for (sz_size_t candidate = threadIdx.x / 32; candidate < tile_count; candidate += warps) {
+            for (sz_size_t candidate = threadIdx.x / 32; any(candidate < tile_count, 32); candidate += warps) {
                 sz_cptr_t const text = sz_strings_start_simt_(candidates, tile_first + candidate);
                 sz_size_t const length = sz_strings_length_simt_(candidates, tile_first + candidate);
                 sz_u32_t *const candidate_matches = matches + query * matches_query_stride +
@@ -553,11 +570,13 @@ STRINGZILLA_DEVICE void sz_overlap_bounded_scores_simt_(
                 if (staged_nodes_count)
                     sz_overlap_candidate_walk_simt_(&staged_tree, sz_true_k, engine.widths, engine.powers,
                                                     engine.widths_count, query_length, query_windows, text, length,
-                                                    bound, lane, 32, shuffle_index, candidate_matches);
+                                                    bound, lane, 32, shuffle_index, any, u32_lanes_sum, u64_lanes_sum,
+                                                    candidate_matches);
                 else
                     sz_overlap_candidate_walk_simt_(&global_tree, sz_false_k, engine.widths, engine.powers,
                                                     engine.widths_count, query_length, query_windows, text, length,
-                                                    bound, lane, 32, shuffle_index, candidate_matches);
+                                                    bound, lane, 32, shuffle_index, any, u32_lanes_sum, u64_lanes_sum,
+                                                    candidate_matches);
             }
             // The next query restages the tree these walks still read.
             __syncthreads();
@@ -715,16 +734,19 @@ STRINGZILLA_DEVICE void sz_overlap_query_prepare_simt_(sz_cptr_t text, sz_size_t
  *  @param[in] lanes The group's lanes, a power of two up to a warp.
  *  @param[in] shuffle_index The vendor's cross-lane step within a group, such as
  *      @c sz_group_shuffle_index_cuda_ .
+ *  @param[in] any The vendor's vote within a group, such as @c sz_group_any_cuda_ .
  *  @return The same count in every lane of the group: exact whenever it leaves at most @p radius
  *      misses, and otherwise a count that leaves more.
  */
-STRINGZILLA_DEVICE sz_size_t sz_overlap_candidate_matches_simt_(
-    sz_overlap_query_t const *query, sz_cptr_t text, sz_size_t length, sz_size_t radius, unsigned lane, unsigned lanes,
-    sz_u32_t (*shuffle_index)(sz_u32_t, unsigned, unsigned)) {
+STRINGZILLA_DEVICE sz_size_t sz_overlap_candidate_matches_simt_(sz_overlap_query_t const *query, sz_cptr_t text,
+                                                                sz_size_t length, sz_size_t radius, unsigned lane,
+                                                                unsigned lanes,
+                                                                sz_u32_t (*shuffle_index)(sz_u32_t, unsigned, unsigned),
+                                                                int (*any)(int, unsigned)) {
     sz_overlap_btree_simt_t const btree = {query->btree.nodes, query->btree.levels, query->btree.level_bases};
     return sz_overlap_candidate_walk_simt_(&btree, sz_true_k, query->widths, query->powers, query->widths_count, 0,
-                                           query->windows, text, length, radius, lane, lanes, shuffle_index,
-                                           STRINGZILLA_NULL);
+                                           query->windows, text, length, radius, lane, lanes, shuffle_index, any,
+                                           STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL);
 }
 
 #pragma endregion Prepared Queries

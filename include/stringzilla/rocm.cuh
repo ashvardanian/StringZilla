@@ -20,7 +20,8 @@
 #define STRINGZILLA_ROCM_CUH_
 
 #include "stringzilla/types.cuh"
-#include "stringzilla/capabilities.h" // `sz_cap_rocm_k`
+#include "stringzilla/capabilities.h"   // `sz_cap_rocm_k`, `sz_cap_cdna3_k`, `sz_cap_cdna4_k`, `sz_cap_cdna5_k`
+#include "stringzilla/compare/serial.h" // `sz_equal_serial_`
 
 #if STRINGZILLA_ARCH_ROCM_
 #include <hip/hip_runtime.h> // `hipLaunchKernel`, `hipMallocManaged`, `hipSetDevice`
@@ -185,6 +186,12 @@ STRINGZILLA_INLINE sz_size_t sz_device_multiprocessors_rocm_(void) {
     return sz_device_attribute_rocm_(hipDeviceAttributeMultiprocessorCount);
 }
 
+/** Lanes per wavefront on the current device: 64 on GFX9, 32 on GFX10 and newer, 64 unanswered. */
+STRINGZILLA_INLINE sz_size_t sz_device_wavefront_lanes_rocm_(void) {
+    sz_size_t const lanes = sz_device_attribute_rocm_(hipDeviceAttributeWarpSize);
+    return lanes ? lanes : 64;
+}
+
 /** Threads one compute unit of the current device keeps resident, or zero. */
 STRINGZILLA_INLINE sz_size_t sz_device_threads_per_multiprocessor_rocm_(void) {
     return sz_device_attribute_rocm_(hipDeviceAttributeMaxThreadsPerMultiProcessor);
@@ -297,9 +304,10 @@ STRINGZILLA_INLINE sz_size_t sz_device_count_rocm_(void) {
     return hipGetDeviceCount(&count) == hipSuccess ? (sz_size_t)count : 0;
 }
 
-/** The capabilities ROCm device @p ordinal runs, by the runtime's own numbering. */
+/** The capabilities ROCm device @p ordinal runs, by the architecture its runtime names: @c cdna3 on
+ *  gfx942, @c cdna4 on gfx950, and @c cdna5 on both gfx1250 and gfx1251. */
 STRINGZILLA_INLINE sz_status_t sz_capabilities_detected_rocm_(sz_size_t ordinal, sz_capability_t *capabilities) {
-    int multiprocessors = 0;
+    hipDeviceProp_t properties;
     *capabilities = 0;
     if (ordinal >= sz_device_count_rocm_()) return sz_missing_gpu_k;
     if (hipDeviceGetAttribute(&multiprocessors, hipDeviceAttributeMultiprocessorCount, (int)ordinal) != hipSuccess)
@@ -350,6 +358,13 @@ STRINGZILLA_DEVICE sz_u32_t sz_group_shuffle_index_rocm_(sz_u32_t value, unsigne
     return __shfl(value, (int)lane, (int)width);
 }
 
+/** Whether @p predicate holds on any lane of this lane's aligned group of @p width lanes, at most
+ *  32, from the group's bits of a ballot. */
+STRINGZILLA_DEVICE int sz_group_any_rocm_(int predicate, unsigned width) {
+    sz_u64_t const members = ((1ull << width) - 1ull) << (__lane_id() & ~(width - 1u));
+    return (__ballot(predicate) & members) != 0;
+}
+
 /** Lane zero's @p value across this thread's 32 lanes. */
 STRINGZILLA_DEVICE sz_u32_t sz_lanes_broadcast_rocm_(sz_u32_t value) { return __shfl(value, 0, 32); }
 
@@ -375,6 +390,47 @@ STRINGZILLA_DEVICE unsigned sz_lanes_below_rocm_(int predicate) {
     return (unsigned)sz_u32_popcount_simt_(sz_lanes_ballot_rocm_(predicate) & ((1u << (__lane_id() & 31u)) - 1u));
 }
 
+/** The sum of @p value over this lane and every lane below it among this thread's 32 lanes. */
+STRINGZILLA_DEVICE sz_u32_t sz_u32_lanes_prefix_sum_rocm_(sz_u32_t value) {
+    unsigned const lane = __lane_id() & 31u;
+    for (unsigned delta = 1; delta != 32; delta <<= 1) {
+        sz_u32_t const below = __shfl_up(value, delta, 32);
+        if (lane >= delta) value += below;
+    }
+    return value;
+}
+
+/** @ref sz_u32_lanes_prefix_sum_rocm_ over 64-bit values, each step two @c ds_bpermute . */
+STRINGZILLA_DEVICE sz_u64_t sz_u64_lanes_prefix_sum_rocm_(sz_u64_t value) {
+    unsigned const lane = __lane_id() & 31u;
+    for (unsigned delta = 1; delta != 32; delta <<= 1) {
+        sz_u64_t const below = __shfl_up(value, delta, 32);
+        if (lane >= delta) value += below;
+    }
+    return value;
+}
+
+/** The sum of @p value over this thread's 32 lanes, in every one of them, two cross-lane moves per
+ *  step. */
+STRINGZILLA_DEVICE sz_u64_t sz_u64_lanes_sum_rocm_(sz_u64_t value) {
+    for (unsigned delta = 16; delta != 0; delta >>= 1) value += __shfl_xor(value, (int)delta, 32);
+    return value;
+}
+
+/** The least of @p value over this lane and every lane below it among this thread's 32 lanes. */
+STRINGZILLA_DEVICE sz_i32_t sz_i32_lanes_prefix_min_rocm_(sz_i32_t value) {
+    unsigned const lane = __lane_id() & 31u;
+    for (unsigned delta = 1; delta != 32; delta <<= 1) {
+        sz_i32_t const below = __shfl_up(value, delta, 32);
+        if (lane >= delta && below < value) value = below;
+    }
+    return value;
+}
+
+/** Adds one to @p counter for this lane, returning the count before it, one atomic per lane, as no
+ *  AMD wavefront matches lanes by value. */
+STRINGZILLA_DEVICE sz_u32_t sz_u32_increment_rocm_(sz_u32_t *counter) { return atomicAdd(counter, 1u); }
+
 /** Orders this thread's lanes and their memory at this point: a wavefront runs in lockstep, so only
  *  the wavefront-scoped fences and the compiler's scheduling barrier between them are needed. */
 STRINGZILLA_DEVICE void sz_group_sync_rocm_(void) {
@@ -383,7 +439,81 @@ STRINGZILLA_DEVICE void sz_group_sync_rocm_(void) {
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
 }
 
+/** @ref sz_block_scan_simt_ over the 32-lane halves of a block of @p threads, scanning through
+ *  @c ds_bpermute . */
+STRINGZILLA_DEVICE sz_size_t sz_block_scan_rocm_(sz_size_t value, sz_size_t *shared, sz_size_t *total,
+                                                 unsigned threads) {
+    return sz_block_scan_simt_(value, shared, total, 32, threads, sz_u64_lanes_prefix_sum_rocm_);
+}
+
+/** @ref sz_block_scan_bounded_simt_ over the 32-lane halves of a block of @p threads, @p shared
+ *  taken as 32-bit entries. */
+STRINGZILLA_DEVICE sz_size_t sz_block_scan_bounded_rocm_(sz_size_t value, sz_size_t *shared, sz_size_t *total,
+                                                         unsigned threads) {
+    return sz_block_scan_bounded_simt_(value, (sz_u32_t *)shared, total, 32, threads, sz_u32_lanes_prefix_sum_rocm_);
+}
+
+/** @ref sz_block_sum_simt_ over the 32-lane halves of a block of @p threads. */
+STRINGZILLA_DEVICE sz_size_t sz_block_sum_rocm_(sz_size_t value, sz_size_t *shared, unsigned threads) {
+    return sz_block_sum_simt_(value, shared, 32, threads, sz_u64_lanes_prefix_sum_rocm_);
+}
+
+/** @ref sz_chain_look_back_simt_ over the block's first 32 lanes. */
+STRINGZILLA_DEVICE sz_size_t sz_chain_look_back_rocm_(sz_u64_t *states, sz_size_t ticket, sz_size_t total) {
+    return sz_chain_look_back_simt_(states, ticket, total, sz_lanes_ballot_rocm_, sz_u64_lanes_prefix_sum_rocm_);
+}
+
 #pragma endregion Device Primitives
+
+/*  Scans within each row of 16 lanes that move values between lanes with DPP rather than through
+ *  the LDS crossbar @c ds_bpermute takes. Every AMD generation has them; carrying the row totals
+ *  across a wavefront differs by generation, so it lives in <tt>strings/cdna3.cuh</tt> and
+ *  <tt>strings/cdna5.cuh</tt>. Every move names its operation's identity as the value it leaves where
+ *  its row is masked off or its source lane falls outside the row, so @c update_dpp , never
+ *  @c mov_dpp . Every lane of the wavefront calls a step at once. */
+#pragma region Row Scans
+
+enum {
+
+    /** The DPP control keeping every lane's own value, the row mask alone picking rows. */
+    sz_dpp_identity_rocm_k = 0xE4,
+
+    /** The DPP control moving every lane's value up its row of 16 lanes, by the count added. */
+    sz_dpp_row_shift_up_rocm_k = 0x110,
+};
+
+/** The sum of @p value over this lane and every lane below it within its row of 16 lanes. */
+STRINGZILLA_DEVICE sz_u32_t sz_u32_rows_prefix_sum_rocm_(sz_u32_t value) {
+    value += __builtin_amdgcn_update_dpp(0u, value, sz_dpp_row_shift_up_rocm_k + 1, 0xF, 0xF, false);
+    value += __builtin_amdgcn_update_dpp(0u, value, sz_dpp_row_shift_up_rocm_k + 2, 0xF, 0xF, false);
+    value += __builtin_amdgcn_update_dpp(0u, value, sz_dpp_row_shift_up_rocm_k + 4, 0xF, 0xF, false);
+    value += __builtin_amdgcn_update_dpp(0u, value, sz_dpp_row_shift_up_rocm_k + 8, 0xF, 0xF, false);
+    return value;
+}
+
+/** @ref sz_u32_rows_prefix_sum_rocm_ over 64-bit values, each move two DPP moves. */
+STRINGZILLA_DEVICE sz_u64_t sz_u64_rows_prefix_sum_rocm_(sz_u64_t value) {
+    value += __builtin_amdgcn_update_dpp((sz_u64_t)0, value, sz_dpp_row_shift_up_rocm_k + 1, 0xF, 0xF, false);
+    value += __builtin_amdgcn_update_dpp((sz_u64_t)0, value, sz_dpp_row_shift_up_rocm_k + 2, 0xF, 0xF, false);
+    value += __builtin_amdgcn_update_dpp((sz_u64_t)0, value, sz_dpp_row_shift_up_rocm_k + 4, 0xF, 0xF, false);
+    value += __builtin_amdgcn_update_dpp((sz_u64_t)0, value, sz_dpp_row_shift_up_rocm_k + 8, 0xF, 0xF, false);
+    return value;
+}
+
+/** The least of @p value over this lane and every lane below it within its row of 16 lanes. */
+STRINGZILLA_DEVICE sz_i32_t sz_i32_rows_prefix_min_rocm_(sz_i32_t value) {
+    sz_i32_t below;
+    below = __builtin_amdgcn_update_dpp(0x7FFFFFFF, value, sz_dpp_row_shift_up_rocm_k + 1, 0xF, 0xF, false);
+    value = below < value ? below : value;
+    below = __builtin_amdgcn_update_dpp(0x7FFFFFFF, value, sz_dpp_row_shift_up_rocm_k + 2, 0xF, 0xF, false);
+    value = below < value ? below : value;
+    below = __builtin_amdgcn_update_dpp(0x7FFFFFFF, value, sz_dpp_row_shift_up_rocm_k + 4, 0xF, 0xF, false);
+    value = below < value ? below : value;
+    below = __builtin_amdgcn_update_dpp(0x7FFFFFFF, value, sz_dpp_row_shift_up_rocm_k + 8, 0xF, 0xF, false);
+    return below < value ? below : value;
+}
+
+#pragma endregion Row Scans
 
 /*  The library defines these once, in `src/capabilities/rocm.hip`; header-only builds define them
  *  here. */

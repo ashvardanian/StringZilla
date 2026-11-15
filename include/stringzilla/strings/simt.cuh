@@ -466,25 +466,32 @@ STRINGZILLA_DEVICE void sz_strings_offset_set_simt_(sz_strings_span_t tape, sz_s
     else tape.data.u32_tape.offsets[index] = (sz_u32_t)offset;
 }
 
-static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
-    sz_strings_scan_local_simt_kernel_(sz_u64_t *offsets, sz_u64_t const *lengths, sz_size_t count, sz_size_t *blocks) {
+/** Scans each block's own @p lengths into @p offsets with @p block_scan, leaving its total in
+ *  @p blocks. */
+STRINGZILLA_DEVICE void sz_strings_scan_local_simt_(sz_u64_t *offsets, sz_u64_t const *lengths, sz_size_t count,
+                                                    sz_size_t *blocks,
+                                                    sz_size_t (*block_scan)(sz_size_t, sz_size_t *, sz_size_t *,
+                                                                            unsigned)) {
     __shared__ sz_size_t shared[sz_strings_threads_simt_k];
     sz_size_t const row = (sz_size_t)blockIdx.x * sz_strings_threads_simt_k + threadIdx.x;
     sz_size_t total = 0;
-    sz_size_t const before = sz_block_scan_simt_(row < count ? lengths[row] : 0, shared, &total);
+    sz_size_t const before = block_scan(row < count ? lengths[row] : 0, shared, &total, sz_strings_threads_simt_k);
     if (row < count) offsets[row] = before;
     if (!threadIdx.x) blocks[blockIdx.x] = total;
 }
 
-static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
-    sz_strings_scan_blocks_simt_kernel_(sz_size_t *blocks, sz_size_t block_count, sz_u64_t *offsets, sz_size_t count,
-                                        sz_size_t target_offset) {
+/** Scans the totals @ref sz_strings_scan_local_simt_ left in @p blocks with @p block_scan, from
+ *  @p target_offset on, on one block. */
+STRINGZILLA_DEVICE void sz_strings_scan_blocks_simt_(sz_size_t *blocks, sz_size_t block_count, sz_u64_t *offsets,
+                                                     sz_size_t count, sz_size_t target_offset,
+                                                     sz_size_t (*block_scan)(sz_size_t, sz_size_t *, sz_size_t *,
+                                                                             unsigned)) {
     __shared__ sz_size_t shared[sz_strings_threads_simt_k];
     sz_size_t const chunk = block_count / sz_strings_threads_simt_k + (block_count % sz_strings_threads_simt_k != 0);
     sz_size_t const first = threadIdx.x * chunk, end = sz_min_of_two(first + chunk, block_count);
     sz_size_t mine = 0, total = 0;
     for (sz_size_t index = first; index < end; ++index) mine += blocks[index];
-    sz_size_t running = target_offset + sz_block_scan_simt_(mine, shared, &total);
+    sz_size_t running = target_offset + block_scan(mine, shared, &total, sz_strings_threads_simt_k);
     for (sz_size_t index = first; index < end; ++index) {
         sz_size_t const value = blocks[index];
         blocks[index] = running;

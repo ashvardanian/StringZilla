@@ -39,6 +39,23 @@ extern "C" {
 /** Blocks per compute unit a grid-strided launch covers the device with. */
 enum { sz_regex_blocks_per_multiprocessor_rocm_k = 8 };
 
+/** @ref sz_regex_scan_tile_simt_ over ROCm's 32-lane halves of wavefronts in 32 bits, for the
+ *  starts per chunk, of which a step of a tile holds at most 64 per value. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_scan_bounded_rocm_kernel_(sz_size_t *values, sz_size_t count, sz_size_t elements_per_tile,
+                                       sz_size_t *chain, sz_u64_t *states, sz_u64_t *stale) {
+    sz_regex_scan_tile_simt_(values, count, elements_per_tile, chain, states, stale, sz_block_scan_bounded_rocm_,
+                             sz_block_sum_rocm_, sz_chain_tile_simt_, sz_chain_look_back_rocm_);
+}
+
+/** @ref sz_regex_scan_tile_simt_ over ROCm's 32-lane halves of wavefronts. */
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_scan_rocm_kernel_(sz_size_t *values, sz_size_t count, sz_size_t elements_per_tile, sz_size_t *chain,
+                               sz_u64_t *states, sz_u64_t *stale) {
+    sz_regex_scan_tile_simt_(values, count, elements_per_tile, chain, states, stale, sz_block_scan_rocm_,
+                             sz_block_sum_rocm_, sz_chain_tile_simt_, sz_chain_look_back_rocm_);
+}
+
 /** The 32-lane walk of the links that outlived their first thread, with ROCm's cross-lane steps,
  *  each 64-wide wavefront running two side by side. */
 static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
@@ -211,10 +228,10 @@ STRINGZILLA_INLINE sz_status_t sz_regex_launch_rocm_(void const *kernel, unsigne
     return sz_launch_rocm_(kernel, grid, block, arguments, shared_bytes, stream);
 }
 
-/** Turns @p count values at @p values into their exclusive prefix sum in one launch, each scan of
- *  @p round taking the other of its two buffers of tile states and clearing the one it leaves. */
+/** Turns @p count values at @p values into their exclusive prefix sum in one launch of @p kernel,
+ *  each scan of @p round reading the tile states the last one cleared and clearing the others. */
 STRINGZILLA_INLINE sz_status_t sz_regex_scan_rocm_(sz_regex_round_simt_t *round, sz_size_t *values, sz_size_t count,
-                                                   sz_stream_t stream) {
+                                                   void const *kernel, sz_stream_t stream) {
     sz_size_t const tiles = sz_min_of_two(sz_size_divide_round_up(count, sz_regex_threads_per_block_simt_k),
                                           (sz_size_t)sz_chain_tiles_max_k);
     sz_size_t elements_per_tile = sz_size_divide_round_up(count, tiles);
@@ -223,7 +240,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_scan_rocm_(sz_regex_round_simt_t *round,
     void *arguments[6];
     arguments[0] = &values, arguments[1] = &count, arguments[2] = &elements_per_tile, arguments[3] = &round->scan_chain;
     arguments[4] = &states, arguments[5] = &stale;
-    return sz_regex_launch_rocm_((void const *)sz_regex_scan_simt_kernel_, (unsigned)tiles, arguments, 0, stream);
+    return sz_regex_launch_rocm_(kernel, (unsigned)tiles, arguments, 0, stream);
 }
 
 /** Reads into @p slots_count the slots a tape of haystacks spans, one per byte and one per
@@ -660,7 +677,9 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_rocm_(sz_regex_engine_t const *en
             status = sz_regex_launch_rocm_(
                 folded ? (void const *)sz_regex_mark_folded_simt_kernel_ : (void const *)sz_regex_mark_simt_kernel_,
                 grid, walk_arguments, shared_bytes + (folded ? 0 : sz_regex_staged_text_bytes_simt_k), stream);
-        if (status == sz_success_k) status = sz_regex_scan_rocm_(round, chunk_offsets, round->chunks_count + 1, stream);
+        if (status == sz_success_k)
+            status = sz_regex_scan_rocm_(round, chunk_offsets, round->chunks_count + 1,
+                                         (void const *)sz_regex_scan_bounded_rocm_kernel_, stream);
         if (status == sz_success_k && !engine->forward_rows) {
             round->walks_count = pike_walks, round->walk_bytes = arena.pike_bytes;
             status = sz_regex_launch_rocm_((void const *)sz_regex_list_simt_kernel_, grid, round_arguments, 0, stream);
@@ -703,7 +722,9 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_rocm_(sz_regex_engine_t const *en
         round->storing = 0;
         if (status == sz_success_k)
             status = sz_regex_launch_rocm_((void const *)sz_regex_sweep_simt_kernel_, grid, chain_arguments, 0, stream);
-        if (status == sz_success_k) status = sz_regex_scan_rocm_(round, chunk_kept, round->chunks_count + 1, stream);
+        if (status == sz_success_k)
+            status = sz_regex_scan_rocm_(round, chunk_kept, round->chunks_count + 1,
+                                         (void const *)sz_regex_scan_rocm_kernel_, stream);
 
         // A rewrite or an extraction runs on the walks between the counting sweep and the storing
         // one, which moves the carry's last match on.
@@ -719,7 +740,8 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_rocm_(sz_regex_engine_t const *en
                 status = sz_regex_launch_rocm_((void const *)sz_regex_drift_simt_kernel_, grid, round_arguments, 0,
                                                stream);
             if (status == sz_success_k)
-                status = sz_regex_scan_rocm_(round, chunk_sums, round->chunks_count + 1, stream);
+                status = sz_regex_scan_rocm_(round, chunk_sums, round->chunks_count + 1,
+                                             (void const *)sz_regex_scan_rocm_kernel_, stream);
             if (status == sz_success_k)
                 status = sz_regex_launch_rocm_((void const *)sz_regex_rewrite_simt_kernel_, walks_grid, walk_arguments,
                                                sz_regex_staged_bytes_simt_k, stream);
@@ -727,12 +749,14 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_rocm_(sz_regex_engine_t const *en
         if (status == sz_success_k && round->rows_offsets) {
             unsigned const walks_grid = (unsigned)sz_size_divide_round_up(pike_walks,
                                                                           sz_regex_threads_per_block_simt_k);
-            status = sz_regex_scan_rocm_(round, chunk_sums, round->chunks_count + 1, stream);
+            status = sz_regex_scan_rocm_(round, chunk_sums, round->chunks_count + 1,
+                                         (void const *)sz_regex_scan_rocm_kernel_, stream);
             if (status == sz_success_k)
                 status = sz_regex_launch_rocm_((void const *)sz_regex_firsts_simt_kernel_, walks_grid, walk_arguments,
                                                sz_regex_staged_bytes_simt_k, stream);
             if (status == sz_success_k)
-                status = sz_regex_scan_rocm_(round, chunk_covers, round->chunks_count + 1, stream);
+                status = sz_regex_scan_rocm_(round, chunk_covers, round->chunks_count + 1,
+                                             (void const *)sz_regex_scan_rocm_kernel_, stream);
             if (status == sz_success_k)
                 status = sz_regex_launch_rocm_((void const *)sz_regex_rows_simt_kernel_, walks_grid, walk_arguments,
                                                sz_regex_staged_bytes_simt_k, stream);

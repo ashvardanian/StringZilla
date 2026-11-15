@@ -276,8 +276,9 @@ static __global__ void __launch_bounds__(sz_overlap_candidates_per_block_rocm_k)
                                            sz_size_t matches_query_stride, sz_size_t matches_candidate_stride,
                                            sz_size_t staged_nodes_count, sz_u32_t misses_bound) {
     sz_overlap_bounded_scores_simt_(engine, candidates, matches, matches_query_stride, matches_candidate_stride,
-                                    staged_nodes_count, misses_bound, sz_group_shuffle_index_rocm_,
-                                    sz_tile_queue_open_simt_, sz_tile_queue_next_simt_);
+                                    staged_nodes_count, misses_bound, sz_group_shuffle_index_rocm_, sz_group_any_rocm_,
+                                    STRINGZILLA_NULL, STRINGZILLA_NULL, sz_tile_queue_open_simt_,
+                                    sz_tile_queue_next_simt_);
 }
 
 STRINGZILLA_API sz_status_t sz_overlap_engine_init_rocm(sz_overlap_engine_t *engine, sz_strings_view_t const *queries,

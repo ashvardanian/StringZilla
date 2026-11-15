@@ -28,6 +28,19 @@ extern "C" {
 
 #if STRINGZILLA_TARGET_ROCM
 
+/** @ref sz_strings_scan_local_simt_ over ROCm's 32-lane halves of wavefronts. */
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_scan_local_rocm_kernel_(sz_u64_t *offsets, sz_u64_t const *lengths, sz_size_t count, sz_size_t *blocks) {
+    sz_strings_scan_local_simt_(offsets, lengths, count, blocks, sz_block_scan_rocm_);
+}
+
+/** @ref sz_strings_scan_blocks_simt_ over ROCm's 32-lane halves of wavefronts. */
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_scan_blocks_rocm_kernel_(sz_size_t *blocks, sz_size_t block_count, sz_u64_t *offsets, sz_size_t count,
+                                        sz_size_t target_offset) {
+    sz_strings_scan_blocks_simt_(blocks, block_count, offsets, count, target_offset, sz_block_scan_rocm_);
+}
+
 /** Whether the device reaches every block a call over @p count strings touches: the tape @p strings
  *  views, @p order, and the blocks a non-null @p tape already holds. */
 STRINGZILLA_INLINE sz_status_t sz_strings_check_rocm_(sz_strings_view_t const *strings, sz_size_t const *order,
@@ -75,10 +88,10 @@ STRINGZILLA_INLINE sz_status_t sz_strings_measured_rocm_(sz_u64_t *scratch, sz_s
     dim3 const grid((unsigned)blocks_count), block(sz_strings_threads_simt_k), single(1);
     sz_status_t status = sz_success_k;
     if (count) {
-        status = sz_launch_rocm_((void const *)&sz_strings_scan_local_simt_kernel_, grid, block, local_arguments, 0,
+        status = sz_launch_rocm_((void const *)&sz_strings_scan_local_rocm_kernel_, grid, block, local_arguments, 0,
                                  stream);
         if (status == sz_success_k)
-            status = sz_launch_rocm_((void const *)&sz_strings_scan_blocks_simt_kernel_, single, block,
+            status = sz_launch_rocm_((void const *)&sz_strings_scan_blocks_rocm_kernel_, single, block,
                                      blocks_arguments, 0, stream);
         if (status == sz_success_k)
             status = sz_launch_rocm_((void const *)&sz_strings_scan_offsets_simt_kernel_, grid, block,

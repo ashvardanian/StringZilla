@@ -21,7 +21,7 @@
 #define STRINGZILLA_CUDA_CUH_
 
 #include "stringzilla/types.cuh"
-#include "stringzilla/capabilities.h" // `sz_cap_cuda_k`
+#include "stringzilla/capabilities.h" // `sz_cap_cuda_k`, `sz_cap_ampere_k`
 
 #if STRINGZILLA_ARCH_CUDA_
 #include <cuda_runtime.h> // `cudaLaunchKernel`, `cudaMallocManaged`, `cudaSetDevice`
@@ -253,6 +253,9 @@ STRINGZILLA_INLINE sz_status_t sz_launch_cuda_(void const *kernel, dim3 grid, di
                : sz_device_code_mismatch_k;
 }
 
+/** Blocks one cluster spans on the tiers that launch clusters, the portable ceiling. */
+enum { sz_cluster_blocks_cuda_k = 8 };
+
 /** Clusters of @p cluster_blocks blocks of @p threads running @p kernel with @p shared_bytes of
  *  dynamic shared memory the current device keeps resident at once, or zero for none. */
 STRINGZILLA_INLINE sz_size_t sz_resident_clusters_cuda_(void const *kernel, sz_size_t threads, sz_size_t shared_bytes,
@@ -365,6 +368,7 @@ STRINGZILLA_INLINE sz_status_t sz_capabilities_detected_cuda_(sz_size_t ordinal,
         return sz_device_code_mismatch_k;
     if (multiprocessors <= 0) return sz_success_k;
     *capabilities = sz_cap_cuda_k;
+    if (major >= 8) *capabilities |= sz_cap_ampere_k;
     if (major >= 9) *capabilities |= sz_cap_hopper_k;
     if (major >= 10) *capabilities |= sz_cap_blackwell_k;
     return sz_success_k;
@@ -420,6 +424,12 @@ STRINGZILLA_DEVICE sz_u32_t sz_group_shuffle_index_cuda_(sz_u32_t value, unsigne
     return __shfl_sync(sz_group_members_cuda_(width), value, (int)lane, (int)width);
 }
 
+/** Whether @p predicate holds on any lane of this lane's aligned group of @p width lanes, with
+ *  @c vote.sync.any ; groups may diverge from one another. */
+STRINGZILLA_DEVICE int sz_group_any_cuda_(int predicate, unsigned width) {
+    return __any_sync(sz_group_members_cuda_(width), predicate) != 0;
+}
+
 /** Lane zero's @p value across the warp, with @c shfl.sync.idx . */
 STRINGZILLA_DEVICE sz_u32_t sz_lanes_broadcast_cuda_(sz_u32_t value) { return __shfl_sync(0xFFFFFFFFu, value, 0); }
 
@@ -436,14 +446,93 @@ STRINGZILLA_DEVICE unsigned sz_lanes_first_cuda_(int predicate) {
     return ballot ? (unsigned)sz_u32_ctz_simt_(ballot) : 32u;
 }
 
-/** How many lanes of the warp below this one @p predicate holds on, with @c vote.sync.ballot and
- *  @c popc . */
+/** The lanes of the warp below this one, from @c %lanemask_lt . */
+STRINGZILLA_DEVICE sz_u32_t sz_lanes_lower_cuda_(void) {
+    sz_u32_t lower;
+    asm("mov.u32 %0, %%lanemask_lt;" : "=r"(lower));
+    return lower;
+}
+
+/** How many lanes of the warp below this one @p predicate holds on, with @c vote.sync.ballot ,
+ *  @c %lanemask_lt and @c popc . */
 STRINGZILLA_DEVICE unsigned sz_lanes_below_cuda_(int predicate) {
-    return (unsigned)sz_u32_popcount_simt_(__ballot_sync(0xFFFFFFFFu, predicate) & ((1u << (threadIdx.x & 31u)) - 1u));
+    return (unsigned)sz_u32_popcount_simt_(__ballot_sync(0xFFFFFFFFu, predicate) & sz_lanes_lower_cuda_());
+}
+
+/** The sum of @p value over this lane and every lane below it in the warp, with
+ *  @c shfl.sync.up . */
+STRINGZILLA_DEVICE sz_u32_t sz_u32_lanes_prefix_sum_cuda_(sz_u32_t value) {
+    unsigned const lane = threadIdx.x & 31u;
+    for (unsigned delta = 1; delta != 32; delta <<= 1) {
+        sz_u32_t const below = __shfl_up_sync(0xFFFFFFFFu, value, delta);
+        if (lane >= delta) value += below;
+    }
+    return value;
+}
+
+/** @ref sz_u32_lanes_prefix_sum_cuda_ over 64-bit values, each step two @c shfl.sync.up . */
+STRINGZILLA_DEVICE sz_u64_t sz_u64_lanes_prefix_sum_cuda_(sz_u64_t value) {
+    unsigned const lane = threadIdx.x & 31u;
+    for (unsigned delta = 1; delta != 32; delta <<= 1) {
+        sz_u64_t const below = __shfl_up_sync(0xFFFFFFFFu, value, delta);
+        if (lane >= delta) value += below;
+    }
+    return value;
+}
+
+/** The sum of @p value over the warp, in every lane, with two @c shfl.sync.bfly per step. */
+STRINGZILLA_DEVICE sz_u64_t sz_u64_lanes_sum_cuda_(sz_u64_t value) {
+    for (unsigned delta = 16; delta != 0; delta >>= 1) value += __shfl_xor_sync(0xFFFFFFFFu, value, delta);
+    return value;
+}
+
+/** The least of @p value over this lane and every lane below it in the warp, with
+ *  @c shfl.sync.up . */
+STRINGZILLA_DEVICE sz_i32_t sz_i32_lanes_prefix_min_cuda_(sz_i32_t value) {
+    unsigned const lane = threadIdx.x & 31u;
+    for (unsigned delta = 1; delta != 32; delta <<= 1) {
+        sz_i32_t const below = __shfl_up_sync(0xFFFFFFFFu, value, delta);
+        if (lane >= delta && below < value) value = below;
+    }
+    return value;
+}
+
+/** Adds one to @p counter for this lane, returning the count before it, with one atomic per counter
+ *  the converged lanes increment, the lanes on one counter found by @c match.any.sync and ranked
+ *  below their lowest. */
+STRINGZILLA_DEVICE sz_u32_t sz_u32_increment_cuda_(sz_u32_t *counter) {
+    unsigned const peers = __match_any_sync(__activemask(), (unsigned long long)counter);
+    unsigned const leader = (unsigned)sz_u32_ctz_simt_(peers);
+    sz_u32_t first = 0;
+    if ((threadIdx.x & 31u) == leader) first = atomicAdd(counter, (unsigned)sz_u32_popcount_simt_(peers));
+    return __shfl_sync(peers, first, (int)leader) + (sz_u32_t)sz_u32_popcount_simt_(peers & sz_lanes_lower_cuda_());
 }
 
 /** Orders the warp's lanes and their memory at this point, with @c bar.warp.sync . */
 STRINGZILLA_DEVICE void sz_group_sync_cuda_(void) { __syncwarp(0xFFFFFFFFu); }
+
+/** @ref sz_block_scan_simt_ over the warps of a block of @p threads. */
+STRINGZILLA_DEVICE sz_size_t sz_block_scan_cuda_(sz_size_t value, sz_size_t *shared, sz_size_t *total,
+                                                 unsigned threads) {
+    return sz_block_scan_simt_(value, shared, total, 32, threads, sz_u64_lanes_prefix_sum_cuda_);
+}
+
+/** @ref sz_block_scan_bounded_simt_ over the warps of a block of @p threads, @p shared taken as
+ *  32-bit entries. */
+STRINGZILLA_DEVICE sz_size_t sz_block_scan_bounded_cuda_(sz_size_t value, sz_size_t *shared, sz_size_t *total,
+                                                         unsigned threads) {
+    return sz_block_scan_bounded_simt_(value, (sz_u32_t *)shared, total, 32, threads, sz_u32_lanes_prefix_sum_cuda_);
+}
+
+/** @ref sz_block_sum_simt_ over the warps of a block of @p threads. */
+STRINGZILLA_DEVICE sz_size_t sz_block_sum_cuda_(sz_size_t value, sz_size_t *shared, unsigned threads) {
+    return sz_block_sum_simt_(value, shared, 32, threads, sz_u64_lanes_prefix_sum_cuda_);
+}
+
+/** @ref sz_chain_look_back_simt_ over the block's first warp. */
+STRINGZILLA_DEVICE sz_size_t sz_chain_look_back_cuda_(sz_u64_t *states, sz_size_t ticket, sz_size_t total) {
+    return sz_chain_look_back_simt_(states, ticket, total, sz_lanes_ballot_cuda_, sz_u64_lanes_prefix_sum_cuda_);
+}
 
 #pragma endregion Device Primitives
 

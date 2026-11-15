@@ -343,10 +343,11 @@ STRINGZILLA_DEVICE sz_size_t sz_utf8_norm_span_simt_(sz_u8_t const *text, sz_siz
 }
 
 /** Normalizes one tile of @p text, @p tile_bytes wide, of the @p tiles a round cuts it into,
- *  measuring each thread's stretch first, then writing it once the chain says where it begins. */
-static __global__ void __launch_bounds__(sz_utf8_norm_threads_simt_k)
-    sz_utf8_norm_simt_kernel_(sz_u8_t const *text, sz_size_t length, sz_normal_form_t form, sz_size_t tile_bytes,
-                              sz_size_t tiles, sz_u8_t *target, sz_size_t *target_length) {
+ *  measuring each thread's stretch first, then writing it once the chain says where it begins; the
+ *  stretches scan with @p block_scan. */
+STRINGZILLA_DEVICE void sz_utf8_norm_tile_simt_(
+    sz_u8_t const *text, sz_size_t length, sz_normal_form_t form, sz_size_t tile_bytes, sz_size_t tiles,
+    sz_u8_t *target, sz_size_t *target_length, sz_size_t (*block_scan)(sz_size_t, sz_size_t *, sz_size_t *, unsigned)) {
     __shared__ sz_size_t shared[sz_utf8_norm_threads_simt_k];
     sz_size_t const ticket = sz_chain_ticket_simt_(target_length);
     sz_size_t const tile_begin = ticket * tile_bytes, tile_end = sz_min_of_two(tile_begin + tile_bytes, length);
@@ -356,8 +357,8 @@ static __global__ void __launch_bounds__(sz_utf8_norm_threads_simt_k)
     sz_size_t const end = sz_utf8_norm_cut_simt_(
         text, length, sz_min_of_two(tile_begin + (threadIdx.x + 1) * thread_bytes, tile_end), form);
     sz_size_t tile_total;
-    sz_size_t const preceding = sz_block_scan_simt_(
-        sz_utf8_norm_span_simt_(text, length, begin, end, form, STRINGZILLA_NULL), shared, &tile_total);
+    sz_size_t const preceding = block_scan(sz_utf8_norm_span_simt_(text, length, begin, end, form, STRINGZILLA_NULL),
+                                           shared, &tile_total, sz_utf8_norm_threads_simt_k);
     sz_size_t const tile_offset = sz_chain_offset_simt_(target_length, ticket, tiles, tile_total);
     sz_utf8_norm_span_simt_(text, length, begin, end, form, target + tile_offset + preceding);
 }
