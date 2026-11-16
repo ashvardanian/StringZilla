@@ -18,6 +18,10 @@
  *  @ref sz_reach_metal_ against the block's host address, while the candidates' tape and the
  *  distances are bound directly. Template word counts keep verticals in registers, with one
  *  entry point per word count.
+ *
+ *  A walk scoring one query against scattered candidates prepares that query itself instead, a
+ *  simdgroup laying its classes and masks into a span the caller owns, and scores each candidate
+ *  with a lone thread or a whole simdgroup, as the CUDA walk's prepared queries do.
  */
 
 /** Unicode as 256-rune pages, as @c sz_levenshtein_utf8_pages_k. */
@@ -104,24 +108,33 @@ inline ulong sz_levenshtein_bounded_metal_(ulong distance, ulong bound) {
     return distance > bound ? bound + 1 : distance;
 }
 
-/** One Myers step over @c words_ verticals against the @p masks row of the stepped symbol's class,
- *  the score moving on the last word, as @c sz_levenshtein_u64x1_step_serial steps. */
-template <uint words_>
-inline void sz_levenshtein_step_metal_(thread ulong *positive, thread ulong *negative, thread ulong &score,
-                                       device ulong const *masks, ulong last_symbol_bit) {
-    ulong positive_carry = 1, negative_carry = 0;
+/**
+ *  @brief Advances one lane's @c words_per_lane_ words of a candidate by one symbol, the Myers body
+ *      every scorer here steps, chaining the horizontal deltas from each word into the next, as
+ *      @c sz_levenshtein_group_step_simt_ does.
+ *
+ *  @param[in] masks The symbol's class row, from the lane's first word.
+ *  @param[in] score_word The lane's word holding the query's last symbol, out of range on every
+ *      other lane, so the score moves only on the lane that owns it.
+ *  @param[in] tracking_ Whether to move @p score at all, false folding it out of the step.
+ *  @param[in,out] positive_carry The positive delta entering the lane's first word, and on return
+ *      the one leaving its last.
+ *  @param[in,out] negative_carry The negative delta, entering and leaving the same way.
+ */
+template <uint words_per_lane_, bool tracking_>
+inline void sz_levenshtein_group_step_metal_(thread ulong *positive, thread ulong *negative, device ulong const *masks,
+                                             ulong score_word, ulong last_symbol_bit, thread ulong &positive_carry,
+                                             thread ulong &negative_carry, thread ulong &score) {
+    ulong rose = 0, fell = 0;
 #pragma unroll
-    for (uint word = 0; word != words_; ++word) {
+    for (uint word = 0; word != words_per_lane_; ++word) {
         ulong const equality = masks[word];
         ulong const vertical_carry = equality | negative[word];
         ulong const matched = equality | negative_carry;
         ulong const diagonal = (((matched & positive[word]) + positive[word]) ^ positive[word]) | matched;
         ulong horizontal_positive = negative[word] | ~(diagonal | positive[word]);
         ulong horizontal_negative = positive[word] & diagonal;
-        if (word + 1 == words_) {
-            score += (horizontal_positive & last_symbol_bit) != 0;
-            score -= (horizontal_negative & last_symbol_bit) != 0;
-        }
+        if (tracking_ && word == score_word) rose = horizontal_positive, fell = horizontal_negative;
         ulong const next_positive_carry = horizontal_positive >> 63;
         ulong const next_negative_carry = horizontal_negative >> 63;
         horizontal_positive = (horizontal_positive << 1) | positive_carry;
@@ -130,6 +143,265 @@ inline void sz_levenshtein_step_metal_(thread ulong *positive, thread ulong *neg
         positive[word] = horizontal_negative | ~(vertical_carry | horizontal_positive);
         negative[word] = horizontal_positive & vertical_carry;
     }
+    if (!tracking_) return;
+    score += (rose & last_symbol_bit) != 0;
+    score -= (fell & last_symbol_bit) != 0;
+}
+
+/** One Myers step over @c words_ verticals against the @p masks row of the stepped symbol's class,
+ *  the score moving on the last word, as @c sz_levenshtein_u64x1_step_serial steps. */
+template <uint words_>
+inline void sz_levenshtein_step_metal_(thread ulong *positive, thread ulong *negative, thread ulong &score,
+                                       device ulong const *masks, ulong last_symbol_bit) {
+    ulong positive_carry = 1, negative_carry = 0;
+    sz_levenshtein_group_step_metal_<words_, true>(positive, negative, masks, words_ - 1, last_symbol_bit,
+                                                   positive_carry, negative_carry, score);
+}
+
+/**
+ *  @brief Builds one byte query's class map and match masks into a simdgroup's @p span, every lane
+ *      of the simdgroup taking part, as @c sz_levenshtein_query_prepare_simt_ builds them.
+ *
+ *  Each lane gathers the bytes it strides over into a 256-bit set and @c simd_or unions them in
+ *  every lane's registers, where the CUDA twin meets them in the span. Classes rank the present
+ *  bytes in byte order, the absent bytes sharing the last, and a lane owns one word of every class
+ *  row, so the masks fill without atomics. The simdgroup is synchronized on entry, as the span may
+ *  still serve the previous query, and on return.
+ *
+ *  @param[in] stride Words from one class row to the next, at least the query's own words, as
+ *      @c sz_levenshtein_walk_stride pads them.
+ *  @param[out] span Eight-byte aligned: @c sz_levenshtein_byte_classes_metal_k class bytes, then
+ *      one row of @p stride words per class, a class per distinct byte plus the absent bytes' one.
+ *  @param[out] query The prepared query, complete in every lane.
+ *  @param[in] lane The calling lane, below 32.
+ */
+inline void sz_levenshtein_query_prepare_metal_(device uchar const *text, ulong length, ulong stride,
+                                                device uchar *span, thread sz_levenshtein_query_metal_t &query,
+                                                uint lane) {
+    sz_group_metal_t const group = {sz_levenshtein_gpu_warp_lanes_metal_k, lane};
+    device uchar *const byte_to_class = span;
+    device ulong *const masks = (device ulong *)(span + sz_levenshtein_byte_classes_metal_k);
+    ulong const words = sz_size_divide_round_up_metal_<ulong>(length, 64);
+    group.sync();
+    uint present[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    for (ulong position = lane; position < length; position += sz_levenshtein_gpu_warp_lanes_metal_k) {
+        uint const byte = text[position];
+        present[byte >> 5] |= 1u << (byte & 31u);
+    }
+    uint distinct = 0;
+    for (uint word = 0; word != 8; ++word) present[word] = simd_or(present[word]), distinct += popcount(present[word]);
+    uint const classes = min(distinct + 1, sz_levenshtein_byte_classes_metal_k);
+    // Byte `word * 32 + lane` ranks among the present bytes below it.
+    uint below = 0;
+    for (uint word = 0; word != 8; ++word) {
+        uint const rank = below + popcount(present[word] & ((1u << lane) - 1u));
+        byte_to_class[word * 32 + lane] = (present[word] >> lane) & 1u ? (uchar)rank : (uchar)(classes - 1);
+        below += popcount(present[word]);
+    }
+    for (ulong entry = lane; entry < classes * stride; entry += sz_levenshtein_gpu_warp_lanes_metal_k) masks[entry] = 0;
+    group.sync();
+    for (ulong word = lane; word < words; word += sz_levenshtein_gpu_warp_lanes_metal_k)
+        for (ulong position = word * 64; position != min(word * 64 + 64, length); ++position)
+            masks[(ulong)byte_to_class[text[position]] * stride + word] |= 1ul << (position & 63);
+    group.sync();
+    query.masks = masks;
+    query.byte_to_class = byte_to_class;
+    query.page_rows = nullptr;
+    query.class_rows = nullptr;
+    query.stride = stride;
+    query.length = length;
+}
+
+/** The class row of rune @p page, opening the next of @p rows with every class absent on the page's
+ *  first rune, as lane zero hands them out in first-appearance order. */
+inline ulong sz_levenshtein_page_row_metal_(device ushort *page_rows, device uint *class_rows, uint page,
+                                            thread uint &rows) {
+    if (page_rows[page] != 0) return page_rows[page];
+    page_rows[page] = (ushort)rows;
+    for (uint entry = 0; entry != 256; ++entry) class_rows[rows * 256 + entry] = 0;
+    return rows++;
+}
+
+/**
+ *  @brief Builds one UTF-8 query's page table, class rows and match masks into a simdgroup's
+ *      @p span, every lane of the simdgroup taking part, as
+ *      @c sz_levenshtein_query_prepare_utf8_simt_ builds them.
+ *
+ *  Classes follow first appearance, which only a serial pass hands out, so lane zero decodes the
+ *  runes and sets the bits while the simdgroup zeroes the table and the masks. Each class row is
+ *  the query's own words long, as @c sz_levenshtein_walk_stride pads them. The simdgroup is
+ *  synchronized on entry, as the span may still serve the previous query, and on return.
+ *
+ *  @param[in] length The query's bytes; the prepared query's length is its runes.
+ *  @param[out] span Eight-byte aligned: @c sz_levenshtein_utf8_span_header_k bytes, the
+ *      @c sz_levenshtein_utf8_pages_metal_k page rows, a class row of 256 entries per page the
+ *      query touches plus the absent pages' one, then one mask row per class at its walk stride.
+ *  @param[out] query The prepared query, complete in every lane.
+ *  @param[in] lane The calling lane, below 32.
+ */
+inline void sz_levenshtein_query_prepare_utf8_metal_(device uchar const *text, ulong length, device uchar *span,
+                                                     thread sz_levenshtein_query_metal_t &query, uint lane) {
+    sz_group_metal_t const group = {sz_levenshtein_gpu_warp_lanes_metal_k, lane};
+    uint const lanes = sz_levenshtein_gpu_warp_lanes_metal_k;
+    device uint *const header = (device uint *)span;
+    // The header holds the classes, the page rows and the runes, which one lane counts and every
+    // lane reads, in the 16 bytes of `sz_levenshtein_utf8_span_header_k`.
+    device ushort *const page_rows = (device ushort *)(span + 16);
+    device uint *const class_rows = (device uint *)(page_rows + sz_levenshtein_utf8_pages_metal_k);
+    group.sync();
+    for (uint entry = lane; entry < sz_levenshtein_utf8_pages_metal_k; entry += lanes) page_rows[entry] = 0;
+    for (uint entry = lane; entry < 256; entry += lanes) class_rows[entry] = 0;
+    group.sync();
+    if (lane == 0) {
+        uint rows = 1, classes = 1, runes = 0;
+        for (ulong position = 0; position < length; ++runes) {
+            uint const rune = sz_levenshtein_next_rune_metal_(text, length, position);
+            ulong const row = sz_levenshtein_page_row_metal_(page_rows, class_rows, rune >> 8, rows);
+            device uint *const class_slot = class_rows + row * 256 + (rune & 255);
+            if (*class_slot == 0) *class_slot = classes++;
+        }
+        header[0] = classes, header[1] = rows, header[2] = runes;
+    }
+    group.sync();
+    ulong const classes = header[0], runes = header[2];
+    // Odd, as `sz_levenshtein_walk_stride` pads the words, so rows spread over the banks.
+    ulong const stride = sz_size_divide_round_up_metal_<ulong>(runes, 64) | 1;
+    device ulong *const masks = (device ulong *)(class_rows + (ulong)header[1] * 256);
+    for (ulong entry = lane; entry < classes * stride; entry += lanes) masks[entry] = 0;
+    group.sync();
+    if (lane == 0) {
+        ulong rune_index = 0;
+        for (ulong position = 0; position < length; ++rune_index) {
+            uint const rune = sz_levenshtein_next_rune_metal_(text, length, position);
+            ulong const class_id = class_rows[(ulong)page_rows[rune >> 8] * 256 + (rune & 255)];
+            masks[class_id * stride + (rune_index >> 6)] |= 1ul << (rune_index & 63);
+        }
+    }
+    group.sync();
+    query.masks = masks;
+    query.byte_to_class = nullptr;
+    query.page_rows = page_rows;
+    query.class_rows = class_rows;
+    query.stride = stride;
+    query.length = runes;
+}
+
+/**
+ *  @brief The edit distance from one candidate to a prepared non-empty @p query, in bytes or, with
+ *      @c runes_, in UTF-8 runes, scored by a group of @c lanes_ lanes, exact within @p radius and
+ *      the running score past it, as @c sz_levenshtein_group_score_simt_ and
+ *      @c sz_levenshtein_group_score_utf8_simt_ score it.
+ *
+ *  A lane owns @c words_per_lane_ consecutive query words and advances the candidate one symbol
+ *  behind the lane below it, so the carry out of the lane below's top word was finalized one step
+ *  earlier and arrives through a single shuffle up. A group runs @c length+score_lane steps over
+ *  bytes, where the score lane owns the query's last word. Over runes lane zero decodes one rune
+ *  per step and hands its class up the lanes beside the carry, the class plus one, so zero marks a
+ *  step past the candidate's end, and the group stops once such a step reaches the score lane.
+ *
+ *  Under a radius the score lane tracks a running score, and every
+ *  @c sz_levenshtein_group_test_steps_simt_k steps tests whether it less the symbols left can
+ *  still come within @p radius, a rune's bounded by the bytes lane zero has not decoded plus the
+ *  runes it decoded ahead of the score lane. Without one the distance is the candidate's symbols
+ *  plus the verticals' deltas over the query's bits, every step integer and every sum exact.
+ *
+ *  A lane past the query's last word steps it rather than branching around it, as the recurrence
+ *  only carries upward, so with two words to a lane the score lane may read one word past its
+ *  class row, which the span then holds.
+ *
+ *  @param[in] words_per_lane_ For a lone thread, exactly the query's words, up to 15; for a whole
+ *      simdgroup, 1 or 2, at least the query's words over 32.
+ *  @param[in] lanes_ 1 for a lone thread, or 32 for a simdgroup, every lane of which calls together
+ *      with the same candidate.
+ *  @param[in] length The candidate's bytes.
+ *  @param[in] radius Edits past which the score may stop early; @c LONG_MAX tracks nothing.
+ *  @param[in] lane This lane's index within its group.
+ *  @return The same on every lane of the group.
+ */
+template <uint words_per_lane_, uint lanes_, bool runes_>
+inline long sz_levenshtein_group_score_metal_(thread sz_levenshtein_query_metal_t const &query,
+                                              device uchar const *text, ulong length, long radius, uint lane) {
+    static_assert(lanes_ == 1 || lanes_ == sz_levenshtein_gpu_warp_lanes_metal_k, "a thread or a whole simdgroup");
+    bool const grouped = lanes_ != 1;
+    ulong const words = sz_size_divide_round_up_metal_<ulong>(query.length, 64);
+    ulong const first_word = (ulong)lane * words_per_lane_;
+    ulong const score_lane = (words - 1) / words_per_lane_;
+    bool const tracking = radius != numeric_limits<long>::max();
+    // A lone thread's word count is exact, so its score word is a literal too.
+    ulong const score_word = grouped ? words - 1 - first_word : words_per_lane_ - 1;
+    ulong const last_symbol_bit = 1ul << ((query.length - 1) & 63);
+    device ulong const *const lane_masks = query.masks + first_word;
+
+    ulong positive[words_per_lane_], negative[words_per_lane_];
+#pragma unroll
+    for (uint word = 0; word != words_per_lane_; ++word) positive[word] = ~0ul, negative[word] = 0;
+
+    // What a lane hands the lane above: the horizontal positive in bit zero, the negative in bit
+    // one, and over runes the class of the rune being stepped. Only lane zero's cursor and rune
+    // count are read, it being the decoding lane.
+    uint carry = 0, held = 0;
+    ulong cursor = 0, runes = 0, score = query.length;
+    // A 64-bit value moves between lanes as two 32-bit halves.
+    uint2 halves;
+    ulong const steps = runes_ ? ~0ul : length + score_lane;
+    for (ulong step = 0; step != steps; ++step) {
+        uint decoded = 0, received = 0, inherited = 0;
+        if (runes_ && lane == 0 && cursor < length) {
+            uint const rune = sz_levenshtein_next_rune_metal_(text, length, cursor);
+            decoded = (uint)sz_levenshtein_rune_class_metal_(query, rune) + 1, ++runes;
+        }
+        if (grouped) received = simd_shuffle_up(carry, ushort(1));
+        if (grouped && runes_) inherited = simd_shuffle_up(held, ushort(1));
+        held = lane == 0 ? decoded : inherited;
+
+        bool stop = runes_ && step >= score_lane && held == 0;
+        // Every eight steps, as `sz_levenshtein_group_test_steps_simt_k` spaces the tests.
+        bool const testing = tracking && step % 8 == 0;
+        if (testing) {
+            // Over runes, lane zero's bytes left bound the symbols left, so it broadcasts them.
+            ulong const stepped = step > score_lane ? step - score_lane : 0;
+            halves = as_type<uint2>(runes_ ? length - cursor : length - stepped);
+            if (grouped && runes_) halves = simd_shuffle(halves, ushort(0));
+            ulong const left = as_type<ulong>(halves) + (runes_ ? score_lane + 1 : 0);
+            stop = stop || (long)score - (long)left > radius;
+        }
+        if (grouped && (runes_ || testing)) stop = simd_shuffle((uint)stop, ushort(score_lane)) != 0;
+        if (stop) break;
+
+        long const position = (long)step - (long)lane;
+        bool const idle = runes_ ? held == 0 : position < 0 || position >= (long)length;
+        if (lane > score_lane || idle) continue;
+        ulong const class_id = runes_ ? (ulong)held - 1 : (ulong)query.byte_to_class[text[position]];
+        device ulong const *const masks = lane_masks + class_id * query.stride;
+        // The row above the query's first word is one edit higher than the cell left of it, which
+        // is lane zero's carry at every symbol rather than anything a shuffle brings.
+        ulong positive_carry = lane == 0 ? 1 : (ulong)(received & 1u);
+        ulong negative_carry = lane == 0 ? 0 : (ulong)((received >> 1) & 1u);
+        if (tracking)
+            sz_levenshtein_group_step_metal_<words_per_lane_, true>(
+                positive, negative, masks, score_word, last_symbol_bit, positive_carry, negative_carry, score);
+        else
+            sz_levenshtein_group_step_metal_<words_per_lane_, false>(
+                positive, negative, masks, score_word, last_symbol_bit, positive_carry, negative_carry, score);
+        carry = (uint)positive_carry | ((uint)negative_carry << 1);
+    }
+
+    if (tracking) {
+        halves = as_type<uint2>(score);
+        if (grouped) halves = simd_shuffle(halves, ushort(score_lane));
+        return (long)as_type<ulong>(halves);
+    }
+    ulong const last_word_live = last_symbol_bit | (last_symbol_bit - 1);
+    int deltas = 0;
+#pragma unroll
+    for (uint word = 0; word != words_per_lane_; ++word) {
+        ulong const index = first_word + word;
+        ulong const live = index + 1 < words ? ~0ul : index + 1 == words ? last_word_live : 0;
+        deltas += (int)popcount(positive[word] & live) - (int)popcount(negative[word] & live);
+    }
+    halves = as_type<uint2>(runes_ ? runes : length);
+    if (grouped) deltas = simd_sum(deltas), halves = simd_shuffle(halves, ushort(0));
+    return (long)as_type<ulong>(halves) + deltas;
 }
 
 /** One candidate per thread against one query per grid row, the query's @c words_ verticals in
@@ -242,22 +514,9 @@ kernel void sz_levenshtein_warped_metal_kernel_(
         // is lane zero's carry at every symbol rather than anything a shuffle brings.
         ulong positive_carry = lane == 0 ? 1 : (ulong)(received & 1u);
         ulong negative_carry = lane == 0 ? 0 : (ulong)((received >> 1) & 1u);
-#pragma unroll
-        for (uint word = 0; word != words_per_lane_; ++word) {
-            ulong const equality = masks[word];
-            ulong const vertical_carry = equality | negative[word];
-            ulong const matched = equality | negative_carry;
-            ulong const diagonal = (((matched & positive[word]) + positive[word]) ^ positive[word]) | matched;
-            ulong horizontal_positive = negative[word] | ~(diagonal | positive[word]);
-            ulong horizontal_negative = positive[word] & diagonal;
-            ulong const next_positive_carry = horizontal_positive >> 63;
-            ulong const next_negative_carry = horizontal_negative >> 63;
-            horizontal_positive = (horizontal_positive << 1) | positive_carry;
-            horizontal_negative = (horizontal_negative << 1) | negative_carry;
-            positive_carry = next_positive_carry, negative_carry = next_negative_carry;
-            positive[word] = horizontal_negative | ~(vertical_carry | horizontal_positive);
-            negative[word] = horizontal_positive & vertical_carry;
-        }
+        ulong untracked = 0;
+        sz_levenshtein_group_step_metal_<words_per_lane_, false>(positive, negative, masks, words_per_lane_, 0,
+                                                                 positive_carry, negative_carry, untracked);
         carry = (uint)positive_carry | ((uint)negative_carry << 1);
     }
 

@@ -83,6 +83,19 @@ inline uint sz_overlap_montgomery_metal_(uint a, uint b) {
     return (uint)(sum >= sz_overlap_modulus_metal_k ? sum - sz_overlap_modulus_metal_k : sum);
 }
 
+/** One byte's step of a rolling window hash, <tt>H' = H * 256 + incoming - outgoing * 256^w</tt>, with
+ *  @p lifted_power being 256^w in Montgomery form, as @c sz_overlap_roll_step_simt_ steps: the same
+ *  residue, as both are exact modulo the same prime. */
+inline uint sz_overlap_roll_step_metal_(uint hash, uint incoming, uint outgoing, uint lifted_power) {
+    // Under p + 256, which still fits 32 bits.
+    uint const shifted = sz_overlap_montgomery_metal_(hash, sz_overlap_byte_shift_metal_k) + incoming;
+    uint const leaving = sz_overlap_montgomery_metal_(outgoing, lifted_power);
+    // Wrapping is exact here: the true difference is under p + 256, below 2³².
+    uint residue = shifted - leaving + (shifted < leaving ? sz_overlap_modulus_metal_k : 0u);
+    if (residue >= sz_overlap_modulus_metal_k) residue -= sz_overlap_modulus_metal_k;
+    return residue;
+}
+
 /** How many of a node's sixteen ascending entries sit below the flipped @p key, up to fifteen, by
  *  halving: four dependent loads where a scan takes sixteen, as @c sz_overlap_rank_simt_ does. */
 inline uint sz_overlap_rank_metal_(device uint const *node, int key) {
@@ -252,13 +265,8 @@ inline void sz_overlap_sweep_metal_(device uchar *engine, device uchar *scratch,
                 uint const width = window_widths[index];
                 if (!width) continue;
                 uint const outgoing = ending - origin > width ? text[position - width] : 0u;
-                // Under p + 256, which still fits 32 bits.
-                uint const shifted = sz_overlap_montgomery_metal_(hashes[index], sz_overlap_byte_shift_metal_k) +
-                                     incoming;
-                uint const leaving = sz_overlap_montgomery_metal_(outgoing, lifted_powers[index]);
-                // Wrapping is exact here: the true difference is under p + 256, below 2³².
-                uint residue = shifted - leaving + (shifted < leaving ? sz_overlap_modulus_metal_k : 0u);
-                if (residue >= sz_overlap_modulus_metal_k) residue -= sz_overlap_modulus_metal_k;
+                uint const residue = sz_overlap_roll_step_metal_(hashes[index], incoming, outgoing,
+                                                                 lifted_powers[index]);
                 hashes[index] = residue;
                 if (ending <= segment_start || width > ending) continue;
                 matches[index] += sz_overlap_probe_metal_(tree, staged_nodes, staged_from, levels, level_bases,
@@ -269,6 +277,327 @@ inline void sz_overlap_sweep_metal_(device uchar *engine, device uchar *scratch,
             if (matches[index])
                 atomic_fetch_add_explicit(&counts[first_width + index], matches[index], memory_order_relaxed);
     }
+}
+
+/*  A walk scoring one query against scattered candidates prepares that query itself, a simdgroup
+ *  laying its tree into a span the caller owns, and counts each candidate's matches a group of
+ *  lanes at a time, through the same roll and probe, as the CUDA walk's prepared queries do. */
+
+/** Endings a lane rolls between two checks of whether a candidate can still come within its limit,
+ *  as @c sz_overlap_gpu_endings_per_check_k. */
+constant ulong sz_overlap_gpu_endings_per_check_metal_k = 32;
+
+/** Windows a text of @p length bytes holds, summed over @p count @p widths, as
+ *  @c sz_overlap_windows counts them: a width of zero or past the text holds none. */
+inline ulong sz_overlap_windows_metal_(ulong length, device uint const *widths, ulong count) {
+    ulong windows = 0;
+    for (ulong index = 0; index != count; ++index)
+        if (widths[index] && widths[index] <= length) windows += length - widths[index] + 1;
+    return windows;
+}
+
+/** One query prepared where a walk scores it, inside a span its caller owns, as
+ *  @c sz_overlap_query_t lays it out: the tree over its window hashes at every width, and what a
+ *  candidate's share needs beside it. Trivially copyable, so a walk may broadcast it. */
+struct sz_overlap_query_metal_t {
+
+    /** The tree's entries, leaves first, keys sign-flipped, at the head of the span. */
+    device uint const *nodes;
+
+    /** The @b [widths_count] window widths, in bytes, read where the caller keeps them. */
+    device uint const *widths;
+
+    /** The @b [widths_count] powers of 256 at each width, mod p, at the tail of the span. */
+    device uint const *powers;
+
+    /** Entries in @c widths and @c powers. */
+    ulong widths_count;
+
+    /** The query's windows summed over every width, repeats included. */
+    ulong windows;
+
+    /** The query's bytes, so a width past them probes nothing, as serial's pairs skip it. */
+    ulong length;
+
+    /** The distinct windows the tree holds, from which its levels follow, as an engine's
+     *  @c keys_counts entry. */
+    ulong keys_count;
+};
+
+/**
+ *  @brief Prepares one query into a simdgroup's @p span, every lane of the simdgroup taking part,
+ *      as @c sz_overlap_query_prepare_simt_ prepares it.
+ *
+ *  Every width's window hashes, each lane rolling its own run of windows from the same residues the
+ *  serial tier computes, a bitonic sort a lane per pair of every step, the repeats dropped by a
+ *  ballot per 32 keys, and the tree laid out over the leaves, a lane per separator. The simdgroup
+ *  is synchronized on entry, as the span may still serve the previous query, and on return.
+ *
+ *  @param[in] text The query, read through plain loads.
+ *  @param[in] widths The @b [widths_count] window widths, kept where every walk reads them.
+ *  @param[out] span Eight-byte aligned, @c sz_overlap_query_span_bytes long: the tree's entries,
+ *      then a power per width.
+ *  @param[out] query Points into @p span and at @p widths, complete in every lane.
+ *  @param[in] lane The calling lane, below 32.
+ */
+inline void sz_overlap_query_prepare_metal_(device uchar const *text, ulong length, device uint const *widths,
+                                            ulong widths_count, device uchar *span,
+                                            thread sz_overlap_query_metal_t &query, uint lane) {
+    uint const lanes = 32, per_node = sz_overlap_keys_per_node_metal_k, branches = sz_overlap_branches_per_node_metal_k;
+    uint const padding_key = 0xFFFFFFFFu, padding = padding_key ^ sz_overlap_sign_flip_metal_k;
+    sz_group_metal_t const group = {lanes, lane};
+    ulong const windows = sz_overlap_windows_metal_(length, widths, widths_count);
+    // The sort pads to a power of two of at least 64 slots, and the powers follow the larger of
+    // that and every level's nodes, as @c sz_overlap_btree_entries sizes the arena.
+    ulong capacity = 64, nodes = 0;
+    while (capacity < windows) capacity *= 2;
+    for (ulong level_nodes = max(sz_size_divide_round_up_metal_<ulong>(windows, per_node), 1ul);;
+         level_nodes = sz_size_divide_round_up_metal_<ulong>(level_nodes, branches)) {
+        nodes += level_nodes;
+        if (level_nodes == 1) break;
+    }
+    device uint *const keys = (device uint *)span;
+    device uint *const powers = keys + max(capacity, nodes * per_node);
+    group.sync();
+    // 256 to each width by squaring in Montgomery form, from one's form, R mod p.
+    for (ulong index = lane; index < widths_count; index += lanes) {
+        uint power = sz_overlap_montgomery_metal_(1, sz_overlap_montgomery_square_metal_k);
+        uint base = sz_overlap_byte_shift_metal_k;
+        for (uint exponent = widths[index]; exponent; exponent >>= 1) {
+            if (exponent & 1) power = sz_overlap_montgomery_metal_(power, base);
+            base = sz_overlap_montgomery_metal_(base, base);
+        }
+        powers[index] = sz_overlap_montgomery_metal_(power, 1);
+    }
+    group.sync();
+
+    // Each lane rolls a run of one width's windows, priming its hash on the run's first window.
+    ulong written = 0;
+    for (ulong index = 0; index != widths_count; ++index) {
+        ulong const width = widths[index];
+        if (!width || width > length) continue;
+        uint const lifted_power = sz_overlap_montgomery_metal_(powers[index], sz_overlap_montgomery_square_metal_k);
+        ulong const width_windows = length - width + 1;
+        ulong const run = sz_size_divide_round_up_metal_<ulong>(width_windows, lanes);
+        ulong const first = min((ulong)lane * run, width_windows), last = min(first + run, width_windows);
+        // A lane past the last window rolls nothing.
+        ulong const endings = first != last ? last - first + width - 1 : 0;
+        uint hash = 0;
+        for (ulong ending = 1; ending <= endings; ++ending) {
+            uint const outgoing = ending > width ? text[first + ending - width - 1] : 0u;
+            hash = sz_overlap_roll_step_metal_(hash, text[first + ending - 1], outgoing, lifted_power);
+            if (ending >= width) keys[written + first + ending - width] = hash;
+        }
+        written += width_windows;
+    }
+    for (ulong entry = windows + lane; entry < capacity; entry += lanes) keys[entry] = padding_key;
+    group.sync();
+
+    // The serial sort's network, each step's pairs spread across the lanes.
+    for (ulong phase = 2; phase <= capacity; phase *= 2) {
+        for (ulong entry = lane; entry < capacity / 2; entry += lanes) {
+            ulong const offset = entry & (phase / 2 - 1), start = (entry - offset) * 2;
+            uint const lower = keys[start + offset], upper = keys[start + phase - 1 - offset];
+            keys[start + offset] = min(lower, upper), keys[start + phase - 1 - offset] = max(lower, upper);
+        }
+        group.sync();
+        for (ulong distance = phase / 4; distance != 0; distance /= 2) {
+            for (ulong entry = lane; entry < capacity / 2; entry += lanes) {
+                ulong const offset = entry & (distance - 1), start = (entry - offset) * 2;
+                uint const lower = keys[start + offset], upper = keys[start + distance + offset];
+                keys[start + offset] = min(lower, upper), keys[start + distance + offset] = max(lower, upper);
+            }
+            group.sync();
+        }
+    }
+
+    // A key survives unless it repeats the one before, which lane zero takes from the last pass.
+    ulong distinct = 0;
+    uint carried = 0;
+    for (ulong base = 0; base < windows; base += lanes) {
+        ulong const position = base + lane;
+        uint const key = position < windows ? keys[position] : 0u;
+        uint const below = group.shuffle_up(key, 1);
+        bool const kept = position < windows && (position == 0 || key != (lane ? below : carried));
+        uint const survivors = group.ballot(kept);
+        group.sync();
+        if (kept) keys[distinct + popcount(survivors & ((1u << lane) - 1u))] = key;
+        distinct += popcount(survivors);
+        carried = group.shuffle(key, lanes - 1);
+    }
+    group.sync();
+
+    // The leaves flip and pad in place, then each separator reads the first key of the child to its
+    // right, as @c sz_overlap_btree_prepare lays them.
+    ulong const leaves = max(sz_size_divide_round_up_metal_<ulong>(distinct, per_node), 1ul);
+    for (ulong entry = lane; entry < leaves * per_node; entry += lanes)
+        keys[entry] = entry < distinct ? keys[entry] ^ sz_overlap_sign_flip_metal_k : padding;
+    group.sync();
+    uint level_bases[sz_overlap_btree_levels_max_metal_k];
+    uint const levels = sz_overlap_levels_metal_((uint)distinct, level_bases);
+    ulong level_nodes = leaves, leaves_per_child = 1;
+    for (uint below = levels - 1; below != 0; --below) {
+        ulong const base = level_bases[below - 1];
+        level_nodes = sz_size_divide_round_up_metal_<ulong>(level_nodes, branches);
+        for (ulong entry = lane; entry < level_nodes * per_node; entry += lanes) {
+            ulong const node = entry / per_node, separator = entry % per_node;
+            ulong const first_leaf = (node * branches + separator + 1) * leaves_per_child;
+            uint const first_key = first_leaf < leaves ? keys[first_leaf * per_node] : padding;
+            keys[base * per_node + entry] = first_key - 1;
+        }
+        leaves_per_child *= branches;
+    }
+    group.sync();
+    query.nodes = keys;
+    query.widths = widths;
+    query.powers = powers;
+    query.widths_count = widths_count;
+    query.windows = windows;
+    query.length = length;
+    query.keys_count = distinct;
+}
+
+/** Whether @p predicate holds on any lane of this lane's aligned group of @p lanes, read as
+ *  nonzero, which other groups of the simdgroup may have left: the votes meet by halves, never past
+ *  the group, as @c sz_group_any_cuda_ votes. */
+inline bool sz_overlap_group_any_metal_(int predicate, uint lanes) {
+    if (lanes == 32) return simd_any(predicate != 0);
+    uint votes = predicate != 0 ? 1u : 0u;
+    for (uint distance = 1; distance < lanes; distance *= 2) votes |= simd_shuffle_xor(votes, ushort(distance));
+    return votes != 0;
+}
+
+/**
+ *  @brief Rolls each width's window hash through the endings past @p from and up to @p until of
+ *      @p walk, on one lane, and adds every window the tree holds to that width's @p matches, as
+ *      @c sz_overlap_roll_simt_ rolls them.
+ *
+ *  Each width rolls its own hash a byte at a time, the byte leaving the window read again from the
+ *  text rather than kept, so the hashes stay in registers. The first @p warm_bytes endings only
+ *  prime the hashes, and a window not yet full is never probed. A caller resumes a walk by passing
+ *  the @p hashes this one left. The tree is read through plain loads, never staged.
+ *
+ *  @param[in] lifted_powers One per width, 256 to the width lifted into Montgomery form.
+ *  @param[in,out] hashes One entry per width, up to @c sz_overlap_gpu_widths_per_walk_metal_k.
+ *  @param[in,out] matches One entry per width, up to @c sz_overlap_gpu_widths_per_walk_metal_k.
+ */
+inline void sz_overlap_roll_metal_(device uchar const *walk, ulong from, ulong until, ulong warm_bytes,
+                                   thread uint const *widths, thread uint const *lifted_powers, ulong widths_count,
+                                   device uint const *nodes, uint levels, thread uint const *level_bases,
+                                   thread uint *hashes, thread uint *matches) {
+    for (ulong ending = from + 1; ending <= until; ++ending) {
+        uint const incoming = walk[ending - 1];
+#pragma unroll
+        for (uint index = 0; index != sz_overlap_gpu_widths_per_walk_metal_k; ++index) {
+            if (index >= widths_count) break;
+            ulong const width = widths[index];
+            if (!width) continue;
+            uint const outgoing = ending > width ? walk[ending - width - 1] : 0u;
+            hashes[index] = sz_overlap_roll_step_metal_(hashes[index], incoming, outgoing, lifted_powers[index]);
+            if (ending <= warm_bytes || width > ending) continue;
+            matches[index] += sz_overlap_probe_metal_(nodes, nullptr, ~0u, levels, level_bases, hashes[index]);
+        }
+    }
+}
+
+/**
+ *  @brief Counts the windows of one candidate, at every width, that a prepared query holds, every
+ *      lane of an aligned group of @p lanes taking part, and gives up once even every window left
+ *      matching would leave more than @p misses_limit of the longer side's windows unmatched, as
+ *      @c sz_overlap_candidate_matches_simt_ counts them.
+ *
+ *  Each lane rolls an even run of the candidate's bytes, primed from the widest window's bytes
+ *  before it, and each width rolls its own hash a byte at a time, the byte leaving the window read
+ *  again from the text. Lanes compare their totals every
+ *  @c sz_overlap_gpu_endings_per_check_metal_k endings, and a candidate with too few windows to
+ *  come within @p misses_limit is answered before a byte is read. Every residue and every count is
+ *  an integer, so a count within the limit is the sum of serial's counts over the widths. Unlike
+ *  the CUDA twin, a width past the query's bytes probes nothing, as serial's pairs skip it.
+ *
+ *  @param[in] query Prepared by @ref sz_overlap_query_prepare_metal_, its span read through plain
+ *      loads, so the same kernel may have written it.
+ *  @param[in] misses_limit Misses past which counting stops; @c ULONG_MAX bounds nothing.
+ *  @param[in] lane The calling lane within its group, below @p lanes.
+ *  @param[in] lanes The group's lanes, one of 1, 4, 8, 16 and 32, aligned within the simdgroup.
+ *  @return The same count in every lane of the group: exact whenever it leaves at most
+ *      @p misses_limit misses, and otherwise a count that leaves more.
+ */
+inline ulong sz_overlap_candidate_matches_metal_(thread sz_overlap_query_metal_t const &query, device uchar const *text,
+                                                 ulong length, ulong misses_limit, uint lane, uint lanes) {
+    sz_group_metal_t const group = {lanes, lane};
+    uint const per_walk = sz_overlap_gpu_widths_per_walk_metal_k;
+    device uint const *const widths = query.widths;
+    ulong const widths_count = query.widths_count;
+    uint level_bases[sz_overlap_btree_levels_max_metal_k];
+    uint const levels = sz_overlap_levels_metal_((uint)query.keys_count, level_bases);
+    ulong const candidate_windows = sz_overlap_windows_metal_(length, widths, widths_count);
+    ulong const longer = max(candidate_windows, query.windows);
+    ulong const needed = longer > misses_limit ? longer - misses_limit : 0;
+    ulong const run = sz_size_divide_round_up_metal_<ulong>(length, (ulong)lanes);
+    ulong const run_begin = min((ulong)lane * run, length);
+    ulong const run_end = min(run_begin + run, length);
+    ulong pending = sz_overlap_windows_metal_(run_end, widths, widths_count) -
+                    sz_overlap_windows_metal_(run_begin, widths, widths_count);
+    ulong matched = 0;
+
+    // A candidate too short to come within the limit walks no group of widths.
+    ulong first_width = candidate_windows < needed ? widths_count : 0;
+    for (; sz_overlap_group_any_metal_(first_width < widths_count, lanes); first_width += per_walk) {
+        device uint const *const group_widths = widths + first_width;
+        ulong const group_count = min(widths_count - first_width, (ulong)per_walk);
+        // Widths and their powers stay in registers for the whole walk; each power is lifted once
+        // into Montgomery form, so its product with a byte comes back plain. A width past the query
+        // holds none of its windows, but one tree holds every width's, and a leading zero byte
+        // leaves a hash unchanged, so serial probes none of them and neither does this.
+        uint window_widths[sz_overlap_gpu_widths_per_walk_metal_k],
+            lifted_powers[sz_overlap_gpu_widths_per_walk_metal_k];
+        uint hashes[sz_overlap_gpu_widths_per_walk_metal_k], matches[sz_overlap_gpu_widths_per_walk_metal_k];
+        ulong warm_up = 0;
+#pragma unroll
+        for (uint index = 0; index != per_walk; ++index) {
+            bool const live = index < group_count && group_widths[index] <= query.length;
+            window_widths[index] = live ? group_widths[index] : 0u;
+            lifted_powers[index] = live ? sz_overlap_montgomery_metal_(query.powers[first_width + index],
+                                                                       sz_overlap_montgomery_square_metal_k)
+                                        : 0u;
+            hashes[index] = 0, matches[index] = 0;
+            warm_up = max(warm_up, (ulong)window_widths[index]);
+        }
+        warm_up = warm_up ? warm_up - 1 : 0;
+        ulong const walk_begin = run_begin > warm_up ? run_begin - warm_up : 0;
+        ulong const walk_bytes = run_end != run_begin ? run_end - walk_begin : 0;
+        ulong const warm_bytes = run_begin - walk_begin;
+        device uchar const *const walk = text + walk_begin;
+
+        // As many passes in every lane, so the checks between them see the whole group.
+        ulong const passes = sz_size_divide_round_up_metal_<ulong>(run + warm_up,
+                                                                   sz_overlap_gpu_endings_per_check_metal_k);
+        ulong reached = 0, pass = 0, group_matched = 0;
+        for (; sz_overlap_group_any_metal_(pass != passes, lanes); ++pass) {
+            ulong const until = min(reached + sz_overlap_gpu_endings_per_check_metal_k, walk_bytes);
+            sz_overlap_roll_metal_(walk, reached, until, warm_bytes, window_widths, lifted_powers, group_count,
+                                   query.nodes, levels, level_bases, hashes, matches);
+            if (reached < until) {
+                // Only the windows ending past the run's start were probed, the rest having primed.
+                ulong const probed_from = max(walk_begin + reached, run_begin);
+                ulong const probed_until = max(walk_begin + until, run_begin);
+                pending -= sz_overlap_windows_metal_(probed_until, group_widths, group_count) -
+                           sz_overlap_windows_metal_(probed_from, group_widths, group_count);
+                reached = until;
+            }
+            if (!sz_overlap_group_any_metal_(needed != 0, lanes)) continue;
+            group_matched = 0;
+#pragma unroll
+            for (uint index = 0; index != per_walk; ++index) group_matched += matches[index];
+            if (sz_overlap_group_any_metal_(group.sum(matched + group_matched + pending) < needed, lanes)) break;
+        }
+        group_matched = 0;
+#pragma unroll
+        for (uint index = 0; index != per_walk; ++index) group_matched += matches[index];
+        matched += group_matched;
+        if (sz_overlap_group_any_metal_(pass != passes, lanes)) break;
+    }
+    return group.sum(matched);
 }
 
 /** Every candidate's first segment, and the total after the last, as one threadgroup's scan. */
