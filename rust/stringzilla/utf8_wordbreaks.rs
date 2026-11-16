@@ -10,9 +10,12 @@ use super::*;
 pub struct Wordbreaks;
 impl SegmenterKernel for Wordbreaks {
     unsafe fn segment(t: *const c_void, n: usize, l: *mut usize, c: usize) -> usize {
-        let mut count = 0;
-        sz_utf8_wordbreaks_best(t, n, l, c, &mut count, Capabilities::CPUS.bits(), core::ptr::null_mut()).infallible();
-        count
+        unsafe {
+            let mut count = 0;
+            sz_utf8_wordbreaks_best(t, n, l, c, &mut count, Capabilities::CPUS.bits(), core::ptr::null_mut())
+                .infallible();
+            count
+        }
     }
 }
 

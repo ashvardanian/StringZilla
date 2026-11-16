@@ -181,8 +181,7 @@ mod tests {
         let candidates = StringsView::from_slices(&["kitten", "mitten", "mittens", "sitting"]);
         let distances_for = |engine: &mut LevenshteinEngine, bound: Option<usize>| {
             let mut distances = [0usize; 4];
-            cpu.scope(|scope| engine.distances(scope, candidates, bound, &mut distances, 4))
-                .unwrap();
+            cpu.scope(|scope| engine.distances(scope, candidates, bound, &mut distances, 4)).unwrap();
             distances
         };
         let exact = [0, 1, 2, 3];

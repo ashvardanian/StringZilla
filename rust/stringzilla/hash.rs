@@ -70,13 +70,7 @@ const _: () = assert!(core::mem::align_of::<Sha256>() == 8);
 impl Hasher {
     /// Creates a new hasher initialized with `seed`.
     pub fn new(seed: u64) -> Self {
-        let mut state = Hasher {
-            aes: [0; 8],
-            sum: [0; 8],
-            ins: [0; 8],
-            key: [0; 2],
-            ins_length: 0,
-        };
+        let mut state = Hasher { aes: [0; 8], sum: [0; 8], ins: [0; 8], key: [0; 2], ins_length: 0 };
         unsafe {
             sz_hash_state_init_best(
                 &mut state as *mut _ as *mut c_void,
@@ -677,16 +671,10 @@ mod tests {
         // Hashing should work the same for any seed
         for seed in [0u64, 42, 123456789].iter() {
             // Single-pass hashing
-            assert_eq!(
-                sz::Hasher::new(*seed).update("Hello".as_bytes()).digest(),
-                sz::hash_with_seed("Hello", *seed)
-            );
+            assert_eq!(sz::Hasher::new(*seed).update("Hello".as_bytes()).digest(), sz::hash_with_seed("Hello", *seed));
             // Dual pass for short strings
             assert_eq!(
-                sz::Hasher::new(*seed)
-                    .update("Hello".as_bytes())
-                    .update("World".as_bytes())
-                    .digest(),
+                sz::Hasher::new(*seed).update("Hello".as_bytes()).update("World".as_bytes()).digest(),
                 sz::hash_with_seed("HelloWorld", *seed)
             );
         }
@@ -708,9 +696,7 @@ mod tests {
     #[test]
     fn multiseed_hash() {
         // More than four seeds to exercise the 4-wide tail handling on the Ice Lake backend.
-        let seeds: Vec<u64> = (0..9u64)
-            .map(|i| i.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(7))
-            .collect();
+        let seeds: Vec<u64> = (0..9u64).map(|i| i.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(7)).collect();
         let texts: [&[u8]; 5] = [
             b"",
             b"token",
@@ -723,21 +709,11 @@ mod tests {
                 let mut out = vec![0u64; k];
                 sz::hash_multiseed_into(text, &seeds[..k], &mut out).expect("one slot per seed");
                 for i in 0..k {
-                    assert_eq!(
-                        out[i],
-                        sz::hash_with_seed(text, seeds[i]),
-                        "len={} k={} i={}",
-                        text.len(),
-                        k,
-                        i
-                    );
+                    assert_eq!(out[i], sz::hash_with_seed(text, seeds[i]), "len={} k={} i={}", text.len(), k, i);
                 }
             }
         }
-        assert_eq!(
-            sz::hash_multiseed_into("token", &seeds, &mut [0u64; 2]),
-            Err(sz::Status::UnexpectedDimensions)
-        );
+        assert_eq!(sz::hash_multiseed_into("token", &seeds, &mut [0u64; 2]), Err(sz::Status::UnexpectedDimensions));
     }
 
     #[test]
@@ -854,16 +830,10 @@ mod tests {
     fn sha256_multistate_size_checks() {
         let mut states = vec![sz::Sha256::new(); 3];
         let too_few: Vec<&[u8]> = vec![b"a".as_slice(), b"b".as_slice()];
-        assert_eq!(
-            sz::sha256_multistate_update(&mut states, &too_few),
-            Err(sz::Status::UnexpectedDimensions)
-        );
+        assert_eq!(sz::sha256_multistate_update(&mut states, &too_few), Err(sz::Status::UnexpectedDimensions));
 
         let mut too_few_digests = vec![[0u8; sz::SHA256_DIGEST_LENGTH]; 2];
-        assert_eq!(
-            sz::sha256_multistate_digest(&states, &mut too_few_digests),
-            Err(sz::Status::UnexpectedDimensions)
-        );
+        assert_eq!(sz::sha256_multistate_digest(&states, &mut too_few_digests), Err(sz::Status::UnexpectedDimensions));
     }
 
     #[test]

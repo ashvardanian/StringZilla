@@ -114,11 +114,7 @@ where
         )
     }
     .infallible();
-    if ptr.is_null() {
-        None
-    } else {
-        Some(match_offset(ptr as *const u8, source_ref.as_ptr()))
-    }
+    if ptr.is_null() { None } else { Some(match_offset(ptr as *const u8, source_ref.as_ptr())) }
 }
 
 #[cfg(test)]
@@ -199,20 +195,13 @@ mod tests {
 
         // Refused below the worst case although this input fits, as the kernel takes no capacity.
         let mut short = vec![0u8; CAFE_NFC.len() * 18 - 1];
-        assert_eq!(
-            sz::utf8_norm(CAFE_NFC, NormalForm::Nfc, &mut short),
-            Err(sz::Status::UnexpectedDimensions)
-        );
+        assert_eq!(sz::utf8_norm(CAFE_NFC, NormalForm::Nfc, &mut short), Err(sz::Status::UnexpectedDimensions));
     }
 
     #[test]
     fn utf8_find_denormalized() {
         // NFC string: precomposed é — no violation.
-        assert_eq!(
-            sz::utf8_find_denormalized(CAFE_NFC, NormalForm::Nfc),
-            None,
-            "NFC string has no NFC violation"
-        );
+        assert_eq!(sz::utf8_find_denormalized(CAFE_NFC, NormalForm::Nfc), None, "NFC string has no NFC violation");
 
         // NFD string: decomposed e + combining acute U+0301.
         // The combining mark violates NFC: it should be composed with the preceding base.
@@ -220,17 +209,10 @@ mod tests {
         assert!(violation.is_some(), "NFD string must report an NFC violation");
         // The violation may point to the base 'e' at byte 3 or to the combining mark at byte 4;
         // either is within the suffix that must change during composition.
-        assert!(
-            violation.unwrap() >= 3,
-            "violation offset must be ≥ 3 (at 'e' or the combining mark)"
-        );
+        assert!(violation.unwrap() >= 3, "violation offset must be ≥ 3 (at 'e' or the combining mark)");
 
         // NFC string has no NFD violation only if it contains no precomposed characters.
         // ASCII is valid NFD.
-        assert_eq!(
-            sz::utf8_find_denormalized("hello", NormalForm::Nfd),
-            None,
-            "pure ASCII has no NFD violation"
-        );
+        assert_eq!(sz::utf8_find_denormalized("hello", NormalForm::Nfd), None, "pure ASCII has no NFD violation");
     }
 }

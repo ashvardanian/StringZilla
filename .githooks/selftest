@@ -2494,11 +2494,6 @@ assert_rejects "two empty comment lines in a row" "leaves two empty comment line
 int probe(void);
 FIXTURE
 
-assert_accepts "ASCII arrow in Mojo parameter syntax" mojo/probe.mojo <<'FIXTURE'
-def erase[Scratch: AnyType, //](context: Context) -> Context:
-    return context
-FIXTURE
-
 assert_accepts "ASCII arrow after a dereference in a macro" include/$project_directory/probe.h <<'FIXTURE'
 #define probe_read_(header, width) \
     *width = header->column_count;
@@ -2574,11 +2569,11 @@ assert_accepts "filesystem include in a test harness" test/probe.cpp <<'FIXTURE'
 #include <filesystem>
 FIXTURE
 
-assert_rejects "vector in the library" "uses a standard container, std::pair or std::tuple" include/$project_directory/probe.hpp <<'FIXTURE'
+assert_rejects "vector in the library" "uses a standard container, an owning std::string, std::pair or std::tuple" include/$project_directory/probe.hpp <<'FIXTURE'
 #include <vector>
 FIXTURE
 
-assert_rejects "pair in a binding" "uses a standard container, std::pair or std::tuple" python/probe.cpp <<'FIXTURE'
+assert_rejects "pair in a binding" "uses a standard container, an owning std::string, std::pair or std::tuple" python/probe.cpp <<'FIXTURE'
 std::pair<int, int> probe_bounds(void);
 FIXTURE
 
@@ -2964,6 +2959,300 @@ FIXTURE
 
 # endregion Binding Doc Fixtures
 
+# region Shared Region Fixtures
+
+# Commits stdin behind the file header, then applies a sed edit and stages it, so a rule judges a commit
+# that touches some lines of an existing construct and leaves the rest.
+stage_committed_fixture() { # stage_committed_fixture <relative-path> <sed-expression> <<< content
+    stage_fixture_with_header "$1"
+    git -C "$fixture_directory" commit --quiet -m "Chore: Seed the fixture"
+    sed "$2" "$fixture_directory/$1" > "$fixture_directory/$1.edited" && mv "$fixture_directory/$1.edited" "$fixture_directory/$1"
+    git -C "$fixture_directory" add -- "$1"
+}
+
+stage_committed_fixture include/$project_directory/probe.hpp 's/probe_text =$/probe_text = "first half "/' <<'FIXTURE'
+static char const *probe_text =
+                                "second half";
+FIXTURE
+run_precommit
+expect_rejection "string split by an added line before an unchanged fragment" "splits a string literal without"
+
+stage_committed_fixture include/$project_directory/probe.hpp 's/bool bounded =/bool bounded_k =/' <<'FIXTURE'
+template <typename value_type_>
+constexpr bool bounded = sizeof(value_type_) < 8;
+FIXTURE
+run_precommit
+expect_rejection "variable template suffixed on the line after its unchanged header" "suffixes a variable template"
+
+stage_committed_fixture include/$project_directory/probe.hpp '/^template/s/value_type_/item_type_/; /constexpr bool/s/value_type_/item_type_/' <<'FIXTURE'
+template <typename value_type_>
+inline bool probe(value_type_ value) noexcept {
+    constexpr bool small_k = sizeof(value_type_) < 8;
+    return small_k && value;
+}
+FIXTURE
+run_precommit
+expect_acceptance "a suffixed local constant below an edited function template header"
+
+assert_rejects "owning string in the library" "an owning std::string" include/$project_directory/probe.hpp <<'FIXTURE'
+inline std::string probe_name() noexcept { return "probe"; }
+FIXTURE
+
+assert_accepts "a string handed to a vendor API on a marked line" include/$project_directory/probe.hpp <<'FIXTURE'
+inline void probe(std::string_view name) noexcept { vendor_open(std::string {name}); } // vendor-boundary
+FIXTURE
+
+assert_rejects "vector in a tool" "uses a standard container" tools/probe.cpp <<'FIXTURE'
+std::vector<int> probe_items;
+FIXTURE
+
+assert_accepts "a directive's comment inside a struct" include/$project_directory/probe.hpp <<'FIXTURE'
+/** Holds one probe. */
+struct probe_t {
+
+    /** The value probed. */
+    int value = 0;
+#if defined(PROBE_EXTRA)
+
+    /** The extra value. */
+    int extra = 0;
+#endif // PROBE_EXTRA
+};
+FIXTURE
+
+assert_accepts "a bare pin and a lint marker on member lines" include/$project_directory/probe.hpp <<'FIXTURE'
+/** Holds one probe. */
+struct probe_t {
+
+    /** The greeting, split by hand. */
+    char const *greeting = "first half " //
+                           "second half";
+
+    /** The flag a kernel reads. */
+    int flag = 0; // device-boundary
+};
+FIXTURE
+
+stage_fixture_verbatim .githooks/pre-commit < "$hooks_directory/pre-commit"
+run_precommit
+expect_acceptance "the hook's shared regions at their pinned sums"
+
+stage_fixture_verbatim .githooks/pre-commit < <(sed 's/^# Prints the reason and the first offending lines\./# Prints the reason and the offending lines./' "$hooks_directory/pre-commit")
+run_precommit
+expect_rejection "a shared region edited away from its pinned sum" "drifts from the sibling hooks' shared regions"
+
+# endregion Shared Region Fixtures
+
+# region Shared Build Fixtures
+
+assert_rejects "CMake string surgery" "derives a name or flag by editing a string" CMakeLists.txt <<'FIXTURE'
+string(REPLACE "a" "b" probe_name_ "${probe_source_}")
+FIXTURE
+
+# endregion Shared Build Fixtures
+
+# region Shared Harness Fixtures
+
+assert_rejects "harness qualifying the visible library namespace" "the library namespace is already visible" test/probe/probe.hpp <<FIXTURE
+namespace ${project_namespace}::test::probe {
+${project_directory}::probe::probe_stage_t stage;
+} // namespace ${project_namespace}::test::probe
+FIXTURE
+
+assert_accepts "harness naming the library type bare" test/probe/probe.hpp <<FIXTURE
+namespace ${project_namespace}::test::probe {
+probe_stage_t stage;
+} // namespace ${project_namespace}::test::probe
+FIXTURE
+
+assert_rejects "test body printing to stdout" "prints to stdout from a test body" test/probe/probe.hpp <<FIXTURE
+namespace ${project_namespace}::test::probe {
+inline void test_probe() { fmt::println("probe passed"); }
+} // namespace ${project_namespace}::test::probe
+FIXTURE
+
+assert_accepts "test body failing on stderr" test/probe/probe.hpp <<FIXTURE
+namespace ${project_namespace}::test::probe {
+inline void test_probe() { fmt::println(stderr, "probe failed"); }
+} // namespace ${project_namespace}::test::probe
+FIXTURE
+
+assert_accepts "a test file's own main printing its summary" test/probe/probe.hpp <<FIXTURE
+namespace ${project_namespace}::test::probe {
+inline void test_probe() {}
+} // namespace ${project_namespace}::test::probe
+
+int main() {
+    fmt::println("probe passed");
+    return 0;
+}
+FIXTURE
+
+# endregion Shared Harness Fixtures
+
+# region Shared Gate Fixtures
+
+assert_rejects "requires expression inline in an if constexpr" "writes a requires expression inside an if constexpr condition" include/$project_directory/probe.hpp <<'FIXTURE'
+template <typename value_type_>
+inline void probe(value_type_ &value) noexcept {
+    if constexpr (requires { value.reset(); }) value.reset();
+}
+FIXTURE
+
+assert_accepts "a named concept in an if constexpr" include/$project_directory/probe.hpp <<'FIXTURE'
+template <typename value_type_>
+concept resettable = requires(value_type_ &value) { value.reset(); };
+
+template <typename value_type_>
+inline void probe(value_type_ &value) noexcept {
+    if constexpr (resettable<value_type_>) value.reset();
+}
+FIXTURE
+
+assert_rejects "if constexpr inside an if constexpr" "nests an if constexpr inside another's branch" include/$project_directory/probe.hpp <<'FIXTURE'
+template <typename value_type_>
+inline int probe() noexcept {
+    if constexpr (sizeof(value_type_) == 4) {
+        if constexpr (alignof(value_type_) == 4) return 1;
+        return 2;
+    }
+    return 0;
+}
+FIXTURE
+
+assert_accepts "an else if constexpr chain" include/$project_directory/probe.hpp <<'FIXTURE'
+template <typename value_type_>
+inline int probe() noexcept {
+    if constexpr (sizeof(value_type_) == 4) return 1;
+    else if constexpr (sizeof(value_type_) == 8) return 2;
+    else return 0;
+}
+FIXTURE
+
+assert_rejects "control flow 4 deep without braces" "nests control flow 4 deep" include/$project_directory/probe.hpp <<'FIXTURE'
+inline int probe(int const *values, int count) noexcept {
+    int total = 0;
+    for (int first = 0; first != count; ++first)
+        for (int second = 0; second != count; ++second)
+            if (values[first] < values[second])
+                while (total < values[second]) ++total;
+    return total;
+}
+FIXTURE
+
+assert_rejects "control flow 4 deep in braces" "nests control flow 4 deep" include/$project_directory/probe.hpp <<'FIXTURE'
+inline int probe(int const *values, int count) noexcept {
+    int total = 0;
+    for (int first = 0; first != count; ++first) {
+        switch (values[first]) {
+        case 0: break;
+        default:
+            if (total < count) {
+                do { ++total; } while (total < values[first]);
+            }
+        }
+    }
+    return total;
+}
+FIXTURE
+
+assert_accepts "three levels around a lambda, an else if chain and both sides of an #if" include/$project_directory/probe.hpp <<'FIXTURE'
+inline int probe(int const *values, int count) noexcept {
+    int total = 0;
+    for (int first = 0; first != count; ++first) {
+        auto add = [&](int value) noexcept {
+            if (value > 0) total += value;
+        };
+        if (values[first] > 0) {
+#if defined(PROBE_WIDE)
+            for (int second = 0; second != count; ++second) add(values[second]);
+#else
+            for (int second = 0; second != first; ++second) add(values[second]);
+#endif
+        }
+        else if (values[first] < 0) {
+            if (total > 0) --total;
+        }
+        else {
+            if (total < 0) ++total;
+        }
+    }
+    return total;
+}
+FIXTURE
+
+assert_accepts "a while after a braceless loop closes it, and a braceless do keeps its while" include/$project_directory/probe.hpp <<'FIXTURE'
+inline int probe(int const *values, int count) noexcept {
+    int total = 0;
+    for (int first = 0; first != count; ++first) {
+        if (total == 0)
+            for (int second = 0; second != count; ++second) total += values[second];
+        while (total > count) {
+            if (total > 0) --total;
+        }
+        if (values[first] > 0)
+            for (int second = 0; second != first; ++second) total += values[second];
+        else if (total < 0)
+            do ++total; while (total < 0);
+    }
+    return total;
+}
+FIXTURE
+
+stage_committed_fixture include/$project_directory/probe.hpp 's/return total;/return total + 1;/' <<'FIXTURE'
+inline int probe(int const *values, int count) noexcept {
+    int total = 0;
+    for (int first = 0; first != count; ++first)
+        for (int second = 0; second != count; ++second)
+            if (values[first] < values[second])
+                while (total < values[second]) ++total;
+    return total;
+}
+FIXTURE
+run_precommit
+expect_acceptance "an edit beside control flow 4 deep that it leaves alone"
+
+assert_accepts "control flow 4 deep outside the gated directories" test/probe/probe.hpp <<FIXTURE
+namespace ${project_namespace}::test::probe {
+inline int probe(int const *values, int count) noexcept {
+    int total = 0;
+    for (int first = 0; first != count; ++first)
+        for (int second = 0; second != count; ++second)
+            if (values[first] < values[second])
+                while (total < values[second]) ++total;
+    return total;
+}
+} // namespace ${project_namespace}::test::probe
+FIXTURE
+
+assert_rejects "enable_if picking an overload" "picks an overload through enable_if or a tag type" include/$project_directory/probe.hpp <<'FIXTURE'
+template <typename value_type_, typename = std::enable_if_t<std::is_integral_v<value_type_>>>
+inline value_type_ probe(value_type_ value) noexcept { return value; }
+FIXTURE
+
+assert_rejects "tag type picking an overload" "picks an overload through enable_if or a tag type" include/$project_directory/probe.hpp <<'FIXTURE'
+struct sorted_tag_t {};
+inline int probe(int value, sorted_tag_t) noexcept { return value; }
+FIXTURE
+
+assert_rejects "true_type parameter picking an overload" "picks an overload through enable_if or a tag type" include/$project_directory/probe.hpp <<'FIXTURE'
+inline int probe(int value, std::true_type) noexcept { return value; }
+FIXTURE
+
+assert_accepts "a requires clause beside an unconstrained fallback, and an iterator category" include/$project_directory/probe.hpp <<'FIXTURE'
+template <typename value_type_>
+inline int probe(value_type_ value) noexcept requires std::is_integral_v<value_type_> {
+    return static_cast<int>(value);
+}
+template <typename value_type_>
+inline int probe(value_type_) noexcept {
+    return 0;
+}
+using probe_category_t = std::random_access_iterator_tag;
+FIXTURE
+
+# endregion Shared Gate Fixtures
+
 # region StringZilla Fixtures
 
 # A Haswell header, or a CUDA one defining kernels, opening no guard of its own gets its shape's, so only the guard
@@ -2983,11 +3272,11 @@ fixture_guards() { # fixture_guards <relative-path> <<< content
 }
 
 assert_rejects "iterator address laundered" "takes &* of an iterator" include/stringzilla/probe.hpp <<'FIXTURE'
-inline char const *probe(std::string const &text) { return &*text.begin(); }
+inline char const *probe(std::string_view text) { return &*text.begin(); }
 FIXTURE
 
 assert_accepts "iterator address through data" include/stringzilla/probe.hpp <<'FIXTURE'
-inline char const *probe(std::string const &text) { return text.data(); }
+inline char const *probe(std::string_view text) { return text.data(); }
 FIXTURE
 
 assert_rejects "pointer cast through an integer" "casts a pointer through an integer" include/stringzilla/probe.h <<'FIXTURE'

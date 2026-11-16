@@ -11,7 +11,7 @@ use core::mem::{ManuallyDrop, MaybeUninit};
 
 use super::*;
 
-extern "C" {
+unsafe extern "C" {
     fn sz_subdocuments_engine_init(
         engine: *mut SubdocumentsEngine,
         paths: *const sz_strings_view_t,
@@ -190,14 +190,7 @@ impl SubdocumentsEngine {
         strided_column_check(documents.len(), counts.len(), counts_stride)?;
         let output = counts.as_mut_ptr();
         unsafe {
-            sz_subdocuments_counts(
-                self,
-                &documents.view,
-                output,
-                counts_stride,
-                malformed_index,
-                stream.as_raw(),
-            )
+            sz_subdocuments_counts(self, &documents.view, output, counts_stride, malformed_index, stream.as_raw())
         }
         .check()
     }
@@ -226,15 +219,7 @@ impl SubdocumentsEngine {
         let output = optional_mut_ptr(matches);
         let offsets = matches_offsets.as_mut_ptr();
         unsafe {
-            sz_subdocuments_find(
-                self,
-                &documents.view,
-                output,
-                capacity,
-                offsets,
-                malformed_index,
-                stream.as_raw(),
-            )
+            sz_subdocuments_find(self, &documents.view, output, capacity, offsets, malformed_index, stream.as_raw())
         }
         .check()
     }

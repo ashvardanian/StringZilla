@@ -13,7 +13,6 @@ env:
   # Pinned so the wasm rows run a reproducible engine that speaks exnref exception handling.
   WASMTIME_VERSION: v50.0.1
 
-# Rust stays on nightly until 1.100 reaches stable, as `rust-version` rejects any older compiler.
 jobs:
   # Only the GPU features change the C library, so both test runs link one CMake build of it.
   test_rust:
@@ -28,7 +27,9 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v7
       - name: Install Rust Toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: "1.100"
       - name: Build C Library
         run: |
           cmake --preset release_shared
@@ -64,7 +65,9 @@ jobs:
         with:
           arch: ${{ matrix.arch }}
       - name: Install Rust Toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: "1.100"
       - name: Test Default Build
         run: cargo test --release
       - name: Build No-Std Library
@@ -85,7 +88,9 @@ jobs:
       - name: Install Dependencies
         run: apk add cmake samurai g++ gcc
       - name: Install Rust Toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: "1.100"
       - name: Test Default Build
         run: cargo test --release
       - name: Test No-Std Build
@@ -99,7 +104,9 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v7
       - name: Install Rust Toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: "1.100"
       - name: Test with Metal
         run: cargo test --release --features metal
 
@@ -137,8 +144,9 @@ jobs:
           "$HOME/.wasmtime/bin/wasmtime" --version
           echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
       - name: Install Rust Toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@v1
         with:
+          toolchain: "1.100"
           targets: wasm32-wasip1
       - name: Test under Wasmtime
         env:
@@ -162,7 +170,9 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v7
       - name: Install Rust Toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: "1.100"
       - name: Link Tests with CUDA
         run: cargo test --features cuda --no-run
 
@@ -177,6 +187,8 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v7
       - name: Install Rust Toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: "1.100"
       - name: Link Tests with ROCm
         run: cargo test --features rocm --no-run

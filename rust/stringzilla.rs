@@ -58,7 +58,7 @@ pub use utf8_wordbreaks::*;
 
 // Import the functions from the StringZillable C library. Every dispatch point takes the capability
 // mask to pick a kernel from and a stream, null on the CPU, and reports an `sz_status_t`.
-extern "C" {
+unsafe extern "C" {
 
     pub(crate) fn sz_version_major() -> c_int;
     pub(crate) fn sz_version_minor() -> c_int;
@@ -83,9 +83,9 @@ extern "C" {
     pub(crate) fn sz_capabilities_enabled_rocm(ordinal: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
     pub(crate) fn sz_count_devices_metal(count: *mut sz_size_t) -> sz_status_t;
     pub(crate) fn sz_capabilities_detected_metal(ordinal: sz_size_t, capabilities: *mut sz_capability_t)
-        -> sz_status_t;
+    -> sz_status_t;
     pub(crate) fn sz_capabilities_compiled_metal(ordinal: sz_size_t, capabilities: *mut sz_capability_t)
-        -> sz_status_t;
+    -> sz_status_t;
     pub(crate) fn sz_capabilities_enabled_metal(ordinal: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
     pub(crate) fn sz_stream_init_cuda(ordinal: sz_size_t, stream: *mut sz_stream_t) -> sz_status_t;
     pub(crate) fn sz_stream_free_cuda(stream: sz_stream_t) -> sz_status_t;
@@ -884,13 +884,12 @@ unsafe extern "C" fn strings_get<Element, Key>(
 ) where
     Key: Fn(&Element) -> &[u8],
 {
-    let (items, key) = &*(handle as *const (&[Element], Key));
-    for position in 0..count {
-        let bytes = key(&items[*indices.add(position)]);
-        views.add(position).write(sz_string_view_t {
-            start: bytes.as_ptr(),
-            length: bytes.len(),
-        });
+    unsafe {
+        let (items, key) = &*(handle as *const (&[Element], Key));
+        for position in 0..count {
+            let bytes = key(&items[*indices.add(position)]);
+            views.add(position).write(sz_string_view_t { start: bytes.as_ptr(), length: bytes.len() });
+        }
     }
 }
 

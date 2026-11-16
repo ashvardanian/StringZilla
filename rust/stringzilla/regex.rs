@@ -9,7 +9,7 @@ use core::mem::MaybeUninit;
 
 use super::*;
 
-extern "C" {
+unsafe extern "C" {
     fn sz_regex_engine_init(
         engine: *mut RegexEngine,
         patterns: *const sz_strings_view_t,
@@ -282,18 +282,8 @@ impl RegexEngine {
         let capacity = groups.len();
         let output = optional_mut_ptr(groups);
         let offsets = groups_offsets.as_mut_ptr();
-        unsafe {
-            sz_regex_extract(
-                self,
-                &haystacks.view,
-                pattern_index,
-                output,
-                capacity,
-                offsets,
-                stream.as_raw(),
-            )
-        }
-        .check()
+        unsafe { sz_regex_extract(self, &haystacks.view, pattern_index, output, capacity, offsets, stream.as_raw()) }
+            .check()
     }
 }
 

@@ -137,22 +137,15 @@ impl OverlapEngine {
         if scores_candidate_stride < widths_count {
             return Err(Status::UnexpectedDimensions);
         }
-        let candidates_span = candidates
-            .len()
-            .checked_mul(scores_candidate_stride)
-            .ok_or(Status::OverflowRisk)?;
+        let candidates_span = candidates.len().checked_mul(scores_candidate_stride).ok_or(Status::OverflowRisk)?;
         if scores_query_stride < candidates_span {
             return Err(Status::UnexpectedDimensions);
         }
         let span = match (self.count, candidates.len()) {
             (0, _) | (_, 0) => 0,
             (queries, candidates_count) => {
-                let planes = (queries - 1)
-                    .checked_mul(scores_query_stride)
-                    .ok_or(Status::OverflowRisk)?;
-                let rows = (candidates_count - 1)
-                    .checked_mul(scores_candidate_stride)
-                    .ok_or(Status::OverflowRisk)?;
+                let planes = (queries - 1).checked_mul(scores_query_stride).ok_or(Status::OverflowRisk)?;
+                let rows = (candidates_count - 1).checked_mul(scores_candidate_stride).ok_or(Status::OverflowRisk)?;
                 planes
                     .checked_add(rows)
                     .and_then(|offset| offset.checked_add(widths_count))
@@ -193,11 +186,7 @@ impl OverlapEngine {
                 for (share, &width) in scores[first..first + widths_count].iter_mut().zip(widths) {
                     let longer = windows(text.len(), width).max(windows(query_length as usize, width));
                     let matches = share.to_bits();
-                    *share = if longer == 0 {
-                        0.0
-                    } else {
-                        (matches as f64 / longer as f64) as f32
-                    };
+                    *share = if longer == 0 { 0.0 } else { (matches as f64 / longer as f64) as f32 };
                 }
             }
         }
@@ -225,8 +214,7 @@ mod tests {
         let candidates = StringsView::from_slices(&["abcdefgh", "abcdefgx", "abcdxxxx"]);
         let scores_for = |engine: &mut OverlapEngine, radius: Option<f32>| {
             let mut scores = [f32::NAN; 6];
-            cpu.scope(|scope| engine.scores(scope, candidates, radius, &mut scores, 6, 2))
-                .unwrap();
+            cpu.scope(|scope| engine.scores(scope, candidates, radius, &mut scores, 6, 2)).unwrap();
             scores
         };
         let exact = scores_for(&mut engine, None);
@@ -238,14 +226,8 @@ mod tests {
         let past_seven = scores_for(&mut engine, Some(7.0 / 11.0));
         assert_eq!(past_seven[..4], exact[..4]);
         assert_eq!(past_seven[4..], [0.0, 0.0]);
-        assert_eq!(
-            scores_for(&mut engine, Some(2.0 / 11.0)),
-            [1.0, 1.0, exact[2], exact[3], 0.0, 0.0]
-        );
-        assert_eq!(
-            scores_for(&mut engine, Some(1.0 / 11.0)),
-            [1.0, 1.0, 0.0, 0.0, 0.0, 0.0]
-        );
+        assert_eq!(scores_for(&mut engine, Some(2.0 / 11.0)), [1.0, 1.0, exact[2], exact[3], 0.0, 0.0]);
+        assert_eq!(scores_for(&mut engine, Some(1.0 / 11.0)), [1.0, 1.0, 0.0, 0.0, 0.0, 0.0]);
         assert_eq!(scores_for(&mut engine, Some(0.0)), [1.0, 1.0, 0.0, 0.0, 0.0, 0.0]);
     }
 }

@@ -58,15 +58,7 @@ where
     if source_slice.is_empty() {
         return Ok(());
     }
-    unsafe {
-        lookup_tape(
-            source_slice.as_ptr(),
-            target_slice.as_mut_ptr(),
-            source_slice.len(),
-            &table,
-        )
-    }
-    .check()
+    unsafe { lookup_tape(source_slice.as_ptr(), target_slice.as_mut_ptr(), source_slice.len(), &table) }.check()
 }
 
 /// Performs a lookup-table transformation, mapping contents of a buffer into the same or other
@@ -103,49 +95,35 @@ where
 /// Maps `length` bytes of `source` into `target` through `table`, as tapes of one string over the
 /// two buffers, whose matching sizes leave nothing to allocate; in place, they share the offsets.
 unsafe fn lookup_tape(source: *const u8, target: *mut u8, length: usize, table: &[u8; 256]) -> sz_status_t {
-    let mut narrow = [[0, length as u32]; 2];
-    let mut wide = [[0, length as u64]; 2];
-    let (layout, source_offsets, target_offsets): (_, *mut c_void, *mut c_void) = match u32::try_from(length) {
-        Ok(_) => (
-            sz_strings_layout_t::U32Tape,
-            narrow[0].as_mut_ptr().cast(),
-            narrow[1].as_mut_ptr().cast(),
-        ),
-        Err(_) => (
-            sz_strings_layout_t::U64Tape,
-            wide[0].as_mut_ptr().cast(),
-            wide[1].as_mut_ptr().cast(),
-        ),
-    };
-    let in_place = core::ptr::eq(source, target);
-    let strings = sz_strings_view_t {
-        layout,
-        count: 1,
-        data: sz_strings_data_t {
-            tape: sz_strings_tape_t {
-                data: source.cast_mut(),
-                offsets: source_offsets,
-            },
-        },
-    };
-    let mut tape = sz_strings_span_t {
-        layout,
-        count: 1,
-        tape: sz_strings_tape_t {
-            data: target,
-            offsets: if in_place { source_offsets } else { target_offsets },
-        },
-    };
-    sz_strings_lookup_best(
-        &strings,
-        core::ptr::null(),
-        1,
-        table.as_ptr(),
-        core::ptr::null_mut(),
-        &mut tape,
-        Capabilities::CPUS.bits(),
-        core::ptr::null_mut(),
-    )
+    unsafe {
+        let mut narrow = [[0, length as u32]; 2];
+        let mut wide = [[0, length as u64]; 2];
+        let (layout, source_offsets, target_offsets): (_, *mut c_void, *mut c_void) = match u32::try_from(length) {
+            Ok(_) => (sz_strings_layout_t::U32Tape, narrow[0].as_mut_ptr().cast(), narrow[1].as_mut_ptr().cast()),
+            Err(_) => (sz_strings_layout_t::U64Tape, wide[0].as_mut_ptr().cast(), wide[1].as_mut_ptr().cast()),
+        };
+        let in_place = core::ptr::eq(source, target);
+        let strings = sz_strings_view_t {
+            layout,
+            count: 1,
+            data: sz_strings_data_t { tape: sz_strings_tape_t { data: source.cast_mut(), offsets: source_offsets } },
+        };
+        let mut tape = sz_strings_span_t {
+            layout,
+            count: 1,
+            tape: sz_strings_tape_t { data: target, offsets: if in_place { source_offsets } else { target_offsets } },
+        };
+        sz_strings_lookup_best(
+            &strings,
+            core::ptr::null(),
+            1,
+            table.as_ptr(),
+            core::ptr::null_mut(),
+            &mut tape,
+            Capabilities::CPUS.bits(),
+            core::ptr::null_mut(),
+        )
+    }
 }
 
 /// Randomizes the contents of a given byte slice `text` using characters from a specified
@@ -298,18 +276,10 @@ pub fn replace_all(buffer: &mut Vec<u8>, needle: &[u8], replacement: &[u8]) -> R
         needle.len(),
         replacement,
         |haystack, start| {
-            if start >= haystack.len() {
-                None
-            } else {
-                find(&haystack[start..], needle).map(|offset| start + offset)
-            }
+            if start >= haystack.len() { None } else { find(&haystack[start..], needle).map(|offset| start + offset) }
         },
         |haystack, end| {
-            if end == 0 {
-                None
-            } else {
-                rfind(&haystack[..end], needle)
-            }
+            if end == 0 { None } else { rfind(&haystack[..end], needle) }
         },
     )
 }
@@ -336,11 +306,7 @@ pub fn replace_all_byteset(buffer: &mut Vec<u8>, byteset: Byteset, replacement: 
             }
         },
         |haystack, end| {
-            if end == 0 {
-                None
-            } else {
-                rfind_byteset(&haystack[..end], byteset)
-            }
+            if end == 0 { None } else { rfind_byteset(&haystack[..end], byteset) }
         },
     )
 }
@@ -526,10 +492,7 @@ impl<A: Allocator> Strings<A> {
             span: sz_strings_span_t {
                 layout: sz_strings_layout_t::U32Tape,
                 count: 0,
-                tape: sz_strings_tape_t {
-                    data: core::ptr::null_mut(),
-                    offsets: core::ptr::null_mut(),
-                },
+                tape: sz_strings_tape_t { data: core::ptr::null_mut(), offsets: core::ptr::null_mut() },
             },
             allocator,
         };
@@ -555,12 +518,7 @@ impl<A: Allocator> Drop for Strings<A> {
         let lent = lend(&self.allocator);
         unsafe {
             free_in::<A>(span.tape.data.cast(), payload, lent.handle, core::ptr::null_mut());
-            free_in::<A>(
-                span.tape.offsets,
-                (span.count + 1) * width,
-                lent.handle,
-                core::ptr::null_mut(),
-            );
+            free_in::<A>(span.tape.offsets, (span.count + 1) * width, lent.handle, core::ptr::null_mut());
         }
     }
 }
@@ -588,10 +546,12 @@ unsafe extern "C" fn allocate_in<A: Allocator>(
     handle: *mut c_void,
     _stream: sz_stream_t,
 ) -> *mut c_void {
-    let allocator = &*handle.cast_const().cast::<A>();
-    block_layout(bytes)
-        .and_then(|layout| allocator.allocate(layout).ok())
-        .map_or(core::ptr::null_mut(), |block| block.as_ptr().cast())
+    unsafe {
+        let allocator = &*handle.cast_const().cast::<A>();
+        block_layout(bytes)
+            .and_then(|layout| allocator.allocate(layout).ok())
+            .map_or(core::ptr::null_mut(), |block| block.as_ptr().cast())
+    }
 }
 
 unsafe extern "C" fn reallocate_in<A: Allocator>(
@@ -601,24 +561,23 @@ unsafe extern "C" fn reallocate_in<A: Allocator>(
     handle: *mut c_void,
     stream: sz_stream_t,
 ) -> *mut c_void {
-    let allocator = &*handle.cast_const().cast::<A>();
-    let Some((block, old)) = NonNull::new(block.cast::<u8>()).zip(block_layout(old_bytes)) else {
-        return allocate_in::<A>(new_bytes, handle, stream);
-    };
-    if new_bytes == 0 {
-        allocator.deallocate(block, old);
-        return core::ptr::null_mut();
+    unsafe {
+        let allocator = &*handle.cast_const().cast::<A>();
+        let Some((block, old)) = NonNull::new(block.cast::<u8>()).zip(block_layout(old_bytes)) else {
+            return allocate_in::<A>(new_bytes, handle, stream);
+        };
+        if new_bytes == 0 {
+            allocator.deallocate(block, old);
+            return core::ptr::null_mut();
+        }
+        // A size no layout holds fails like a refused one, leaving the block to C.
+        let Some(new) = block_layout(new_bytes) else {
+            return core::ptr::null_mut();
+        };
+        let moved =
+            if new_bytes > old_bytes { allocator.grow(block, old, new) } else { allocator.shrink(block, old, new) };
+        moved.map_or(core::ptr::null_mut(), |moved| moved.as_ptr().cast())
     }
-    // A size no layout holds fails like a refused one, leaving the block to C.
-    let Some(new) = block_layout(new_bytes) else {
-        return core::ptr::null_mut();
-    };
-    let moved = if new_bytes > old_bytes {
-        allocator.grow(block, old, new)
-    } else {
-        allocator.shrink(block, old, new)
-    };
-    moved.map_or(core::ptr::null_mut(), |moved| moved.as_ptr().cast())
 }
 
 unsafe extern "C" fn free_in<A: Allocator>(
@@ -627,9 +586,11 @@ unsafe extern "C" fn free_in<A: Allocator>(
     handle: *mut c_void,
     _stream: sz_stream_t,
 ) {
-    let allocator = &*handle.cast_const().cast::<A>();
-    if let Some((block, layout)) = NonNull::new(block.cast::<u8>()).zip(block_layout(bytes)) {
-        allocator.deallocate(block, layout);
+    unsafe {
+        let allocator = &*handle.cast_const().cast::<A>();
+        if let Some((block, layout)) = NonNull::new(block.cast::<u8>()).zip(block_layout(bytes)) {
+            allocator.deallocate(block, layout);
+        }
     }
 }
 
@@ -687,10 +648,7 @@ impl<'a> StringsView<'a> {
                 layout: sz_strings_layout_t::Accessor,
                 count: texts.len(),
                 data: sz_strings_data_t {
-                    accessor: sz_strings_accessor_t {
-                        get: slices_get::<Text>,
-                        handle: texts.as_ptr().cast(),
-                    },
+                    accessor: sz_strings_accessor_t { get: slices_get::<Text>, handle: texts.as_ptr().cast() },
                 },
             },
             bytes: PhantomData,
@@ -714,10 +672,7 @@ impl<'a> StringsView<'a> {
 
     /// The strings in order, like [`slice::iter`].
     pub fn iter(&self) -> StringsIter<'a> {
-        StringsIter {
-            strings: *self,
-            indices: 0..self.view.count,
-        }
+        StringsIter { strings: *self, indices: 0..self.view.count }
     }
 
     /// Escapes every string for `kind` into a new column from `allocator`, on the device of
@@ -853,20 +808,14 @@ impl<'a> StringsView<'a> {
         }
         let mut views = Vec::new_in(&allocator);
         views.try_reserve_exact(frames.len()).map_err(|_| Status::BadAlloc)?;
-        views.extend(frames.iter().map(|frame| sz_string_view_t {
-            start: frame.as_ptr(),
-            length: frame.len(),
-        }));
+        views.extend(frames.iter().map(|frame| sz_string_view_t { start: frame.as_ptr(), length: frame.len() }));
         let join = |output: *mut u8, length: &mut usize| unsafe {
             sz_strings_join_best(
                 columns.as_ptr().cast(),
                 columns.len(),
                 rows,
                 views.as_ptr(),
-                sz_string_view_t {
-                    start: between.as_ptr(),
-                    length: between.len(),
-                },
+                sz_string_view_t { start: between.as_ptr(), length: between.len() },
                 output,
                 length,
                 stream.capabilities().bits(),
@@ -898,11 +847,7 @@ impl<'a> StringsView<'a> {
         if rows.len() < rows_bytes {
             return Err(Status::UnexpectedDimensions);
         }
-        let target = sz_strings_rows_t {
-            data: rows.as_mut_ptr(),
-            stride: width,
-            width,
-        };
+        let target = sz_strings_rows_t { data: rows.as_mut_ptr(), stride: width, width };
         // A device writes the longest length too, so it lands in memory that device reaches.
         let unified = UnifiedAllocator::new(stream);
         let layout = Layout::new::<usize>();
@@ -1067,19 +1012,13 @@ impl<'a> StringsView<'a> {
         let (start, length) = match self.view.layout {
             sz_strings_layout_t::Accessor => {
                 let accessor = unsafe { self.view.data.accessor };
-                let mut string = sz_string_view_t {
-                    start: core::ptr::null(),
-                    length: 0,
-                };
+                let mut string = sz_string_view_t { start: core::ptr::null(), length: 0 };
                 unsafe { (accessor.get)(accessor.handle, &index, 1, &mut string) };
                 (string.start, string.length)
             }
             _ => {
                 let (first, end) = (self.offset(index), self.offset(index + 1));
-                (
-                    unsafe { self.view.data.tape.data.cast_const().wrapping_add(first) },
-                    end - first,
-                )
+                (unsafe { self.view.data.tape.data.cast_const().wrapping_add(first) }, end - first)
             }
         };
         match length {
@@ -1095,13 +1034,12 @@ unsafe extern "C" fn slices_get<Text: AsRef<[u8]>>(
     count: sz_size_t,
     views: *mut sz_string_view_t,
 ) {
-    let texts = handle.cast::<Text>();
-    for position in 0..count {
-        let bytes = (*texts.add(*indices.add(position))).as_ref();
-        views.add(position).write(sz_string_view_t {
-            start: bytes.as_ptr(),
-            length: bytes.len(),
-        });
+    unsafe {
+        let texts = handle.cast::<Text>();
+        for position in 0..count {
+            let bytes = (*texts.add(*indices.add(position))).as_ref();
+            views.add(position).write(sz_string_view_t { start: bytes.as_ptr(), length: bytes.len() });
+        }
     }
 }
 
@@ -1172,10 +1110,7 @@ mod tests {
         let mut less_long: Vec<u8> = vec![0; 10];
         let lut: [u8; 256] = core::array::from_fn(|i| i as u8);
 
-        assert_eq!(
-            sz::lookup(&mut less_long, &long, lut),
-            Err(sz::Status::UnexpectedDimensions)
-        );
+        assert_eq!(sz::lookup(&mut less_long, &long, lut), Err(sz::Status::UnexpectedDimensions));
         assert_eq!(less_long, vec![0; 10]);
 
         assert_eq!(sz::lookup(&mut less_long, &long[..10], lut), Ok(()));
@@ -1189,26 +1124,11 @@ mod tests {
     #[test]
     fn tapes_refuse_offsets_that_are_empty_fall_or_overrun_their_data() {
         let data = b"kittensitting";
-        assert_eq!(
-            StringsView::from_u32_tape(data, &[]).err(),
-            Some(Status::UnexpectedDimensions)
-        );
-        assert_eq!(
-            StringsView::from_u32_tape(data, &[0, 6, 4]).err(),
-            Some(Status::UnexpectedDimensions)
-        );
-        assert_eq!(
-            StringsView::from_u32_tape(data, &[0, 6, 14]).err(),
-            Some(Status::UnexpectedDimensions)
-        );
-        assert_eq!(
-            StringsView::from_u64_tape(data, &[7, 6]).err(),
-            Some(Status::UnexpectedDimensions)
-        );
-        assert_eq!(
-            StringsView::from_u64_tape(data, &[0, u64::MAX]).err(),
-            Some(Status::UnexpectedDimensions)
-        );
+        assert_eq!(StringsView::from_u32_tape(data, &[]).err(), Some(Status::UnexpectedDimensions));
+        assert_eq!(StringsView::from_u32_tape(data, &[0, 6, 4]).err(), Some(Status::UnexpectedDimensions));
+        assert_eq!(StringsView::from_u32_tape(data, &[0, 6, 14]).err(), Some(Status::UnexpectedDimensions));
+        assert_eq!(StringsView::from_u64_tape(data, &[7, 6]).err(), Some(Status::UnexpectedDimensions));
+        assert_eq!(StringsView::from_u64_tape(data, &[0, u64::MAX]).err(), Some(Status::UnexpectedDimensions));
 
         let single = StringsView::from_u32_tape(data, &[13]).unwrap();
         assert!(single.is_empty() && single.get(0).is_none());
@@ -1234,13 +1154,7 @@ mod tests {
     #[test]
     fn columns_escape_and_unescape() {
         let cpu = cpu();
-        let names = [
-            "Ada",
-            "Grace \"Amazing\" Hopper",
-            "Linus\nTorvalds",
-            "",
-            "caf\u{e9} \u{1f600}",
-        ];
+        let names = ["Ada", "Grace \"Amazing\" Hopper", "Linus\nTorvalds", "", "caf\u{e9} \u{1f600}"];
         let column = Strings::copy_in(StringsView::from_slices(&names), Global, &cpu).unwrap();
         let view = column.view();
         assert!(view.iter().eq(names.iter().map(|name| name.as_bytes())));
@@ -1268,10 +1182,7 @@ mod tests {
     #[test]
     fn unescape_reports_the_first_malformed_string() {
         let fields = StringsView::from_slices(&["plain", "\"closed\"", "\"open", "\"also open"]);
-        assert_eq!(
-            fields.unescape_in(EscapeKind::Csv, Global, &cpu()).err(),
-            Some(StringsError::Malformed(2))
-        );
+        assert_eq!(fields.unescape_in(EscapeKind::Csv, Global, &cpu()).err(), Some(StringsError::Malformed(2)));
     }
 
     /// Lookup, normalization and rows read a column like the strings it was copied from.
@@ -1282,10 +1193,7 @@ mod tests {
 
         let upper: [u8; 256] = core::array::from_fn(|byte| (byte as u8).to_ascii_uppercase());
         let shouted = words.lookup_in(&upper, Global, &cpu).unwrap();
-        assert!(shouted
-            .view()
-            .iter()
-            .eq(["STRA\u{df}E".as_bytes(), "\u{fb01}LE".as_bytes(), b"AB"]));
+        assert!(shouted.view().iter().eq(["STRA\u{df}E".as_bytes(), "\u{fb01}LE".as_bytes(), b"AB"]));
 
         let folded = words.normalize_in(sz::NormalForm::NfkcCasefold, Global, &cpu).unwrap();
         assert!(folded.view().iter().eq([&b"strasse"[..], b"file", b"ab"]));
@@ -1293,10 +1201,7 @@ mod tests {
         let mut rows = [0xFF; 12];
         assert_eq!(words.to_rows(&mut rows, 4, &cpu), Ok(7));
         assert_eq!(&rows, b"Stra\xEF\xAC\x81lAb\0\0");
-        assert_eq!(
-            words.to_rows(&mut rows[..11], 4, &cpu),
-            Err(Status::UnexpectedDimensions)
-        );
+        assert_eq!(words.to_rows(&mut rows[..11], 4, &cpu), Err(Status::UnexpectedDimensions));
     }
 
     /// Texts past one SIMD block, with delimiters leading, trailing, neighbouring, or absent.
@@ -1339,17 +1244,11 @@ mod tests {
             ("a\n\nb\n", &["a", "", "b"]),
             ("a\r\r\nb", &["a", "", "b"]),
             ("no break", &["no break"]),
-            (
-                every_break,
-                &["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"],
-            ),
+            (every_break, &["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]),
         ];
         for (text, expected) in cases {
             let lines = Strings::split_lines_in(text.as_bytes(), Global, &cpu).unwrap();
-            assert!(
-                lines.view().iter().eq(expected.iter().map(|line| line.as_bytes())),
-                "{text:?}"
-            );
+            assert!(lines.view().iter().eq(expected.iter().map(|line| line.as_bytes())), "{text:?}");
         }
     }
 
@@ -1362,10 +1261,7 @@ mod tests {
         let one = StringsView::from_slices(&["Ada"]);
         assert_eq!(one.join_in(b", ", Global, &cpu).unwrap(), b"Ada");
         every_layout(|haystacks| {
-            assert_eq!(
-                haystacks.join_in(b"|", Global, &cpu).unwrap(),
-                HAYSTACKS.join("|").as_bytes()
-            );
+            assert_eq!(haystacks.join_in(b"|", Global, &cpu).unwrap(), HAYSTACKS.join("|").as_bytes());
         });
         let letters: Vec<u8> = (0..130).map(|index| b'a' + index % 26).collect();
         let offsets: Vec<u32> = (0..=130).collect();
@@ -1433,21 +1329,13 @@ mod tests {
     #[test]
     fn column_finds_agree_with_finds_in_each_string() {
         let cpu = cpu();
-        let needles: [&[u8]; 6] = [
-            b"needle",
-            b"",
-            b"e",
-            "\u{1f600}".as_bytes(),
-            b"anee",
-            b"no such text in any haystack",
-        ];
+        let needles: [&[u8]; 6] =
+            [b"needle", b"", b"e", "\u{1f600}".as_bytes(), b"anee", b"no such text in any haystack"];
         every_layout(|haystacks| {
             for needle in needles {
                 let mut positions = vec![0; haystacks.len()];
                 haystacks.find(needle, &mut positions, &cpu).unwrap();
-                let expected = haystacks
-                    .iter()
-                    .map(|haystack| sz::find(haystack, needle).unwrap_or(usize::MAX));
+                let expected = haystacks.iter().map(|haystack| sz::find(haystack, needle).unwrap_or(usize::MAX));
                 assert!(positions.iter().copied().eq(expected), "{needle:?}");
             }
         });
@@ -1472,9 +1360,7 @@ mod tests {
         every_layout(|texts| {
             let mut runes = vec![0; texts.len()];
             texts.utf8_count(Some(&mut runes), &cpu).unwrap();
-            let expected = texts
-                .iter()
-                .map(|text| core::str::from_utf8(text).unwrap().chars().count());
+            let expected = texts.iter().map(|text| core::str::from_utf8(text).unwrap().chars().count());
             assert!(runes.iter().copied().eq(expected));
             assert_eq!(texts.utf8_count(None, &cpu), Ok(()));
         });
@@ -1486,10 +1372,7 @@ mod tests {
         let rows: [&[u8]; 4] = [b"fine", "caf\u{e9}".as_bytes(), b"\xFF", b"\xC0\x80"];
         let rows = StringsView::from_slices(&rows);
         assert_eq!(rows.utf8_count(None, &cpu), Err(StringsError::Malformed(2)));
-        assert_eq!(
-            rows.utf8_count(Some(&mut [0; 4]), &cpu),
-            Err(StringsError::Malformed(2))
-        );
+        assert_eq!(rows.utf8_count(Some(&mut [0; 4]), &cpu), Err(StringsError::Malformed(2)));
         let crossing = StringsView::from_u32_tape("caf\u{e9}".as_bytes(), &[0, 4, 5]).unwrap();
         assert_eq!(crossing.utf8_count(None, &cpu), Err(StringsError::Malformed(0)));
     }
@@ -1502,10 +1385,7 @@ mod tests {
             let refused = Err(Status::UnexpectedDimensions);
             assert_eq!(column.find(b"needle", &mut vec![0; length], &cpu), refused);
             assert_eq!(column.hashes(0, &mut vec![0; length], &cpu), refused);
-            assert_eq!(
-                column.utf8_count(Some(&mut vec![0; length]), &cpu),
-                refused.map_err(StringsError::Failed)
-            );
+            assert_eq!(column.utf8_count(Some(&mut vec![0; length]), &cpu), refused.map_err(StringsError::Failed));
         }
     }
 
@@ -1522,7 +1402,7 @@ mod tests {
             Global.allocate(layout)
         }
         unsafe fn deallocate(&self, block: NonNull<u8>, layout: Layout) {
-            Global.deallocate(block, layout)
+            unsafe { Global.deallocate(block, layout) }
         }
     }
 
@@ -1535,11 +1415,7 @@ mod tests {
 
     impl Budget {
         fn new(refused: usize) -> Self {
-            Budget {
-                refused,
-                requests: Cell::new(0),
-                live: Cell::new(0),
-            }
+            Budget { refused, requests: Cell::new(0), live: Cell::new(0) }
         }
     }
 
@@ -1556,8 +1432,10 @@ mod tests {
             Ok(block)
         }
         unsafe fn deallocate(&self, block: NonNull<u8>, layout: Layout) {
-            self.live.set(self.live.get() - 1);
-            Global.deallocate(block, layout)
+            unsafe {
+                self.live.set(self.live.get() - 1);
+                Global.deallocate(block, layout)
+            }
         }
     }
 
@@ -1578,13 +1456,7 @@ mod tests {
         }
     }
 
-    const NAMES: [&str; 5] = [
-        "Ada",
-        "Grace \"Amazing\" Hopper",
-        "Linus\nTorvalds",
-        "",
-        "caf\u{e9} \u{1f600}",
-    ];
+    const NAMES: [&str; 5] = ["Ada", "Grace \"Amazing\" Hopper", "Linus\nTorvalds", "", "caf\u{e9} \u{1f600}"];
 
     #[test]
     fn copies_fail_cleanly_at_every_refused_allocation() {
@@ -1697,19 +1569,9 @@ mod tests {
         let device = Strings::copy_in(slices, unified, &cpu).unwrap();
         let host = Strings::copy_in(slices, Global, &cpu).unwrap();
         let (device_view, host_view) = (device.view(), host.view());
-        assert!(Strings::copy_in(device_view, unified, &gpu)
-            .unwrap()
-            .view()
-            .iter()
-            .eq(slices.iter()));
-        assert_eq!(
-            slices.escape_in(EscapeKind::Json, unified, &gpu).err(),
-            Some(Status::DeviceMemoryMismatch)
-        );
-        assert_eq!(
-            device_view.escape_in(EscapeKind::Json, Global, &gpu).err(),
-            Some(Status::DeviceMemoryMismatch)
-        );
+        assert!(Strings::copy_in(device_view, unified, &gpu).unwrap().view().iter().eq(slices.iter()));
+        assert_eq!(slices.escape_in(EscapeKind::Json, unified, &gpu).err(), Some(Status::DeviceMemoryMismatch));
+        assert_eq!(device_view.escape_in(EscapeKind::Json, Global, &gpu).err(), Some(Status::DeviceMemoryMismatch));
 
         for kind in [EscapeKind::Json, EscapeKind::Csv, EscapeKind::Url] {
             let device_escaped = device_view.escape_in(kind, unified, &gpu).unwrap();
@@ -1730,17 +1592,13 @@ mod tests {
         let mut device_rows = Vec::new_in(unified);
         device_rows.resize(words.len() * 8, 0xFFu8);
         let mut host_rows = vec![0xFFu8; words.len() * 8];
-        assert_eq!(
-            device_view.to_rows(&mut device_rows, 8, &gpu),
-            host_view.to_rows(&mut host_rows, 8, &cpu)
-        );
+        assert_eq!(device_view.to_rows(&mut device_rows, 8, &gpu), host_view.to_rows(&mut host_rows, 8, &cpu));
         assert_eq!(device_rows[..], host_rows[..]);
 
         let mut engine = sz::LevenshteinEngine::new(&["kitten"], sz::LevenshteinSymbol::Bytes, &gpu).unwrap();
         let mut distances = Vec::new_in(unified);
         distances.resize(words.len(), usize::MAX);
-        gpu.scope(|scope| engine.distances(scope, device_view, None, &mut distances, words.len()))
-            .unwrap();
+        gpu.scope(|scope| engine.distances(scope, device_view, None, &mut distances, words.len())).unwrap();
         assert_eq!(distances[4], 0);
     }
 

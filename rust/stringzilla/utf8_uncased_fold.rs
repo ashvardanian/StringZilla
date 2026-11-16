@@ -82,10 +82,7 @@ mod tests {
             ("Hello, WASM World! 12345.", b"hello, wasm world! 12345."),   // >16B mixed: only A-Z fold
             // Long ASCII run, then a multi-byte codepoint, then more ASCII: SIMD → serial
             // → scalar tail.
-            (
-                "LONG ASCII PREFIX \u{00C4} SUFFIX",
-                "long ascii prefix \u{00E4} suffix".as_bytes(),
-            ),
+            ("LONG ASCII PREFIX \u{00C4} SUFFIX", "long ascii prefix \u{00E4} suffix".as_bytes()),
             ("\u{00DF}", b"ss"),                   // ß → ss expansion
             ("\u{1E9E}", b"ss"),                   // ẞ → ss (E1 BA lead bytes)
             ("\u{03A3}", "\u{03C3}".as_bytes()),   // Σ → σ
@@ -116,9 +113,6 @@ mod tests {
         assert_eq!(&target[..folded_length], "\u{03B9}\u{0308}\u{0301}".as_bytes());
 
         // Refused below the worst case although ASCII fits, as the kernel takes no capacity.
-        assert_eq!(
-            sz::utf8_uncased_fold("HELLO", &mut target[..14]),
-            Err(sz::Status::UnexpectedDimensions)
-        );
+        assert_eq!(sz::utf8_uncased_fold("HELLO", &mut target[..14]), Err(sz::Status::UnexpectedDimensions));
     }
 }

@@ -55,11 +55,7 @@ where
     }
     .infallible();
 
-    if result.is_null() {
-        None
-    } else {
-        Some(match_offset(result, haystack_pointer))
-    }
+    if result.is_null() { None } else { Some(match_offset(result, haystack_pointer)) }
 }
 
 /// Locates the last matching substring within `haystack` that equals `needle`.
@@ -107,11 +103,7 @@ where
     }
     .infallible();
 
-    if result.is_null() {
-        None
-    } else {
-        Some(match_offset(result, haystack_pointer))
-    }
+    if result.is_null() { None } else { Some(match_offset(result, haystack_pointer)) }
 }
 
 /// Checks whether `needle` occurs anywhere within `haystack`.
@@ -172,11 +164,7 @@ where
         )
     }
     .infallible();
-    if result.is_null() {
-        None
-    } else {
-        Some(match_offset(result, haystack_pointer))
-    }
+    if result.is_null() { None } else { Some(match_offset(result, haystack_pointer)) }
 }
 
 /// Finds the index of the last character in `haystack` that is also present in `needles`.
@@ -212,11 +200,7 @@ where
         )
     }
     .infallible();
-    if result.is_null() {
-        None
-    } else {
-        Some(match_offset(result, haystack_pointer))
-    }
+    if result.is_null() { None } else { Some(match_offset(result, haystack_pointer)) }
 }
 
 /// Finds the index of the first character in `haystack` that is also present in `needles`.
@@ -363,20 +347,12 @@ pub struct FindMatches<'a, Overlap: Overlaps = NonOverlapping> {
 impl<'a> FindMatches<'a, NonOverlapping> {
     /// Iterates the non-overlapping matches of `matcher` in `haystack`, front to back.
     pub fn new(haystack: &'a [u8], matcher: Matcher<'a>) -> Self {
-        Self {
-            matcher,
-            rest: Some(haystack),
-            _overlaps: PhantomData,
-        }
+        Self { matcher, rest: Some(haystack), _overlaps: PhantomData }
     }
 
     /// Report overlapping matches too, a compile-time policy returning the `Overlapping` variant.
     pub fn overlapping(self) -> FindMatches<'a, Overlapping> {
-        FindMatches {
-            matcher: self.matcher,
-            rest: self.rest,
-            _overlaps: PhantomData,
-        }
+        FindMatches { matcher: self.matcher, rest: self.rest, _overlaps: PhantomData }
     }
 }
 
@@ -421,20 +397,12 @@ pub struct RFindMatches<'a, Overlap: Overlaps = NonOverlapping> {
 impl<'a> RFindMatches<'a, NonOverlapping> {
     /// Iterates the non-overlapping matches of `matcher` in `haystack`, back to front.
     pub fn new(haystack: &'a [u8], matcher: Matcher<'a>) -> Self {
-        Self {
-            matcher,
-            rest: Some(haystack),
-            _overlaps: PhantomData,
-        }
+        Self { matcher, rest: Some(haystack), _overlaps: PhantomData }
     }
 
     /// Report overlapping matches too, a compile-time policy returning the `Overlapping` variant.
     pub fn overlapping(self) -> RFindMatches<'a, Overlapping> {
-        RFindMatches {
-            matcher: self.matcher,
-            rest: self.rest,
-            _overlaps: PhantomData,
-        }
+        RFindMatches { matcher: self.matcher, rest: self.rest, _overlaps: PhantomData }
     }
 }
 
@@ -482,20 +450,12 @@ pub struct FindSplits<'a, Empty: EmptySegments = KeepEmpty> {
 impl<'a> FindSplits<'a, KeepEmpty> {
     /// Splits `haystack` at every match of `matcher`, front to back, keeping empty pieces.
     pub fn new(haystack: &'a [u8], matcher: Matcher<'a>) -> Self {
-        Self {
-            matcher,
-            rest: Some(haystack),
-            _empties: PhantomData,
-        }
+        Self { matcher, rest: Some(haystack), _empties: PhantomData }
     }
 
     /// Drop zero-length segments, a compile-time policy returning the `SkipEmpty` variant.
     pub fn skip_empty(self) -> FindSplits<'a, SkipEmpty> {
-        FindSplits {
-            matcher: self.matcher,
-            rest: self.rest,
-            _empties: PhantomData,
-        }
+        FindSplits { matcher: self.matcher, rest: self.rest, _empties: PhantomData }
     }
 }
 
@@ -547,20 +507,12 @@ pub struct RFindSplits<'a, Empty: EmptySegments = KeepEmpty> {
 impl<'a> RFindSplits<'a, KeepEmpty> {
     /// Splits `haystack` at every match of `matcher`, back to front, keeping empty pieces.
     pub fn new(haystack: &'a [u8], matcher: Matcher<'a>) -> Self {
-        Self {
-            matcher,
-            rest: Some(haystack),
-            _empties: PhantomData,
-        }
+        Self { matcher, rest: Some(haystack), _empties: PhantomData }
     }
 
     /// Drop zero-length segments, a compile-time policy returning the `SkipEmpty` variant.
     pub fn skip_empty(self) -> RFindSplits<'a, SkipEmpty> {
-        RFindSplits {
-            matcher: self.matcher,
-            rest: self.rest,
-            _empties: PhantomData,
-        }
+        RFindSplits { matcher: self.matcher, rest: self.rest, _empties: PhantomData }
     }
 }
 
@@ -1165,10 +1117,7 @@ mod tests {
         let haystack = b"hello world";
         let needles = b"xyz";
         let matches: Vec<_> = haystack.sz_find_last_not_of(needles).collect();
-        assert_eq!(
-            matches,
-            vec![b"d", b"l", b"r", b"o", b"w", b" ", b"o", b"l", b"l", b"e", b"h"]
-        );
+        assert_eq!(matches, vec![b"d", b"l", b"r", b"o", b"w", b" ", b"o", b"l", b"l", b"e", b"h"]);
     }
 
     #[test]

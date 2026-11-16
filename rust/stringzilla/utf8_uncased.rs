@@ -271,22 +271,12 @@ pub struct Utf8UncasedMatches<'a, O: Overlaps = NonOverlapping> {
 impl<'a> Utf8UncasedMatches<'a, NonOverlapping> {
     /// Creates a new iterator for non-overlapping uncased matches.
     pub fn new(haystack: &'a [u8], needle: &'a [u8]) -> Self {
-        Self {
-            needle: Utf8UncasedNeedle::new(needle),
-            rest: Some(haystack),
-            offset: 0,
-            _overlaps: PhantomData,
-        }
+        Self { needle: Utf8UncasedNeedle::new(needle), rest: Some(haystack), offset: 0, _overlaps: PhantomData }
     }
 
     /// Report overlapping matches too, a compile-time policy returning the `Overlapping` variant.
     pub fn overlapping(self) -> Utf8UncasedMatches<'a, Overlapping> {
-        Utf8UncasedMatches {
-            needle: self.needle,
-            rest: self.rest,
-            offset: self.offset,
-            _overlaps: PhantomData,
-        }
+        Utf8UncasedMatches { needle: self.needle, rest: self.rest, offset: self.offset, _overlaps: PhantomData }
     }
 }
 
@@ -301,8 +291,7 @@ impl<'a, O: Overlaps> Iterator for Utf8UncasedMatches<'a, O> {
         };
         // An empty match at the end steps past it, parking the iterator.
         let stride = if length == 0 {
-            rest.get(start)
-                .map_or(1, |&lead| rune_length(lead).min(rest.len() - start))
+            rest.get(start).map_or(1, |&lead| rune_length(lead).min(rest.len() - start))
         } else if O::OVERLAP {
             rune_length(rest[start]).min(length)
         } else {
@@ -458,16 +447,10 @@ mod tests {
         let boundaries = [0, 1, 3].map(|offset| IndexSpan::new(offset, 0));
         let haystack = "a\u{e9}".as_bytes();
         assert_eq!(Utf8UncasedMatches::new(haystack, b"").collect::<Vec<_>>(), boundaries);
-        assert_eq!(
-            Utf8UncasedMatches::new(haystack, b"").overlapping().collect::<Vec<_>>(),
-            boundaries
-        );
+        assert_eq!(Utf8UncasedMatches::new(haystack, b"").overlapping().collect::<Vec<_>>(), boundaries);
         // A truncated three-byte rune runs to the end as one step, and the end still matches.
         let truncated = [0, 1, 3].map(|offset| IndexSpan::new(offset, 0));
-        assert_eq!(
-            Utf8UncasedMatches::new(b"a\xE4\xB8", b"").collect::<Vec<_>>(),
-            truncated
-        );
+        assert_eq!(Utf8UncasedMatches::new(b"a\xE4\xB8", b"").collect::<Vec<_>>(), truncated);
     }
 
     #[test]

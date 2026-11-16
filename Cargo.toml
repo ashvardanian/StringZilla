@@ -4,7 +4,7 @@ authors = ["Ash Vardanian <1983160+ashvardanian@users.noreply.github.com>"]
 categories = ["text-processing", "hardware-support", "no-std", "wasm"]
 description = "Search, hash, sort, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU"
 documentation = "https://docs.rs/stringzilla"
-edition = "2021"
+edition = "2024"
 homepage = "https://ashvardanian.com/posts/stringzilla/"
 # Leading slashes anchor to the package root; Cargo matches these like gitignore.
 include = [

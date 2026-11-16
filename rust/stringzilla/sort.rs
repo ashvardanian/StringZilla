@@ -111,11 +111,7 @@ where
     let order = order.get_mut(..data.len()).ok_or(Status::UnexpectedDimensions)?;
     let top_count = options.top.unwrap_or(0);
     let reverse = options.reverse as i32;
-    let argsort = if options.uncased {
-        sz_sort_uncased_order_best
-    } else {
-        sz_sort_order_best
-    };
+    let argsort = if options.uncased { sz_sort_uncased_order_best } else { sz_sort_order_best };
     with_strings_by(data, key, |strings| unsafe {
         argsort(
             strings,
@@ -155,10 +151,7 @@ mod tests {
         assert_eq!(sorted_from_api, expected);
 
         let mut short_order = [0; 2];
-        assert_eq!(
-            sz::argsort(&fruits, &mut short_order, Default::default()),
-            Err(sz::Status::UnexpectedDimensions)
-        );
+        assert_eq!(sz::argsort(&fruits, &mut short_order, Default::default()), Err(sz::Status::UnexpectedDimensions));
     }
 
     #[test]
@@ -171,14 +164,8 @@ mod tests {
             age: u32, //? We won't use this field for intersection
         }
 
-        let people = [
-            Person {
-                name: "Charlie",
-                age: 30,
-            },
-            Person { name: "Alice", age: 25 },
-            Person { name: "Bob", age: 40 },
-        ];
+        let people =
+            [Person { name: "Charlie", age: 30 }, Person { name: "Alice", age: 25 }, Person { name: "Bob", age: 40 }];
         let mut order = [0; 3];
         sz::argsort_by(&people, |person| person.name.as_bytes(), &mut order, Default::default())
             .expect("argsort_by failed");

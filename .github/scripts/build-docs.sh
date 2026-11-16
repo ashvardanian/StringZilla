@@ -5,8 +5,6 @@
 set -euo pipefail
 version=$(cat VERSION)
 name=stringzilla_docs_$version out=build/stringzilla_docs_$version
-# Rustdoc's JSON is unstable, and `rust-version` needs 1.100, which reaches stable on 2026-11-12.
-toolchain=${STRINGZILLA_RUST_TOOLCHAIN:-beta-2026-10-18}
 rm -rf "$out" build/docs-scratch
 mkdir -p "$out"/{doxygen,doxygen-java,doxygen-csharp,headers,python,rust,swift,javascript,go} \
     build/docs-scratch/{library,stub/stringzilla}
@@ -27,8 +25,9 @@ cp python/stringzilla.pyi build/docs-scratch/stub/stringzilla/__init__.pyi
 griffe dump stringzilla --search build/docs-scratch/stub --no-inspection --docstyle google --full \
     --output "$out/python/stringzilla.json"
 cp build/docs-scratch/stub/stringzilla/__init__.pyi "$out/python/"
+# Stable 1.100 emits rustdoc's JSON only behind `-Z unstable-options`, so this one step bootstraps it.
 STRINGZILLA_LIBRARY_DIR=$PWD/build/docs-scratch/library RUSTC_BOOTSTRAP=1 \
-    cargo +"$toolchain" rustdoc --lib -- -Z unstable-options --output-format json
+    cargo rustdoc --lib -- -Z unstable-options --output-format json
 cp "${CARGO_TARGET_DIR:-target}/doc/stringzilla.json" "$out/rust/"
 mapfile -t swift_sources < <(git ls-files 'swift/*.swift' ':!swift/Test.swift')
 swiftc -emit-module -emit-module-path build/docs-scratch/StringZilla.swiftmodule -module-name StringZilla \

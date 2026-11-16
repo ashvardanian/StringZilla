@@ -11,11 +11,8 @@ use std::path::{Path, PathBuf};
 /// The Cargo features that switch a GPU vendor on, each passed to CMake as `all` or as the code
 /// the environment names, like `STRINGZILLA_CUDA_ARCH=120f`, and as empty without it, never left
 /// to the host.
-const FEATURE_OPTIONS: &[(&str, &str)] = &[
-    ("CUDA", "STRINGZILLA_CUDA_ARCH"),
-    ("ROCM", "STRINGZILLA_ROCM_ARCH"),
-    ("METAL", "STRINGZILLA_METAL_ARCH"),
-];
+const FEATURE_OPTIONS: &[(&str, &str)] =
+    &[("CUDA", "STRINGZILLA_CUDA_ARCH"), ("ROCM", "STRINGZILLA_ROCM_ARCH"), ("METAL", "STRINGZILLA_METAL_ARCH")];
 
 /// The CMake cache variables read from the environment, like `STRINGZILLA_MARCH=native`, the
 /// build kind, or a capability override such as `STRINGZILLA_TARGET_SVE2=0`.
@@ -112,10 +109,7 @@ fn build_library(manifest: &Path, enabled: impl Fn(&str) -> bool) -> PathBuf {
     }
 
     let mut library = cmake::Config::new(manifest);
-    library
-        .profile("Release")
-        .define("STRINGZILLA_BUILD_SHARED", "OFF")
-        .build_target("stringzilla_static");
+    library.profile("Release").define("STRINGZILLA_BUILD_SHARED", "OFF").build_target("stringzilla_static");
     for (feature, variable) in FEATURE_OPTIONS {
         println!("cargo:rerun-if-env-changed={variable}");
         let codes = match enabled(feature) {
@@ -161,16 +155,10 @@ fn build_library(manifest: &Path, enabled: impl Fn(&str) -> bool) -> PathBuf {
         let target = env::var("TARGET").unwrap();
         match os.as_str() {
             "wasi" if target.ends_with("-threads") => {
-                library.define(
-                    "CMAKE_TOOLCHAIN_FILE",
-                    manifest.join("cmake/toolchain-wasm32-wasi-threads.cmake"),
-                );
+                library.define("CMAKE_TOOLCHAIN_FILE", manifest.join("cmake/toolchain-wasm32-wasi-threads.cmake"));
             }
             "wasi" => {
-                library.define(
-                    "CMAKE_TOOLCHAIN_FILE",
-                    manifest.join("cmake/toolchain-wasm32-wasi.cmake"),
-                );
+                library.define("CMAKE_TOOLCHAIN_FILE", manifest.join("cmake/toolchain-wasm32-wasi.cmake"));
             }
             "unknown" | "none" => {}
             os => panic!("StringZilla has no CMake toolchain for WebAssembly on `{os}`, the target `{target}`"),

@@ -164,22 +164,11 @@ where
 
     let mut result = core::ptr::null();
     unsafe {
-        sz_utf8_seek_best(
-            text_pointer,
-            text_length,
-            n,
-            &mut result,
-            Capabilities::CPUS.bits(),
-            core::ptr::null_mut(),
-        )
+        sz_utf8_seek_best(text_pointer, text_length, n, &mut result, Capabilities::CPUS.bits(), core::ptr::null_mut())
     }
     .infallible();
 
-    if result.is_null() {
-        None
-    } else {
-        Some(match_offset(result, text_pointer))
-    }
+    if result.is_null() { None } else { Some(match_offset(result, text_pointer)) }
 }
 
 /// Lazy UTF-8 character view with SIMD-accelerated operations.
@@ -274,12 +263,7 @@ impl<'a, const STEPS: usize> Utf8Runes<'a, STEPS> {
     /// Constructs an iterator buffering up to `STEPS` codepoints per FFI call.
     pub fn with_steps(octets: &'a [u8]) -> Self {
         const { assert!(STEPS > 0, "STEPS must be positive") };
-        Self {
-            rest: octets,
-            runes: [0; STEPS],
-            count: 0,
-            index: 0,
-        }
+        Self { rest: octets, runes: [0; STEPS], count: 0, index: 0 }
     }
 }
 
@@ -323,21 +307,11 @@ mod tests {
     fn utf8_runes_match_std_chars() {
         // Multilingual valid UTF-8, including a long mixed run that spans several decode batches.
         let long_mixed = "Hello, \u{43C}\u{438}\u{440}! \u{4E16}\u{754C} \u{1F30D}\u{1F680} \u{627}\u{644}".repeat(50);
-        let samples = [
-            "",
-            "A",
-            "Hello\u{1F30D}",
-            "\u{3A9}\u{3BC}\u{3AD}\u{3B3}\u{3B1}",
-            long_mixed.as_str(),
-        ];
+        let samples = ["", "A", "Hello\u{1F30D}", "\u{3A9}\u{3BC}\u{3AD}\u{3B3}\u{3B1}", long_mixed.as_str()];
         for text in samples {
             let expected: Vec<char> = text.chars().collect();
             let via_view: Vec<char> = sz::Utf8View::new(text.as_bytes()).iter().collect();
-            assert_eq!(
-                via_view, expected,
-                "rune iteration diverged from std::chars for {:?}",
-                text
-            );
+            assert_eq!(via_view, expected, "rune iteration diverged from std::chars for {:?}", text);
             let via_trait: Vec<char> = text.as_bytes().sz_utf8_runes().iter().collect();
             assert_eq!(via_trait, expected);
         }
@@ -365,11 +339,7 @@ mod tests {
             let (consumed, count) = sz::utf8_decode(bytes, &mut runes);
             assert_eq!(consumed, bytes.len());
             for &rune in &runes[..count] {
-                assert!(
-                    rune <= 0x10FFFF && !(0xD800..=0xDFFF).contains(&rune),
-                    "non-scalar value 0x{:X}",
-                    rune
-                );
+                assert!(rune <= 0x10FFFF && !(0xD800..=0xDFFF).contains(&rune), "non-scalar value 0x{:X}", rune);
             }
         }
         // A lone 0xFF between two ASCII bytes yields exactly 'a', U+FFFD, 'b' -

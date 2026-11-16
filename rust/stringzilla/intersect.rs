@@ -30,15 +30,7 @@ pub fn intersection<Element: AsRef<[u8]>>(
     positions1: &mut [usize],
     positions2: &mut [usize],
 ) -> Result<usize, Status> {
-    intersection_by(
-        data1,
-        |item| item.as_ref(),
-        data2,
-        |item| item.as_ref(),
-        seed,
-        positions1,
-        positions2,
-    )
+    intersection_by(data1, |item| item.as_ref(), data2, |item| item.as_ref(), seed, positions1, positions2)
 }
 
 /// Intersects two sequences, as an inner join, on a byte-slice key of each element.
@@ -160,14 +152,8 @@ mod tests {
             age: u32, //? We won't use this field for intersection
         }
 
-        let group1 = [
-            Person { name: "Alice", age: 25 },
-            Person { name: "Bob", age: 30 },
-            Person {
-                name: "Charlie",
-                age: 35,
-            },
-        ];
+        let group1 =
+            [Person { name: "Alice", age: 25 }, Person { name: "Bob", age: 30 }, Person { name: "Charlie", age: 35 }];
         // A different length and element type on the second side, which is all the C call needs.
         let group2 = ["David", "Charlie", "Alice", "Eve", "Mallory"];
         let mut out1 = [0; 3];

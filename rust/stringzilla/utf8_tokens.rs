@@ -48,20 +48,12 @@ pub trait SegmenterKernel {
 pub struct Newlines;
 impl TokenizerKernel for Newlines {
     unsafe fn tokenize(t: *const c_void, n: usize, o: *mut usize, l: *mut usize, c: usize, u: *mut usize) -> usize {
-        let mut count = 0;
-        sz_utf8_newlines_best(
-            t,
-            n,
-            o,
-            l,
-            c,
-            &mut count,
-            u,
-            Capabilities::CPUS.bits(),
-            core::ptr::null_mut(),
-        )
-        .infallible();
-        count
+        unsafe {
+            let mut count = 0;
+            sz_utf8_newlines_best(t, n, o, l, c, &mut count, u, Capabilities::CPUS.bits(), core::ptr::null_mut())
+                .infallible();
+            count
+        }
     }
 }
 
@@ -69,20 +61,12 @@ impl TokenizerKernel for Newlines {
 pub struct Whitespaces;
 impl TokenizerKernel for Whitespaces {
     unsafe fn tokenize(t: *const c_void, n: usize, o: *mut usize, l: *mut usize, c: usize, u: *mut usize) -> usize {
-        let mut count = 0;
-        sz_utf8_whitespaces_best(
-            t,
-            n,
-            o,
-            l,
-            c,
-            &mut count,
-            u,
-            Capabilities::CPUS.bits(),
-            core::ptr::null_mut(),
-        )
-        .infallible();
-        count
+        unsafe {
+            let mut count = 0;
+            sz_utf8_whitespaces_best(t, n, o, l, c, &mut count, u, Capabilities::CPUS.bits(), core::ptr::null_mut())
+                .infallible();
+            count
+        }
     }
 }
 
@@ -90,20 +74,12 @@ impl TokenizerKernel for Whitespaces {
 pub struct Delimiters;
 impl TokenizerKernel for Delimiters {
     unsafe fn tokenize(t: *const c_void, n: usize, o: *mut usize, l: *mut usize, c: usize, u: *mut usize) -> usize {
-        let mut count = 0;
-        sz_utf8_delimiters_best(
-            t,
-            n,
-            o,
-            l,
-            c,
-            &mut count,
-            u,
-            Capabilities::CPUS.bits(),
-            core::ptr::null_mut(),
-        )
-        .infallible();
-        count
+        unsafe {
+            let mut count = 0;
+            sz_utf8_delimiters_best(t, n, o, l, c, &mut count, u, Capabilities::CPUS.bits(), core::ptr::null_mut())
+                .infallible();
+            count
+        }
     }
 }
 
@@ -213,10 +189,7 @@ impl<'a, Kernel: TokenizerKernel, Parts: SplitParts, Empty: EmptySegments, const
         };
         self.rest = Some(rest);
         self.index = Parts::FIRST;
-        debug_assert!(
-            self.count <= STEPS,
-            "tokenizer reported more runs than the capacity STEPS"
-        );
+        debug_assert!(self.count <= STEPS, "tokenizer reported more runs than the capacity STEPS");
         debug_assert!(
             (0..self.count).all(|s| self.lengths[s] > 0
                 && self.starts[s] + self.lengths[s] <= rest.len()
@@ -386,13 +359,7 @@ impl<'a, Kernel: SegmenterKernel, const STEPS: usize> Utf8Segments<'a, Kernel, S
     /// Constructs an iterator buffering up to `STEPS` segments per FFI call.
     pub fn with_steps(text: &'a [u8]) -> Self {
         const { assert!(STEPS > 0, "STEPS must be positive") };
-        Self {
-            rest: text,
-            lengths: [0; STEPS],
-            count: 0,
-            index: 0,
-            _kernel: PhantomData,
-        }
+        Self { rest: text, lengths: [0; STEPS], count: 0, index: 0, _kernel: PhantomData }
     }
 }
 
@@ -405,12 +372,7 @@ impl<'a, Kernel: SegmenterKernel, const STEPS: usize> Iterator for Utf8Segments<
                 return None;
             }
             self.count = unsafe {
-                Kernel::segment(
-                    self.rest.as_ptr() as *const c_void,
-                    self.rest.len(),
-                    self.lengths.as_mut_ptr(),
-                    STEPS,
-                )
+                Kernel::segment(self.rest.as_ptr() as *const c_void, self.rest.len(), self.lengths.as_mut_ptr(), STEPS)
             };
             self.index = 0;
             debug_assert!(
@@ -441,21 +403,14 @@ pub(crate) mod tests {
         let forward: Vec<&[u8]> = Utf8Segments::<Kernel, ITERATORS_DEFAULT_STEPS>::new(text).collect();
         assert_eq!(Utf8Segments::<Kernel, 1>::with_steps(text).collect::<Vec<_>>(), forward);
         assert_eq!(Utf8Segments::<Kernel, 3>::with_steps(text).collect::<Vec<_>>(), forward);
-        assert_eq!(
-            Utf8Segments::<Kernel, 65>::with_steps(text).collect::<Vec<_>>(),
-            forward
-        );
+        assert_eq!(Utf8Segments::<Kernel, 65>::with_steps(text).collect::<Vec<_>>(), forward);
     }
 
     #[test]
     fn utf8_delimiters() {
         // `split_delimiters` yields the content between ',', ' ', U+2014; skip_empty
         // drops the empties.
-        let toks: Vec<&[u8]> = "Hi, world\u{2014}foo"
-            .as_bytes()
-            .sz_utf8_split_delimiters()
-            .skip_empty()
-            .collect();
+        let toks: Vec<&[u8]> = "Hi, world\u{2014}foo".as_bytes().sz_utf8_split_delimiters().skip_empty().collect();
         assert_eq!(toks, vec![&b"Hi"[..], &b"world"[..], &b"foo"[..]]);
         // Default policy keeps the empty segment between adjacent delimiters.
         let kept: Vec<&[u8]> = "a,,b".as_bytes().sz_utf8_split_delimiters().collect();
@@ -479,9 +434,7 @@ pub(crate) mod tests {
                 assert_eq!(tiny, expected, "run of {} undelimited bytes", run);
             }
             // Separators included, the split is lossless however small the batch.
-            let both: Vec<&[u8]> = Utf8SplitDelimiters::<1>::with_steps(text.as_bytes())
-                .with_separators()
-                .collect();
+            let both: Vec<&[u8]> = Utf8SplitDelimiters::<1>::with_steps(text.as_bytes()).with_separators().collect();
             assert_eq!(both.concat(), text.as_bytes());
         }
     }
@@ -510,30 +463,15 @@ pub(crate) mod tests {
         // straddles a batch).
         let many = "w ".repeat(50) + "end";
         let between_small: Vec<&[u8]> = Utf8SplitWhitespaces::<2>::with_steps(many.as_bytes()).collect();
-        assert_eq!(
-            between_small,
-            many.as_bytes().sz_utf8_split_whitespaces().collect::<Vec<_>>()
-        );
+        assert_eq!(between_small, many.as_bytes().sz_utf8_split_whitespaces().collect::<Vec<_>>());
         let seps_small: Vec<&[u8]> = Utf8Whitespaces::<2>::with_steps(many.as_bytes()).collect();
         assert_eq!(seps_small, many.as_bytes().sz_utf8_whitespaces().collect::<Vec<_>>());
-        let both_small: Vec<&[u8]> = Utf8SplitWhitespaces::<2>::with_steps(many.as_bytes())
-            .with_separators()
-            .collect();
+        let both_small: Vec<&[u8]> = Utf8SplitWhitespaces::<2>::with_steps(many.as_bytes()).with_separators().collect();
         assert_eq!(both_small.concat(), many.as_bytes()); // lossless even across many refills
-        assert_eq!(
-            both_small,
-            many.as_bytes()
-                .sz_utf8_split_whitespaces()
-                .with_separators()
-                .collect::<Vec<_>>()
-        );
+        assert_eq!(both_small, many.as_bytes().sz_utf8_split_whitespaces().with_separators().collect::<Vec<_>>());
         // `with_separators` preserves `skip_empty` regardless of chaining order.
-        let dropped: Vec<&[u8]> = "a  b"
-            .as_bytes()
-            .sz_utf8_split_whitespaces()
-            .skip_empty()
-            .with_separators()
-            .collect();
+        let dropped: Vec<&[u8]> =
+            "a  b".as_bytes().sz_utf8_split_whitespaces().skip_empty().with_separators().collect();
         assert!(dropped.iter().all(|s| !s.is_empty()));
         // `utf8_wordbreaks` tiles into all UAX-29 segments: words and the separators between them.
         let segs: Vec<&[u8]> = "Hello, world!".as_bytes().sz_utf8_wordbreaks().collect();
@@ -563,18 +501,7 @@ pub(crate) mod tests {
         let segments: Vec<_> = Utf8SplitWhitespaces::new(text).collect();
         assert_eq!(
             segments,
-            vec![
-                &b""[..],
-                &b""[..],
-                b"a",
-                &b""[..],
-                &b""[..],
-                b"b",
-                &b""[..],
-                b"c",
-                &b""[..],
-                &b""[..],
-            ]
+            vec![&b""[..], &b""[..], b"a", &b""[..], &b""[..], b"b", &b""[..], b"c", &b""[..], &b""[..],]
         );
         // skip_empty: recovers the str::split_whitespace token behavior.
         let tokens: Vec<_> = Utf8SplitWhitespaces::new(text).skip_empty().collect();
@@ -638,49 +565,20 @@ pub(crate) mod tests {
 
         // skip_empty across the same batch sizes.
         let nonempty: Vec<&[u8]> = vec![b"a", b"b", b"c", b"d"];
-        assert_eq!(
-            Utf8SplitNewlines::<1>::with_steps(text)
-                .skip_empty()
-                .collect::<Vec<_>>(),
-            nonempty
-        );
-        assert_eq!(
-            Utf8SplitNewlines::<3>::with_steps(text)
-                .skip_empty()
-                .collect::<Vec<_>>(),
-            nonempty
-        );
-        assert_eq!(
-            Utf8SplitNewlines::<65>::with_steps(text)
-                .skip_empty()
-                .collect::<Vec<_>>(),
-            nonempty
-        );
+        assert_eq!(Utf8SplitNewlines::<1>::with_steps(text).skip_empty().collect::<Vec<_>>(), nonempty);
+        assert_eq!(Utf8SplitNewlines::<3>::with_steps(text).skip_empty().collect::<Vec<_>>(), nonempty);
+        assert_eq!(Utf8SplitNewlines::<65>::with_steps(text).skip_empty().collect::<Vec<_>>(), nonempty);
     }
 
     #[test]
     fn iter_whitespace_utf8_splits_steps_invariance() {
         let text = b"  a \t b\n\nc  ";
         let expected: Vec<&[u8]> = vec![b"", b"", b"a", b"", b"", b"b", b"", b"c", b"", b""];
-        assert_eq!(
-            Utf8SplitWhitespaces::<1>::with_steps(text).collect::<Vec<_>>(),
-            expected
-        );
-        assert_eq!(
-            Utf8SplitWhitespaces::<3>::with_steps(text).collect::<Vec<_>>(),
-            expected
-        );
-        assert_eq!(
-            Utf8SplitWhitespaces::<65>::with_steps(text).collect::<Vec<_>>(),
-            expected
-        );
+        assert_eq!(Utf8SplitWhitespaces::<1>::with_steps(text).collect::<Vec<_>>(), expected);
+        assert_eq!(Utf8SplitWhitespaces::<3>::with_steps(text).collect::<Vec<_>>(), expected);
+        assert_eq!(Utf8SplitWhitespaces::<65>::with_steps(text).collect::<Vec<_>>(), expected);
         let tokens: Vec<&[u8]> = vec![b"a", b"b", b"c"];
-        assert_eq!(
-            Utf8SplitWhitespaces::<1>::with_steps(text)
-                .skip_empty()
-                .collect::<Vec<_>>(),
-            tokens
-        );
+        assert_eq!(Utf8SplitWhitespaces::<1>::with_steps(text).skip_empty().collect::<Vec<_>>(), tokens);
     }
 
     #[test]

@@ -109,21 +109,13 @@ impl Bm25Params {
     /// corpus whose mean document length is `average_document_length`, in the unit the per-document
     /// lengths use.
     pub const fn normalized(average_document_length: f32) -> Self {
-        Self {
-            term_frequency_saturation: 1.2,
-            length_normalization: 0.75,
-            average_document_length,
-        }
+        Self { term_frequency_saturation: 1.2, length_normalization: 0.75, average_document_length }
     }
 
     /// BM25 with length normalization switched off, for a corpus whose mean length is unknown or
     /// whose documents are uniform enough not to need it; the per-document lengths then go unread.
     pub const fn unnormalized() -> Self {
-        Self {
-            term_frequency_saturation: 1.2,
-            length_normalization: 0.0,
-            average_document_length: 0.0,
-        }
+        Self { term_frequency_saturation: 1.2, length_normalization: 0.0, average_document_length: 0.0 }
     }
 }
 
@@ -413,10 +405,9 @@ pub(crate) fn strided_column_check(haystacks: usize, entries: usize, stride: usi
     }
     let span = match haystacks {
         0 => 0,
-        count => (count - 1)
-            .checked_mul(stride)
-            .and_then(|offset| offset.checked_add(1))
-            .ok_or(Status::OverflowRisk)?,
+        count => {
+            (count - 1).checked_mul(stride).and_then(|offset| offset.checked_add(1)).ok_or(Status::OverflowRisk)?
+        }
     };
     if entries < span {
         return Err(Status::UnexpectedDimensions);
@@ -427,9 +418,5 @@ pub(crate) fn strided_column_check(haystacks: usize, entries: usize, stride: usi
 /// The C verbs read a null output as a pure size query, which an empty slice's dangling
 /// pointer is not.
 pub(crate) fn optional_mut_ptr<Element>(buffer: &mut [Element]) -> *mut Element {
-    if buffer.is_empty() {
-        core::ptr::null_mut()
-    } else {
-        buffer.as_mut_ptr()
-    }
+    if buffer.is_empty() { core::ptr::null_mut() } else { buffer.as_mut_ptr() }
 }

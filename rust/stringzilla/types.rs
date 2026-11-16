@@ -21,7 +21,7 @@
 //! Date: August 7, 2026
 
 use core::alloc::{AllocError, Allocator, Layout};
-use core::ffi::{c_void, CStr};
+use core::ffi::{CStr, c_void};
 use core::fmt;
 use core::marker::PhantomData;
 use core::ops::BitOr;
@@ -115,10 +115,7 @@ impl Status {
     /// The variant holding a failing `code`, or [`Status::Unrecognized`] for
     /// a value C does not list.
     fn from_code(code: sz_status_t) -> Self {
-        Self::LISTED
-            .into_iter()
-            .find(|&status| status as sz_status_t == code)
-            .unwrap_or(Status::Unrecognized)
+        Self::LISTED.into_iter().find(|&status| status as sz_status_t == code).unwrap_or(Status::Unrecognized)
     }
 }
 
@@ -274,9 +271,7 @@ impl Byteset {
     /// Initializes a bit-set to contain all ASCII characters.
     #[inline]
     pub const fn new_ascii() -> Self {
-        Self {
-            bits: [u64::MAX, u64::MAX, 0, 0],
-        }
+        Self { bits: [u64::MAX, u64::MAX, 0, 0] }
     }
 
     /// Adds a byte to the set.
@@ -300,9 +295,7 @@ impl Byteset {
     /// Returns a new Byteset with all bits inverted, leaving self unchanged.
     #[inline]
     pub const fn inverted(&self) -> Self {
-        Self {
-            bits: [!self.bits[0], !self.bits[1], !self.bits[2], !self.bits[3]],
-        }
+        Self { bits: [!self.bits[0], !self.bits[1], !self.bits[2], !self.bits[3]] }
     }
 
     /// Constructs a Byteset from a slice of bytes.
@@ -508,9 +501,7 @@ impl Capabilities {
 
     /// The capabilities in this set, in bit order.
     pub fn iter(self) -> impl Iterator<Item = Capability> {
-        CAPABILITIES
-            .into_iter()
-            .filter(move |&capability| self.contains(capability))
+        CAPABILITIES.into_iter().filter(move |&capability| self.contains(capability))
     }
 
     /// The GPU vendor whose bit tops this set, which C's dispatch reads as the set's group, or none
@@ -692,11 +683,7 @@ pub struct Stream {
 impl Stream {
     /// The default stream of the default device of the group `capabilities` name.
     pub fn default(capabilities: Capabilities) -> Self {
-        Stream {
-            capabilities,
-            handle: core::ptr::null_mut(),
-            owned: false,
-        }
+        Stream { capabilities, handle: core::ptr::null_mut(), owned: false }
     }
 
     /// A new stream on device `ordinal` of the vendor `capabilities` name, a `cudaStream_t`, a
@@ -709,11 +696,7 @@ impl Stream {
         };
         let mut handle = core::ptr::null_mut();
         unsafe { init(ordinal, &mut handle) }.check()?;
-        Ok(Stream {
-            capabilities,
-            handle,
-            owned: true,
-        })
+        Ok(Stream { capabilities, handle, owned: true })
     }
 
     /// Borrows a stream the caller made and keeps owning, which is never freed here.
@@ -723,11 +706,7 @@ impl Stream {
     /// `handle` must be null or a live stream of the vendor `capabilities` name, a `cudaStream_t`,
     /// a `hipStream_t` or an `id<MTLCommandQueue>`, null on the CPU, and outlive the result.
     pub unsafe fn from_raw(capabilities: Capabilities, handle: sz_stream_t) -> Self {
-        Stream {
-            capabilities,
-            handle,
-            owned: false,
-        }
+        Stream { capabilities, handle, owned: false }
     }
 
     /// The capabilities every consumer of this stream dispatches with.
@@ -770,10 +749,7 @@ impl Stream {
         body: impl for<'scope> FnOnce(&'scope Scope<'scope, 'env>) -> Result<Output, Status>,
     ) -> Result<Output, Status> {
         let join_on_unwind = JoinOnUnwind(self);
-        let output = body(&Scope {
-            stream: self,
-            scope: PhantomData,
-        });
+        let output = body(&Scope { stream: self, scope: PhantomData });
         core::mem::forget(join_on_unwind);
         let joined = self.synchronize();
         let output = output?;
@@ -862,12 +838,8 @@ impl<'stream> UnifiedAllocator<'stream> {
     }
 
     pub(crate) fn c_allocator(&self) -> Result<sz_allocator_t, Status> {
-        let mut allocator = sz_allocator_t {
-            allocate: None,
-            reallocate: None,
-            free: None,
-            handle: core::ptr::null_mut(),
-        };
+        let mut allocator =
+            sz_allocator_t { allocate: None, reallocate: None, free: None, handle: core::ptr::null_mut() };
         unsafe { sz_allocator_init_unified_best(&mut allocator, self.stream.capabilities.0) }.check()?;
         Ok(allocator)
     }
@@ -884,14 +856,7 @@ unsafe impl Allocator for UnifiedAllocator<'_> {
         let block = unsafe { allocate(layout.size(), allocator.handle, self.stream.handle) } as *mut u8;
         let block = NonNull::new(block).ok_or(AllocError)?;
         if block.as_ptr().addr() % layout.align() != 0 {
-            unsafe {
-                free(
-                    block.as_ptr().cast(),
-                    layout.size(),
-                    allocator.handle,
-                    self.stream.handle,
-                )
-            };
+            unsafe { free(block.as_ptr().cast(), layout.size(), allocator.handle, self.stream.handle) };
             return Err(AllocError);
         }
         Ok(NonNull::slice_from_raw_parts(block, layout.size()))
@@ -903,14 +868,7 @@ unsafe impl Allocator for UnifiedAllocator<'_> {
         }
         if let Ok(allocator) = self.c_allocator() {
             if let Some(free) = allocator.free {
-                unsafe {
-                    free(
-                        block.as_ptr().cast(),
-                        layout.size(),
-                        allocator.handle,
-                        self.stream.handle,
-                    )
-                };
+                unsafe { free(block.as_ptr().cast(), layout.size(), allocator.handle, self.stream.handle) };
             }
         }
     }
@@ -1050,9 +1008,7 @@ mod tests {
             assert_eq!(capability.to_string(), name);
             previous = capability as u64;
         }
-        let gpus = Capabilities::GPUS
-            .iter()
-            .fold(Capabilities::default(), |set, gpu| set | gpu);
+        let gpus = Capabilities::GPUS.iter().fold(Capabilities::default(), |set, gpu| set | gpu);
         assert_eq!(gpus, Capabilities::GPUS);
         assert_eq!(Capabilities::CPUS.bits() & Capabilities::GPUS.bits(), 0);
     }
@@ -1113,10 +1069,7 @@ mod tests {
             for ordinal in 0..count {
                 let supported = detected(ordinal).unwrap();
                 assert_eq!(supported.bits() & Capabilities::CPUS.bits(), 0);
-                assert_eq!(
-                    enabled(ordinal).unwrap().bits(),
-                    supported.bits() & compiled(ordinal).unwrap().bits()
-                );
+                assert_eq!(enabled(ordinal).unwrap().bits(), supported.bits() & compiled(ordinal).unwrap().bits());
                 let stream = Stream::new(enabled(ordinal).unwrap(), ordinal).unwrap();
                 assert!(!stream.as_raw().is_null());
                 assert_eq!(stream.synchronize(), Ok(()));
@@ -1150,13 +1103,8 @@ mod tests {
         // not this run.
         const SPAN: sz::IndexSpan = sz::IndexSpan::new(6, 5);
         const WHITESPACE: sz::Byteset = sz::Byteset::from_bytes(b" \t\r\n");
-        const TOP_TWO_DESCENDING: sz::ArgsortOptions = sz::ArgsortOptions {
-            reverse: false,
-            uncased: false,
-            top: None,
-        }
-        .reversed()
-        .top(2);
+        const TOP_TWO_DESCENDING: sz::ArgsortOptions =
+            sz::ArgsortOptions { reverse: false, uncased: false, top: None }.reversed().top(2);
 
         assert_eq!(SPAN.extract(b"Hello World"), Some(&b"World"[..]));
         assert_eq!(sz::IndexSpan::new(usize::MAX, 2).extract(b"Hello World"), None);
@@ -1198,12 +1146,9 @@ mod tests {
         let mut from_arrow = [0usize; 4];
         let mut from_column = Vec::new_in(unified);
         from_column.resize(words.len(), usize::MAX);
-        cpu.scope(|scope| engine.distances(scope, slices, None, &mut from_slices, words.len()))
-            .unwrap();
-        cpu.scope(|scope| engine.distances(scope, arrow, None, &mut from_arrow, words.len()))
-            .unwrap();
-        cpu.scope(|scope| engine.distances(scope, column.view(), None, &mut from_column, words.len()))
-            .unwrap();
+        cpu.scope(|scope| engine.distances(scope, slices, None, &mut from_slices, words.len())).unwrap();
+        cpu.scope(|scope| engine.distances(scope, arrow, None, &mut from_arrow, words.len())).unwrap();
+        cpu.scope(|scope| engine.distances(scope, column.view(), None, &mut from_column, words.len())).unwrap();
         assert_eq!(from_arrow, from_slices);
         assert_eq!(from_column[..], from_slices);
     }
@@ -1244,10 +1189,8 @@ mod tests {
         let mut host = sz::LevenshteinEngine::new(&queries, sz::LevenshteinSymbol::Bytes, &cpu).unwrap();
         let mut host_distances = [0usize; 15];
         let mut column_distances = [0usize; 15];
-        cpu.scope(|scope| host.distances(scope, words, None, &mut host_distances, words.len()))
-            .unwrap();
-        cpu.scope(|scope| host.distances(scope, candidates.view(), None, &mut column_distances, words.len()))
-            .unwrap();
+        cpu.scope(|scope| host.distances(scope, words, None, &mut host_distances, words.len())).unwrap();
+        cpu.scope(|scope| host.distances(scope, candidates.view(), None, &mut column_distances, words.len())).unwrap();
         assert_eq!(column_distances, host_distances);
 
         let mut device = sz::LevenshteinEngine::new(&queries, sz::LevenshteinSymbol::Bytes, &gpu).unwrap();

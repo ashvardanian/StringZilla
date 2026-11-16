@@ -10,9 +10,12 @@ use super::*;
 pub struct Graphemes;
 impl SegmenterKernel for Graphemes {
     unsafe fn segment(t: *const c_void, n: usize, l: *mut usize, c: usize) -> usize {
-        let mut count = 0;
-        sz_utf8_graphemes_best(t, n, l, c, &mut count, Capabilities::CPUS.bits(), core::ptr::null_mut()).infallible();
-        count
+        unsafe {
+            let mut count = 0;
+            sz_utf8_graphemes_best(t, n, l, c, &mut count, Capabilities::CPUS.bits(), core::ptr::null_mut())
+                .infallible();
+            count
+        }
     }
 }
 
