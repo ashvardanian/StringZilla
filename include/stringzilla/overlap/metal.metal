@@ -511,8 +511,8 @@ inline void sz_overlap_roll_metal_(device uchar const *walk, ulong from, ulong u
  *  again from the text. Lanes compare their totals every
  *  @c sz_overlap_gpu_endings_per_check_metal_k endings, and a candidate with too few windows to
  *  come within @p misses_limit is answered before a byte is read. Every residue and every count is
- *  an integer, so a count within the limit is the sum of serial's counts over the widths. Unlike
- *  the CUDA twin, a width past the query's bytes probes nothing, as serial's pairs skip it.
+ *  an integer, so a count within the limit is the sum of serial's counts over the widths. A width
+ *  past the query's bytes probes nothing, as serial's pairs skip it.
  *
  *  @param[in] query Prepared by @ref sz_overlap_query_prepare_metal_, its span read through plain
  *      loads, so the same kernel may have written it.

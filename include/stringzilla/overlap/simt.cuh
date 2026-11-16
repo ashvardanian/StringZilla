@@ -304,7 +304,8 @@ STRINGZILLA_DEVICE sz_size_t sz_overlap_lanes_sum_simt_(sz_size_t value, unsigne
  *
  *  @param[in] btree The tree, read through plain loads when @p staged, so the same kernel may have
  *      written it, and through the read-only path otherwise.
- *  @param[in] query_length The query's bytes, which only the counts read.
+ *  @param[in] query_length The query's bytes: a width past them probes nothing, as serial's pairs
+ *      skip it, since a zero byte leading a wider window leaves its hash one the tree may hold.
  *  @param[in] query_windows The query's windows over every width.
  *  @param[in] lane The calling lane within its group, below @p lanes.
  *  @param[in] lanes The group's lanes, a power of two up to a warp; a group needs as many as its
@@ -350,16 +351,22 @@ STRINGZILLA_DEVICE sz_size_t sz_overlap_candidate_walk_simt_(
         sz_size_t const walk_bytes = run_end != run_begin ? run_end - walk_begin : 0;
         sz_size_t const warm_bytes = run_begin - walk_begin;
 
+        // A width past the query rolls as zero, which probes nothing.
+        sz_u32_t live_widths[sz_overlap_gpu_widths_per_walk_k];
         sz_u32_t hashes[sz_overlap_gpu_widths_per_walk_k], matches[sz_overlap_gpu_widths_per_walk_k];
 #pragma unroll
-        for (index = 0; index != sz_overlap_gpu_widths_per_walk_k; ++index) hashes[index] = 0, matches[index] = 0;
+        for (index = 0; index != sz_overlap_gpu_widths_per_walk_k; ++index) {
+            sz_bool_t const live = index < group_count && group_widths[index] <= query_length ? sz_true_k : sz_false_k;
+            live_widths[index] = live ? group_widths[index] : 0;
+            hashes[index] = 0, matches[index] = 0;
+        }
         // As many passes in every lane, so the checks between them see the whole warp.
         sz_size_t const passes = sz_size_divide_round_up(run + warm_up, sz_overlap_gpu_endings_per_check_k);
         sz_size_t reached = 0, pass = 0, group_matched = 0;
         for (; any(pass != passes, lanes); ++pass) {
             sz_size_t const until = sz_min_of_two(reached + sz_overlap_gpu_endings_per_check_k, walk_bytes);
             if (reached < until) {
-                sz_overlap_roll_simt_((sz_u8_t const *)text + walk_begin, reached, until, warm_bytes, group_widths,
+                sz_overlap_roll_simt_((sz_u8_t const *)text + walk_begin, reached, until, warm_bytes, live_widths,
                                       powers + first_width, group_count, btree, staged, hashes, matches);
                 // Only the windows ending past the run's start were probed, the rest having primed.
                 sz_size_t const probed_from = sz_max_of_two(walk_begin + reached, run_begin);
@@ -708,6 +715,7 @@ STRINGZILLA_DEVICE void sz_overlap_query_prepare_simt_(sz_cptr_t text, sz_size_t
         query->powers = powers;
         query->widths_count = widths_count;
         query->windows = windows;
+        query->length = length;
     }
     __syncwarp();
 }
@@ -744,9 +752,9 @@ STRINGZILLA_DEVICE sz_size_t sz_overlap_candidate_matches_simt_(sz_overlap_query
                                                                 sz_u32_t (*shuffle_index)(sz_u32_t, unsigned, unsigned),
                                                                 int (*any)(int, unsigned)) {
     sz_overlap_btree_simt_t const btree = {query->btree.nodes, query->btree.levels, query->btree.level_bases};
-    return sz_overlap_candidate_walk_simt_(&btree, sz_true_k, query->widths, query->powers, query->widths_count, 0,
-                                           query->windows, text, length, radius, lane, lanes, shuffle_index, any,
-                                           STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL);
+    return sz_overlap_candidate_walk_simt_(&btree, sz_true_k, query->widths, query->powers, query->widths_count,
+                                           query->length, query->windows, text, length, radius, lane, lanes,
+                                           shuffle_index, any, STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL);
 }
 
 #pragma endregion Prepared Queries

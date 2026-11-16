@@ -148,6 +148,9 @@ typedef struct sz_overlap_query_t {
     /** The query's windows summed over every width, repeats included, as @ref sz_overlap_windows
      *  counts them. */
     sz_size_t windows;
+
+    /** The query's bytes, so a width past them probes nothing, as serial's pairs skip it. */
+    sz_size_t length;
 } sz_overlap_query_t;
 
 /** Bytes of the span a device walk prepares one query of @p length bytes into at @p widths: the

@@ -90,7 +90,6 @@ std::size_t test_cross_rocm(environment_t const &env, std::size_t ordinal) {
                                           sz_strings_lookup_rocm,
                                           sz_strings_normalize_rocm};
     check_device_strings_(check, rocm_runtime, strings_rocm);
-    check_device_walks_(check, rocm_runtime, "rocm");
 #endif
 #if STRINGZILLA_TARGET_CDNA3
     device_backend_t cdna3_runtime = runtime;

@@ -3771,6 +3771,24 @@ inline sz_u32_t overlap_reference_matches_(std::string const &query, std::string
     return matches;
 }
 
+/** Queries, candidates and widths that one check scores together. */
+struct overlap_case_t {
+    std::vector<std::string> queries, candidates;
+    std::vector<std::size_t> widths;
+};
+
+/**
+ *  @brief A width past both queries, against candidates whose windows at it open on zero bytes.
+ *
+ *  A zero byte leading a window leaves its hash unchanged, so <tt>"\0\0ab"</tt> at width four hashes
+ *  as <tt>"ab"</tt> at width two, and one tree holds every width's hashes. A backend that probes a
+ *  width past the query counts a window there, which serial and the oracle never do.
+ */
+inline overlap_case_t overlap_past_query_case_() {
+    using namespace std::string_literals;
+    return {{"ab", "abc"}, {"\0\0ab"s, "\0\0bc"s, "\0abc"s, "abc", ""}, {2, 4}};
+}
+
 inline std::vector<sz_u32_t> overlap_tensor_(overlap_backend_t const &backend, std::vector<std::string> const &queries,
                                              std::vector<std::string> const &candidates,
                                              std::vector<std::size_t> const &widths, sz_f32_t radius = 1.0f) {
@@ -3908,8 +3926,9 @@ inline void check_overlap_equivalence_(test_context_t &context, overlap_backend_
 }
 
 /** One backend's engine on degenerate inputs: empties on either side, both, and none survive, as
- *  does a candidate narrower than the width; zero widths, a refused allocation and a stride under
- *  its own axis are reported without touching the outputs; and known answers at three radii. */
+ *  does a candidate narrower than the width or a width past the query; zero widths, a refused
+ *  allocation and a stride under its own axis are reported without touching the outputs; and known
+ *  answers at three radii. */
 inline void check_overlap_safety_(overlap_backend_t const &backend) {
     handle_checked_heap_t heap;
     sz_allocator_t refusing = refusing_allocator_();
@@ -3926,6 +3945,8 @@ inline void check_overlap_safety_(overlap_backend_t const &backend) {
     check_overlap_scores_(backend, kitten, none, widths);
     check_overlap_scores_(backend, none, words, widths);
     check_overlap_scores_(backend, kitten, narrow, widths);
+    overlap_case_t const past_query = overlap_past_query_case_();
+    check_overlap_scores_(backend, past_query.queries, past_query.candidates, past_query.widths);
 
     sz_strings_view_t const kitten_strings = strings_from_(kitten);
     sz_strings_view_t const words_strings = strings_from_(words);
