@@ -108,7 +108,7 @@ constant uint sz_regex_flow_positions_metal_k = 0, sz_regex_flow_behind_metal_k 
 
 /** What a call writes, as @c sz_regex_verb_metal_t numbers it. */
 constant ulong sz_regex_finding_metal_k = 0, sz_regex_counting_metal_k = 1, sz_regex_replacing_metal_k = 2,
-               sz_regex_extracting_metal_k = 3;
+               sz_regex_extracting_metal_k = 3, sz_regex_containing_metal_k = 4;
 
 /** How a walk reads its text, a byte at a time or by the folds of whole units, as
  *  @c sz_case_sensitivity_t numbers it. */
@@ -203,9 +203,12 @@ struct sz_regex_composition_metal_t {
     uchar indices[sz_regex_priming_states_metal_k];
 };
 
-/** What one segment hands the next, as @c sz_regex_carry_simt_t lays it out. */
+/** What one segment hands the next, as @c sz_regex_carry_simt_t lays it out, the contains bits of
+ *  the partial words at either end of the bitmap in two words of their own, the first word's then
+ *  the last word's, as MSL has no 64-bit atomic OR. */
 struct sz_regex_carry_metal_t {
     ulong cursor, refusing, running, last_start, last_end, summed, counted, straddle;
+    uint contained_edges[2];
 };
 
 /** The launch record the host copies in: host addresses in both blocks, and the round's shape. */
@@ -687,6 +690,41 @@ inline void sz_regex_boundary_store_metal_(constant sz_regex_arguments_metal_t &
         if (index) counts[(index - 1) * arguments.counts_stride] = value;
     }
     else if (arguments.verb == sz_regex_finding_metal_k) matches_offsets[index] = value;
+}
+
+/**
+ *  @brief Sets bit @p index of a contains call's bitmap at @p contained, as
+ *      @c sz_regex_contained_set_simt_ does: an atomic OR into the aligned word holding it where
+ *      that word lies inside the bitmap, else into the @p carry 's edges.
+ *
+ *  The bitmap starts as many bytes past a 4-byte boundary as the record's @c counts_stride holds,
+ *  which a contains call has no use for, as the bitmap takes the counts' slot and the host reads
+ *  the bytes off its address, which MSL takes of no device pointer.
+ */
+inline void sz_regex_contained_set_metal_(constant sz_regex_arguments_metal_t &arguments,
+                                          device sz_regex_carry_metal_t *carry, device uchar *contained, ulong index) {
+    ulong const skew = arguments.counts_stride;
+    ulong const end = skew + sz_size_divide_round_up_metal_<ulong>(arguments.haystacks_count, 8);
+    ulong const address = skew + index / 8, word = address & ~3ul;
+    uint const bit = 1u << (address % 4 * 8 + index % 8);
+    device atomic_uint *const target = word >= skew && word + 4 <= end
+                                           ? (device atomic_uint *)(contained + (word - skew))
+                                           : (device atomic_uint *)(carry->contained_edges + (word < skew ? 0 : 1));
+    atomic_fetch_or_explicit(target, bit, memory_order_relaxed);
+}
+
+/** ORs the @p carry 's edges into the bytes of the partial words at either end of a contains
+ *  call's bitmap at @p contained, which no other thread writes, as
+ *  @c sz_regex_contained_edges_simt_ does. */
+inline void sz_regex_contained_edges_metal_(constant sz_regex_arguments_metal_t &arguments,
+                                            device sz_regex_carry_metal_t const *carry, device uchar *contained) {
+    ulong const skew = arguments.counts_stride;
+    ulong const end = skew + sz_size_divide_round_up_metal_<ulong>(arguments.haystacks_count, 8);
+    uint const head = carry->contained_edges[0], tail = carry->contained_edges[1];
+    ulong address = skew;
+    for (; address != end && address % 4; ++address) contained[address - skew] |= uchar(head >> (address % 4 * 8));
+    for (address = max(end & ~3ul, address); address != end; ++address)
+        contained[address - skew] |= uchar(tail >> (address % 4 * 8));
 }
 
 /** Byte @p index of @p image. */
@@ -3433,7 +3471,7 @@ kernel void sz_regex_sweep_metal_kernel_(device uchar *scratch [[buffer(1)]],
         sz_regex_haystack_metal_t haystack = sz_regex_haystack_metal_(corpus, haystack_index);
         if (haystack.first < low) ++pending;
         uint expected = sz_regex_none_metal_k, kept = 0;
-        ulong last_start = 0, last_end = 0, kept_pattern = 0;
+        ulong last_start = 0, last_end = 0, kept_pattern = 0, marked = ~0ul;
         for (uint index = first; index != end; ++index) {
             ulong const mark = begin + round.slots[index];
             if (storing)
@@ -3446,6 +3484,9 @@ kernel void sz_regex_sweep_metal_kernel_(device uchar *scratch [[buffer(1)]],
             expected = round.nexts[index];
             sz_regex_result_metal_t const result = sz_regex_settle_metal_(round, index, mark, haystack);
             if (result.pattern == sz_regex_none_metal_k) continue;
+            // A contains call's bitmap takes the counts' place.
+            if (storing && arguments.verb == sz_regex_containing_metal_k && haystack_index != marked)
+                sz_regex_contained_set_metal_(arguments, round.carry, (device uchar *)counts, marked = haystack_index);
             if (storing && arguments.verb == sz_regex_finding_metal_k && base + kept < arguments.matches_capacity)
                 matches[base + kept] = {haystack_index, result.pattern, mark - haystack.first, result.end - mark};
             if (!storing) round.kept[index] = 1, kept_pattern += result.pattern == arguments.pattern_index;
@@ -3464,8 +3505,8 @@ kernel void sz_regex_sweep_metal_kernel_(device uchar *scratch [[buffer(1)]],
 }
 
 /** Hands the next segment its carry, on one thread: the running total of kept matches, and where
- *  the haystack straddling the two resumes, which is past its last kept match here, and the last
- *  boundary of whatever the call writes. */
+ *  the haystack straddling the two resumes, which is past its last kept match here, the last
+ *  boundary of whatever the call writes, and the edges of a contains call's bitmap. */
 kernel void sz_regex_carry_metal_kernel_(device uchar *scratch [[buffer(1)]],
                                          device uchar const *haystacks [[buffer(2)]],
                                          device uchar const *haystacks_offsets [[buffer(3)]],
@@ -3495,6 +3536,69 @@ kernel void sz_regex_carry_metal_kernel_(device uchar *scratch [[buffer(1)]],
         carry->counted += round.chunk_sums[arguments.chunks_count];
         carry->summed += round.chunk_covers[arguments.chunks_count];
         matches_offsets[arguments.haystacks_count] = carry->summed;
+    }
+    if (arguments.verb == sz_regex_containing_metal_k)
+        sz_regex_contained_edges_metal_(arguments, carry, (device uchar *)counts);
+}
+
+/** Zeroes a contains call's bitmap, bound in the counts' place, its tail bits included, as the
+ *  storing sweeps only ever set bits. */
+kernel void sz_regex_contained_clear_metal_kernel_(device uchar *contained [[buffer(6)]],
+                                                   constant sz_regex_arguments_metal_t &arguments [[buffer(10)]],
+                                                   uint position [[thread_position_in_grid]],
+                                                   uint threads [[threads_per_grid]]) {
+    ulong const bytes = sz_size_divide_round_up_metal_<ulong>(arguments.haystacks_count, 8);
+    for (ulong byte = position; byte < bytes; byte += threads) contained[byte] = 0;
+}
+
+/**
+ *  @brief Marks the haystacks holding a match of a byte-exact engine with no lookarounds into the
+ *      bitmap bound in the counts' place, each walk stopping at its haystack's first match.
+ *
+ *  A SIMD group of 32 lanes, as every Apple GPU runs, answers 32 haystacks at a time, a lane each.
+ *  A lane walks a haystack of at most @ref sz_regex_link_bytes_metal_k bytes alone, as a link walks
+ *  that many on its own, with @ref sz_regex_first_thread_metal_. The group walks each wider one
+ *  together with @ref sz_regex_first_group_metal_, the lanes owning them in order. Its ballot is
+ *  the 32 haystacks' bits, which its first lane stores as four bytes, the tail's cleared, so every
+ *  byte is written once and no thread waits on another threadgroup.
+ */
+kernel void sz_regex_contains_metal_kernel_(
+    device uchar *engine [[buffer(0)]], device uchar *scratch [[buffer(1)]],
+    device uchar const *haystacks [[buffer(2)]], device uchar const *haystacks_offsets [[buffer(3)]],
+    device uchar *contained [[buffer(6)]], constant sz_regex_arguments_metal_t &arguments [[buffer(10)]],
+    threadgroup uchar *staged [[threadgroup(0)]], uint position [[thread_index_in_threadgroup]],
+    uint group_width [[threads_per_threadgroup]], uint group_index [[threadgroup_position_in_grid]],
+    uint groups [[threadgroups_per_grid]], uint simdgroup [[simdgroup_index_in_threadgroup]],
+    uint simdgroups [[simdgroups_per_threadgroup]], uint lane [[thread_index_in_simdgroup]],
+    uint lanes [[threads_per_simdgroup]]) {
+    sz_regex_table_metal_t const table = sz_regex_stage_table_metal_(
+        sz_reach_metal_<uchar>(engine, arguments.engine_host, arguments.byte_to_class),
+        sz_reach_metal_<uint>(engine, arguments.engine_host, arguments.reverse_rows),
+        sz_reach_metal_<uint>(scratch, arguments.scratch_host, arguments.reverse_images), arguments.classes_count, 0,
+        min(arguments.reverse_cells, arguments.staged_cells), staged, position, group_width);
+    sz_regex_corpus_metal_t const corpus = sz_regex_corpus_metal_(haystacks, haystacks_offsets, arguments);
+    sz_group_metal_t const group = {lanes, lane};
+    ulong const count = corpus.count, bytes = sz_size_divide_round_up_metal_<ulong>(count, 8);
+    ulong const blocks = sz_size_divide_round_up_metal_<ulong>(count, 32);
+
+    // Every lane of a SIMD group takes as many rounds, as its walks and ballots are collective.
+    for (ulong block = ulong(group_index) * simdgroups + simdgroup; block < blocks;
+         block += ulong(groups) * simdgroups) {
+        ulong const index = block * 32 + lane;
+        bool const present = index < count;
+        sz_regex_haystack_metal_t const haystack = sz_regex_haystack_metal_(corpus, present ? index : 0);
+        bool const alone = present && haystack.length <= sz_regex_link_bytes_metal_k;
+        bool found = alone && sz_regex_first_thread_metal_(table, arguments, haystack.text, haystack.length);
+        for (uint together = group.ballot(present && !alone); together; together &= together - 1) {
+            uint const owner = ctz(together);
+            sz_regex_haystack_metal_t const walked = sz_regex_haystack_metal_(corpus, block * 32 + owner);
+            bool const any = sz_regex_first_group_metal_(table, arguments, walked.text, walked.length, group);
+            if (lane == owner) found = any;
+        }
+        uint const bits = group.ballot(found);
+        if (lane != 0) continue;
+        for (ulong byte = block * 4; byte != block * 4 + 4 && byte < bytes; ++byte)
+            contained[byte] = uchar(bits >> (byte - block * 4) * 8);
     }
 }
 

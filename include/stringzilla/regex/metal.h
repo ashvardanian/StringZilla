@@ -22,6 +22,10 @@
  *  past that window does a call commit what it encoded, wait, read the round's counters back and go
  *  on, which is how its walks slide past the window's end. Otherwise nothing is read back until the
  *  caller synchronizes.
+ *
+ *  A contains call on a byte-exact engine without lookarounds runs no rounds: each haystack's
+ *  start-finding walk stops at its first match, a SIMD group's lanes walking the short haystacks
+ *  alone and each long one together.
  */
 #ifndef STRINGZILLA_REGEX_METAL_H_
 #define STRINGZILLA_REGEX_METAL_H_
@@ -133,6 +137,9 @@ typedef enum sz_regex_verb_metal_t {
 
     /** Rows of groups and their boundaries, into the matches and their offsets. */
     sz_regex_extracting_metal_k = 3,
+
+    /** A bit per haystack holding a match, into the contains bitmap in the counts' place. */
+    sz_regex_containing_metal_k = 4,
 } sz_regex_verb_metal_t;
 
 /** Every kernel of <tt>metal.metal</tt>, built at init so no call compiles one. */
@@ -179,6 +186,8 @@ static char const *const sz_regex_kernels_metal_[] = {
     "sz_regex_rewrite_metal_kernel_",
     "sz_regex_firsts_metal_kernel_",
     "sz_regex_rows_metal_kernel_",
+    "sz_regex_contained_clear_metal_kernel_",
+    "sz_regex_contains_metal_kernel_",
 };
 
 /** The walk a dispatch's set kernels run, as the kernels number them: the position automaton right
@@ -234,8 +243,9 @@ enum {
     sz_regex_affine_bytes_metal_k = 2 * sizeof(sz_u32_t) + (1 + sz_regex_undecided_metal_k) * sizeof(sz_u64_t),
 };
 
-/** Bytes of the carry between segments, as the kernels lay it out. */
-enum { sz_regex_carry_bytes_metal_k = 8 * sizeof(sz_u64_t) };
+/** Bytes of the carry between segments, as the kernels lay it out, the edges of a contains call's
+ *  bitmap in its last word. */
+enum { sz_regex_carry_bytes_metal_k = 9 * sizeof(sz_u64_t) };
 
 /** The segment geometry of an engine's round block, and the byte offsets of everything in it. */
 typedef struct sz_regex_arena_metal_t {
@@ -1091,6 +1101,41 @@ STRINGZILLA_API sz_status_t sz_regex_engine_init_metal(sz_regex_engine_t *engine
         return sz_metal_commit_(&call, status);
     }
     return sz_metal_commit_(&call, sz_success_k);
+}
+
+STRINGZILLA_API sz_status_t sz_regex_contains_metal(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
+                                                    sz_u1x8_t *contained, sz_stream_t stream) {
+    sz_metal_bound_t buffers[sz_regex_buffers_metal_k] = {{STRINGZILLA_NULL, 0}};
+    sz_size_t const bytes = sz_size_divide_round_up(haystacks->count, 8);
+    sz_regex_arguments_metal_t arguments;
+    sz_metal_call_t call;
+    sz_status_t status;
+    if (!engine->memory) return sz_missing_kernel_k;
+    if (!haystacks->count) return sz_success_k;
+    if (haystacks->layout == sz_strings_accessor_k) return sz_device_memory_mismatch_k;
+    status = sz_device_enter_metal_(stream, &call);
+    if (status == sz_success_k) status = sz_regex_resident_metal_(engine, &call, haystacks, buffers);
+    if (status != sz_success_k) return sz_metal_commit_(&call, status);
+    // The bitmap takes the counts' slot, the per-haystack output this verb writes in their place.
+    if (!sz_metal_resolve_call_(&call, contained, bytes, buffers + sz_regex_counts_buffer_metal_k))
+        return sz_metal_commit_(&call, sz_device_memory_mismatch_k);
+    sz_regex_bind_unused_metal_(buffers);
+
+    sz_regex_arguments_metal_(engine, haystacks, sz_regex_containing_metal_k, &arguments);
+    // A contains call has no counts' stride, which carries how far past a word the bitmap starts.
+    arguments.counts_stride = (sz_u64_t)((sz_size_t)contained % 4);
+    // A byte-exact engine without lookarounds answers from the start-finding walk alone, each
+    // haystack's walk stopping at its first match; any other runs the rounds, as the counts do.
+    if (engine->case_sensitivity == sz_cased_k && !engine->lookarounds_count && engine->reverse_rows)
+        status = sz_regex_encode_metal_(&call, buffers, "sz_regex_contains_metal_kernel_", &arguments,
+                                        sz_regex_groups_metal_(sz_size_divide_round_up(haystacks->count, 32) * 32));
+    else {
+        status = sz_regex_encode_metal_(&call, buffers, "sz_regex_contained_clear_metal_kernel_", &arguments,
+                                        sz_regex_groups_metal_(bytes));
+        if (status == sz_success_k)
+            status = sz_regex_rounds_metal_(engine, &call, buffers, haystacks, &arguments, stream);
+    }
+    return sz_metal_commit_(&call, status);
 }
 
 STRINGZILLA_API sz_status_t sz_regex_counts_metal(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,

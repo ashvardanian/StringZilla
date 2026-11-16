@@ -51,8 +51,7 @@ struct device_kernels {
     sz_kernel_levenshtein_distances_t levenshtein_distances;
     sz_kernel_overlap_scores_t overlap_scores;
 
-    /** The three @c contains, each null where the vendor has none, as Metal has no regex or
-     *  subdocuments one. */
+    /** The three @c contains, each null where the vendor has none. */
     sz_kernel_substrings_contains_t substrings_contains;
     sz_kernel_substrings_counts_t substrings_counts;
     sz_kernel_substrings_find_t substrings_find;
@@ -3084,7 +3083,7 @@ inline void check_device_kernels_(cross_section_t &check, auto const &backend) {
 inline std::size_t test_cross_dispatch_device(environment_t const &env, device_backend_t const &runtime,
                                               auto sha256_multistate_update, auto sha256_multistate_digest) {
     sz_capability_t const capabilities = runtime.capabilities;
-    // Only a group that has the kernel gets a dispatch point, as Metal has no contains yet.
+    // Only a group that has the kernel gets a dispatch point.
     auto const offered = [capabilities](sz_kernel_kind_t kind) {
         sz_kernel_punned_t kernel = nullptr;
         sz_capability_t capability = 0;

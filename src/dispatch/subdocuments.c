@@ -212,6 +212,14 @@ static sz_capability_kernels_t const *sz_subdocuments_contains_capabilities(void
                                                          : (sz_kernel_punned_t)&sz_subdocuments_contains_cdna5,
 #endif
     };
+    enum { metal_above_k = ((sz_cap_metal_k * STRINGZILLA_TARGET_METAL) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
+    static sz_kernel_punned_t const metal[] = {
+        STRINGZILLA_NULL,
+#if STRINGZILLA_TARGET_METAL
+        metal_above_k & ~((sz_cap_metal_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_subdocuments_contains_metal,
+#endif
+    };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
              sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
@@ -225,7 +233,7 @@ static sz_capability_kernels_t const *sz_subdocuments_contains_capabilities(void
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM | sz_cap_cdna3_k * STRINGZILLA_TARGET_CDNA3 |
              sz_cap_cdna4_k * STRINGZILLA_TARGET_CDNA4 | sz_cap_cdna5_k * STRINGZILLA_TARGET_CDNA5,
          rocm},
-        {0, sz_no_kernels_},
+        {sz_cap_metal_k * STRINGZILLA_TARGET_METAL, metal},
     };
     return lists;
 }

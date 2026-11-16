@@ -10,7 +10,7 @@
  *
  *  The verbs keep the serial tier's shape, with an @c id<MTLCommandQueue> as the stream. Every
  *  block the kernels read must come from @c sz_allocator_init_unified_metal on that stream's
- *  device, and documents must be tapes. Both verbs wait for their counting walks, as a malformed
+ *  device, and documents must be tapes. Every verb waits for its counting walks, as a malformed
  *  document fails the call and the documents needing more frames than the first walk's stacks hold
  *  are counted again; a find then scans the counts on the host, every Metal block being shared, and
  *  leaves its storing walks running. The large documents the counting walks list walk over chunks
@@ -419,14 +419,22 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_large_metal_(sz_subdocuments_engi
     return sz_metal_commit_(&call, status);
 }
 
-/** Counts every document into @p counts, or, with @p counts null, finds every match into @p matches
- *  and @p matches_offsets; waits for the counting walks, and fails as the serial tier does on the
- *  first malformed document. */
+/**
+ *  @brief Marks every document holding a match into @p contained, counts every document into
+ *      @p counts, or, with both null, finds every match into @p matches and @p matches_offsets.
+ *
+ *  It waits for the counting walks and fails on the first malformed document, as serial does.
+ *
+ *  A contains call over JSON without filters or relative paths first walks each document with a
+ *  SIMD group, as the CUDA tier walks it with a warp, on the first walk's stacks, and only where
+ *  one is deeper than they hold walks the call again as the counts do, marking from their counts.
+ */
 STRINGZILLA_INLINE sz_status_t sz_subdocuments_walks_metal_(sz_subdocuments_engine_t *engine,
-                                                            sz_strings_view_t const *documents, sz_size_t *counts,
-                                                            sz_size_t counts_stride, sz_match_t *matches,
-                                                            sz_size_t matches_capacity, sz_size_t *matches_offsets,
-                                                            sz_size_t *malformed_index, sz_stream_t stream) {
+                                                            sz_strings_view_t const *documents, sz_u1x8_t *contained,
+                                                            sz_size_t *counts, sz_size_t counts_stride,
+                                                            sz_match_t *matches, sz_size_t matches_capacity,
+                                                            sz_size_t *matches_offsets, sz_size_t *malformed_index,
+                                                            sz_stream_t stream) {
     sz_size_t const count = documents->count, words = engine->words_count;
     // An XML frame's positional counters follow its live set, two to a word, as the serial
     // markup walk keeps them.
@@ -447,8 +455,10 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walks_metal_(sz_subdocuments_engi
     sz_subdocuments_arguments_metal_t arguments[2];
     sz_u32_t *header;
     sz_size_t larges = 0, deep_stacks_bytes = 0;
+    sz_u64_t relative = 0;
     sz_status_t status;
     if (count >> 32) return sz_unexpected_dimensions_k;
+    for (sz_size_t word = 0; word != words; ++word) relative |= engine->relative_steps[word];
     status = sz_subdocuments_reserve_metal_(engine, stacks + stacks_bytes, stream);
     if (status != sz_success_k) return status;
 
@@ -506,6 +516,36 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walks_metal_(sz_subdocuments_engi
     arguments[0].frame_words = frame_words, arguments[0].key_bytes = key_bytes;
     arguments[0].words_count = (sz_u32_t)words, arguments[0].names_slots_count = engine->names_slots_count;
     arguments[0].filters_count = engine->filters_count, arguments[0].format = (sz_u32_t)engine->format;
+
+    // Filters and relative paths keep a frame per structural byte, past what a group's stack holds,
+    // and XML walks a document a thread each. The groups take the first walk's key buffers and
+    // stacks, a group to at most 32 documents, so they hold as many as its threads do.
+    if (contained && engine->format == sz_subdocuments_json_k && !engine->filters_count && !relative) {
+        sz_subdocuments_arguments_metal_t grouped = arguments[0];
+        sz_metal_bound_t buffers[sz_subdocuments_buffers_metal_k];
+        sz_metal_call_t call;
+        grouped.threads = sz_min_of_two(sz_size_divide_round_up(count, 32),
+                                        (sz_size_t)sz_subdocuments_threads_metal_k / 32);
+        header = (sz_u32_t *)engine->scratch;
+        header[0] = (sz_u32_t)count, header[1] = 0;
+        status = sz_subdocuments_open_metal_(engine, documents, STRINGZILLA_NULL, 0, STRINGZILLA_NULL, 0,
+                                             STRINGZILLA_NULL, &call, buffers, stream);
+        if (status == sz_success_k && !sz_metal_resolve_call_(&call, contained, sz_size_divide_round_up(count, 8),
+                                                              buffers + sz_subdocuments_counts_buffer_metal_k))
+            status = sz_device_memory_mismatch_k;
+        if (status == sz_success_k)
+            status = sz_subdocuments_dispatch_metal_(
+                &call, buffers, "sz_subdocuments_contains_group_metal_kernel_", &grouped,
+                sz_size_divide_round_up((sz_size_t)grouped.threads * 32, sz_subdocuments_threads_per_group_metal_k));
+        status = sz_metal_commit_(&call, status);
+        if (status == sz_success_k) status = sz_stream_synchronize_metal_(stream);
+        if (status != sz_success_k) return status;
+        if (!header[1] && header[0] != count) {
+            *malformed_index = header[0];
+            return sz_invalid_syntax_k;
+        }
+        if (!header[1]) return sz_success_k;
+    }
     arguments[1] = arguments[0], arguments[1].listed = 1;
 
     // The stream is joined after every counting walk, so no queued dispatch still reads the header.
@@ -553,6 +593,22 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walks_metal_(sz_subdocuments_engi
     }
     if (counts) return sz_success_k;
 
+    // A contains call marks from the counts the walks left in the round block.
+    if (contained) {
+        sz_metal_bound_t buffers[sz_subdocuments_buffers_metal_k];
+        sz_metal_call_t call;
+        status = sz_subdocuments_open_metal_(engine, documents, STRINGZILLA_NULL, 0, STRINGZILLA_NULL, 0,
+                                             STRINGZILLA_NULL, &call, buffers, stream);
+        if (status == sz_success_k && !sz_metal_resolve_call_(&call, contained, sz_size_divide_round_up(count, 8),
+                                                              buffers + sz_subdocuments_counts_buffer_metal_k))
+            status = sz_device_memory_mismatch_k;
+        if (status == sz_success_k)
+            status = sz_subdocuments_dispatch_metal_(
+                &call, buffers, "sz_subdocuments_contains_metal_kernel_", arguments,
+                sz_size_divide_round_up(count, sz_subdocuments_threads_per_group_metal_k));
+        return sz_metal_commit_(&call, status);
+    }
+
     // Each document's count becomes its first match, the total after the last, and every walk
     // stores in one call.
     {
@@ -594,6 +650,23 @@ STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_metal(
     return status;
 }
 
+STRINGZILLA_API sz_status_t sz_subdocuments_contains_metal(sz_subdocuments_engine_t *engine,
+                                                           sz_strings_view_t const *documents, sz_u1x8_t *contained,
+                                                           sz_size_t *malformed_index, sz_stream_t stream) {
+    sz_metal_context_t *context;
+    sz_metal_bound_t bound;
+    if (!engine->steps_count) return sz_missing_kernel_k;
+    if (!documents->count) return sz_success_k;
+    if (documents->layout == sz_strings_accessor_k) return sz_device_memory_mismatch_k;
+    // The bitmap is checked before any walk, so a refused output fails ahead of any document.
+    context = sz_metal_context_(stream);
+    if (!context) return sz_missing_gpu_k;
+    if (!sz_metal_resolve_(context, contained, sz_size_divide_round_up(documents->count, 8), &bound))
+        return sz_device_memory_mismatch_k;
+    return sz_subdocuments_walks_metal_(engine, documents, contained, STRINGZILLA_NULL, 0, STRINGZILLA_NULL, 0,
+                                        STRINGZILLA_NULL, malformed_index, stream);
+}
+
 STRINGZILLA_API sz_status_t sz_subdocuments_counts_metal(sz_subdocuments_engine_t *engine,
                                                          sz_strings_view_t const *documents, sz_size_t *counts,
                                                          sz_size_t counts_stride, sz_size_t *malformed_index,
@@ -602,8 +675,8 @@ STRINGZILLA_API sz_status_t sz_subdocuments_counts_metal(sz_subdocuments_engine_
     if (!counts_stride) return sz_unexpected_dimensions_k;
     if (!documents->count) return sz_success_k;
     if (documents->layout == sz_strings_accessor_k) return sz_device_memory_mismatch_k;
-    return sz_subdocuments_walks_metal_(engine, documents, counts, counts_stride, STRINGZILLA_NULL, 0, STRINGZILLA_NULL,
-                                        malformed_index, stream);
+    return sz_subdocuments_walks_metal_(engine, documents, STRINGZILLA_NULL, counts, counts_stride, STRINGZILLA_NULL, 0,
+                                        STRINGZILLA_NULL, malformed_index, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_subdocuments_find_metal(sz_subdocuments_engine_t *engine,
@@ -616,8 +689,8 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_metal(sz_subdocuments_engine_t 
         matches_offsets[0] = 0;
         return sz_success_k;
     }
-    return sz_subdocuments_walks_metal_(engine, documents, STRINGZILLA_NULL, 0, matches, matches_capacity,
-                                        matches_offsets, malformed_index, stream);
+    return sz_subdocuments_walks_metal_(engine, documents, STRINGZILLA_NULL, STRINGZILLA_NULL, 0, matches,
+                                        matches_capacity, matches_offsets, malformed_index, stream);
 }
 
 #pragma endregion Metal

@@ -137,6 +137,14 @@ static sz_capability_kernels_t const *sz_regex_contains_capabilities(void) {
                                                         : (sz_kernel_punned_t)&sz_regex_contains_rocm,
 #endif
     };
+    enum { metal_above_k = ((sz_cap_metal_k * STRINGZILLA_TARGET_METAL) * !STRINGZILLA_MULTIVERSIONED) >> 48 };
+    static sz_kernel_punned_t const metal[] = {
+        STRINGZILLA_NULL,
+#if STRINGZILLA_TARGET_METAL
+        metal_above_k & ~((sz_cap_metal_k >> 48) * 2 - 1) ? STRINGZILLA_NULL
+                                                          : (sz_kernel_punned_t)&sz_regex_contains_metal,
+#endif
+    };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
              sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
@@ -146,7 +154,7 @@ static sz_capability_kernels_t const *sz_regex_contains_capabilities(void) {
              sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER,
          cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
-        {0, sz_no_kernels_},
+        {sz_cap_metal_k * STRINGZILLA_TARGET_METAL, metal},
     };
     return lists;
 }

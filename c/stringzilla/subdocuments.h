@@ -557,6 +557,10 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_cdna5(sz_subdocuments_engine_t 
 STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_metal(
     sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths, sz_subdocuments_format_t format,
     sz_subdocuments_options_t options, sz_size_t *malformed_index, sz_allocator_t *allocator, sz_stream_t stream);
+/** @copydoc sz_subdocuments_contains */
+STRINGZILLA_API sz_status_t sz_subdocuments_contains_metal(sz_subdocuments_engine_t *engine,
+                                                           sz_strings_view_t const *documents, sz_u1x8_t *contained,
+                                                           sz_size_t *malformed_index, sz_stream_t stream);
 /** @copydoc sz_subdocuments_counts */
 STRINGZILLA_API sz_status_t sz_subdocuments_counts_metal(sz_subdocuments_engine_t *engine,
                                                          sz_strings_view_t const *documents, sz_size_t *counts,

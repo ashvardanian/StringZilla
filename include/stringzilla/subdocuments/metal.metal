@@ -2247,6 +2247,82 @@ kernel void sz_subdocuments_walk_metal_kernel_(
     }
 }
 
+/** Marks the documents a counting walk found a match in, a bit each from the counts it left in the
+ *  round block, as @c sz_subdocuments_contains_simt_ does: a SIMD group's ballot covers 32
+ *  documents, and its first lane stores their four bytes, the tail's bits cleared. */
+kernel void sz_subdocuments_contains_metal_kernel_(device uchar *scratch [[buffer(1)]],
+                                                   device uchar *contained [[buffer(6)]],
+                                                   constant sz_subdocuments_arguments_metal_t &arguments [[buffer(8)]],
+                                                   uint position [[thread_position_in_grid]],
+                                                   uint threads [[threads_per_grid]]) {
+    device ulong const *const counted = sz_reach_metal_<ulong>(scratch, arguments.scratch_host, arguments.counted);
+    ulong const count = arguments.documents_count, bytes = sz_size_divide_round_up_metal_<ulong>(count, 8);
+    // Every lane of a SIMD group takes as many rounds, as the ballot is collective.
+    ulong const lanes = sz_size_divide_round_up_metal_<ulong>(count, 32) * 32;
+    for (ulong index = position; index < lanes; index += threads) {
+        bool const found = index < count && counted[index] != 0;
+        uint const bits = uint(simd_vote::vote_t(simd_ballot(found)));
+        if (index % 32 != 0) continue;
+        for (ulong byte = index / 8; byte != index / 8 + 4 && byte < bytes; ++byte)
+            contained[byte] = uchar(bits >> (byte - index / 8) * 8);
+    }
+}
+
+/**
+ *  @brief Marks the JSON documents holding a node some path selects, a SIMD group walking each one
+ *      together with @ref sz_subdocuments_walk_group_metal_, as the CUDA tier's warps walk them.
+ *
+ *  A SIMD group of 32 lanes, as every Apple GPU runs, answers 32 documents at a time, one after
+ *  another on its own stack of @c frames frames and its own key buffer, and its first lane stores
+ *  their four bytes, the tail's bits cleared. Each walk validates its whole document, as a count
+ *  does: a malformed one lowers the header's first word to its index, and one deeper than the stack
+ *  sets the second, for the host to walk the call again as the counts do. No group waits on
+ *  another, as Apple GPUs promise no forward progress between threadgroups.
+ */
+kernel void sz_subdocuments_contains_group_metal_kernel_(
+    device uchar *engine_block [[buffer(0)]], device uchar *scratch [[buffer(1)]],
+    device uchar const *documents [[buffer(2)]], device uchar const *documents_offsets [[buffer(3)]],
+    device uchar *contained [[buffer(6)]], device uchar *regex_block [[buffer(7)]],
+    constant sz_subdocuments_arguments_metal_t &arguments [[buffer(8)]],
+    uint group_index [[threadgroup_position_in_grid]], uint simdgroup [[simdgroup_index_in_threadgroup]],
+    uint simdgroups [[simdgroups_per_threadgroup]], uint lane [[thread_index_in_simdgroup]],
+    uint lanes [[threads_per_simdgroup]]) {
+    ulong const scratch_host = arguments.scratch_host;
+    sz_subdocuments_engine_metal_t const engine = sz_subdocuments_engine_reach_metal_(engine_block, regex_block,
+                                                                                      arguments);
+    sz_strings_tape_metal_t const tape = {documents, documents_offsets, arguments.documents_layout};
+    device atomic_uint *const header = sz_reach_metal_<atomic_uint>(scratch, scratch_host, arguments.header);
+    ulong const walker = ulong(group_index) * simdgroups + simdgroup;
+    device ulong *const stack = sz_reach_metal_<ulong>(scratch, scratch_host, arguments.stacks) +
+                                walker * arguments.frames * arguments.frame_words;
+    device uchar *const key = sz_reach_metal_<uchar>(scratch, scratch_host, arguments.keys) +
+                              walker * arguments.key_bytes;
+    sz_group_metal_t const group = {lanes, lane};
+    ulong const count = arguments.documents_count, bytes = sz_size_divide_round_up_metal_<ulong>(count, 8);
+    ulong const blocks = sz_size_divide_round_up_metal_<ulong>(count, 32);
+
+    // Only the groups the stacks were sized for walk, whatever the grid rounds up to.
+    for (ulong block = walker; walker < arguments.threads && block < blocks; block += arguments.threads) {
+        uint bits = 0;
+        for (uint member = 0; member != 32 && block * 32 + member < count; ++member) {
+            ulong const document = block * 32 + member;
+            ulong emitted = 0;
+            int const ending = sz_subdocuments_walk_group_metal_(
+                engine, sz_strings_start_metal_(tape, document), sz_strings_length_metal_(tape, document), document,
+                stack, arguments.frames, arguments.frame_words, key, arguments.key_bytes, nullptr, 0, emitted, group);
+            // Every lane walked the same document, so the first one answers for the group.
+            if (lane != 0) continue;
+            if (ending == sz_subdocuments_walked_metal_k) bits |= uint(emitted != 0) << member;
+            else if (ending == sz_subdocuments_malformed_metal_k)
+                atomic_fetch_min_explicit(header, uint(document), memory_order_relaxed);
+            else atomic_store_explicit(header + 1, 1u, memory_order_relaxed);
+        }
+        if (lane != 0) continue;
+        for (ulong byte = block * 4; byte != block * 4 + 4 && byte < bytes; ++byte)
+            contained[byte] = uchar(bits >> (byte - block * 4) * 8);
+    }
+}
+
 /** Entries of one level of depth minima each entry of the level above summarizes. */
 constant ulong sz_subdocuments_minima_fanout_metal_k = 32;
 
