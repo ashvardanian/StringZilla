@@ -121,7 +121,7 @@ static char const *const sz_substrings_kernels_metal_[] = {
     "sz_substrings_counts_metal_kernel_",       "sz_substrings_store_matches_metal_kernel_",
     "sz_substrings_stored_metal_kernel_",       "sz_substrings_rewrite_offsets_metal_kernel_",
     "sz_substrings_rewrite_copy_metal_kernel_", "sz_substrings_target_metal_kernel_",
-    "sz_substrings_bm25_metal_kernel_",
+    "sz_substrings_bm25_metal_kernel_",         "sz_substrings_contains_metal_kernel_",
 };
 
 /** The launch record, laid out as the kernels' record of the same name. */
@@ -419,6 +419,30 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init_metal(
     }
     engine->report = (sz_substrings_report_t *)engine->scratch;
     return sz_metal_commit_(&call, sz_success_k);
+}
+
+STRINGZILLA_API sz_status_t sz_substrings_contains_metal(sz_substrings_engine_t *engine,
+                                                         sz_strings_view_t const *haystacks, sz_u1x8_t *contained,
+                                                         sz_stream_t stream) {
+    sz_metal_bound_t buffers[sz_substrings_buffers_metal_k] = {{STRINGZILLA_NULL, 0}};
+    sz_substrings_arguments_metal_t arguments;
+    sz_metal_call_t call;
+    sz_status_t status;
+    if (!haystacks->count) return sz_success_k;
+    status = sz_device_enter_metal_(stream, &call);
+    if (status == sz_success_k) status = sz_substrings_resident_metal_(engine, &call, haystacks, buffers);
+    if (status != sz_success_k) return sz_metal_commit_(&call, status);
+    // The bitmap takes the counts' slot, the per-haystack output this verb writes in their place.
+    if (!sz_metal_resolve_call_(&call, contained, sz_size_divide_round_up(haystacks->count, 8),
+                                buffers + sz_substrings_counts_buffer_metal_k))
+        return sz_metal_commit_(&call, sz_device_memory_mismatch_k);
+
+    sz_substrings_arguments_metal_(engine, haystacks, &arguments);
+    status = sz_substrings_walk_metal_(engine, &call, buffers, haystacks, sz_false_k, STRINGZILLA_NULL, &arguments);
+    if (status == sz_success_k)
+        status = sz_substrings_encode_metal_(&call, buffers, "sz_substrings_contains_metal_kernel_", &arguments,
+                                             sz_substrings_groups_metal_(haystacks->count));
+    return sz_metal_commit_(&call, status);
 }
 
 STRINGZILLA_API sz_status_t sz_substrings_counts_metal(sz_substrings_engine_t *engine,

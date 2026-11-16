@@ -51,7 +51,8 @@ struct device_kernels {
     sz_kernel_levenshtein_distances_t levenshtein_distances;
     sz_kernel_overlap_scores_t overlap_scores;
 
-    /** The three @c contains, each null where the vendor has none, as Metal has none yet. */
+    /** The three @c contains, each null where the vendor has none, as Metal has no regex or
+     *  subdocuments one. */
     sz_kernel_substrings_contains_t substrings_contains;
     sz_kernel_substrings_counts_t substrings_counts;
     sz_kernel_substrings_find_t substrings_find;

@@ -60,11 +60,6 @@ struct sz_substrings_output_metal_t {
     uint needle_index, folded_match_bytes;
 };
 
-/** One match, laid out as @c sz_match_t. */
-struct sz_match_metal_t {
-    ulong haystack_index, needle_index, byte_offset, byte_length;
-};
-
 /** A round's report, laid out as @c sz_substrings_report_t. */
 struct sz_substrings_report_metal_t {
     ulong matches_emitted, matches_stored, target_length, shortfall;
@@ -373,6 +368,149 @@ inline ulong sz_substrings_walk_chunk_metal_(thread sz_substrings_automaton_meta
         }
     }
     return found;
+}
+
+/**
+ *  @brief What a threadgroup keeps in threadgroup memory beside the automaton, which a walk reads
+ *      in place of the automaton's own arrays, as @c sz_substrings_staged_simt_t keeps it.
+ *
+ *  The automaton stays the walk's read-only argument, so its device arrays stay where the steps
+ *  past the staged head read them.
+ */
+struct sz_substrings_staged_metal_t {
+
+    /** The automaton's class map, in threadgroup memory. */
+    threadgroup uchar const *classes;
+
+    /** The head of the hot tier, in threadgroup memory. */
+    threadgroup uint const *rows;
+
+    /** States the staged head covers. */
+    uint rows_count;
+};
+
+/** One byte's transition, staged threadgroup memory first, as @c sz_substrings_step_simt_ takes
+ *  it. */
+inline uint sz_substrings_step_staged_metal_(thread sz_substrings_automaton_metal_t const &automaton,
+                                             thread sz_substrings_staged_metal_t const &staged, uint state,
+                                             uchar byte) {
+    uint const byte_class = staged.classes[byte];
+    // Asked on every chase step, so a failure link into the staged head stays in fast memory.
+    for (;;) {
+        if (state < staged.rows_count) return staged.rows[(ulong)state * automaton.classes_count + byte_class];
+        if (state < automaton.hot_count) return automaton.hot_rows[(ulong)state * automaton.classes_count + byte_class];
+        ulong const candidate = (ulong)automaton.base[state] + byte;
+        if (automaton.check[candidate] == state) return (uint)candidate;
+        if (state == automaton.root) return automaton.root;
+        state = automaton.fail[state];
+    }
+}
+
+/** Whether any needle ends on @p state, from the automaton's acceptance bitmap. */
+inline bool sz_substrings_accepts_metal_(thread sz_substrings_automaton_metal_t const &automaton, uint state) {
+    return (automaton.accepts_words[state >> 5] >> (state & 31u)) & 1u;
+}
+
+/**
+ *  @brief Cooperatively stages the class map and the head of the hot tier into @p staged, once per
+ *      threadgroup, as @c sz_substrings_stage_simt_ does.
+ *  @param[in] staged Room for 256 bytes of the class map, then @p staged_count rows of
+ *      @c classes_count words each, the threadgroup memory a kernel binds at @c threadgroup(0) .
+ *
+ *  The hot tier's out-degree ordering makes its head the best prefix to stage, and every step reads
+ *  the map. Every thread of the threadgroup takes part, so a kernel calls it first, before any
+ *  thread can leave.
+ */
+inline sz_substrings_staged_metal_t sz_substrings_stage_metal_(thread sz_substrings_automaton_metal_t const &automaton,
+                                                               threadgroup uchar *staged, uint staged_count, uint lane,
+                                                               uint width) {
+    threadgroup uint *const rows = (threadgroup uint *)(staged + 256);
+    uint const count = min(staged_count, automaton.hot_count);
+    ulong const cells = (ulong)count * automaton.classes_count;
+    for (uint cell = lane; cell < 256; cell += width) staged[cell] = automaton.byte_to_class[cell];
+    for (ulong cell = lane; cell < cells; cell += width) rows[cell] = automaton.hot_rows[cell];
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    sz_substrings_staged_metal_t result;
+    result.classes = staged, result.rows = rows, result.rows_count = count;
+    return result;
+}
+
+/** The state a walk from the root reaches at @p chunk_begin of @p text, primed without reporting
+ *  over the bytes before it a match ending in the chunk may start at, never before the text, as
+ *  @c sz_substrings_prime_simt_ primes it. */
+inline uint sz_substrings_prime_metal_(thread sz_substrings_automaton_metal_t const &automaton,
+                                       thread sz_substrings_staged_metal_t const &staged, device uchar const *text,
+                                       ulong chunk_begin) {
+    ulong const warm_up = automaton.max_source_match_bytes > 0 ? automaton.max_source_match_bytes - 1 : 0;
+    uint state = automaton.root;
+    for (ulong position = chunk_begin >= warm_up ? chunk_begin - warm_up : 0; position < chunk_begin; ++position)
+        state = sz_substrings_step_staged_metal_(automaton, staged, state, text[position]);
+    return state;
+}
+
+/*  A walk answers for one value at one granularity, as the walks of `substrings/simt.cuh` do: a
+ *  thread walking it alone, a simdgroup walking it together, or a thread walking one chunk of it
+ *  with its state carried in and out. A walk reads no grid position and stages nothing, so a
+ *  product calls it from a kernel of its own under any launch, having staged the automaton with
+ *  `sz_substrings_stage_metal_`; the `first` walks take a byte-exact automaton. */
+
+/**
+ *  @brief Whether any needle of a byte-exact automaton ends in bytes @p chunk_begin to @p chunk_end
+ *      of @p text, walking from @p carried and stopping at the first match, as
+ *      @c sz_substrings_first_chunk_simt_ does.
+ *  @param[in] length Bytes of @p text, past which the chunk is cut.
+ *  @param[in,out] carried The state at @p chunk_begin, which @ref sz_substrings_prime_metal_ or the
+ *      previous chunk's walk leaves; the state at @p chunk_end on return, or at the byte the first
+ *      match ends on.
+ *
+ *  A match may start before @p chunk_begin, as far back as @p carried remembers, so a value cut
+ *  into chunks walked in order, each carrying the last one's state, answers exactly as one walk
+ *  over all of it.
+ */
+inline bool sz_substrings_first_chunk_metal_(thread sz_substrings_automaton_metal_t const &automaton,
+                                             thread sz_substrings_staged_metal_t const &staged,
+                                             device uchar const *text, ulong length, ulong chunk_begin, ulong chunk_end,
+                                             thread uint &carried) {
+    ulong const end = min(chunk_end, length);
+    uint state = carried;
+    for (ulong position = chunk_begin; position < end; ++position) {
+        state = sz_substrings_step_staged_metal_(automaton, staged, state, text[position]);
+        if (sz_substrings_accepts_metal_(automaton, state)) {
+            carried = state;
+            return true;
+        }
+    }
+    carried = state;
+    return false;
+}
+
+/** Whether any needle of a byte-exact automaton occurs in @p text, one thread walking all of it
+ *  from the root. */
+inline bool sz_substrings_first_thread_metal_(thread sz_substrings_automaton_metal_t const &automaton,
+                                              thread sz_substrings_staged_metal_t const &staged,
+                                              device uchar const *text, ulong length) {
+    uint carried = automaton.root;
+    return sz_substrings_first_chunk_metal_(automaton, staged, text, length, 0, length, carried);
+}
+
+/**
+ *  @brief Whether any needle of a byte-exact automaton occurs in @p text, the lanes of @p group
+ *      walking it together, and every lane answering the same.
+ *
+ *  As in @c sz_substrings_first_group_simt_, lane @c l walks chunk @c l of @p text cut into
+ *  @c group.lanes, primed as the chunk walk primes, so a match is found by the lane owning its
+ *  last byte, whichever lane its first byte falls to.
+ */
+inline bool sz_substrings_first_group_metal_(thread sz_substrings_automaton_metal_t const &automaton,
+                                             thread sz_substrings_staged_metal_t const &staged,
+                                             device uchar const *text, ulong length,
+                                             thread sz_group_metal_t const &group) {
+    ulong const chunk_bytes = sz_size_divide_round_up_metal_(length, (ulong)group.lanes);
+    ulong const chunk_begin = min((ulong)group.lane * chunk_bytes, length);
+    uint carried = sz_substrings_prime_metal_(automaton, staged, text, chunk_begin);
+    bool const found = sz_substrings_first_chunk_metal_(automaton, staged, text, length, chunk_begin,
+                                                        chunk_begin + chunk_bytes, carried);
+    return group.any(found);
 }
 
 /** The threadgroup's exclusive prefix sum of @p value, its own total left in @p total, over
@@ -753,6 +891,26 @@ kernel void sz_substrings_counts_metal_kernel_(device ulong const *haystack_offs
                                                uint threads [[threads_per_grid]]) {
     for (ulong index = position; index < arguments.haystacks_count; index += threads)
         counts[index * arguments.counts_stride] = haystack_offsets[index + 1] - haystack_offsets[index];
+}
+
+/** Marks the haystacks the walk found a match in, a bit each from their scanned boundaries, as
+ *  @c sz_substrings_contains_simt_ does: a simdgroup's ballot covers 32 haystacks, and its first
+ *  lane stores their four bytes, the tail's bits cleared. */
+kernel void sz_substrings_contains_metal_kernel_(device ulong const *haystack_offsets [[buffer(3)]],
+                                                 device uchar *contained [[buffer(6)]],
+                                                 constant sz_substrings_arguments_metal_t &arguments [[buffer(16)]],
+                                                 uint position [[thread_position_in_grid]],
+                                                 uint threads [[threads_per_grid]]) {
+    ulong const count = arguments.haystacks_count, bytes = sz_size_divide_round_up_metal_(count, 8ul);
+    // Every lane of a simdgroup takes as many rounds, as the ballot is collective.
+    ulong const lanes = sz_size_divide_round_up_metal_(count, 32ul) * 32;
+    for (ulong index = position; index < lanes; index += threads) {
+        bool const found = index < count && haystack_offsets[index + 1] > haystack_offsets[index];
+        uint const bits = uint(simd_vote::vote_t(simd_ballot(found)));
+        if (index % 32 != 0) continue;
+        for (ulong byte = index / 8; byte != index / 8 + 4 && byte < bytes; ++byte)
+            contained[byte] = uchar(bits >> (byte - index / 8) * 8);
+    }
 }
 
 /** Copies the surviving matches into the caller's array, clipped at a capacity only it knows. */

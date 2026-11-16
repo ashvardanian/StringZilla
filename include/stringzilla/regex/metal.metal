@@ -135,11 +135,6 @@ enum sz_regex_recording_metal_t : uint {
     sz_regex_recorded_metal_k = 1,
 };
 
-/** One match, laid out as @c sz_match_t. */
-struct sz_match_metal_t {
-    ulong haystack_index, needle_index, byte_offset, byte_length;
-};
-
 /** One NFA state, laid out as @c sz_regex_nfa_state_t. */
 struct sz_regex_nfa_state_metal_t {
     uint kind, look, target, slot, first_link, last_link;
@@ -348,12 +343,13 @@ inline sz_regex_round_metal_t sz_regex_round_metal_(device uchar *scratch,
 
 /** One automaton's transitions as a walk reads them: the class map, the first column of each block
  *  of lookarounds and the rows' head staged in threadgroup memory, the rest of the rows in device
- *  memory, and the ring of the lookaround table whose entries pick the blocks, null without
- *  lookarounds, with the end of its window and the flag a walk that cannot pause there sets. */
+ *  memory, the automaton's column images where a walk primes from them, else null, and the ring of
+ *  the lookaround table whose entries pick the blocks, null without lookarounds, with the end of
+ *  its window and the flag a walk that cannot pause there sets. */
 struct sz_regex_table_metal_t {
     threadgroup uchar const *classes;
     threadgroup uint const *blocks, *head;
-    device uint const *rows, *looks;
+    device uint const *rows, *images, *looks;
     device atomic_uint *refused;
     ulong looks_mask, looks_end;
     uint head_cells, edge_column;
@@ -367,35 +363,61 @@ constant uint sz_regex_blocks_metal_k = 64;
  *  as the host sizes it. */
 constant uint sz_regex_staged_bytes_metal_k = 256 + sz_regex_blocks_metal_k * sizeof(uint);
 
-/** The first column of the block a lookaround table entry's @p looks select,
- *  as @c sz_regex_looks_block_ finds it. */
-inline uint sz_regex_looks_block_metal_(constant sz_regex_arguments_metal_t &arguments, uint looks) {
-    return (looks / sz_regex_look_lookaround_metal_k & ((1u << arguments.lookarounds_count) - 1)) *
-           (arguments.classes_count + 1);
+/** The first column of the block a lookaround table entry's @p looks select among
+ *  @p lookarounds_count lookarounds of rows of @p classes_count classes, as
+ *  @c sz_regex_looks_block_ finds it. */
+inline uint sz_regex_looks_block_metal_(uint lookarounds_count, uint classes_count, uint looks) {
+    return (looks / sz_regex_look_lookaround_metal_k & ((1u << lookarounds_count) - 1)) * (classes_count + 1);
 }
 
-/** Stages @p cells of @p rows, the class map and the blocks into @p staged, with every thread of
- *  the threadgroup taking part, so a kernel calls it before any thread can leave. */
+/**
+ *  @brief Stages @p cells of @p rows, the class map and the blocks into @p staged, for walks
+ *      with no lookaround table that prime from @p images, or null, as
+ *      @c sz_regex_stage_table_simt_ does.
+ *  @param[in] byte_to_class The engine's class map, at the kernel's own address.
+ *  @param[in] rows The automaton's rows, at the kernel's own address.
+ *  @param[in] lookarounds_count The engine's lookarounds, which size each row's blocks.
+ *  @param[in] cells Cells of @p rows to stage, which @p staged must hold past its first
+ *      @ref sz_regex_staged_bytes_metal_k bytes.
+ *
+ *  It reads no round block, so the table it returns has no lookaround table to pause at and no flag
+ *  to refuse with. Every thread of the threadgroup takes part, so a kernel calls it before any
+ *  thread can leave.
+ */
+inline sz_regex_table_metal_t sz_regex_stage_table_metal_(device uchar const *byte_to_class, device uint const *rows,
+                                                          device uint const *images, uint classes_count,
+                                                          uint lookarounds_count, uint cells, threadgroup uchar *staged,
+                                                          uint lane, uint width) {
+    sz_regex_table_metal_t table;
+    threadgroup uint *blocks = (threadgroup uint *)(staged + 256);
+    threadgroup uint *head = (threadgroup uint *)(staged + sz_regex_staged_bytes_metal_k);
+    table.rows = rows, table.images = images, table.looks = nullptr, table.refused = nullptr;
+    table.looks_mask = 0, table.looks_end = 0;
+    table.classes = staged, table.blocks = blocks, table.head = head;
+    table.head_cells = cells, table.edge_column = classes_count;
+    for (uint index = lane; index < 256; index += width) staged[index] = byte_to_class[index];
+    for (uint index = lane; index < sz_regex_blocks_metal_k; index += width)
+        blocks[index] = sz_regex_looks_block_metal_(lookarounds_count, classes_count,
+                                                    index * sz_regex_look_lookaround_metal_k);
+    for (uint index = lane; index < table.head_cells; index += width) head[index] = rows[index];
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    return table;
+}
+
+/** Stages a round's @p cells of the rows at @p rows_host as @ref sz_regex_stage_table_metal_ does,
+ *  at most the round's own staged cells, its blocks picked by the round's lookaround table. */
 inline sz_regex_table_metal_t sz_regex_stage_metal_(device uchar *engine, device uchar *scratch,
                                                     constant sz_regex_arguments_metal_t &arguments, ulong rows_host,
                                                     uint cells, threadgroup uchar *staged, uint lane, uint width) {
-    sz_regex_table_metal_t table;
-    device uchar const *byte_to_class = sz_reach_metal_<uchar>(engine, arguments.engine_host, arguments.byte_to_class);
-    threadgroup uint *blocks = (threadgroup uint *)(staged + 256);
-    threadgroup uint *head = (threadgroup uint *)(staged + sz_regex_staged_bytes_metal_k);
-    table.rows = sz_reach_metal_<uint>(engine, arguments.engine_host, rows_host);
+    sz_regex_table_metal_t table = sz_regex_stage_table_metal_(
+        sz_reach_metal_<uchar>(engine, arguments.engine_host, arguments.byte_to_class),
+        sz_reach_metal_<uint>(engine, arguments.engine_host, rows_host), nullptr, arguments.classes_count,
+        arguments.lookarounds_count, min(cells, arguments.staged_cells), staged, lane, width);
     table.looks = arguments.lookarounds_count ? sz_reach_metal_<uint>(scratch, arguments.scratch_host, arguments.looks)
                                               : nullptr;
     table.refused = sz_reach_metal_<atomic_uint>(scratch, arguments.scratch_host, arguments.counters) +
                     sz_regex_refused_counter_metal_k;
     table.looks_mask = arguments.looks_mask, table.looks_end = arguments.looks_end;
-    table.classes = staged, table.blocks = blocks, table.head = head;
-    table.head_cells = min(cells, arguments.staged_cells), table.edge_column = arguments.classes_count;
-    for (uint index = lane; index < 256; index += width) staged[index] = byte_to_class[index];
-    for (uint index = lane; index < sz_regex_blocks_metal_k; index += width)
-        blocks[index] = sz_regex_looks_block_metal_(arguments, index * sz_regex_look_lookaround_metal_k);
-    for (uint index = lane; index < table.head_cells; index += width) head[index] = table.rows[index];
-    threadgroup_barrier(mem_flags::mem_threadgroup);
     return table;
 }
 
@@ -1622,6 +1644,132 @@ inline ulong sz_regex_block_scan_metal_(ulong value, threadgroup ulong *shared, 
     total = shared[width - 1];
     threadgroup_barrier(mem_flags::mem_threadgroup); // ! The caller reuses `shared` for the next tile.
     return inclusive - value;
+}
+
+/** Where a run of chunks leaves the start-finding walk, and whether a match starts inside it, for
+ *  each state it may enter with: a priming frontier and each state's exit, or, with no entries,
+ *  the one exit whatever the entry, a bit of @c founds per entry, as @c sz_regex_exits_simt_t. */
+struct sz_regex_exits_metal_t {
+    uint count, founds;
+    uint entries[sz_regex_priming_states_metal_k], exits[sz_regex_priming_states_metal_k];
+};
+
+/** Composes @p left, a run of chunks, with @p right, the run right after it, into @p left, as
+ *  @c sz_regex_compose_exits_simt_ does: each state @p right may enter with leaves where @p left
+ *  leaves from @p right's exit, a match starting in either run. */
+inline void sz_regex_compose_exits_metal_(thread sz_regex_exits_metal_t &left,
+                                          thread sz_regex_exits_metal_t const &right) {
+    sz_regex_exits_metal_t composed;
+    composed.count = right.count, composed.founds = 0;
+#pragma unroll
+    for (uint index = 0; index != sz_regex_priming_states_metal_k; ++index) {
+        uint const middle = right.exits[index];
+        uint exit = left.exits[0], found = left.founds & 1u;
+        if (left.count) exit = 0, found = 0;
+#pragma unroll
+        for (uint known = 0; known != sz_regex_priming_states_metal_k; ++known)
+            if (known < left.count && left.entries[known] == middle)
+                exit = left.exits[known], found = (left.founds >> known) & 1u;
+        composed.entries[index] = right.entries[index];
+        composed.exits[index] = exit;
+        composed.founds |= (found | ((right.founds >> index) & 1u)) << index;
+    }
+    left = composed;
+}
+
+/*  A walk answers for one value at one granularity, as the walks of `regex/simt.cuh` do: a thread
+ *  walking it alone, a simdgroup walking it together, or a thread walking one chunk of it with the
+ *  start-finding state carried from the chunk after it. A walk reads no grid position and stages
+ *  nothing, so a product calls it from a kernel of its own under any launch, having staged
+ *  `reverse_rows` with `sz_regex_stage_table_metal_`, and with the launch record that
+ *  `sz_regex_arguments_metal_` fills on the host. The walks take a byte-exact engine with no
+ *  lookarounds whose `reverse_rows` exist. */
+
+/**
+ *  @brief Walks bytes @p chunk_begin to @p chunk_end of a byte-exact @p text right to left from the
+ *      start-finding state @p carried, answering whether a match starts inside them, as
+ *      @c sz_regex_first_chunk_simt_ does.
+ *  @param[in] table The start-finding automaton, staged from @c reverse_rows with no lookarounds.
+ *  @param[in] length Bytes of @p text, past which the chunk is cut.
+ *  @param[in,out] carried The state after every byte from @p chunk_end on, which
+ *      @c reverse_starts[0] is at the text's end; the state at @p chunk_begin on return.
+ *
+ *  Chunks walked from the text's end towards its start, each carrying the last one's state, answer
+ *  exactly as one walk over all of it; the chunk at the text's start also takes its edge column, so
+ *  a match starting at the first byte counts.
+ */
+inline bool sz_regex_first_chunk_metal_(thread sz_regex_table_metal_t const &table,
+                                        constant sz_regex_arguments_metal_t &arguments, device uchar const *text,
+                                        ulong length, ulong chunk_begin, ulong chunk_end, thread uint &carried) {
+    uint const accepts = arguments.reverse_accepts_begin;
+    ulong at = min(chunk_end, length);
+    uint state = carried;
+    bool found = false;
+    while (at > chunk_begin && !found) {
+        uint const count = uint(min(at - chunk_begin, (ulong)sz_regex_run_bytes_metal_k));
+        found = sz_regex_run_back_metal_(table, state, text + at, at, count, accepts) != 0;
+        at -= count;
+    }
+    carried = state;
+    if (!found && chunk_begin == 0) found = sz_regex_step_edge_metal_(table, state, 0) >= accepts;
+    return found;
+}
+
+/** Whether any pattern of a byte-exact engine with no lookarounds matches in @p text, one thread
+ *  walking all of it from its end through the start-finding automaton @p table. */
+inline bool sz_regex_first_thread_metal_(thread sz_regex_table_metal_t const &table,
+                                         constant sz_regex_arguments_metal_t &arguments, device uchar const *text,
+                                         ulong length) {
+    uint carried = arguments.reverse_starts[0];
+    return sz_regex_first_chunk_metal_(table, arguments, text, length, 0, length, carried);
+}
+
+/**
+ *  @brief Whether any pattern of a byte-exact engine with no lookarounds matches in @p text, the
+ *      lanes of @p group walking it together, every lane answering the same.
+ *
+ *  The lanes walk the start-finding automaton @p table, staged with its column images, as @c
+ *  sz_regex_first_group_simt_ walks it. Lane @c l takes chunk @c l of @p text cut into @c
+ *  group.lanes and primes the state at its right edge with @ref sz_regex_prime_metal_. Where
+ *  priming leaves a frontier, the lane walks its chunk from each of its states, and @ref
+ *  sz_regex_compose_exits_metal_ chains the lanes' exits from the text's end in log2 of the lanes'
+ *  rounds of shuffles. Where any chunk is too wide to prime, every lane walks the whole text in
+ *  order from its end instead.
+ */
+inline bool sz_regex_first_group_metal_(thread sz_regex_table_metal_t const &table,
+                                        constant sz_regex_arguments_metal_t &arguments, device uchar const *text,
+                                        ulong length, thread sz_group_metal_t const &group) {
+    ulong const chunk_bytes = sz_size_divide_round_up_metal_(length, (ulong)group.lanes);
+    ulong const chunk_begin = min((ulong)group.lane * chunk_bytes, length);
+    ulong const chunk_end = min(chunk_begin + chunk_bytes, length);
+    sz_regex_exits_metal_t exits;
+    uint set[sz_regex_priming_states_metal_k], count = 0;
+    uint const primed = sz_regex_prime_metal_(table, arguments, table.images, text, 0, length, chunk_end,
+                                              sz_regex_priming_bytes_metal_k, set, count);
+    if (group.any(!primed && !count)) return sz_regex_first_thread_metal_(table, arguments, text, length);
+    if (primed) set[0] = primed, count = 1;
+    exits.count = primed ? 0 : count, exits.founds = 0;
+#pragma unroll
+    for (uint index = 0; index != sz_regex_priming_states_metal_k; ++index) {
+        uint carried = set[index];
+        if (index >= count) continue;
+        exits.entries[index] = carried;
+        exits.founds |=
+            uint(sz_regex_first_chunk_metal_(table, arguments, text, length, chunk_begin, chunk_end, carried)) << index;
+        exits.exits[index] = carried;
+    }
+    // Every lane shuffles every round, as shuffles are collective; one past the last keeps its own.
+    for (uint distance = 1; distance < group.lanes; distance *= 2) {
+        uint const source = group.lane + distance;
+        sz_regex_exits_metal_t right;
+        right.count = group.shuffle(exits.count, source), right.founds = group.shuffle(exits.founds, source);
+#pragma unroll
+        for (uint index = 0; index != sz_regex_priming_states_metal_k; ++index)
+            right.entries[index] = group.shuffle(exits.entries[index], source),
+            right.exits[index] = group.shuffle(exits.exits[index], source);
+        if (source < group.lanes) sz_regex_compose_exits_metal_(exits, right);
+    }
+    return group.any((exits.founds & 1u) != 0);
 }
 
 /** Zeroes @c clear_words words at @c target, which is how a round clears what it reads first. */

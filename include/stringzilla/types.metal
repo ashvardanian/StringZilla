@@ -39,6 +39,11 @@ constexpr scalar_type_ sz_size_divide_round_up_metal_(scalar_type_ number, scala
     return (number + divisor - 1) / divisor;
 }
 
+/** One match, laid out as @c sz_match_t. */
+struct sz_match_metal_t {
+    ulong haystack_index, needle_index, byte_offset, byte_length;
+};
+
 /** The layout of a tape with 64-bit offsets, as @c sz_strings_u64_tape_k numbers it. */
 constant ulong sz_strings_u64_tape_metal_k = 1;
 
@@ -78,6 +83,70 @@ template <typename type_>
 inline device type_ *sz_reach_metal_(device uchar *block, ulong block_host, ulong host) {
     return (device type_ *)(block + (host - block_host));
 }
+
+/**
+ *  @brief The lanes of one simdgroup walking one value together, as @c sz_simt_group_t steps
+ *      through a CUDA warp or a ROCm wavefront.
+ *
+ *  A shared walk calls it without naming the device. A kernel builds the record from its @c
+ *  thread_index_in_simdgroup and @c threads_per_simdgroup, 32 on every Apple GPU, so after inlining
+ *  every member folds to its instruction. Lane sets stay 32-bit, as @c sz_simt_group_t keeps them,
+ *  and every lane of the simdgroup calls each member at once, as each one is a collective.
+ */
+struct sz_group_metal_t {
+
+    /** Lanes in the group, which every walk derives its windows and scan bounds from. */
+    uint lanes;
+
+    /** This thread's lane within the group, from zero. */
+    uint lane;
+
+    /** Whether @p predicate holds on any lane of the group, read as nonzero, as
+     *  @c sz_simt_group_t reads it. */
+    bool any(int predicate) const { return simd_any(predicate != 0); }
+
+    /** A bit per lane of the group where @p predicate holds. */
+    uint ballot(int predicate) const { return uint(simd_vote::vote_t(simd_ballot(predicate != 0))); }
+
+    /** The lowest lane @p predicate holds on, or @c lanes where it holds on none. */
+    uint first(int predicate) const {
+        uint const bits = ballot(predicate);
+        return bits ? ctz(bits) : lanes;
+    }
+
+    /** How many lanes below this one @p predicate holds on. */
+    uint below(int predicate) const { return popcount(ballot(predicate) & ((1u << lane) - 1u)); }
+
+    /** @p value from lane @p source. */
+    uint shuffle(uint value, uint source) const { return simd_shuffle(value, ushort(source)); }
+
+    /** @p value from the lane @p distance below this one, a low lane keeping its own. */
+    uint shuffle_up(uint value, uint distance) const { return simd_shuffle_up(value, ushort(distance)); }
+
+    /** The sum of @p value over this lane and every lane below it. */
+    uint prefix_sum(uint value) const { return simd_prefix_inclusive_sum(value); }
+
+    /** The least of @p value over this lane and every lane below it, in shuffles, as MSL has no
+     *  prefix minimum. */
+    int prefix_min(int value) const {
+        for (uint distance = 1; distance < lanes; distance *= 2) {
+            int const other = simd_shuffle_up(value, ushort(distance));
+            if (lane >= distance) value = min(value, other);
+        }
+        return value;
+    }
+
+    /** The sum of @p value over every lane of the group, in each of them, in halves as MSL shuffles
+     *  32-bit words. */
+    ulong sum(ulong value) const {
+        for (uint distance = 1; distance < lanes; distance *= 2)
+            value += as_type<ulong>(simd_shuffle_xor(as_type<uint2>(value), ushort(distance)));
+        return value;
+    }
+
+    /** Orders the group's lanes and their memory at this point, and no lane outside the group. */
+    void sync() const { simdgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup); }
+};
 
 /** Decodes one well-formed rune, returning zero for an opaque malformed byte. */
 inline uint sz_utf8_decode_rune_metal_(device uchar const *text, ulong length, ulong offset, thread uint &rune) {

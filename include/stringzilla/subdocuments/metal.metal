@@ -110,11 +110,6 @@ enum sz_subdocuments_node_metal_t : uint {
     sz_subdocuments_node_text_metal_k = 2,
 };
 
-/** One match, laid out as @c sz_match_t. */
-struct sz_match_metal_t {
-    ulong haystack_index, needle_index, byte_offset, byte_length;
-};
-
 /** The array positions one selector picks, laid out as @c sz_subdocuments_slice_t. */
 struct sz_subdocuments_slice_metal_t {
     long begin, end, step;
@@ -417,14 +412,12 @@ enum sz_subdocuments_child_metal_t : uint {
     sz_subdocuments_child_element_metal_k = 1,
 };
 
-/** Word @p word of the live set of a child of a node live in @p live, joined with @p carried unless
- *  null: as @p child says, a member named @p selector or an element at position @p selector, as
- *  @c sz_subdocuments_child_word_simt_ settles it. */
-inline ulong sz_subdocuments_child_word_metal_(thread sz_subdocuments_engine_metal_t const &engine,
-                                               device ulong const *live, device ulong const *carried, uint word,
-                                               thread ulong &carry, sz_subdocuments_child_metal_t child, ulong selector,
-                                               ulong length) {
-    ulong const parent = live[word] | (carried ? carried[word] : 0);
+/** Word @p word of the live set of a child of a node whose word @p word is @p parent: as @p child
+ *  says, a member named @p selector or an element at position @p selector, as
+ *  @c sz_subdocuments_child_word_simt_ settles it, for a live set a lane holds in registers. */
+inline ulong sz_subdocuments_child_bits_metal_(thread sz_subdocuments_engine_metal_t const &engine, ulong parent,
+                                               uint word, thread ulong &carry, sz_subdocuments_child_metal_t child,
+                                               ulong selector, ulong length) {
     ulong const advancing = parent & ~engine.final_steps[word];
     ulong const candidates = advancing << 1 | carry;
     ulong selected;
@@ -449,6 +442,16 @@ inline ulong sz_subdocuments_child_word_metal_(thread sz_subdocuments_engine_met
         }
     }
     return selected | (parent & engine.descendant_steps[word]);
+}
+
+/** Word @p word of the live set of a child of a node live in @p live, joined with @p carried unless
+ *  null, as @ref sz_subdocuments_child_bits_metal_ settles it. */
+inline ulong sz_subdocuments_child_word_metal_(thread sz_subdocuments_engine_metal_t const &engine,
+                                               device ulong const *live, device ulong const *carried, uint word,
+                                               thread ulong &carry, sz_subdocuments_child_metal_t child, ulong selector,
+                                               ulong length) {
+    return sz_subdocuments_child_bits_metal_(engine, live[word] | (carried ? carried[word] : 0), word, carry, child,
+                                             selector, length);
 }
 
 /** The live set of an array's element, tentatively for the steps its length settles while
@@ -1296,6 +1299,787 @@ inline int sz_subdocuments_walk_markup_metal_(thread sz_subdocuments_engine_meta
     }
     return current != 0 || skipped_depth || !rooted ? sz_subdocuments_malformed_metal_k
                                                     : sz_subdocuments_walked_metal_k;
+}
+
+/*  A group walks one JSON document together, or one chunk of it with its progress carried in and
+ *  out, as @c sz_subdocuments_walk_simt_ and @c sz_subdocuments_first_chunk_simt_ do: the lanes of
+ *  one simdgroup, a @c sz_group_metal_t whose @c lanes is a power of two of at most 32, as its
+ *  @c ballot answers in 32 bits. A walk reads no threadgroup position and declares no threadgroup
+ *  memory, so a product calls it from a kernel of its own, every lane of the group passing the same
+ *  arguments. Each walk takes a stack of @c frames frames of @c frame_words words and a key buffer
+ *  of @c key_bytes, both the group's own. A product asking only whether a document holds a match
+ *  passes no matches and a zero @c matches_capacity, and reads @c emitted != 0 once the walk ends
+ *  walked; a malformed document ends malformed, and one deeper than its stack too deep. */
+
+/** The masks a group walking one document together keeps of its window, 32 bytes to a lane, and
+ *  what the window hands the next, as @c sz_subdocuments_cursor_simt_t keeps them. */
+struct sz_subdocuments_group_cursor_metal_t {
+    device uchar const *text;
+    ulong length, window_end;
+    uint escaped, in_string, scalar, slashes;
+    uint lane_opens, lane_closes, lane_pending;
+};
+
+/** The class masks of 32 bytes, one bit per byte. */
+struct sz_subdocuments_classes_metal_t {
+    uint quotes, backslashes, opens, closes, separators, blanks, slashes;
+};
+
+/** Classifies the 32 bytes at @p text [offset], those past @p length blank, as
+ *  @c sz_subdocuments_classify_simt_ does, a byte at a time as nothing aligns them. */
+inline sz_subdocuments_classes_metal_t sz_subdocuments_classify_metal_(device uchar const *text, ulong length,
+                                                                       ulong offset) {
+    sz_subdocuments_classes_metal_t classes = {0, 0, 0, 0, 0, 0, 0};
+    for (uint index = 0; index != 32; ++index) {
+        uchar const byte = offset + index < length ? text[offset + index] : ' ';
+        uchar const folded = byte | 0x20;
+        uint const bit = 1u << index;
+        if (byte == '"') classes.quotes |= bit;
+        if (byte == '\\') classes.backslashes |= bit;
+        if (folded == '{') classes.opens |= bit;
+        if (folded == '}') classes.closes |= bit;
+        if (byte == ':' || byte == ',') classes.separators |= bit;
+        if (byte == ' ' || byte == '\t' || byte == '\n' || byte == '\r') classes.blanks |= bit;
+        if (byte == '/') classes.slashes |= bit;
+    }
+    return classes;
+}
+
+/**
+ *  @brief Classifies the 32 bytes per lane from @p window, 32 to each lane of @p group walking the
+ *      document, every lane calling it at once, so each lane keeps its own bytes' masks, as
+ *      @c sz_subdocuments_window_simt_ does.
+ *
+ *  A lane holding backslashes alone hands on the escape it receives, and any other the parity of
+ *  its last run, so one ballot finds every lane's escape; a ballot of quote parities tells each
+ *  lane whether it starts inside a string, and a ballot hands on the scalar carry. The window's
+ *  own carries come from its last lanes, as a block's do from its last bytes.
+ */
+inline void sz_subdocuments_window_metal_(thread sz_subdocuments_group_cursor_metal_t &cursor, ulong window,
+                                          thread sz_group_metal_t const &group) {
+    uint const lane = group.lane, last = group.lanes - 1;
+    uint const below = (1u << lane) - 1u, odd_bits = 0xAAAAAAAAu;
+    sz_subdocuments_classes_metal_t const classes = sz_subdocuments_classify_metal_(cursor.text, cursor.length,
+                                                                                    window + 32 * lane);
+    uint const backslashes = classes.backslashes;
+    uint const settled = (((backslashes << 1) | odd_bits) - backslashes) ^ odd_bits;
+    uint const blocking = ~group.ballot(backslashes == 0xFFFFFFFFu) & (0xFFFFFFFFu >> (31 - last));
+    uint const handing = group.ballot(((settled & backslashes) >> 31) != 0);
+    uint const escape_in = blocking & below ? handing >> (31 - clz(blocking & below)) & 1u : cursor.escaped;
+    uint const potential_escape = backslashes & ~escape_in;
+    uint const escape_and_terminal = (((potential_escape << 1) | odd_bits) - potential_escape) ^ odd_bits;
+    uint const quotes = classes.quotes & ~(escape_and_terminal ^ (backslashes | escape_in));
+    uint const odd_lanes = group.ballot((popcount(quotes) & 1) != 0);
+    uint in_string = quotes;
+    in_string ^= in_string << 1, in_string ^= in_string << 2, in_string ^= in_string << 4;
+    in_string ^= in_string << 8, in_string ^= in_string << 16;
+    in_string ^= 0u - ((popcount(odd_lanes & below) ^ cursor.in_string) & 1u);
+    uint const opens = classes.opens & ~in_string, closes = classes.closes & ~in_string;
+    uint const separators = classes.separators & ~in_string;
+    uint const scalars = ~(in_string | quotes | classes.blanks | opens | closes | separators);
+    cursor.slashes |= group.ballot((classes.slashes & ~in_string) != 0);
+    cursor.lane_opens = opens, cursor.lane_closes = closes;
+    uint const scalar_ends = group.ballot((scalars >> 31) != 0);
+    cursor.lane_pending = opens | closes | separators | quotes |
+                          (scalars & ~(scalars << 1 | (lane ? scalar_ends >> (lane - 1) & 1u : cursor.scalar)));
+    cursor.escaped = blocking ? handing >> (31 - clz(blocking)) & 1u : cursor.escaped;
+    cursor.in_string = 0u - ((popcount(odd_lanes) ^ cursor.in_string) & 1u);
+    cursor.scalar = scalar_ends >> last & 1u;
+    cursor.window_end = window + 32 * group.lanes;
+}
+
+/** The bits of the 32 bytes from @p base at or past @p from. */
+inline uint sz_subdocuments_from_mask_metal_(ulong base, ulong from) {
+    return from <= base ? 0xFFFFFFFFu : from - base >= 32 ? 0u : 0xFFFFFFFFu << (from - base);
+}
+
+/** The position of the set bit of @p bits with @p rank set bits below it. */
+inline uint sz_subdocuments_select_metal_(uint bits, uint rank) {
+    uint position = 0;
+    for (uint width = 16; width; width >>= 1) {
+        uint const lower = popcount(bits & ((1u << width) - 1u));
+        if (rank >= lower) rank -= lower, bits >>= width, position += width;
+    }
+    return position;
+}
+
+/** Classifies the window past the cursor's last, every lane at once, or returns false past the
+ *  document. */
+inline bool sz_subdocuments_advance_metal_(thread sz_subdocuments_group_cursor_metal_t &cursor,
+                                           thread sz_group_metal_t const &group) {
+    if (cursor.window_end >= cursor.length) return false;
+    sz_subdocuments_window_metal_(cursor, cursor.window_end, group);
+    return true;
+}
+
+/** The first structural byte at or past @p from, classifying windows as it passes them, or @c ~0
+ *  past the document, as @c sz_subdocuments_next_simt_ finds it; every lane calls it at once. */
+inline ulong sz_subdocuments_next_group_metal_(thread sz_subdocuments_group_cursor_metal_t &cursor, ulong from,
+                                               thread sz_group_metal_t const &group) {
+    uint const lane = group.lane;
+    ulong const window_bytes = 32 * ulong(group.lanes);
+    for (;; from = cursor.window_end) {
+        if (from >= cursor.window_end && !sz_subdocuments_advance_metal_(cursor, group)) return ~0ul;
+        uint const pending = cursor.lane_pending &
+                             sz_subdocuments_from_mask_metal_(cursor.window_end - window_bytes + 32 * lane, from);
+        uint const holding = group.ballot(pending != 0);
+        if (holding) {
+            uint const first = ctz(holding);
+            return cursor.window_end - window_bytes + 32 * first + ctz(group.shuffle(pending, first));
+        }
+    }
+}
+
+/** The bit of the bracket among a lane's @p opens and @p closes that brings the depth @p before
+ *  them to zero, walking them in order; zero where none does. */
+inline uint sz_subdocuments_lane_close_metal_(uint opens, uint closes, long before) {
+    for (uint brackets = opens | closes; brackets; brackets &= brackets - 1) {
+        if (opens & brackets & (0u - brackets)) ++before;
+        else if (--before == 0) return ctz(brackets);
+    }
+    return 0;
+}
+
+/**
+ *  @brief The bracket closing the container whose opening bracket lies just before @p from, or
+ *      @c ~0 past the document, counting brackets kind-blind a window at a time, as
+ *      @c sz_subdocuments_skip_simt_ does.
+ *
+ *  Each lane counts its bytes' brackets and the lowest depth they reach, a sum over the lanes
+ *  places every lane's first byte, and the first lane whose bytes close the container finds where.
+ */
+inline ulong sz_subdocuments_skip_group_metal_(thread sz_subdocuments_group_cursor_metal_t &cursor, ulong from,
+                                               thread sz_group_metal_t const &group) {
+    uint const lane = group.lane;
+    long depth = 1;
+    for (;; from = cursor.window_end) {
+        if (from >= cursor.window_end && !sz_subdocuments_advance_metal_(cursor, group)) return ~0ul;
+        ulong const window = cursor.window_end - 32 * ulong(group.lanes);
+        uint const mask = sz_subdocuments_from_mask_metal_(window + 32 * lane, from);
+        uint const opens = cursor.lane_opens & mask, closes = cursor.lane_closes & mask;
+        int running = 0, lowest = 0;
+        for (uint brackets = closes ? opens | closes : 0; brackets; brackets &= brackets - 1)
+            running += opens & brackets & (0u - brackets) ? 1 : -1, lowest = running < lowest ? running : lowest;
+        uint const net = popcount(opens) - popcount(closes);
+        uint const before_lane = group.prefix_sum(net) - net;
+        long before = depth + long(int(before_lane));
+        uint const closing = group.ballot(before + lowest <= 0);
+        if (closing) {
+            uint const first = ctz(closing);
+            uint const found = lane == first ? 32 * lane + sz_subdocuments_lane_close_metal_(opens, closes, before) : 0;
+            return window + group.shuffle(found, first);
+        }
+        depth += long(int(group.shuffle(before_lane + net, group.lanes - 1)));
+    }
+}
+
+/** The name the @p length bytes of a document at @p key spell, as @c sz_subdocuments_key_name_simt_
+ *  finds it for a key of at most @p key_bytes bytes; @c ~0 for a key holding a backslash, which
+ *  only its unescaped bytes name. */
+inline ulong sz_subdocuments_key_name_metal_(thread sz_subdocuments_engine_metal_t const &engine,
+                                             device uchar const *key, ulong length, ulong key_bytes) {
+    for (ulong index = 0; index != length; ++index)
+        if (key[index] == '\\') return ~0ul;
+    if (length > key_bytes) return sz_subdocuments_no_name_metal_k;
+    return sz_subdocuments_name_metal_(engine, key, length);
+}
+
+/** Settles the lengths of the matches @p frame 's container reported that fit, closing at
+ *  @p end_offset, from the frame every lane wrote rather than the matches one lane may have. */
+inline void sz_subdocuments_close_frame_metal_(device sz_match_metal_t *matches, ulong matches_capacity,
+                                               device sz_subdocuments_frame_metal_t const *frame, ulong end_offset) {
+    ulong const end = min(frame->matches_end, matches_capacity);
+    for (ulong index = frame->matches_begin; index < end; ++index)
+        matches[index].byte_length = end_offset - frame->byte_offset;
+}
+
+/**
+ *  @brief Walks the next structural bytes of the window a byte to a lane, as
+ *      @c sz_subdocuments_batch_simt_ does, while every live set fits a single word.
+ *
+ *  Each lane takes the byte left whose rank is its own: a sum of opens minus closes over the lanes
+ *  gives each byte its depth, and the lowest depth before it tells whether a container opened in
+ *  this batch holds it. Every byte none holds is checked against what the byte before it leaves
+ *  expected, with keys looked up and live sets settled in their own lanes; one that such a
+ *  container holds is skipped with it, as no live step enters it, and that container's close ends
+ *  its value. The batch commits every byte before the first it cannot settle alone: a container to
+ *  enter, entered last; one whose close lies past the batch, after which the group skips to that
+ *  close; and a key to unescape, a container opening a run or the close of the pending one, left to
+ *  the walk's own step. Inside a pending run nothing reports: each value a path selects and each
+ *  container entered keeps the next slot in order, as the walk keeps them for the replay, and each
+ *  container's slot is found by following the parents up from the innermost one.
+ *
+ *  @param[in,out] from The first byte not walked yet, left in place when nothing was committed.
+ *  @param[in,out] current The innermost open container's slot, never
+ *      @c sz_subdocuments_no_slot_metal_k , until the root closes and leaves it so.
+ *  @param[in,out] top Inside a pending run, the first slot past the kept ones; read otherwise.
+ *  @param[in] run The pending run's container, or @c sz_subdocuments_no_slot_metal_k .
+ *  @return The first failure among the committed bytes, else @c sz_subdocuments_walked_metal_k.
+ */
+inline int sz_subdocuments_batch_metal_(thread sz_subdocuments_engine_metal_t const &engine, device uchar const *text,
+                                        ulong length, ulong document, device ulong *stack, ulong frames,
+                                        ulong frame_words, ulong key_bytes, device sz_match_metal_t *matches,
+                                        ulong matches_capacity, thread ulong &emitted,
+                                        thread sz_subdocuments_group_cursor_metal_t &cursor,
+                                        thread sz_group_metal_t const &group, thread ulong &from, thread ulong &current,
+                                        thread ulong &top, ulong run, thread uint &expect) {
+    uint const lane = group.lane, lanes = group.lanes, top_lane = lanes - 1;
+    uint const below = (1u << lane) - 1u, above = lane == top_lane ? 0u : ~0u << (lane + 1);
+    ulong const header_words = sz_subdocuments_frame_header_words_metal_k;
+    ulong const final_steps = engine.final_steps[0];
+    bool const pending_run = run != sz_subdocuments_no_slot_metal_k;
+    ulong window = 0, end = 0, name = sz_subdocuments_no_name_metal_k, closer = 0, owner_live = 0, live = 0;
+    uint pending = 0, inclusive = 0, total = 0, source = 0, chain = uint(current);
+    bool unescape = false;
+
+    // Each lane takes the structural byte at or past the first unwalked one whose rank is its own:
+    // the lane holding it, then its bit.
+    for (;; from = cursor.window_end) {
+        if (from >= cursor.window_end && !sz_subdocuments_advance_metal_(cursor, group))
+            return sz_subdocuments_walked_metal_k;
+        window = cursor.window_end - 32 * ulong(lanes);
+        pending = cursor.lane_pending & sz_subdocuments_from_mask_metal_(window + 32 * lane, from);
+        inclusive = group.prefix_sum(popcount(pending));
+        total = group.shuffle(inclusive, top_lane);
+        if (total) break;
+    }
+    for (uint step = lanes / 2; step; step >>= 1)
+        if (group.shuffle(inclusive, source + step - 1) <= lane) source += step;
+    uint const bits = group.shuffle(pending, source);
+    uint const offset = 32 * source +
+                        sz_subdocuments_select_metal_(bits, lane - (group.shuffle(inclusive, source) - popcount(bits)));
+    ulong const position = window + offset;
+    uint tokens = total < lanes ? total : lanes;
+    uchar const byte = lane < tokens ? text[position] : uchar(' ');
+
+    // Quotes pair up in order, and a string closing past the batch waits for the next one.
+    uint const quotes = group.ballot(lane < tokens && byte == '"');
+    bool const quote = quotes >> lane & 1u;
+    bool const opening = quote && !(popcount(quotes & below) & 1);
+    uint const openings = group.ballot(opening);
+    if (openings >> (tokens - 1) & 1u && (total > lanes || cursor.window_end < length)) --tokens;
+    if (!tokens) return sz_subdocuments_walked_metal_k;
+    bool const valid = lane < tokens;
+
+    // Depths relative to the innermost open container, and how many of this batch's containers hold
+    // a byte, which leaves it to be walked only when none does.
+    int const delta = valid ? int((byte | 0x20) == '{') - int((byte | 0x20) == '}') : 0;
+    // Each delta is one of -1, 0 and 1, so two ballots count them through this lane.
+    int const depth_after = int(popcount(group.ballot(delta > 0) & (below | 1u << lane))) -
+                            int(popcount(group.ballot(delta < 0) & (below | 1u << lane)));
+    int const depth_before = depth_after - delta;
+    int const lowest_through = group.prefix_min(depth_after);
+    int lowest = int(group.shuffle_up(uint(lowest_through), 1));
+    lowest = lane && lowest < 0 ? lowest : 0;
+    bool const walked = valid && depth_before == lowest;
+    bool const is_open = delta > 0, is_close = delta < 0;
+    bool const is_scalar = valid && !quote && !delta && byte != ':' && byte != ',';
+    // Outside a run every open container sits a slot past its parent; inside one, each lane follows
+    // the parents up as many levels as its index.
+    if (pending_run)
+        for (int level = 1, levels = -int(group.shuffle(uint(lowest_through), tokens - 1)); level <= levels; ++level)
+            if (lane >= uint(level) && chain != 0xFFFFFFFFu)
+                chain = uint(
+                    ((device sz_subdocuments_frame_metal_t const *)(stack + ulong(chain) * frame_words))->parent);
+    long const slot = pending_run ? long(int(group.shuffle(chain, uint(-depth_before) & top_lane)))
+                                  : long(current) + depth_before;
+    device ulong const *const owner_words = stack + ulong(walked && slot >= 0 ? slot : 0) * frame_words;
+    device sz_subdocuments_frame_metal_t *const owner = (device sz_subdocuments_frame_metal_t *)owner_words;
+    if (walked && slot >= 0) closer = owner->closer, owner_live = owner_words[header_words];
+
+    // What each byte leaves expected, a closing quote's by whether its string was a key.
+    uint after = sz_subdocuments_expect_comma_or_close_metal_k;
+    if (byte == ':') after = sz_subdocuments_expect_value_metal_k;
+    else if (byte == ',')
+        after = closer == '}' ? sz_subdocuments_expect_key_metal_k : sz_subdocuments_expect_value_metal_k;
+    else if (walked && is_close) after = pending_run || slot > 0 ? after : uint(sz_subdocuments_expect_end_metal_k);
+    else if (quote && !opening) after = sz_subdocuments_expect_colon_metal_k;
+    uint expected = group.shuffle_up(after, 1);
+    expected = lane ? expected : expect;
+    bool const keyed = opening && (expected == sz_subdocuments_expect_key_metal_k ||
+                                   expected == sz_subdocuments_expect_key_or_close_metal_k);
+    if ((group.ballot(keyed) << 1 | uint(keyed)) >> lane & 1u && quote && !opening)
+        after = sz_subdocuments_expect_colon_metal_k;
+    else if (quote && !opening) after = sz_subdocuments_expect_comma_or_close_metal_k;
+    expected = group.shuffle_up(after, 1);
+    expected = lane ? expected : expect;
+
+    // Each byte checked as the walk's step for it checks it.
+    bool const is_value = walked && (is_open || is_scalar || (opening && !keyed));
+    bool malformed = slot < 0;
+    if (byte == ':') malformed = malformed || expected != sz_subdocuments_expect_colon_metal_k;
+    else if (byte == ',') malformed = malformed || expected != sz_subdocuments_expect_comma_or_close_metal_k;
+    else if (is_close)
+        malformed = malformed || closer != byte ||
+                    (expected != sz_subdocuments_expect_comma_or_close_metal_k &&
+                     expected != (byte == '}' ? sz_subdocuments_expect_key_or_close_metal_k
+                                              : sz_subdocuments_expect_value_or_close_metal_k));
+    else if (is_value)
+        malformed = malformed || (expected != sz_subdocuments_expect_value_metal_k &&
+                                  expected != sz_subdocuments_expect_value_or_close_metal_k);
+    // A string still open at the document's end has no closing quote.
+    if (opening && lane + 1 == tokens && !(total > lanes || cursor.window_end < length)) malformed = true;
+    malformed = walked && malformed;
+
+    // Keys look up their names, and live sets settle in their own lanes.
+    {
+        uint const closing = group.shuffle(offset, (lane + 1) & top_lane);
+        ulong carry = 0;
+        if (opening) end = window + closing + 1;
+        if (walked && keyed && !malformed) {
+            device uchar const *const name_bytes = text + position + 1;
+            ulong const name_length = window + closing - position - 1;
+            if (engine.names_slots_count && ((owner_live & ~final_steps) << 1 & ~engine.wildcard_steps[0]) != 0) {
+                name = sz_subdocuments_key_name_metal_(engine, name_bytes, name_length, key_bytes);
+                if (name == ~0ul) unescape = true, name = sz_subdocuments_no_name_metal_k;
+            }
+            live = sz_subdocuments_child_bits_metal_(engine, owner_live, 0, carry, sz_subdocuments_child_member_metal_k,
+                                                     name, 0);
+        }
+    }
+    uint const elements = group.ballot(is_value && closer == ']');
+    uint const closes = group.ballot(walked && is_close);
+    uint const since = closes & below ? ~0u << (31 - clz(closes & below)) << 1 : ~0u;
+    if (is_value && closer == ']') {
+        ulong carry = 0;
+        name = owner->next_position + popcount(elements & below & since);
+        live = sz_subdocuments_child_bits_metal_(engine, owner_live, 0, carry, sz_subdocuments_child_element_metal_k,
+                                                 name, 0);
+    }
+    if (engine.filters_count && walked && (keyed || (is_value && closer == ']'))) {
+        ulong const filtered = (owner_live & ~final_steps) << 1 & engine.filter_steps[0];
+        live |= filtered;
+        for (uint filter = 0; filtered && filter != engine.filters_count; ++filter)
+            if (live >> engine.filters[filter].step & 1) live |= engine.filters_roots[filter];
+    }
+    // A member's value takes the live set its key settled three lanes before, or, for a key before
+    // the batch, the one it left in the slot past the last kept one.
+    {
+        uint const key_lane = (lane - 3) & top_lane;
+        ulong const key_live = ulong(group.shuffle(uint(live), key_lane)) |
+                               ulong(group.shuffle(uint(live >> 32), key_lane)) << 32;
+        ulong const key_name = group.shuffle(uint(name), key_lane);
+        if (is_value && closer == '}' && lane >= 3) live = key_live, name = key_name;
+        else if (is_value && closer == '}') {
+            device ulong const *const held = stack + top * frame_words;
+            live = held[header_words], name = ((device sz_subdocuments_frame_metal_t const *)held)->selector;
+        }
+    }
+
+    // Values report, or inside a run keep a slot each in order, and containers are entered,
+    // skipped to their close, or left to the walk.
+    ulong const reported = is_value ? live & final_steps : 0;
+    ulong const continuing = is_value ? live & ~final_steps : 0;
+    bool const entering = is_open && continuing;
+    ulong const waiting = entering && !pending_run ? continuing << 1 & ((byte == '[' ? engine.relative_steps[0] : 0) |
+                                                                        engine.filter_steps[0])
+                                                   : 0;
+    bool const keeping = pending_run ? entering || reported : entering;
+    uint const kept = group.ballot(keeping);
+    long const kept_slot = pending_run ? long(top + popcount(kept & below)) : slot + 1;
+    uint const ends = group.ballot(valid && is_close && depth_before == lowest + 1);
+    bool unfinished;
+    {
+        uint const ends_after = ends & above;
+        uint const closing = group.shuffle(offset, ends_after ? ctz(ends_after) : lane);
+        unfinished = is_value && is_open && !continuing && !ends_after;
+        if (is_value && is_open && !continuing) end = window + closing + 1;
+    }
+    if (is_value && is_scalar) {
+        end = position + sz_subdocuments_scalar_length_metal_(text, position, length);
+        malformed = malformed || end == position;
+    }
+    uint const reports = pending_run ? 0 : uint(popcount(reported));
+    uint const reports_through = group.prefix_sum(reports);
+
+    // The batch commits up to its first stop; the first failure before it fails the walk.
+    uint commit = tokens;
+    // In a run, its own close replays it, and no batch closes more containers than a lane can name.
+    uint stops = group.ballot(
+        walked &&
+        (unescape || waiting || (pending_run && ((is_close && slot == long(run)) || depth_after < -int(top_lane)))));
+    if (stops) commit = min(commit, ctz(stops));
+    stops = group.ballot(walked && ((entering && !waiting) || unfinished));
+    if (stops) commit = min(commit, ctz(stops) + 1);
+    if (!commit) return sz_subdocuments_walked_metal_k;
+    uint const committed = commit == 32 ? ~0u : (1u << commit) - 1u;
+    uint const failures = group.ballot(malformed || (keeping && kept_slot + 2 > long(frames))) & committed;
+    if (failures)
+        return group.ballot(malformed) >> ctz(failures) & 1u ? sz_subdocuments_malformed_metal_k
+                                                             : sz_subdocuments_too_deep_metal_k;
+
+    // Matches go in place, and the containers open before the batch that it closes settle theirs.
+    if (committed >> lane & 1u) {
+        ulong index = emitted + reports_through - reports;
+        // Indices only grow, so the first one past the capacity ends the stores.
+        for (ulong left = pending_run ? 0 : reported; left && index < matches_capacity; left &= left - 1, ++index) {
+            device sz_match_metal_t *const match = matches + index;
+            match->haystack_index = document;
+            match->needle_index = engine.steps_paths[ctz(left)];
+            match->byte_offset = position;
+            if (!entering && !unfinished) match->byte_length = end - position;
+        }
+        if (walked && is_close && !pending_run)
+            sz_subdocuments_close_frame_metal_(matches, matches_capacity, owner, position + 1);
+    }
+
+    // Every lane writes the same frames, so each reads its own writes back.
+    uint const last = commit - 1;
+    bool const enters = group.ballot(entering) >> last & 1u, skips = group.ballot(unfinished) >> last & 1u;
+    // Broadcast before the branches that read them, so every lane of the group takes the shuffles.
+    ulong const last_name = ulong(group.shuffle(uint(name), last)) | ulong(group.shuffle(uint(name >> 32), last)) << 32;
+    ulong const last_live = ulong(group.shuffle(uint(live), last)) | ulong(group.shuffle(uint(live >> 32), last)) << 32;
+    {
+        int const level = int(group.shuffle(uint(enters || skips ? depth_before : depth_after), last));
+        long const open = pending_run ? long(int(group.shuffle(chain, uint(-level) & top_lane)))
+                                      : long(current) + level;
+        ulong const last_position = window + group.shuffle(offset, last);
+        ulong const last_reports = group.shuffle(reports, last);
+        ulong const reports_committed = group.shuffle(reports_through, last);
+        uint const closes_committed = closes & committed, kept_committed = kept & committed;
+        uint const tail = closes_committed ? ~0u << (31 - clz(closes_committed)) << 1 : ~0u;
+        uint const appended = popcount(elements & committed & tail);
+        uint const last_after = group.shuffle(after, last);
+        uchar const last_byte = uchar(group.shuffle(byte, last));
+        // In a run, the containers the batch closes keep spans and element counts for the replay.
+        for (uint left = pending_run ? closes_committed : 0; left; left &= left - 1) {
+            uint const closing = ctz(left);
+            uint const before_closing = closes_committed & ((1u << closing) - 1u);
+            uint const from_lane = before_closing ? ~0u << (31 - clz(before_closing)) << 1 : ~0u;
+            device sz_subdocuments_frame_metal_t *const frame =
+                (device sz_subdocuments_frame_metal_t *)(stack + group.shuffle(uint(slot), closing) * frame_words);
+            frame->next_position += popcount(elements & from_lane & ((1u << closing) - 1u));
+            frame->byte_length = window + group.shuffle(offset, closing) + 1 - frame->byte_offset;
+        }
+        // Inside a run, every value a path selects keeps a frame for the replay.
+        for (uint left = pending_run ? kept_committed & ~group.ballot(entering) & ~group.ballot(unfinished) : 0; left;
+             left &= left - 1) {
+            uint const keeper = ctz(left);
+            device ulong *const slot_words = stack + (top + popcount(kept & ((1u << keeper) - 1u))) * frame_words;
+            device sz_subdocuments_frame_metal_t *const frame = (device sz_subdocuments_frame_metal_t *)slot_words;
+            ulong const begin = window + group.shuffle(offset, keeper);
+            frame->parent = group.shuffle(uint(slot), keeper), frame->byte_offset = begin;
+            frame->byte_length = ulong(group.shuffle(uint(end - position), keeper)) |
+                                 ulong(group.shuffle(uint((end - position) >> 32), keeper)) << 32;
+            frame->closer = 0;
+            frame->selector = ulong(group.shuffle(uint(name), keeper)) | ulong(group.shuffle(uint(name >> 32), keeper))
+                                                                             << 32;
+            slot_words[header_words] = ulong(group.shuffle(uint(live), keeper)) |
+                                       ulong(group.shuffle(uint(live >> 32), keeper)) << 32;
+        }
+        if (appended && open >= 0)
+            ((device sz_subdocuments_frame_metal_t *)(stack + ulong(open) * frame_words))->next_position += appended;
+        if (pending_run) top += popcount(kept_committed);
+        // A key whose value lies past the batch leaves its live set where that value will read it.
+        uint const keys = group.ballot(walked && keyed && lane < commit && lane + 3 >= commit);
+        if (keys) {
+            uint const key_lane = ctz(keys);
+            device ulong *const slot_words =
+                stack + (pending_run ? top : ulong(int(group.shuffle(uint(slot), key_lane))) + 1) * frame_words;
+            slot_words[header_words] = ulong(group.shuffle(uint(live), key_lane)) |
+                                       ulong(group.shuffle(uint(live >> 32), key_lane)) << 32;
+            ((device sz_subdocuments_frame_metal_t *)slot_words)->selector = group.shuffle(uint(name), key_lane);
+        }
+        if (enters) {
+            ulong const pushed = ulong(int(group.shuffle(uint(kept_slot), last)));
+            device ulong *const slot_words = stack + pushed * frame_words;
+            device sz_subdocuments_frame_metal_t *const frame = (device sz_subdocuments_frame_metal_t *)slot_words;
+            frame->parent = ulong(open), frame->byte_offset = last_position, frame->next_position = 0;
+            frame->matches_begin = emitted + reports_committed - last_reports;
+            frame->matches_end = emitted + reports_committed;
+            frame->closer = last_byte == '{' ? '}' : ']';
+            frame->selector = last_name;
+            slot_words[header_words] = last_live;
+            current = pushed;
+            expect = last_byte == '{' ? sz_subdocuments_expect_key_or_close_metal_k
+                                      : sz_subdocuments_expect_value_or_close_metal_k;
+        }
+        else if (skips) current = ulong(open), expect = sz_subdocuments_expect_comma_or_close_metal_k;
+        else current = open >= 0 ? ulong(open) : sz_subdocuments_no_slot_metal_k, expect = last_after;
+        emitted += reports_committed;
+        from = last_position + 1;
+    }
+    if (skips) {
+        ulong const closing = sz_subdocuments_skip_group_metal_(cursor, from, group);
+        if (closing == ~0ul) return sz_subdocuments_malformed_metal_k;
+        if (lane == last)
+            for (ulong index = emitted - reports, ends_at = min(emitted, matches_capacity); index < ends_at; ++index)
+                matches[index].byte_length = closing + 1 - position;
+        // A container a run keeps, skipped past the batch, takes its frame once its close is known.
+        if (pending_run && kept >> last & 1u) {
+            device ulong *const slot_words = stack + (top - 1) * frame_words;
+            device sz_subdocuments_frame_metal_t *const frame = (device sz_subdocuments_frame_metal_t *)slot_words;
+            frame->parent = current, frame->byte_offset = from - 1;
+            frame->byte_length = closing + 1 - frame->byte_offset;
+            frame->closer = 0;
+            frame->selector = last_name;
+            slot_words[header_words] = last_live;
+        }
+        from = closing + 1;
+    }
+    return sz_subdocuments_walked_metal_k;
+}
+
+/** Where a group's walk of one JSON document stands between two of its chunks, which each lane of
+ *  the group keeps for itself, as @c sz_subdocuments_progress_simt_t keeps it: the classified
+ *  window and its carries, the first byte not walked yet, the stack's first free slot, the
+ *  innermost open container's slot, the pending run's container, and what the next structural
+ *  byte must be. The open containers themselves stay in the walk's stack. */
+struct sz_subdocuments_progress_metal_t {
+    sz_subdocuments_group_cursor_metal_t cursor;
+    ulong from, top, current, run;
+    uint expect;
+};
+
+/** Starts @p carried at the first byte of the @p length bytes at @p text, the root's live set in
+ *  the first frame of @p stack, as @c sz_subdocuments_prime_simt_ does. */
+inline void sz_subdocuments_prime_metal_(thread sz_subdocuments_engine_metal_t const &engine, device uchar const *text,
+                                         ulong length, device ulong *stack,
+                                         thread sz_subdocuments_progress_metal_t &carried) {
+    ulong const header_words = sz_subdocuments_frame_header_words_metal_k;
+    for (uint word = 0; word != engine.words_count; ++word) stack[header_words + word] = engine.root_steps[word];
+    carried.cursor.text = text, carried.cursor.length = length, carried.cursor.escaped = 0;
+    carried.cursor.in_string = 0, carried.cursor.scalar = 0, carried.cursor.slashes = 0;
+    carried.cursor.window_end = 0;
+    carried.from = 0, carried.top = 0, carried.current = sz_subdocuments_no_slot_metal_k;
+    carried.run = sz_subdocuments_no_slot_metal_k, carried.expect = sz_subdocuments_expect_value_metal_k;
+}
+
+/** The name of a member's key of @p length bytes at @p bytes, unescaped into @p key where it holds
+ *  a backslash, as the walk's key step finds it; @c ~0 for a malformed escape. */
+inline ulong sz_subdocuments_key_unescaped_metal_(thread sz_subdocuments_engine_metal_t const &engine,
+                                                  device uchar const *bytes, ulong length, device uchar *key,
+                                                  ulong key_bytes) {
+    ulong const name = sz_subdocuments_key_name_metal_(engine, bytes, length, key_bytes);
+    if (name != ~0ul) return name;
+    ulong const unescaped = sz_subdocuments_unescape_metal_(bytes, length, key, key_bytes);
+    if (unescaped == ~0ul) return ~0ul;
+    return unescaped <= key_bytes ? sz_subdocuments_name_metal_(engine, key, unescaped)
+                                  : ulong(sz_subdocuments_no_name_metal_k);
+}
+
+/** Whether a container that @p byte opens with @p live opens a pending run: whether a step that
+ *  waits, a relative one in an array or any filter's, may advance into what it holds. */
+inline bool sz_subdocuments_waits_metal_(thread sz_subdocuments_engine_metal_t const &engine, device ulong const *live,
+                                         uchar byte) {
+    ulong waiting = 0, carry = 0;
+    for (uint word = 0; word != engine.words_count; ++word) {
+        ulong const advancing = live[word] & ~engine.final_steps[word];
+        waiting |= (advancing << 1 | carry) &
+                   ((byte == '[' ? engine.relative_steps[word] : 0) | engine.filter_steps[word]);
+        carry = advancing >> 63;
+    }
+    return waiting != 0;
+}
+
+/**
+ *  @brief Settles the pending run whose container at slot @p run just closed, its kept slots up to
+ *      @p top, once every kept subtree's end is known, as the walk's close of that container does.
+ *  @return @c sz_subdocuments_too_deep_metal_k when the replay's spare slots do not fit in
+ *      @p frames, else @c sz_subdocuments_walked_metal_k.
+ */
+inline int sz_subdocuments_replay_run_metal_(thread sz_subdocuments_engine_metal_t const &engine,
+                                             device uchar const *text, device ulong *stack, ulong frames,
+                                             ulong frame_words, device uchar *key, ulong key_bytes, ulong document,
+                                             device sz_match_metal_t *matches, ulong matches_capacity,
+                                             thread ulong &emitted, ulong run, ulong top) {
+    // Filters replay at one spare slot per nesting level past the kept ones.
+    if (top + engine.filters_count + 2 > frames) return sz_subdocuments_too_deep_metal_k;
+    // Kept slots are in document order, so a subtree ends one past its last descendant.
+    for (ulong slot = run + 1; slot != top; ++slot)
+        ((device sz_subdocuments_frame_metal_t *)(stack + slot * frame_words))->subtree_end = slot + 1;
+    for (ulong slot = top - 1; slot > run + 1; --slot) {
+        device sz_subdocuments_frame_metal_t const *const node =
+            (device sz_subdocuments_frame_metal_t const *)(stack + slot * frame_words);
+        device sz_subdocuments_frame_metal_t *const holder =
+            (device sz_subdocuments_frame_metal_t *)(stack + node->parent * frame_words);
+        if (node->parent != run) holder->subtree_end = max(holder->subtree_end, node->subtree_end);
+    }
+    sz_subdocuments_replay_metal_(engine, text, stack, frame_words, run + 1, top, top, key, key_bytes, document,
+                                  matches, matches_capacity, emitted);
+    return sz_subdocuments_walked_metal_k;
+}
+
+/**
+ *  @brief Walks one JSON document from where @p carried stands up to the first structural byte at
+ *      or past @p chunk_end, emitting its matches from @p emitted on, those below
+ *      @p matches_capacity written, every lane of @p group at once.
+ *
+ *  It walks as @c sz_subdocuments_first_chunk_simt_ does. While live sets take one word, @ref
+ *  sz_subdocuments_batch_metal_ walks the bytes a lane each; the rest, and whatever a batch leaves,
+ *  take one step at a time on every lane alike, finding bytes and skipping containers a window at a
+ *  time. A step begun before @p chunk_end finishes past it, so a batch, a string, a scalar or a
+ *  skipped container may leave @p carried beyond the chunk; chunks walked in order, each from the
+ *  state the last one left, answer exactly as one walk over the whole document, and only the walk
+ *  reaching its end checks that every container closed.
+ *
+ *  @param[in] length Bytes of the whole document at @p text.
+ *  @param[in] stack Room for @p frames frames of @p frame_words words each, holding the open
+ *      containers between the chunks.
+ *  @param[in] key Room for @p key_bytes bytes, where keys and compared strings are unescaped.
+ *  @param[in,out] carried Where the walk stands, from @ref sz_subdocuments_prime_metal_ or the
+ *      previous chunk's walk.
+ *  @return @c sz_subdocuments_walked_metal_k, @c sz_subdocuments_malformed_metal_k for a malformed
+ *      document, or @c sz_subdocuments_too_deep_metal_k when it needs more than @p frames frames.
+ */
+inline int sz_subdocuments_first_chunk_metal_(thread sz_subdocuments_engine_metal_t const &engine,
+                                              device uchar const *text, ulong length, ulong document,
+                                              device ulong *stack, ulong frames, ulong frame_words, device uchar *key,
+                                              ulong key_bytes, device sz_match_metal_t *matches, ulong matches_capacity,
+                                              thread ulong &emitted, ulong chunk_end,
+                                              thread sz_group_metal_t const &group,
+                                              thread sz_subdocuments_progress_metal_t &carried) {
+    ulong const header_words = sz_subdocuments_frame_header_words_metal_k;
+    uint const words = engine.words_count;
+    uint expect = carried.expect;
+    ulong top = carried.top, current = carried.current, run = carried.run, from = carried.from;
+    ulong position, closing;
+    sz_subdocuments_group_cursor_metal_t cursor = carried.cursor;
+
+    for (;;) {
+        if (words == 1 && current != sz_subdocuments_no_slot_metal_k) {
+            ulong const walked = from;
+            int const ending = sz_subdocuments_batch_metal_(engine, text, length, document, stack, frames, frame_words,
+                                                            key_bytes, matches, matches_capacity, emitted, cursor,
+                                                            group, from, current, top, run, expect);
+            if (ending != sz_subdocuments_walked_metal_k) return ending;
+            if (run == sz_subdocuments_no_slot_metal_k)
+                top = current != sz_subdocuments_no_slot_metal_k ? current + 1 : 0;
+            if (from != walked) continue;
+        }
+        if ((position = sz_subdocuments_next_group_metal_(cursor, from, group)) == ~0ul) break;
+        if (position >= chunk_end) {
+            carried.cursor = cursor, carried.from = position, carried.top = top, carried.current = current;
+            carried.run = run, carried.expect = expect;
+            return sz_subdocuments_walked_metal_k;
+        }
+        from = position + 1;
+        uchar const byte = text[position];
+        device sz_subdocuments_frame_metal_t *const parent =
+            current != sz_subdocuments_no_slot_metal_k
+                ? (device sz_subdocuments_frame_metal_t *)(stack + current * frame_words)
+                : (device sz_subdocuments_frame_metal_t *)nullptr;
+        device ulong const *const parent_live = parent ? (device ulong const *)parent + header_words : nullptr;
+        device sz_subdocuments_frame_metal_t *const frame = (device sz_subdocuments_frame_metal_t *)(stack +
+                                                                                                     top * frame_words);
+        device ulong *const live = (device ulong *)frame + header_words;
+        ulong reported = 0, continuing = 0, end;
+
+        if (byte == ':') {
+            if (expect != sz_subdocuments_expect_colon_metal_k) return sz_subdocuments_malformed_metal_k;
+            expect = sz_subdocuments_expect_value_metal_k;
+            continue;
+        }
+        if (byte == ',') {
+            if (expect != sz_subdocuments_expect_comma_or_close_metal_k) return sz_subdocuments_malformed_metal_k;
+            expect = parent->closer == '}' ? sz_subdocuments_expect_key_metal_k : sz_subdocuments_expect_value_metal_k;
+            continue;
+        }
+        if (byte == '}' || byte == ']') {
+            if (!parent || parent->closer != byte) return sz_subdocuments_malformed_metal_k;
+            if (expect != sz_subdocuments_expect_comma_or_close_metal_k &&
+                expect != (byte == '}' ? sz_subdocuments_expect_key_or_close_metal_k
+                                       : sz_subdocuments_expect_value_or_close_metal_k))
+                return sz_subdocuments_malformed_metal_k;
+            parent->byte_length = position + 1 - parent->byte_offset;
+            closing = parent->parent;
+            bool const settles = run == sz_subdocuments_no_slot_metal_k || run == current;
+            if (settles) sz_subdocuments_close_frame_metal_(matches, matches_capacity, parent, position + 1);
+            int const ending = run == current ? sz_subdocuments_replay_run_metal_(
+                                                    engine, text, stack, frames, frame_words, key, key_bytes, document,
+                                                    matches, matches_capacity, emitted, run, top)
+                                              : sz_subdocuments_walked_metal_k;
+            if (ending != sz_subdocuments_walked_metal_k) return ending;
+            if (run == current) run = sz_subdocuments_no_slot_metal_k;
+            if (settles) top = current;
+            current = closing;
+            expect = current != sz_subdocuments_no_slot_metal_k ? sz_subdocuments_expect_comma_or_close_metal_k
+                                                                : sz_subdocuments_expect_end_metal_k;
+            continue;
+        }
+
+        if (byte == '"' &&
+            (expect == sz_subdocuments_expect_key_metal_k || expect == sz_subdocuments_expect_key_or_close_metal_k)) {
+            device uchar const *const name_bytes = text + position + 1;
+            ulong name = sz_subdocuments_no_name_metal_k;
+            if ((closing = sz_subdocuments_next_group_metal_(cursor, from, group)) == ~0ul)
+                return sz_subdocuments_malformed_metal_k;
+            from = closing + 1;
+            if (engine.names_slots_count && sz_subdocuments_needs_name_metal_(engine, parent_live, nullptr))
+                name = sz_subdocuments_key_unescaped_metal_(engine, name_bytes, closing - position - 1, key, key_bytes);
+            if (name == ~0ul) return sz_subdocuments_malformed_metal_k;
+            sz_subdocuments_member_live_metal_(engine, parent_live, name, live);
+            if (engine.filters_count) sz_subdocuments_filters_tentative_metal_(engine, parent_live, live);
+            frame->selector = name;
+            expect = sz_subdocuments_expect_colon_metal_k;
+            continue;
+        }
+
+        if (expect != sz_subdocuments_expect_value_metal_k && expect != sz_subdocuments_expect_value_or_close_metal_k)
+            return sz_subdocuments_malformed_metal_k;
+        if (parent && parent->closer == ']') {
+            frame->selector = parent->next_position++;
+            sz_subdocuments_element_live_metal_(engine, parent_live, frame->selector, 0, live);
+            if (engine.filters_count) sz_subdocuments_filters_tentative_metal_(engine, parent_live, live);
+        }
+        for (uint word = 0; word != words; ++word)
+            reported |= live[word] & engine.final_steps[word], continuing |= live[word] & ~engine.final_steps[word];
+        ulong const matches_begin = emitted;
+        if (run == sz_subdocuments_no_slot_metal_k)
+            sz_subdocuments_report_metal_(engine, live, document, position, 0, matches, matches_capacity, emitted);
+        if ((byte == '{' || byte == '[') && continuing) {
+            frame->parent = current, frame->byte_offset = position;
+            frame->next_position = 0, frame->matches_begin = matches_begin, frame->matches_end = emitted;
+            frame->closer = byte == '{' ? '}' : ']';
+            // A container opens a pending run when a step that waits may advance
+            // into what it holds.
+            if (run == sz_subdocuments_no_slot_metal_k && sz_subdocuments_waits_metal_(engine, live, byte)) run = top;
+            current = top++;
+            // The next value's live set takes the slot past the last, so that one must fit as well.
+            if (top + 1 > frames) return sz_subdocuments_too_deep_metal_k;
+            expect = byte == '{' ? sz_subdocuments_expect_key_or_close_metal_k
+                                 : sz_subdocuments_expect_value_or_close_metal_k;
+            continue;
+        }
+        if (byte == '{' || byte == '[' || byte == '"') {
+            closing = byte == '"' ? sz_subdocuments_next_group_metal_(cursor, from, group)
+                                  : sz_subdocuments_skip_group_metal_(cursor, from, group);
+            if (closing == ~0ul) return sz_subdocuments_malformed_metal_k;
+            end = from = closing + 1;
+        }
+        else {
+            end = position + sz_subdocuments_scalar_length_metal_(text, position, length);
+            if (end == position) return sz_subdocuments_malformed_metal_k;
+        }
+        if (run == sz_subdocuments_no_slot_metal_k)
+            sz_subdocuments_close_metal_(matches, matches_capacity, matches_begin, emitted, end);
+        else if (reported) {
+            frame->parent = current, frame->byte_offset = position, frame->byte_length = end - position;
+            frame->closer = 0;
+            if (++top + 1 > frames) return sz_subdocuments_too_deep_metal_k;
+        }
+        expect = current != sz_subdocuments_no_slot_metal_k ? sz_subdocuments_expect_comma_or_close_metal_k
+                                                            : sz_subdocuments_expect_end_metal_k;
+    }
+    carried.cursor = cursor, carried.from = length, carried.top = top, carried.current = current;
+    carried.run = run, carried.expect = expect;
+    return current != sz_subdocuments_no_slot_metal_k || expect != sz_subdocuments_expect_end_metal_k || cursor.slashes
+               ? sz_subdocuments_malformed_metal_k
+               : sz_subdocuments_walked_metal_k;
+}
+
+/** Walks one JSON document as @c sz_subdocuments_walk_simt_ does, emitting its matches from
+ *  @p emitted on, those below @p matches_capacity written, every lane of @p group at once:
+ *  @ref sz_subdocuments_first_chunk_metal_ over the whole document as one chunk. */
+inline int sz_subdocuments_walk_group_metal_(thread sz_subdocuments_engine_metal_t const &engine,
+                                             device uchar const *text, ulong length, ulong document,
+                                             device ulong *stack, ulong frames, ulong frame_words, device uchar *key,
+                                             ulong key_bytes, device sz_match_metal_t *matches, ulong matches_capacity,
+                                             thread ulong &emitted, thread sz_group_metal_t const &group) {
+    sz_subdocuments_progress_metal_t carried;
+    sz_subdocuments_prime_metal_(engine, text, length, stack, carried);
+    return sz_subdocuments_first_chunk_metal_(engine, text, length, document, stack, frames, frame_words, key,
+                                              key_bytes, matches, matches_capacity, emitted, length, group, carried);
 }
 
 /** Frames a walk of the @p length bytes at @p text needs at most, as
