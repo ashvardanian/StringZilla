@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """UTF-8 delimiter splitting: utf8_split_delimiters segments text on any Unicode punctuation, symbol, or
 separator/whitespace codepoint, a superset of the utf8_tokens whitespace splitter, plus malformed-byte safety.
 

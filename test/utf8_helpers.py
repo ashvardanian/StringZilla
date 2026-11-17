@@ -184,9 +184,7 @@ def assert_segments_tile(segments: Iterable, original: str | bytes) -> None:
     """
     original_bytes = original.encode("utf-8") if isinstance(original, str) else bytes(original)
     rebuilt = segment_bytes(segments)
-    assert rebuilt == original_bytes, "segments do not tile the input: in={} out={}".format(
-        original_bytes.hex(), rebuilt.hex()
-    )
+    assert rebuilt == original_bytes, f"segments do not tile the input: in={original_bytes.hex()} out={rebuilt.hex()}"
 
 
 # endregion Boundary helpers
@@ -453,8 +451,8 @@ PROSE_CONCERT_POST = (
 """Concert post in Korean and Japanese: conjoining L+V+T jamo, a Katakana run, an ideographic stop,
 and a 'p.m.' no-break.
 
-    오늘 콘서트, 진짜 미쳤다!! 한국 팬들이 다 모였고, the staff bowed and said 안녕히 가세요. Setlist was pure ハードコア; 今日は最高だった。 We
-    screamed 사랑해 till 11 p.m. sharp.
+    오늘 콘서트, 진짜 미쳤다!! 한국 팬들이 다 모였고, the staff bowed and said 안녕히 가세요.
+    Setlist was pure ハードコア; 今日は最高だった。 We screamed 사랑해 till 11 p.m. sharp.
 """
 
 PROSE_DEVANAGARI_TIP = (
@@ -483,7 +481,7 @@ NBSP, and WJ + ZWSP.
 
     The ﬁlm grew at 300 K on a 5 Å buffer (≈ 2² monolayers). Section Ⅻ covers the Ａ-phase; see Fig. 2 for the
     Σ-band dispersion. Resistivity scaled as T², vanishing at the 4.2 K transition. Full dataset:
-    doi:10.1000⁠/​xyz (mirror in Box ②).
+    doi:10.1000⁠/\u200bxyz (mirror in Box ②).
 """
 
 PROSE_NEWS_LEDE = (

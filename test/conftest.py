@@ -1,7 +1,7 @@
 """
 Shared pytest configuration for the StringZilla per-family test modules.
 
-Hosts the settings header, the case cap, the `STRINGZILLA_FILTER` hook and the `seed`/`rng` fixtures,
+Hosts the settings header, the case cap and the `seed`/`rng` fixtures,
 so every split test file (string_types.py, find.py, utf8_wordbreaks.py, …) inherits them
 without importing anything. The settings themselves are parsed once into `SETTINGS` in `base`.
 
@@ -63,13 +63,13 @@ def pytest_report_header() -> list[str]:
         f"- NumPy: {np.__version__ if numpy_available else 'none'}",
         f"- PyArrow: {pa.__version__ if pyarrow_available else 'none'}",
         f"- In QEMU: {str(SETTINGS.in_qemu).lower()}",
-        f"- Seed: {SETTINGS.seed}, scale: {SETTINGS.scale:g}, filter: {SETTINGS.filter.pattern or 'none'}",
+        f"- Seed: {SETTINGS.seed}, scale: {SETTINGS.scale:g}",
     ]
 
 
 # region Shared Pytest
-def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Refuses a test whose cases outgrow MAX_CASES_PER_TEST, then deselects what the filter setting leaves out."""
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Refuses a test whose cases outgrow MAX_CASES_PER_TEST."""
     variants: dict[tuple[str, str], set[str]] = collections.defaultdict(set)
     for item in items:
         callspec = getattr(item, "callspec", None)
@@ -84,10 +84,6 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     ]
     if oversized:
         raise pytest.UsageError(f"over MAX_CASES_PER_TEST={MAX_CASES_PER_TEST}: " + "; ".join(oversized))
-    deselected = [item for item in items if not SETTINGS.filter.selects(item.nodeid)]
-    if deselected:
-        config.hook.pytest_deselected(items=deselected)
-        items[:] = [item for item in items if SETTINGS.filter.selects(item.nodeid)]
 
 
 def pytest_make_parametrize_id(config: pytest.Config, val: object, argname: str) -> str | None:

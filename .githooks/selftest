@@ -1298,6 +1298,10 @@ assert_accepts "a foreign macro keeps its abbreviation" include/$project_directo
 inline bool zabha(unsigned long extensions) { return extensions & RISCV_HWPROBE_EXT_ZABHA; }
 FIXTURE
 
+assert_accepts "a standard name deep in a std:: chain keeps its abbreviation" test/probe.cpp <<'FIXTURE'
+inline std::filesystem::path probe() { return std::filesystem::temp_directory_path(); }
+FIXTURE
+
 assert_rejects "a macro the file defines spells words out" "abbreviates a word this project spells out" include/$project_directory/probe.hpp <<'FIXTURE'
 #define PROBE_TMP_WORDS 4
 FIXTURE
@@ -3563,6 +3567,31 @@ inline int probe(value_type_) noexcept {
 using probe_category_t = std::random_access_iterator_tag;
 FIXTURE
 
+assert_rejects "a reference to a pointer to a pointer" "takes or binds a reference to a pointer" test/probe.cpp <<'FIXTURE'
+inline void probe(char **&arguments) noexcept { arguments = nullptr; }
+FIXTURE
+
+assert_rejects "a type alias above an include" "declares an alias above its last #include" test/probe.cpp <<'FIXTURE'
+using probe_t = int;
+#include <cstddef> // `std::size_t`
+inline std::size_t probe(probe_t value) noexcept { return static_cast<std::size_t>(value); }
+FIXTURE
+
+assert_accepts "a type alias below the includes" test/probe.cpp <<'FIXTURE'
+#include <cstddef> // `std::size_t`
+using probe_t = int;
+inline std::size_t probe(probe_t value) noexcept { return static_cast<std::size_t>(value); }
+FIXTURE
+
+assert_rejects "a reference to a pointer in a test helper" "takes or binds a reference to a pointer" test/probe.cpp <<'FIXTURE'
+inline void probe(char const*& cursor, std::size_t count) noexcept { cursor += count; }
+FIXTURE
+
+assert_accepts "a view the callee advances, and prose naming the reference it replaces" test/probe.cpp <<'FIXTURE'
+/** Advances @p remaining past @p count bytes, never a <tt>char const*& cursor</tt>. */
+inline void probe(std::span<char const>& remaining, std::size_t count) noexcept { remaining = remaining.subspan(count); }
+FIXTURE
+
 # endregion Shared Gate Fixtures
 
 # region StringZilla Fixtures
@@ -3626,6 +3655,10 @@ FIXTURE
 
 assert_accepts "cstdio" test/probe.cpp <<'FIXTURE'
 #include <cstdio>
+FIXTURE
+
+assert_accepts "the string's stream operator under test" test/string.cpp <<'FIXTURE'
+#include <sstream>
 FIXTURE
 
 assert_rejects "portable bit-scan on x86" "bit-scans through a portable wrapper" include/stringzilla/probe/haswell.h <<'FIXTURE'
@@ -4118,6 +4151,20 @@ STRINGZILLA_INLINE sz_status_t sz_stream_probe_cuda(sz_stream_t stream) { return
 STRINGZILLA_API sz_status_t sz_probe_cuda(sz_stream_t stream) { return sz_success_k; }
 #endif // STRINGZILLA_TARGET_CUDA
 #endif // STRINGZILLA_ARCH_CUDA_
+FIXTURE
+
+assert_rejects "dispatch export beside a generation kernel" "mixes a dispatch export with a generation kernel" test/probe.cpp <<'FIXTURE'
+void run_probe_cases() {
+    run_kernel_case("sz_find_best", test_find, serial, cpu_best<sz_find_best>,
+                    sz_find_serial);
+}
+FIXTURE
+
+assert_accepts "dispatch export and generation kernel registered apart" test/probe.cpp <<'FIXTURE'
+void run_probe_cases() {
+    run_kernel_case("sz_find_serial", test_find, serial, sz_find_serial);
+    run_kernel_case("test_find(cpu_best<sz_find_best>)", test_find, serial, cpu_best<sz_find_best>);
+}
 FIXTURE
 
 # region Shared Guard Fixtures

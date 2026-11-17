@@ -87,6 +87,7 @@
 #include <utility>      // `std::index_sequence`
 #include <vector>       // `std::vector`
 
+#include <fmt/chrono.h> // `std::chrono::milliseconds` - the warm-up and time limits
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <fmt/std.h> // `std::byte`
@@ -112,11 +113,17 @@ namespace sz = ashvardanian::stringzilla;
 
 namespace ashvardanian::stringzilla::bench {
 
+/** Writes one line to @p stream, formatted from @p format and @p args, then its newline. */
+template <typename... args_types_>
+void print_line(std::FILE *stream, fmt::format_string<args_types_...> format, args_types_ &&...args) {
+    fmt::println(stream, format, std::forward<args_types_>(args)...);
+}
+
 #pragma region Shared Settings
 
 /** Exits with one line naming a setting that does not parse, so a bad value never runs anything. */
 [[noreturn]] inline void exit_unparsed(char const *variable, char const *text, char const *expected) noexcept {
-    std::fprintf(stderr, "%s=\"%s\" does not parse, expected %s\n", variable, text, expected);
+    print_line(stderr, "{}=\"{}\" does not parse, expected {}", variable, text, expected);
     std::exit(1);
 }
 
@@ -150,8 +157,8 @@ inline std::size_t read_count_setting(int argc, char **argv, char const *variabl
     if (!text) return fallback;
     std::string_view const spelled {text};
     std::size_t count = 0;
-    auto const [end, error] = std::from_chars(spelled.data(), spelled.data() + spelled.size(), count);
-    if (error != std::errc {} || end != spelled.data() + spelled.size())
+    auto const [end, parse_status] = std::from_chars(spelled.data(), spelled.data() + spelled.size(), count);
+    if (parse_status != std::errc {} || end != spelled.data() + spelled.size())
         exit_unparsed(variable, text, "a whole number");
     return count;
 }
@@ -176,9 +183,9 @@ inline std::chrono::milliseconds read_duration_setting(int argc, char **argv, ch
     if (!text) return fallback;
     std::string_view const spelled {text};
     std::uint32_t count = 0;
-    auto const [end, error] = std::from_chars(spelled.data(), spelled.data() + spelled.size(), count);
+    auto const [end, parse_status] = std::from_chars(spelled.data(), spelled.data() + spelled.size(), count);
     std::string_view const unit = spelled.substr(static_cast<std::size_t>(end - spelled.data()));
-    if (error == std::errc {} && count != 0) {
+    if (parse_status == std::errc {} && count != 0) {
         if (unit == "ms") return std::chrono::milliseconds(count);
         if (unit == "s") return std::chrono::seconds(count);
         if (unit == "m") return std::chrono::minutes(count);
@@ -196,38 +203,36 @@ inline std::uint64_t read_seed_setting(int argc, char **argv, char const *variab
         return (static_cast<std::uint64_t>(device()) << 32) ^ device();
     }
     std::uint64_t seed = 0;
-    auto const [end, error] = std::from_chars(spelled.data(), spelled.data() + spelled.size(), seed);
-    if (error != std::errc {} || end != spelled.data() + spelled.size())
+    auto const [end, parse_status] = std::from_chars(spelled.data(), spelled.data() + spelled.size(), seed);
+    if (parse_status != std::errc {} || end != spelled.data() + spelled.size())
         exit_unparsed(variable, text, "an unsigned integer or random");
     return seed;
 }
 
-/** Which labels a run selects: a regex search when the pattern compiles, else a substring. */
-struct filter_t {
-    std::string pattern;
-    std::optional<std::regex> regex;
+/** Which labels a run selects: those its regex matches somewhere, every label while unset. */
+struct regex_filter_t {
+    std::string_view text;
+    std::regex regex {""};
 
-    bool selects(std::string_view label) const noexcept {
-        if (pattern.empty()) return true;
-        if (regex) return std::regex_search(label.begin(), label.end(), *regex);
-        return label.find(pattern) != std::string_view::npos;
-    }
+    bool selects(std::string_view label) const noexcept { return std::regex_search(label.begin(), label.end(), regex); }
 };
 
-/** The filter a setting spells, compiled once; empty, selecting everything, when unset. */
-inline filter_t read_filter_setting(int argc, char **argv, char const *variable, std::string_view flag) noexcept {
-    filter_t filter;
+/** The filter a setting spells, compiled once; one that does not compile exits as a bad setting. */
+inline regex_filter_t read_regex_filter_setting(int argc, char **argv, char const *variable,
+                                                std::string_view flag) noexcept {
+    regex_filter_t filter;
     char const *text = setting_text(argc, argv, variable, flag);
     if (!text) return filter;
-    filter.pattern = text;
+    filter.text = text;
 #if defined(__cpp_exceptions) && __cpp_exceptions
     try {
-        filter.regex.emplace(filter.pattern);
+        filter.regex.assign(filter.text.begin(), filter.text.end());
     }
     catch (std::regex_error const &) {
+        exit_unparsed(variable, text, "a regular expression");
     }
 #else
-    filter.regex.emplace(filter.pattern);
+    filter.regex.assign(filter.text.begin(), filter.text.end());
 #endif
     return filter;
 }
@@ -235,7 +240,7 @@ inline filter_t read_filter_setting(int argc, char **argv, char const *variable,
 /** What every suite and bench reads before its own settings; @c program starts the rerun lines. */
 struct common_settings_t {
     std::uint64_t seed = 42;
-    filter_t filter;
+    regex_filter_t regex_filter;
     char const *program = "";
 };
 
@@ -254,7 +259,7 @@ constexpr std::uint64_t stream_key(std::uint64_t seed, std::string_view name, st
 }
 
 /**
- *  @brief SplitMix64 over one 64-bit state, seeded by a @ref stream_key , bit-identical to the
+ *  @brief SplitMix64 over one 64-bit counter, seeded by a @ref stream_key , bit-identical to the
  *      JavaScript generator NumKong ships.
  *
  *  Distributions are not specified to draw the same sequence on every standard library, so a
@@ -263,12 +268,12 @@ constexpr std::uint64_t stream_key(std::uint64_t seed, std::string_view name, st
  */
 struct split_mix_generator_t {
     using result_type = std::uint64_t;
-    std::uint64_t state = 0;
+    std::uint64_t counter = 0;
 
-    explicit split_mix_generator_t(std::uint64_t key) noexcept : state(key) {}
+    explicit split_mix_generator_t(std::uint64_t key) noexcept : counter(key) {}
     static constexpr result_type(min)() noexcept { return 0; }
     static constexpr result_type(max)() noexcept { return ~result_type {0}; }
-    result_type operator()() noexcept { return split_mix_bits(state += 0x9E3779B97F4A7C15ull); }
+    result_type operator()() noexcept { return split_mix_bits(counter += 0x9E3779B97F4A7C15ull); }
 
     /** A uniform draw below @p bound , zero for an empty bound, without the bias of a modulo. */
     std::uint64_t below(std::uint64_t bound) noexcept {
@@ -340,19 +345,20 @@ template <typename value_type_, typename parse_type_>
     exit_unparsed(variable, text, expected);
 }
 
-/** Spells @p duration as a user types it: whole seconds as "10s", anything else as "1500ms". */
-inline std::string spell_duration(std::chrono::milliseconds duration) {
-    auto const count = duration.count();
-    return count % 1000 ? std::to_string(count) + "ms" : std::to_string(count / 1000) + "s";
-}
+} // namespace ashvardanian::stringzilla::bench
 
-/** Spells @p size as a user types it, in the largest binary unit dividing it, like "256MB". */
-inline std::string spell_size(bytes_t size) {
-    constexpr std::array<char const *, 5> units {"", "KB", "MB", "GB", "TB"};
-    std::size_t bytes = size.value, power = 0;
-    while (power + 1 != units.size() && bytes && bytes % 1024 == 0) bytes /= 1024, ++power;
-    return std::to_string(bytes) + units[power];
-}
+/** Writes a @ref bytes_t as a user types it, in the largest binary unit dividing it, as "256MB". */
+template <>
+struct fmt::formatter<ashvardanian::stringzilla::bench::bytes_t> : fmt::formatter<std::string_view> {
+    auto format(ashvardanian::stringzilla::bench::bytes_t size, fmt::format_context &context) const {
+        constexpr char const *units[] {"", "KB", "MB", "GB", "TB"};
+        std::size_t bytes = size.value, power = 0;
+        while (power + 1 != std::size(units) && bytes && bytes % 1024 == 0) bytes /= 1024, ++power;
+        return fmt::format_to(context.out(), "{}{}", bytes, units[power]);
+    }
+};
+
+namespace ashvardanian::stringzilla::bench {
 
 /** Calls the dispatch point @p best_ over @p capabilities with the arguments of its capability
  *  kernels, whose last one, the stream, follows the mask. */
@@ -993,7 +999,7 @@ struct bench_settings_t : common_settings_t {
 inline bench_settings_t read_bench_settings(int argc, char **argv) noexcept {
     bench_settings_t settings;
     settings.seed = read_seed_setting(argc, argv, "STRINGWARS_SEED", "--seed");
-    settings.filter = read_filter_setting(argc, argv, "STRINGWARS_FILTER", "--filter");
+    settings.regex_filter = read_regex_filter_setting(argc, argv, "STRINGWARS_FILTER", "--filter");
     settings.program = argc != 0 ? argv[0] : "";
     if (char const *text = setting_text(argc, argv, "STRINGWARS_DEVICES", "--devices")) {
         settings.devices = parse_devices(text);
@@ -1047,20 +1053,21 @@ inline void print(bench_settings_t const &settings) {
     }
     else fmt::println("- Devices: auto");
     fmt::println("- Seed: {}", settings.seed);
-    fmt::println("- Filter: {}", settings.filter.pattern.empty() ? std::string_view("none") : settings.filter.pattern);
-    fmt::println("- Warm-up: {}", spell_duration(settings.warmup));
-    fmt::println("- Time limit: {}", spell_duration(settings.time_limit));
-    fmt::println("- Bytes: {}", settings.read_limit ? spell_size(*settings.read_limit) : std::string("per corpus"));
-    fmt::println("- Batch per core: {}", settings.candidates_per_core ? std::to_string(*settings.candidates_per_core)
-                                                                      : std::string("per backend"));
+    fmt::println("- Filter: {}",
+                 settings.regex_filter.text.empty() ? std::string_view("none") : settings.regex_filter.text);
+    fmt::println("- Warm-up: {}", settings.warmup);
+    fmt::println("- Time limit: {}", settings.time_limit);
+    if (settings.read_limit) fmt::println("- Bytes: {}", *settings.read_limit);
+    else fmt::println("- Bytes: per corpus");
+    if (settings.candidates_per_core) fmt::println("- Batch per core: {}", *settings.candidates_per_core);
+    else fmt::println("- Batch per core: per backend");
     fmt::println("- Dataset: {}", settings.dataset.value_or("per corpus"));
-    fmt::println("- Tokens: {}", !settings.tokenization ? std::string("per corpus")
-                                 : *settings.tokenization == tokenization_t::ngrams_k
-                                     ? std::to_string(settings.ngram_bytes)
-                                     : fmt::format("{}", *settings.tokenization));
+    if (!settings.tokenization) fmt::println("- Tokens: per corpus");
+    else if (*settings.tokenization == tokenization_t::ngrams_k) fmt::println("- Tokens: {}", settings.ngram_bytes);
+    else fmt::println("- Tokens: {}", *settings.tokenization);
     fmt::println("- Unique: {}", settings.duplicates == duplicates_t::drop_k);
     fmt::println("- Stress: {}", settings.stress == stress_t::check_k);
-    fmt::println("- Stress time limit: {}", spell_duration(settings.stress_time_limit));
+    fmt::println("- Stress time limit: {}", settings.stress_time_limit);
     fmt::println("- Stress dir: {}", settings.stress_log_dir);
     fmt::println("- Stress limit: {}", settings.stress_failures_to_stop);
 }
@@ -1083,17 +1090,35 @@ inline machine_t probe_machine() noexcept {
     return machine;
 }
 
+/** A capability mask, formatted as the comma-separated names @c sz_capabilities_name spells. */
+struct capability_names_t {
+    sz_capability_t capabilities = 0;
+};
+
+} // namespace ashvardanian::stringzilla::bench
+
+/** Writes a @ref capability_names_t through @c sz_capabilities_name , its one staging buffer. */
+template <>
+struct fmt::formatter<ashvardanian::stringzilla::bench::capability_names_t> {
+    constexpr auto parse(fmt::format_parse_context &context) { return context.begin(); }
+    template <typename context_type_>
+    auto format(ashvardanian::stringzilla::bench::capability_names_t const &names, context_type_ &context) const {
+        char spelled[STRINGZILLA_CAPABILITIES_NAME_CAPACITY];
+        std::size_t const length = sz_capabilities_name(names.capabilities, spelled, sizeof(spelled));
+        return std::copy_n(spelled, length, context.out());
+    }
+};
+
+namespace ashvardanian::stringzilla::bench {
+
 /** Prints the version line, then "- Compiled for:", "- This machine:", "- Caches:", and in GPU
  *  builds report device facts separately. */
 inline void print(machine_t const &machine) {
-    char compiled[STRINGZILLA_CAPABILITIES_NAME_CAPACITY], detected[STRINGZILLA_CAPABILITIES_NAME_CAPACITY];
-    sz_capabilities_name(machine.compiled, compiled, sizeof(compiled));
-    sz_capabilities_name(machine.detected, detected, sizeof(detected));
     fmt::println("StringZilla {}.{}.{}", machine.version[0], machine.version[1], machine.version[2]);
-    fmt::println("- Compiled for: {}", compiled);
-    fmt::println("- This machine: {}", detected);
+    fmt::println("- Compiled for: {}", capability_names_t {machine.compiled});
+    fmt::println("- This machine: {}", capability_names_t {machine.detected});
     fmt::println("- Caches: {} first-level, assumed, and {} confined to a compute domain",
-                 spell_size({machine.specs.l1_bytes}), spell_size({machine.specs.l3_bytes}));
+                 bytes_t {machine.specs.l1_bytes}, bytes_t {machine.specs.l3_bytes});
 }
 
 /** Loads one corpus: @p default_dataset split by @p default_tokenization and cut at
@@ -1149,7 +1174,7 @@ inline corpus_t build_corpus(bench_settings_t const &settings, char const *defau
 )",
         fmt::arg("path", corpus.path), fmt::arg("tokenization", corpus.tokenization),
         fmt::arg("dataset_bytes", corpus.dataset.size()),
-        fmt::arg("dataset_limit", read_limit ? spell_size(*read_limit) : std::string("whole file")),
+        fmt::arg("dataset_limit", read_limit ? fmt::format("{}", *read_limit) : std::string("whole file")),
         fmt::arg("tokens", corpus.tokens.size()), fmt::arg("mean_token_length", mean_token_length));
 
     return corpus;
@@ -1222,9 +1247,7 @@ inline bool section(environment_t const &env, std::string_view title, sz_capabil
         fmt::println("\n{}:", title);
         return true;
     }
-    char missing_names[STRINGZILLA_CAPABILITIES_NAME_CAPACITY];
-    sz_capabilities_name(missing, missing_names, sizeof(missing_names));
-    fmt::println("\n{}: skipped, {} not detected", title, missing_names);
+    fmt::println("\n{}: skipped, {} not detected", title, capability_names_t {missing});
     return false;
 }
 
@@ -1261,18 +1284,17 @@ inline void log_failure(                                              //
     std::size_t expected_check_value, std::size_t actual_check_value, //
     std::optional<std::size_t> token_index) noexcept(false) {
 
-    std::string timestamp = std::to_string(std::time(nullptr));
     // Benchmark names embed shape labels like `...:q4xc4:allpairs`; `:` and `/` are invalid in path
     // components on common filesystems, so map every non-portable character to `_` before composing the path.
     std::string safe_name {name};
     for (char &c : safe_name)
         if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '.' || c == '_')) c = '_';
-    std::string file_name = "failed_" + timestamp + "_" + safe_name + "_" + ".txt";
-    std::string file_path = std::string(settings.stress_log_dir) + "/" + file_name;
+    std::string const file_path = fmt::format("{}/failed_{}_{}_.txt", settings.stress_log_dir, std::time(nullptr),
+                                              safe_name);
     std::error_code ignored;
     std::filesystem::create_directories(settings.stress_log_dir, ignored);
     std::FILE *file = std::fopen(file_path.c_str(), "w");
-    if (!file) throw std::runtime_error("Failed to open file for writing: " + file_path);
+    if (!file) throw std::runtime_error(fmt::format("Failed to open file for writing: {}", file_path));
 
     fmt::println(file, "Dataset path: {}\nTokenization mode: {}\nSeed: {}", corpus.path, corpus.tokenization,
                  settings.seed);
@@ -1334,7 +1356,7 @@ std::optional<row_t> bench_nullary(                   //
     callable_type_ &&callable,                        //
     check_validator_type_ &&check_validator = check_validator_type_ {}) {
 
-    if (!env.settings.filter.selects(name)) return std::nullopt;
+    if (!env.settings.regex_filter.selects(name)) return std::nullopt;
     if constexpr (requires { baseline.preprocess(); }) baseline.preprocess();
     if constexpr (requires { callable.preprocess(); }) callable.preprocess();
     if constexpr (!is_same_type<baseline_type_, callable_no_op_t>::value)
@@ -1377,7 +1399,7 @@ std::optional<row_t> bench_unary(                     //
     callable_type_ &&callable,                        //
     check_validator_type_ &&check_validator = check_validator_type_ {}) {
 
-    if (!env.settings.filter.selects(name)) return std::nullopt;
+    if (!env.settings.regex_filter.selects(name)) return std::nullopt;
     if constexpr (requires { baseline.preprocess(); }) baseline.preprocess();
     if constexpr (requires { callable.preprocess(); }) callable.preprocess();
     if constexpr (!is_same_type<baseline_type_, callable_no_op_t>::value)
@@ -1418,11 +1440,11 @@ template <typename callable_type_>
 std::optional<double> bench_baseline(environment_t const &env, corpus_t const &corpus, std::string const &name,
                                      std::initializer_list<std::string_view> arms, callable_type_ &callable,
                                      std::optional<double> against = std::nullopt) {
-    bool const printed = env.settings.filter.selects(name);
+    bool const printed = env.settings.regex_filter.selects(name);
     std::string_view timed_as = name;
     if (!printed)
         for (std::string_view const arm : arms)
-            if (env.settings.filter.selects(arm)) timed_as = arm;
+            if (env.settings.regex_filter.selects(arm)) timed_as = arm;
     // ? Timed under a kept arm's name, so a filter naming only the arms still times their baseline
     std::optional<row_t> row = bench_unary(env, corpus, timed_as, callable);
     if (!row) return std::nullopt;

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Hashing and cryptography: sz.hash / Hasher, hash_multiseed, bytesum, SHA-256, HMAC-SHA-256.
 
 Mirrors the C++ test/hash.cpp translation unit.

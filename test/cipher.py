@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """AES-256 ciphers: the seekable `sz.Aes256CtrKey`, the authenticated `sz.Aes256GcmKey`, and its chunked
 `sz.Aes256GcmEncryptor` / `sz.Aes256GcmDecryptor`.
 
@@ -95,10 +94,14 @@ AUTHENTICATED_VECTORS = [
         "feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308",
         "cafebabefacedbaddecaf888",
         "",
-        "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a72"
-        "1c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b391aafd255",
-        "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa"
-        "8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662898015ad",
+        (
+            "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a72"
+            "1c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b391aafd255"
+        ),
+        (
+            "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa"
+            "8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662898015ad"
+        ),
         "b094dac5d93471bdec1a502270e3cc6c",
     ),
     # A partial trailing block plus associated data, which exercises both zero pads
@@ -106,10 +109,14 @@ AUTHENTICATED_VECTORS = [
         "feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308",
         "cafebabefacedbaddecaf888",
         "feedfacedeadbeeffeedfacedeadbeefabaddad2",
-        "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a72"
-        "1c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39",
-        "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa"
-        "8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662",
+        (
+            "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a72"
+            "1c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39"
+        ),
+        (
+            "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa"
+            "8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662"
+        ),
         "76fc6ece0f4e1768cddf8853bb2d551b",
     ),
 ]
@@ -544,7 +551,9 @@ def test_gcm_agrees_across_backends(backend_results, length: int, rng: Random):
 
             assert_backends_agree(
                 backend_results(encrypt),
-                format_inputs=lambda: f"length={length} associated_length={associated_length}",
+                format_inputs=lambda associated_length=associated_length: (
+                    f"length={length} associated_length={associated_length}"
+                ),
             )
 
             ciphertext, tag = encrypt()

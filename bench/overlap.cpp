@@ -31,7 +31,7 @@ void bench_overlap(environment_t &env) {
     std::size_t const candidates = candidates_per_call(env, corpus);
     overlap_query_t const query(corpus, median_token_bytes(corpus));
     fmt::println("Starting window overlap benchmarks...");
-    print(bench_unary(env, corpus, "sz_overlap_scores:w" + std::to_string(query.width),
+    print(bench_unary(env, corpus, fmt::format("sz_overlap_scores:w{}", query.width),
                       scores_from_sz {overlap_engine_init_cpu_, sz_overlap_scores, corpus, query, candidates}));
 }
 

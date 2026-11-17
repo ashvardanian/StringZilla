@@ -82,10 +82,9 @@ struct levenshtein_pair_from_sz {
 
 /** One-pair shape on the dispatched entry alone, as one pair fills one candidate on any backend. */
 void bench_levenshtein_one_pair(environment_t const &env, corpus_t const &corpus, std::size_t query_bytes) {
-    std::string const suffix = ":q" + std::to_string(query_bytes);
-    print(bench_unary(env, corpus, "sz_levenshtein_distances:pair" + suffix,
+    print(bench_unary(env, corpus, fmt::format("sz_levenshtein_distances:pair:q{}", query_bytes),
                       levenshtein_pair_from_sz {corpus, query_bytes, sz_levenshtein_bytes_k}));
-    print(bench_unary(env, corpus, "sz_levenshtein_distances:pair:utf8" + suffix,
+    print(bench_unary(env, corpus, fmt::format("sz_levenshtein_distances:pair:utf8:q{}", query_bytes),
                       levenshtein_pair_from_sz {corpus, query_bytes, sz_levenshtein_runes_k}));
 }
 
@@ -96,14 +95,13 @@ void bench_levenshtein_one_pair(environment_t const &env, corpus_t const &corpus
 /** Cross-product verbs at one query length, over bytes and runes, on the engine's kernel. */
 void bench_levenshtein_cross_product(environment_t const &env, corpus_t const &corpus, std::size_t query_bytes,
                                      std::size_t candidates) {
-    std::string const suffix = ":q" + std::to_string(query_bytes);
     std::optional<row_t> const base = bench_unary(
-        env, corpus, "sz_levenshtein_distances" + suffix,
+        env, corpus, fmt::format("sz_levenshtein_distances:q{}", query_bytes),
         levenshtein_distances_from_sz {levenshtein_engine_init_cpu_, sz_levenshtein_distances, corpus, query_bytes,
                                        candidates, sz_levenshtein_bytes_k});
     print(base);
     // The rune rows decode every candidate byte, so their cost over the byte rows is the decoder's.
-    print(bench_unary(env, corpus, "sz_levenshtein_distances:utf8" + suffix,
+    print(bench_unary(env, corpus, fmt::format("sz_levenshtein_distances:utf8:q{}", query_bytes),
                       levenshtein_distances_from_sz {levenshtein_engine_init_cpu_, sz_levenshtein_distances, corpus,
                                                      query_bytes, candidates, sz_levenshtein_runes_k}),
           baseline_of(base));

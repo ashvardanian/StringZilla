@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """UAX-29 grapheme cluster segmentation: sz.utf8_graphemes and String.utf8_graphemes().
 
 Mirrors the C++ test/utf8_graphemes.cpp translation unit.
@@ -224,10 +223,7 @@ def test_utf8_grapheme_boundary_fuzz(seed: int, rng: Random, grapheme_break_prop
     """Fuzz: compare the C grapheme iterator vs the pure-Python UAX-29 baseline."""
     for _ in range(scaled_iterations(200)):
         text = "".join(rng.choice(_SEGMENTATION_PALETTE) for _ in range(rng.randint(1, 100)))
-        try:
-            expected = baseline_grapheme_boundaries(text, grapheme_break_props)
-        except Exception:
-            continue
+        expected = baseline_grapheme_boundaries(text, grapheme_break_props)
         sz_boundaries = _byte_boundaries(sz.utf8_graphemes(text))
         assert sz_boundaries == expected, (
             "Grapheme boundary mismatch (seed {}):\n  text cps: {}\n  expected: {}\n  got:      {}".format(
@@ -240,7 +236,7 @@ def test_utf8_grapheme_differential_grapheme(rng: Random):
     """Differential fuzz against an independent grapheme library (``grapheme`` / ``uniseg``)."""
     try:
         graphemes_fn = pytest.importorskip("grapheme", reason="grapheme is not installed").graphemes
-    except Exception:
+    except pytest.skip.Exception:
         uniseg_gc = pytest.importorskip("uniseg.graphemecluster", reason="uniseg is not installed")
         graphemes_fn = uniseg_gc.grapheme_clusters
 

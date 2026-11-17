@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Scheme-C mode tests for the UTF-8 splitters: the bare name yields the separators, ``split_*`` yields the
 content between them, and ``with_separators=True`` interleaves both losslessly.
 
@@ -100,7 +99,7 @@ def test_zero_width_format_chars_are_not_whitespace():
     whitespace separators, while U+200A HAIR SPACE, the last codepoint of the U+2000 space block, must split.
     The kernel overran the E2 80 block to 0x8D, splitting on the zero-width joiners and shattering ZWJ emoji."""
     assert list(sz.utf8_split_whitespaces("a b")) == [String("a"), String("b")]  # U+200A HAIR SPACE → splits
-    for cp in ("​", "‌", "‍"):  # ZWSP / ZWNJ / ZWJ → not whitespace, no split
+    for cp in ("\u200b", "\u200c", "\u200d"):  # ZWSP / ZWNJ / ZWJ → not whitespace, no split
         assert list(sz.utf8_split_whitespaces(f"a{cp}b")) == [String(f"a{cp}b")]
     # A ZWJ emoji sequence (man-ZWJ-woman) stays one segment instead of being split on the joiner.
     assert list(sz.utf8_split_whitespaces("\U0001f468‍\U0001f469")) == [String("\U0001f468‍\U0001f469")]

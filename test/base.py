@@ -15,7 +15,6 @@ import gc
 import io
 import os
 import random
-import re
 import tempfile
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -90,8 +89,6 @@ def _write_cache_atomically(cache_path: str, payload: bytes) -> None:
 class UnicodeDataDownloadError(Exception):
     """Raised when Unicode data files cannot be downloaded."""
 
-    pass
-
 
 class UnicodeDataParseError(Exception):
     """Raised when a downloaded Unicode data file yields no usable entries.
@@ -100,8 +97,6 @@ class UnicodeDataParseError(Exception):
     skip a test, while a file that parses to an empty table means the cache is truncated or the upstream
     format moved, and a test running against an empty table silently validates nothing.
     """
-
-    pass
 
 
 def _parsed_or_raise(entries, cache_path: str, description: str):
@@ -139,7 +134,7 @@ def get_unicode_xml_data(version: str = UNICODE_VERSION) -> ET.Element:
                     xml_content = xml_file.read()
                     _write_cache_atomically(cache_path, xml_content)
             print(f"Cached to {cache_path}")
-        except Exception as error:
+        except (OSError, zipfile.BadZipFile) as error:
             raise UnicodeDataDownloadError(f"Could not download UCD XML from {url}: {error}")
     else:
         print(f"Using cached Unicode {version} UCD XML: {cache_path}")
@@ -211,7 +206,7 @@ def _download_uncased_folding_file(version: str) -> str:
             # Use urlopen with 30-second timeout instead of urlretrieve
             with urllib.request.urlopen(url, timeout=30) as response:
                 _write_cache_atomically(cache_path, response.read())
-        except Exception as error:
+        except OSError as error:
             raise UnicodeDataDownloadError(f"Could not download CaseFolding.txt from {url}: {error}")
 
     return cache_path
@@ -283,7 +278,7 @@ def get_normalization_props(version: str = UNICODE_VERSION) -> dict[int, dict[st
             with urllib.request.urlopen(url, timeout=30) as response:
                 _write_cache_atomically(cache_path, response.read())
             print(f"Cached to {cache_path}")
-        except Exception as error:
+        except OSError as error:
             raise UnicodeDataDownloadError(f"Could not download DerivedNormalizationProps.txt from {url}: {error}")
     else:
         print(f"Using cached Unicode {version} DerivedNormalizationProps.txt: {cache_path}")
@@ -339,7 +334,7 @@ def _download_word_break_property_file(version: str) -> str:
             with urllib.request.urlopen(url, timeout=30) as response:
                 _write_cache_atomically(cache_path, response.read())
             print(f"Cached to {cache_path}")
-        except Exception as error:
+        except OSError as error:
             raise UnicodeDataDownloadError(f"Could not download WordBreakProperty.txt from {url}: {error}")
 
     return cache_path
@@ -399,7 +394,7 @@ def _download_word_break_test_file(version: str) -> str:
             with urllib.request.urlopen(url, timeout=30) as response:
                 _write_cache_atomically(cache_path, response.read())
             print(f"Cached to {cache_path}")
-        except Exception as error:
+        except OSError as error:
             raise UnicodeDataDownloadError(f"Could not download WordBreakTest.txt from {url}: {error}")
 
     return cache_path
@@ -587,22 +582,23 @@ def baseline_word_boundaries(text: str, word_break_properties: dict[int, str] | 
             # Already handled by WB6
             pass
 
-        if is_midnumlet_or_single_quote(effective_previous) or effective_previous == "MidLetter":
-            if is_aletter_or_hebrew_letter(effective_current):
-                # Check if preceded by AHLetter
-                for lookahead_index in range(index - 2, -1, -1):
-                    scanned_property = word_break_property_of(codepoints[lookahead_index][0])
-                    if is_ignorable(scanned_property):
-                        continue
-                    if is_aletter_or_hebrew_letter(scanned_property):
-                        # Don't break: AHLetter × (MidLetter|MidNumLetQ) × AHLetter
-                        break
-                    else:
-                        boundaries.append(boundary_byte_position)
-                        break
+        if (
+            is_midnumlet_or_single_quote(effective_previous) or effective_previous == "MidLetter"
+        ) and is_aletter_or_hebrew_letter(effective_current):
+            # Check if preceded by AHLetter
+            for lookahead_index in range(index - 2, -1, -1):
+                scanned_property = word_break_property_of(codepoints[lookahead_index][0])
+                if is_ignorable(scanned_property):
+                    continue
+                if is_aletter_or_hebrew_letter(scanned_property):
+                    # Don't break between AHLetters around a MidLetter or MidNumLetQ
+                    break
                 else:
                     boundaries.append(boundary_byte_position)
-                continue
+                    break
+            else:
+                boundaries.append(boundary_byte_position)
+            continue
 
         # WB8: Do not break between digits
         if effective_previous == "Numeric" and effective_current == "Numeric":
@@ -641,14 +637,20 @@ def baseline_word_boundaries(text: str, word_break_properties: dict[int, str] | 
             continue
 
         # WB13a: Connect with ExtendNumLet
-        if effective_previous in ("ALetter", "Hebrew_Letter", "Numeric", "Katakana", "ExtendNumLet"):
-            if effective_current == "ExtendNumLet":
-                continue
+        if (
+            effective_previous in ("ALetter", "Hebrew_Letter", "Numeric", "Katakana", "ExtendNumLet")
+            and effective_current == "ExtendNumLet"
+        ):
+            continue
 
         # WB13b: ExtendNumLet continues words
-        if effective_previous == "ExtendNumLet":
-            if effective_current in ("ALetter", "Hebrew_Letter", "Numeric", "Katakana"):
-                continue
+        if effective_previous == "ExtendNumLet" and effective_current in (
+            "ALetter",
+            "Hebrew_Letter",
+            "Numeric",
+            "Katakana",
+        ):
+            continue
 
         # WB15/16: Regional Indicators - keep pairs together
         if effective_previous == "Regional_Indicator" and effective_current == "Regional_Indicator":
@@ -689,7 +691,7 @@ def _download_break_property_file(filename: str, version: str) -> str:
             with urllib.request.urlopen(url, timeout=30) as response:
                 _write_cache_atomically(cache_path, response.read())
             print(f"Cached to {cache_path}")
-        except Exception as error:
+        except OSError as error:
             raise UnicodeDataDownloadError(f"Could not download {filename} from {url}: {error}")
 
     return cache_path
@@ -737,7 +739,7 @@ def _download_break_test_file(filename: str, version: str) -> str:
             with urllib.request.urlopen(url, timeout=30) as response:
                 _write_cache_atomically(cache_path, response.read())
             print(f"Cached to {cache_path}")
-        except Exception as error:
+        except OSError as error:
             raise UnicodeDataDownloadError(f"Could not download {filename} from {url}: {error}")
 
     return cache_path
@@ -802,7 +804,7 @@ def get_indic_conjunct_break_properties(version: str = UNICODE_VERSION) -> dict[
             with urllib.request.urlopen(url, timeout=30) as response:
                 _write_cache_atomically(cache_path, response.read())
             print(f"Cached to {cache_path}")
-        except Exception as error:
+        except OSError as error:
             raise UnicodeDataDownloadError(f"Could not download DerivedCoreProperties.txt from {url}: {error}")
     indic_conjunct_breaks: dict[int, str] = {}
     with open(cache_path, encoding="utf-8") as data_file:
@@ -835,7 +837,7 @@ def baseline_grapheme_boundaries(
     text: str,
     properties: dict[int, str] | None = None,
     indic_conjunct_breaks: dict[int, str] | None = None,
-    extended_pictographic: set = None,
+    extended_pictographic: set | None = None,
 ) -> list[int]:
     """Pure Python implementation of the UAX-29 extended grapheme cluster algorithm.
 
@@ -1197,7 +1199,7 @@ def _download_ucd_text(filename: str, subdir: str, version: str = UNICODE_VERSIO
             with urllib.request.urlopen(url, timeout=30) as response:
                 _write_cache_atomically(cache_path, response.read())
             print(f"Cached to {cache_path}")
-        except Exception as error:
+        except OSError as error:
             raise UnicodeDataDownloadError(f"Could not download {filename} from {url}: {error}")
     return cache_path
 
@@ -1395,32 +1397,6 @@ def env_flag(variable: str, fallback: bool = False) -> bool:
     return text not in {"0", "false", "off", "no"}
 
 
-@dataclass(frozen=True)
-class Filter:
-    """Which node ids a run selects: a regex search when the pattern compiles, else a substring, all when empty."""
-
-    pattern: str
-    regex: re.Pattern[str] | None
-
-    def selects(self, nodeid: str) -> bool:
-        """Whether `nodeid` passes the filter."""
-        if not self.pattern:
-            return True
-        if self.regex is not None:
-            return self.regex.search(nodeid) is not None
-        return self.pattern in nodeid
-
-
-def env_filter(variable: str) -> Filter:
-    """The filter the environment `variable` spells, compiled once."""
-    pattern = env_text(variable) or ""
-    try:
-        regex = re.compile(pattern) if pattern else None
-    except re.error:
-        regex = None
-    return Filter(pattern, regex)
-
-
 def mix(value: int) -> int:
     """SplitMix64's finalizer, a bijection that spreads every input bit over all 64 output bits."""
     value = ((value ^ (value >> 30)) * 0xBF58476D1CE4E5B9) & _UINT64_MASK
@@ -1444,7 +1420,6 @@ class Settings:
     """Every `STRINGZILLA_*` variable the Python suite reads, parsed once at import."""
 
     seed: int
-    filter: Filter
     scale: float
     in_qemu: bool
     expect_simd: bool
@@ -1452,7 +1427,6 @@ class Settings:
 
 SETTINGS = Settings(
     seed=env_seed("STRINGZILLA_SEED"),
-    filter=env_filter("STRINGZILLA_FILTER"),
     scale=env_real("STRINGZILLA_SCALE", 1.0),
     in_qemu=env_flag("STRINGZILLA_IN_QEMU"),
     # On unless set to `0`, for a deliberately scalar build on a SIMD-capable machine.
@@ -1483,7 +1457,7 @@ def get_random_string(
 def is_equal_strings(native_strings, big_strings):
     """Assert each StringZilla slice equals its native counterpart, pairwise."""
     for native_slice, big_slice in zip(native_strings, big_strings):
-        assert native_slice == big_slice, f"Mismatch between `{native_slice}` and `{str(big_slice)}`"
+        assert native_slice == big_slice, f"Mismatch between `{native_slice}` and `{big_slice!s}`"
 
 
 DEGENERATE_HAYSTACKS = ["", "a", "hello world"]
@@ -1491,6 +1465,9 @@ DEGENERATE_BOUNDS = [-16, -6, -5, -1, 0, 1, 2, 5, 6, 10, 11, 12, 16, 99]
 UNCASED_DEGENERATE_BOUNDS = [0, 1, 3, 4, 5, 6, 7, 8, 11, 99]
 """`utf8_uncased_search` counts negative offsets from 0, not from the end, so its bounds are
 non-negative."""
+
+SEED_VALUES: list[int] = [0, 7, 2**64 - 1]
+"""Hash seeds spanning zero, a small value and the largest unsigned 64-bit one."""
 
 
 # endregion General test scaffolding

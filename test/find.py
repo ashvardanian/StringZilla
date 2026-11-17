@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Substring search and byteset tests: find, rfind, find_*_of, partition, count, fuzzy substring search.
 
 Mirrors the C++ test/find.cpp translation unit.
@@ -339,7 +338,7 @@ def check_identical(
         for i in range(len(native_strings)):
             assert len(native_strings[i]) == len(big_strings[i])
             assert native_strings[i] == big_strings[i], (
-                f"Mismatch between `{native_strings[i]}` and `{str(big_strings[i])}`"
+                f"Mismatch between `{native_strings[i]}` and `{big_strings[i]!s}`"
             )
             assert [c for c in native_strings[i]] == [c for c in big_strings[i]]
 

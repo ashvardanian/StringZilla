@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """UAX-14 line-break-opportunity segmentation: sz.utf8_linebreaks and the String.utf8_linebreaks method.
 
 Mirrors the C++ test/utf8_linebreaks.cpp translation unit.

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """UAX-29 sentence-boundary segmentation: sz.utf8_sentences and String.utf8_sentences.
 
 Mirrors the C++ test/utf8_sentences.cpp translation unit.
@@ -196,7 +195,7 @@ def test_utf8_sentence_differential_icu(rng: Random):
 
     try:
         ref_segments = icu_boundaries()
-    except Exception:
+    except pytest.skip.Exception:
         pysbd = pytest.importorskip("pysbd", reason="pysbd is not installed")
         segmenter = pysbd.Segmenter(language="en", clean=False)
         ref_segments = lambda text: segmenter.segment(text)  # noqa: E731
@@ -231,25 +230,18 @@ def test_utf8_sentence_boundary_fuzz(seed: int, rng: Random, sentence_break_prop
     # `test_utf8_sentence_boundary_official_conformance` at 512/512, and ICU. Use ICU to arbitrate a
     # kernel-vs-baseline mismatch, exonerating the kernel when it matches ICU, so a real kernel bug,
     # disagreeing with both, still fails.
-    icu_sentences = None
-    try:
-        icu_sentences = icu_segmenter("sentence")
-    except Exception:
-        icu_sentences = None
+    icu_sentences = icu_segmenter("sentence")
 
     total = 0
     disagreements = []
     for _ in range(scaled_iterations(200)):
         text = "".join(rng.choice(SEGMENTATION_PALETTE) for _ in range(rng.randint(1, 100)))
-        try:
-            expected = baseline_sentence_boundaries(text, sentence_break_props)
-        except Exception:
-            continue
+        expected = baseline_sentence_boundaries(text, sentence_break_props)
         total += 1
         sz_boundaries = _byte_boundaries(sz.utf8_sentences(text))
         if sz_boundaries == expected:
             continue
-        if icu_sentences is not None and sz_boundaries == _byte_boundaries(icu_sentences(text)):
+        if sz_boundaries == _byte_boundaries(icu_sentences(text)):
             continue  # baseline bug, kernel agrees with ICU and the strict UCD gate
         # Neither imperfect oracle agrees on this text. The baseline misses some SB11 interactions and ICU
         # is a stale Unicode version, so they disagree on different boundaries. The official UCD vector is

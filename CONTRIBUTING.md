@@ -339,7 +339,7 @@ The benchmark harness reads these environment variables, and a flag overrides ea
 | `STRINGWARS_TOKENS`             | `--tokens`            | per corpus  | `file`, `lines`, `words`, or an N-gram length like `64`                              |
 | `STRINGWARS_BYTES`              | `--bytes`             | whole file  | Bytes read from the corpus, like `4096`, `64KB` or `1GB`; UTF-8 families read `64MB` |
 | `STRINGWARS_UNIQUE`             | `--unique`            | `0`         | Sorts the tokens and drops duplicates first                                          |
-| `STRINGWARS_FILTER`             | `--filter`            | unset       | ECMAScript regex over benchmark names, or a substring when it does not compile       |
+| `STRINGWARS_FILTER`             | `--filter`            | unset       | ECMAScript regex over benchmark names                                                |
 | `STRINGWARS_SEED`               | `--seed`              | `42`        | Seed for every random generator, or `random` to draw one, which a run prints         |
 | `STRINGWARS_WARMUP`             | `--warmup`            | `1s`        | Untimed run before each benchmark, like `200ms` or `1s`                              |
 | `STRINGWARS_TIME_LIMIT`         | `--time-limit`        | `10s`       | Timed run of each benchmark, like `200ms` or `10s`; `1s` in debug builds             |
@@ -671,7 +671,7 @@ Each setting is an environment variable, and in the C++ runners a `--name` flag 
 | :---------------------------- | :------------------ | :------ | :-------------------------------------------------------------------------------------- |
 | `STRINGZILLA_SEED`            | `--seed`            | `42`    | Any unsigned 64-bit seed, or `random` to draw one, which a run prints                   |
 | `STRINGZILLA_SCALE`           | `--scale`           | `1`     | Multiplier for every baseline iteration count, like `0.1` or `10`                       |
-| `STRINGZILLA_FILTER`          | `--filter`          | unset   | Regex searched in C++ case labels or pytest node ids, else a substring                  |
+| `STRINGZILLA_FILTER`          | `--filter`          | unset   | Regex searched in C++ case labels                                                       |
 | `STRINGZILLA_DEVICES`         | `--devices`         | unset   | C++ only: comma-separated `backend:ordinal` devices, like `cuda:0,rocm:1`               |
 | `STRINGZILLA_TRAP_ON_FAILURE` | `--trap-on-failure` | `0`     | C++ only: raises `SIGTRAP` at the first failed check, to stop there under a debugger    |
 | `STRINGZILLA_NO_SKIPS`        | `--no-skips`        | `0`     | C++ only: exits with 3 when any case skipped, for runners that must cover everything    |

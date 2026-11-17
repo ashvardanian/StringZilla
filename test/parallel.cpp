@@ -5,12 +5,12 @@
  *  @brief Checks that @c sz_parallel_for_tiles runs every tile once at any thread count,
  *      and that the status of a failing tile comes back.
  */
-#include <cstdio>  // `std::fprintf`
-#include <cstdlib> // `EXIT_SUCCESS`, `EXIT_FAILURE`
+#undef NDEBUG // ! A test's oracle must stay live in every build
 
 #include <atomic> // `std::atomic_ref`
 #include <vector> // `std::vector`
 
+#include "harness.hpp"
 #include "parallel.h" // `sz_parallel_for_tiles`
 
 namespace ashvardanian::stringzilla::test {
@@ -20,36 +20,46 @@ struct tiles_t {
     sz_size_t failing_tile = static_cast<sz_size_t>(-1);
 };
 
-sz_status_t count_tile(sz_size_t tile_index, void *context) {
+sz_status_t count_tile_(sz_size_t tile_index, void *context) {
     tiles_t &tiles = *static_cast<tiles_t *>(context);
     std::atomic_ref<unsigned>(tiles.runs[tile_index]).fetch_add(1, std::memory_order_relaxed);
     return tile_index == tiles.failing_tile ? sz_bad_alloc_k : sz_success_k;
 }
 
+/** Thread counts to run, the largest past any core count, so the scheduler multiplexes them. */
+constexpr sz_size_t thread_counts_k[] = {1, 4, 64, 4096};
+constexpr std::size_t tiles_count_k = 10000;
+
+/** Every tile runs exactly once, and the call reports success, at every thread count. */
+void test_parallel_every_tile_once() {
+    for (sz_size_t threads : thread_counts_k) {
+        tiles_t tiles;
+        tiles.runs.assign(tiles_count_k, 0);
+        sz_status_t const status = sz_parallel_for_tiles(tiles.runs.size(), threads, count_tile_, &tiles);
+        std::size_t once = 0;
+        for (unsigned runs : tiles.runs) once += runs == 1;
+        expect_equal(status, sz_success_k, "{} threads", threads);
+        expect_equal(once, tiles.runs.size(), "{} threads", threads);
+    }
+}
+
+/** The status of a failing tile comes back from the call, at every thread count. */
+void test_parallel_failing_tile() {
+    for (sz_size_t threads : thread_counts_k) {
+        tiles_t tiles;
+        tiles.runs.assign(tiles_count_k, 0);
+        tiles.failing_tile = 777;
+        expect_equal(sz_parallel_for_tiles(tiles.runs.size(), threads, count_tile_, &tiles), sz_bad_alloc_k,
+                     "{} threads", threads);
+    }
+}
+
 } // namespace ashvardanian::stringzilla::test
 
-int main() {
+int main(int argc, char **argv) {
     using namespace ashvardanian::stringzilla::test;
-    int failures = 0;
-    // 4096 threads exceeds any core count here, so the scheduler multiplexes the threads.
-    for (sz_size_t threads : {sz_size_t {1}, sz_size_t {4}, sz_size_t {64}, sz_size_t {4096}}) {
-        tiles_t tiles;
-        tiles.runs.assign(10000, 0);
-        sz_status_t const status = sz_parallel_for_tiles(tiles.runs.size(), threads, count_tile, &tiles);
-        sz_size_t once = 0;
-        for (unsigned runs : tiles.runs) once += runs == 1;
-        if (status != sz_success_k || once != tiles.runs.size()) {
-            std::fprintf(stderr, "%zu threads: status %d, %zu of %zu tiles ran once\n", static_cast<size_t>(threads),
-                         static_cast<int>(status), static_cast<size_t>(once), tiles.runs.size());
-            ++failures;
-        }
-
-        tiles.runs.assign(10000, 0);
-        tiles.failing_tile = 777;
-        if (sz_parallel_for_tiles(tiles.runs.size(), threads, count_tile, &tiles) != sz_bad_alloc_k) {
-            std::fprintf(stderr, "%zu threads: the failing tile's status was lost\n", static_cast<size_t>(threads));
-            ++failures;
-        }
-    }
-    return failures ? EXIT_FAILURE : EXIT_SUCCESS;
+    start_test_run(argc, argv);
+    run_test_case("test_parallel_every_tile_once", test_parallel_every_tile_once);
+    run_test_case("test_parallel_failing_tile", test_parallel_failing_tile);
+    return finish_test_run();
 }

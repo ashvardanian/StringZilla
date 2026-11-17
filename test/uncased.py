@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Uncased UTF-8 operations: sz.utf8_uncased_fold, utf8_uncased_search, utf8_uncased_matches, utf8_uncased_order.
 
 Mirrors the C++ test/uncased.cpp translation unit.

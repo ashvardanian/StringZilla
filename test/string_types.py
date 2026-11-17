@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """String and Strings containers: construction, indexing, slicing, comparisons, and the buffer protocol.
 
 Mirrors the C++ test/string.cpp translation unit.
@@ -40,6 +39,7 @@ from string import ascii_lowercase
 import pytest
 from base import (
     DEGENERATE_HAYSTACKS,
+    SEED_VALUES,
     VECTOR_WIDTH_LENGTHS,
     assert_backends_agree,
     differential_bodies,
@@ -621,10 +621,10 @@ def test_strings_compare_like_sequences():
     assert arr != tuple_different
 
     # Test against a generator of unknown length
-    generator_equal = (x for x in "a b c d e f g h".split())
-    generator_different = (x for x in "a b c d e f g i".split())
-    generator_shorter = (x for x in "a b c d e".split())
-    generator_longer = (x for x in "a b c d e f g h i j".split())
+    generator_equal = (x for x in ["a", "b", "c", "d", "e", "f", "g", "h"])
+    generator_different = (x for x in ["a", "b", "c", "d", "e", "f", "g", "i"])
+    generator_shorter = (x for x in ["a", "b", "c", "d", "e"])
+    generator_longer = (x for x in ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"])
 
     assert arr == generator_equal
     assert arr != generator_different
@@ -1188,7 +1188,7 @@ def test_strings_pyarrow_empty():
     assert offsets_bytes == 4  # Arrow uses N+1 offsets, so 1 offset for 0 strings (u32 = 4 bytes)
 
     are_large = strings.offsets_are_large
-    assert are_large == False  # Default to u32 offsets
+    assert are_large is False  # Default to u32 offsets
 
 
 @pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
@@ -1694,7 +1694,7 @@ def test_strings_find_matches_bytes_find(backend_results, needle: str):
             assert tuple(out.tolist()) == expected
 
 
-@pytest.mark.parametrize("seed_value", [0, 7, 2**64 - 1])
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
 def test_strings_hashes_match_hash(backend_results, seed_value: int):
     """`Strings.hashes(seed)` returns `sz.hash(text, seed)` for every string, over every kind of tape, and
     writes the same into `out`."""
@@ -1936,7 +1936,7 @@ def test_contains_agrees_across_backends(backend_results, length: int, rng: Rand
         )
         assert_backends_agree(
             backend_results(
-                lambda capabilities, absent_needle=absent_needle: sz.find(
+                lambda capabilities, absent_needle=absent_needle, haystack=haystack: sz.find(
                     haystack, absent_needle, capabilities=capabilities
                 )
             ),

@@ -69,7 +69,7 @@ static sz_substrings_overlap_policy_t const substrings_leftmost_policies_k[] = {
  *  @p kit, like @c _haswell, then the slice and the policy, so an unwanted slice is never drawn. */
 inline bool substrings_selects(environment_t const &env, std::string_view kit, std::string const &label) {
     auto const selects = [&](char const *verb, char const *policy) {
-        return env.settings.filter.selects(fmt::format("sz_substrings_{}{}{}{}", verb, kit, label, policy));
+        return env.settings.regex_filter.selects(fmt::format("sz_substrings_{}{}{}{}", verb, kit, label, policy));
     };
     for (sz_substrings_overlap_policy_t const policy : substrings_policies_k)
         if (selects("counts", substrings_policy_name(policy)) || selects("find", substrings_policy_name(policy)))

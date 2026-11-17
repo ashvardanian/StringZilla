@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """UTF-8 delimiter splitting: sz.utf8_split_newlines and sz.utf8_split_whitespaces, plus malformed-byte
 safety.
 

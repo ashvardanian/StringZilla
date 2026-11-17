@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Sequence sorting: Strings.sorted / argsort, top-K and reverse selection, uncased ordering, and the
 argsort(out=...) buffer protocol.
 

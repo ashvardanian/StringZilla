@@ -745,7 +745,7 @@ if (STRINGZILLA_BUILD_TEST)
     add_executable(stringzilla_parallel_test test/parallel.cpp src/parallel.c)
     stringzilla_set_compiler_flags(stringzilla_parallel_test 20)
     target_include_directories(stringzilla_parallel_test PRIVATE src)
-    target_link_libraries(stringzilla_parallel_test PRIVATE stringzilla_static Threads::Threads)
+    target_link_libraries(stringzilla_parallel_test PRIVATE stringzilla_static fmt::fmt Threads::Threads)
     add_test(NAME stringzilla_parallel_test COMMAND stringzilla_parallel_test)
 
 endif ()

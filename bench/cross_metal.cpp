@@ -23,7 +23,7 @@
 #if STRINGZILLA_ARCH_METAL_
 #include <optional>  // `std::optional`
 #include <stdexcept> // `std::runtime_error`
-#include <string>    // `std::string`, `std::to_string`
+#include <string>    // `std::string`
 #include <vector>    // `std::vector`
 
 #include <fmt/format.h>
@@ -39,19 +39,18 @@ static void bench_overlap_scores(environment_t const &env, corpus_t const &corpu
                                  std::size_t query_bytes, device_backend_t const &runtime) {
     std::size_t const width = overlap_width_(corpus, query_bytes);
     auto const query = std::string_view(corpus.tokens[0]).substr(0, query_bytes);
-    std::string const suffix = ":w" + std::to_string(width);
     auto validator = scores_from_sz {sz_overlap_engine_init_serial,
                                      sz_overlap_scores_serial,
                                      query,
                                      width,
                                      resident.host_candidates(),
                                      resident.views};
-    std::string const device_suffix = ":metal:" + std::to_string(runtime.selected.ordinal());
-    std::string const metal_name = "sz_overlap_scores_metal:" + std::to_string(runtime.selected.ordinal()) + suffix;
+    std::size_t const ordinal = runtime.selected.ordinal();
+    std::string const metal_name = fmt::format("sz_overlap_scores_metal:{}:w{}", ordinal, width);
     auto dispatched = scores_from_sz {overlap_engine_init_cpu_,   sz_overlap_scores, query, width,
                                       resident.host_candidates(), resident.views};
-    std::optional<double> const base = bench_baseline(env, corpus, "sz_overlap_scores" + device_suffix + suffix,
-                                                      {metal_name}, dispatched);
+    std::optional<double> const base = bench_baseline(
+        env, corpus, fmt::format("sz_overlap_scores:metal:{}:w{}", ordinal, width), {metal_name}, dispatched);
     print(bench_unary(env, corpus, metal_name, validator,
                       scores_from_sz {sz_overlap_engine_init_metal, sz_overlap_scores_metal, query, width,
                                       resident.candidates.view().raw, resident.views, std::cref(runtime)}),

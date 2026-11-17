@@ -31,9 +31,9 @@ void bench_cipher_ctr(environment_t const &env, corpus_t const &corpus) {
     for (std::size_t message_bytes : cipher_message_sizes_) {
         std::vector<char> pool = cipher_pool();
         std::vector<char> target(pool.size());
-        std::string const suffix = ":" + std::to_string(message_bytes);
         using best_t = ctr_from_sz<cpu_best<sz_aes256_key_init_best>, cpu_best<sz_aes256_ctr_xor_best>>;
-        print(bench_unary(env, corpus, "sz_aes256_ctr_xor_best" + suffix, best_t {message_bytes, pool, target}));
+        print(bench_unary(env, corpus, fmt::format("sz_aes256_ctr_xor_best:{}", message_bytes),
+                          best_t {message_bytes, pool, target}));
     }
 }
 
@@ -41,9 +41,9 @@ void bench_cipher_gcm(environment_t const &env, corpus_t const &corpus) {
     for (std::size_t message_bytes : cipher_message_sizes_) {
         std::vector<char> pool = cipher_pool();
         std::vector<char> target(pool.size());
-        std::string const suffix = ":" + std::to_string(message_bytes);
         using best_t = gcm_from_sz<cpu_best<sz_aes256_gcm_key_init_best>, cpu_best<sz_aes256_gcm_encrypt_best>>;
-        print(bench_unary(env, corpus, "sz_aes256_gcm_encrypt_best" + suffix, best_t {message_bytes, pool, target}));
+        print(bench_unary(env, corpus, fmt::format("sz_aes256_gcm_encrypt_best:{}", message_bytes),
+                          best_t {message_bytes, pool, target}));
     }
 }
 
@@ -52,12 +52,11 @@ void bench_cipher_stream(environment_t const &env, corpus_t const &corpus) {
     for (std::size_t chunk_bytes : cipher_chunk_sizes_) {
         std::vector<char> pool = cipher_pool();
         std::vector<char> target(pool.size());
-        std::string const suffix = ":chunk" + std::to_string(chunk_bytes);
         using best_t =
             gcm_stream_from_sz<cpu_best<sz_aes256_gcm_key_init_best>, cpu_best<sz_aes256_gcm_encryptor_init_best>,
                                cpu_best<sz_aes256_gcm_encryptor_update_best>,
                                cpu_best<sz_aes256_gcm_encryptor_digest_best>>;
-        print(bench_unary(env, corpus, "sz_aes256_gcm_stream_best" + suffix,
+        print(bench_unary(env, corpus, fmt::format("sz_aes256_gcm_stream_best:chunk{}", chunk_bytes),
                           best_t {message_bytes, chunk_bytes, pool, target}));
     }
 }

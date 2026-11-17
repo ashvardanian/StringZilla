@@ -55,7 +55,7 @@ inline void log_kernel(environment_t &env, std::optional<row_t> const &row, std:
 
 /** Whether the filter keeps the kernel @p name but dropped the serial row it prints against. */
 inline bool needs_serial_row(environment_t const &env, std::string_view name, std::string_view serial_name) {
-    return name != serial_name && env.settings.filter.selects(name) && !env.serial_rows.contains(serial_name);
+    return name != serial_name && env.settings.regex_filter.selects(name) && !env.serial_rows.contains(serial_name);
 }
 
 /** Keeps @p row, timed under a kept kernel's name, as the serial row @p serial_name, unprinted. */
@@ -1412,10 +1412,10 @@ void bench_aes256_ctr_kernels(environment_t &env, std::string_view kit) {
     for (std::size_t message_bytes : cipher_message_sizes_) {
         std::vector<char> pool = cipher_pool();
         std::vector<char> target(pool.size());
-        std::string const suffix = ":" + std::to_string(message_bytes);
         using serial_t = ctr_from_sz<sz_aes256_key_init_serial, sz_aes256_ctr_xor_serial>;
-        bench_kernel_unary(env, corpus, fmt::format("sz_aes256_ctr_xor_{}{}", kit, suffix),
-                           "sz_aes256_ctr_xor_serial" + suffix, serial_t {message_bytes, pool, target},
+        bench_kernel_unary(env, corpus, fmt::format("sz_aes256_ctr_xor_{}:{}", kit, message_bytes),
+                           fmt::format("sz_aes256_ctr_xor_serial:{}", message_bytes),
+                           serial_t {message_bytes, pool, target},
                            ctr_from_sz<key_init_, ctr_xor_> {message_bytes, pool, target});
     }
 }
@@ -1427,10 +1427,10 @@ void bench_aes256_gcm_kernels(environment_t &env, std::string_view kit) {
     for (std::size_t message_bytes : cipher_message_sizes_) {
         std::vector<char> pool = cipher_pool();
         std::vector<char> target(pool.size());
-        std::string const suffix = ":" + std::to_string(message_bytes);
         using serial_t = gcm_from_sz<sz_aes256_gcm_key_init_serial, sz_aes256_gcm_encrypt_serial>;
-        bench_kernel_unary(env, corpus, fmt::format("sz_aes256_gcm_encrypt_{}{}", kit, suffix),
-                           "sz_aes256_gcm_encrypt_serial" + suffix, serial_t {message_bytes, pool, target},
+        bench_kernel_unary(env, corpus, fmt::format("sz_aes256_gcm_encrypt_{}:{}", kit, message_bytes),
+                           fmt::format("sz_aes256_gcm_encrypt_serial:{}", message_bytes),
+                           serial_t {message_bytes, pool, target},
                            gcm_from_sz<key_init_, encrypt_> {message_bytes, pool, target});
     }
 }
@@ -1444,12 +1444,12 @@ void bench_aes256_gcm_stream_kernels(environment_t &env, std::string_view kit) {
     for (std::size_t chunk_bytes : cipher_chunk_sizes_) {
         std::vector<char> pool = cipher_pool();
         std::vector<char> target(pool.size());
-        std::string const suffix = ":chunk" + std::to_string(chunk_bytes);
         using serial_t =
             gcm_stream_from_sz<sz_aes256_gcm_key_init_serial, sz_aes256_gcm_encryptor_init_serial,
                                sz_aes256_gcm_encryptor_update_serial, sz_aes256_gcm_encryptor_digest_serial>;
         bench_kernel_unary(
-            env, corpus, fmt::format("sz_aes256_gcm_stream_{}{}", kit, suffix), "sz_aes256_gcm_stream_serial" + suffix,
+            env, corpus, fmt::format("sz_aes256_gcm_stream_{}:chunk{}", kit, chunk_bytes),
+            fmt::format("sz_aes256_gcm_stream_serial:chunk{}", chunk_bytes),
             serial_t {message_bytes, chunk_bytes, pool, target},
             gcm_stream_from_sz<key_init_, begin_, update_, digest_> {message_bytes, chunk_bytes, pool, target});
     }
@@ -1710,7 +1710,7 @@ void bench_levenshtein_distances_kernels(environment_t &env, std::string_view ki
         std::string const suffix = fmt::format("{}:q{}", symbol == sz_levenshtein_runes_k ? ":utf8" : "", query_bytes);
         bench_kernel_unary(
             env, corpus, fmt::format("sz_levenshtein_distances_{}{}", kit, suffix),
-            "sz_levenshtein_distances_serial" + suffix,
+            fmt::format("sz_levenshtein_distances_serial{}", suffix),
             levenshtein_distances_from_sz {sz_levenshtein_engine_init_serial, sz_levenshtein_distances_serial, corpus,
                                            query_bytes, candidates, symbol},
             levenshtein_distances_from_sz {init_, distances_, corpus, query_bytes, candidates, symbol});
@@ -1894,9 +1894,9 @@ void bench_overlap_scores_kernels(environment_t &env, std::string_view kit) {
     corpus_t const &corpus = env.corpora.multilingual_lines();
     overlap_query_t const query(corpus, median_token_bytes(corpus));
     std::size_t const candidates = candidates_per_call(env, corpus);
-    std::string const suffix = ":w" + std::to_string(query.width);
     bench_kernel_unary(
-        env, corpus, fmt::format("sz_overlap_scores_{}{}", kit, suffix), "sz_overlap_scores_serial" + suffix,
+        env, corpus, fmt::format("sz_overlap_scores_{}:w{}", kit, query.width),
+        fmt::format("sz_overlap_scores_serial:w{}", query.width),
         scores_from_sz {sz_overlap_engine_init_serial, sz_overlap_scores_serial, corpus, query, candidates},
         scores_from_sz {init_, scores_, corpus, query, candidates});
 }
@@ -2066,7 +2066,7 @@ inline sz_strings_view_t regex_replacements(vocabulary_t const &vocabulary) noex
  *  unwanted vocabulary is never compiled. */
 inline bool regex_selects(environment_t const &env, std::string_view kit, vocabulary_t const &vocabulary) {
     for (char const *verb : {"engine_init", "counts", "find", "replace", "extract"})
-        if (env.settings.filter.selects(fmt::format("sz_regex_{}{}{}", verb, kit, vocabulary.label))) return true;
+        if (env.settings.regex_filter.selects(fmt::format("sz_regex_{}{}{}", verb, kit, vocabulary.label))) return true;
     return false;
 }
 
@@ -2366,7 +2366,8 @@ inline bool subdocuments_selects(environment_t const &env, std::string_view kit)
     for (sz_subdocuments_format_t const format : {sz_subdocuments_json_k, sz_subdocuments_xml_k})
         for (vocabulary_t const &vocabulary : subdocuments_vocabularies(format))
             for (char const *verb : {"counts", "find"})
-                if (env.settings.filter.selects(fmt::format("sz_subdocuments_{}{}{}", verb, kit, vocabulary.label)))
+                if (env.settings.regex_filter.selects(
+                        fmt::format("sz_subdocuments_{}{}{}", verb, kit, vocabulary.label)))
                     return true;
     return false;
 }

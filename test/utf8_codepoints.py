@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """UTF-8 codepoint counting and iteration: sz.utf8_count and sz.utf8_codepoints.
 
 Mirrors the C++ test/utf8_runes.cpp translation unit.

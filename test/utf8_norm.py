@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """UTF-8 normalization: sz.utf8_norm, sz.utf8_find_denormalized and Strings.normalize across the NFC, NFD,
 NFKC, NFKD and NFKC_Casefold forms.
 
@@ -85,7 +84,7 @@ def test_utf8_norm_matches_unicodedata():
         for form in ("NFC", "NFD", "NFKC", "NFKD"):
             expected = unicodedata.normalize(form, sample).encode("utf-8")
             got = sz.utf8_norm(sample, form)
-            assert got == expected, f"Mismatch for {repr(sample)} form={form}: {got!r} != {expected!r}"
+            assert got == expected, f"Mismatch for {sample!r} form={form}: {got!r} != {expected!r}"
 
 
 @pytest.mark.parametrize(
@@ -230,8 +229,8 @@ def test_utf8_norm_official_conformance(normalization_cases):
                 codepoints = " ".join(f"{ord(character):04X}" for character in source)
                 failures.append((form, codepoints, expected.hex(), got.hex()))
 
-    assert not failures, "NormalizationTest.txt conformance failures ({} / {} cases). First 10: {}".format(
-        len(failures), len(cases), failures[:10]
+    assert not failures, (
+        f"NormalizationTest.txt conformance failures ({len(failures)} / {len(cases)} cases). First 10: {failures[:10]}"
     )
 
 
@@ -283,8 +282,9 @@ def test_utf8_norm_all_codepoints_icu(form: str):
         if got != expected:
             mismatches.append((f"U+{codepoint:04X}", expected.hex(), got.hex()))
 
-    assert not mismatches, "{} codepoints differ from ICU {} (icu unicode {}). First 10: {}".format(
-        len(mismatches), form, icu.UNICODE_VERSION, mismatches[:10]
+    assert not mismatches, (
+        f"{len(mismatches)} codepoints differ from ICU {form} (icu unicode {icu.UNICODE_VERSION}). "
+        f"First 10: {mismatches[:10]}"
     )
 
 
@@ -309,8 +309,8 @@ def test_utf8_norm_hangul_syllables(form: str):
             if got != expected:
                 mismatches.append((f"U+{codepoint:04X}", expected.hex(), got.hex()))
 
-    assert not mismatches, "{} Hangul codepoints differ from unicodedata {}. First 10: {}".format(
-        len(mismatches), form, mismatches[:10]
+    assert not mismatches, (
+        f"{len(mismatches)} Hangul codepoints differ from unicodedata {form}. First 10: {mismatches[:10]}"
     )
 
 
@@ -334,9 +334,7 @@ def test_utf8_norm_random_sequences_icu(form: str, rng: Random):
         if got != expected:
             mismatches.append((" ".join(f"{ord(c):04X}" for c in text), expected.hex(), got.hex()))
 
-    assert not mismatches, "{} sequences differ from ICU {}. First 10: {}".format(
-        len(mismatches), form, mismatches[:10]
-    )
+    assert not mismatches, f"{len(mismatches)} sequences differ from ICU {form}. First 10: {mismatches[:10]}"
 
 
 def test_utf8_prose_normalizes_like_icu():

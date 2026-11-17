@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """UAX-29 word-boundary segmentation: utf8_wordbreaks and String.utf8_wordbreaks.
 
 Mirrors the C++ test/utf8_wordbreaks.cpp translation unit.
