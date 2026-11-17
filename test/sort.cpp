@@ -4,7 +4,7 @@
  *  @date February 6, 2024
  *  @brief Sequence sort equivalence/backends/algorithms and intersection tests.
  */
-#undef NDEBUG // ! Enable all assertions for testing
+#undef NDEBUG // ! A test's oracle must stay live in every build
 
 #if defined(STRINGZILLA_DEBUG)
 #undef STRINGZILLA_DEBUG
@@ -35,7 +35,7 @@
 #include <fmt/format.h>
 
 #include "cross.hpp"   // `sort_backend_t`, `check_sort_unit_`, `check_intersect_unit_`
-#include "harness.hpp" // `random_string`, `test_context_t`
+#include "harness.hpp" // `random_string`, `case_stream_key`
 
 namespace ashvardanian::stringzilla::test {
 using sz::literals::operator""_sv; // for `sz::string_view_t`
@@ -69,8 +69,8 @@ void test_sort_unit() {
     // Byte arg-sort: {"banana","apple","cherry"} sorts lexicographically to {1, 0, 2}, and uncased
     // {"Banana","apple"} case-folds to {"banana","apple"}, ordering them {1, 0}.
     check_sort_unit_(sort_dispatched);
-    verify(sz::argsort(strs_t {"banana", "apple", "cherry"}).value == order_t({1u, 0u, 2u}));
-    verify(sz::argsort_utf8_uncased(strs_t {"Banana", "apple"}).value == order_t({1u, 0u}));
+    expect_equal(sz::argsort(strs_t {"banana", "apple", "cherry"}).value, order_t({1u, 0u, 2u}));
+    expect_equal(sz::argsort_utf8_uncased(strs_t {"Banana", "apple"}).value, order_t({1u, 0u}));
 
     // Intersection: {"apple","banana","cherry"} vs {"cherry","date","banana"} share {"banana","cherry"}.
     {
@@ -82,12 +82,12 @@ void test_sort_unit() {
         std::set<intersect_match_t> const expected_pairs = {{1u, 2u}, {2u, 0u}};
 
         auto const [result, status] = sz::intersect(first, second);
-        verify(sz::succeeded(status));
-        verify(result.first_offsets.size() == 2u && result.second_offsets.size() == 2u);
+        expect_true(sz::succeeded(status));
+        if (!expect_true(result.first_offsets.size() == 2u && result.second_offsets.size() == 2u)) return;
         std::set<intersect_match_t> wrapper_pairs;
         for (std::size_t index = 0; index != result.first_offsets.size(); ++index)
             wrapper_pairs.insert({result.first_offsets[index], result.second_offsets[index]});
-        verify(wrapper_pairs == expected_pairs);
+        expect_equal(wrapper_pairs, expected_pairs);
     }
 
     // The span overloads fill caller-sized outputs; `intersect` also returns its match count.
@@ -96,15 +96,15 @@ void test_sort_unit() {
 
         std::vector<std::string> const fruits = {"banana", "apple", "cherry"};
         order_t order(fruits.size());
-        verify(sz::argsort(fruits, as_view, {order.data(), order.size()}) == sz::status_t::success_k);
-        verify(order == order_t({1u, 0u, 2u}));
-        verify(sz::argsort_utf8_uncased(fruits, as_view, {order.data(), order.size()}) == sz::status_t::success_k);
-        verify(order == order_t({1u, 0u, 2u}));
+        expect_equal(sz::argsort(fruits, as_view, {order.data(), order.size()}), sz::status_t::success_k);
+        expect_equal(order, order_t({1u, 0u, 2u}));
+        expect_equal(sz::argsort_utf8_uncased(fruits, as_view, {order.data(), order.size()}), sz::status_t::success_k);
+        expect_equal(order, order_t({1u, 0u, 2u}));
 
         // An output shorter than the collection is refused in release builds too, not written past.
         order_t short_order(fruits.size() - 1);
-        verify(sz::argsort(fruits, as_view, {short_order.data(), short_order.size()}) ==
-               sz::status_t::unexpected_dimensions_k);
+        expect_equal(sz::argsort(fruits, as_view, {short_order.data(), short_order.size()}),
+                     sz::status_t::unexpected_dimensions_k);
 
         std::vector<std::string> const first = {"apple", "banana", "cherry"};
         std::vector<std::string> const second = {"cherry", "date", "banana"};
@@ -113,27 +113,26 @@ void test_sort_unit() {
         auto const [matched, status] = sz::intersect( //
             first, as_view, second, as_view, /*seed*/ 0u, {first_positions.data(), first_positions.size()},
             {second_positions.data(), second_positions.size()});
-        verify(sz::succeeded(status));
-        verify(matched == 2u);
+        expect_true(sz::succeeded(status));
+        expect_equal(matched, 2u);
         std::set<intersect_match_t> low_level_pairs;
         for (std::size_t index = 0; index != matched; ++index)
             low_level_pairs.insert({first_positions[index], second_positions[index]});
         std::set<intersect_match_t> const expected_low_level = {{1u, 2u}, {2u, 0u}};
-        verify(low_level_pairs == expected_low_level);
+        expect_equal(low_level_pairs, expected_low_level);
     }
 
     // Basic tests with predetermined orders.
-    let_verify(auto result = sz::argsort(strs_t({"a", "b", "c", "d"})).value, result == order_t({0u, 1u, 2u, 3u}));
-    let_verify(auto result = sz::argsort(strs_t({"b", "c", "d", "a"})).value, result == order_t({3u, 0u, 1u, 2u}));
-    let_verify(auto result = sz::argsort(strs_t({"b", "a", "d", "c"})).value, result == order_t({1u, 0u, 3u, 2u}));
+    expect_equal(sz::argsort(strs_t({"a", "b", "c", "d"})).value, order_t({0u, 1u, 2u, 3u}));
+    expect_equal(sz::argsort(strs_t({"b", "c", "d", "a"})).value, order_t({3u, 0u, 1u, 2u}));
+    expect_equal(sz::argsort(strs_t({"b", "a", "d", "c"})).value, order_t({1u, 0u, 3u, 2u}));
 
     // Single character vs multi-character strings
-    let_verify(auto result = sz::argsort(strs_t({"aa", "a", "aaa", "aa"})).value, result == order_t({1u, 0u, 3u, 2u}));
+    expect_equal(sz::argsort(strs_t({"aa", "a", "aaa", "aa"})).value, order_t({1u, 0u, 3u, 2u}));
 
     // Mix of short and long strings with common prefixes
-    let_verify(
-        auto result = sz::argsort(strs_t({"test", "t", "testing", "te", "tests", "testify", "tea", "team"})).value,
-        result == order_t({1u, 3u, 6u, 7u, 0u, 5u, 2u, 4u}));
+    expect_equal(sz::argsort(strs_t({"test", "t", "testing", "te", "tests", "testify", "tea", "team"})).value,
+                 order_t({1u, 3u, 6u, 7u, 0u, 5u, 2u, 4u}));
 
     // A prefix spanning dozens of pgram windows, so only the numeric tail decides the order.
     {
@@ -143,27 +142,26 @@ void test_sort_unit() {
         std::iota(expected.begin(), expected.end(), 0u);
         std::sort(expected.begin(), expected.end(),
                   [&](sz_size_t first, sz_size_t second) { return shared_prefix[first] < shared_prefix[second]; });
-        verify(sz::argsort(shared_prefix).value == expected);
-        verify(sz::argsort_utf8_uncased(shared_prefix).value == expected);
+        expect_equal(sz::argsort(shared_prefix).value, expected);
+        expect_equal(sz::argsort_utf8_uncased(shared_prefix).value, expected);
         std::reverse(expected.begin(), expected.end());
-        verify(sz::argsort(shared_prefix, 0, true).value == expected);
+        expect_equal(sz::argsort(shared_prefix, 0, true).value, expected);
     }
 
     // Single character vs multi-character strings with varied patterns
-    let_verify(auto result = sz::argsort(strs_t({"zebra", "z", "zoo", "zip", "zap", "a", "apple", "ant", "ark", "mango",
-                                                 "m", "maple"}))
-                                 .value,
-               result == order_t({5u, 7u, 6u, 8u, 10u, 9u, 11u, 1u, 4u, 0u, 3u, 2u}));
+    expect_equal(
+        sz::argsort(strs_t({"zebra", "z", "zoo", "zip", "zap", "a", "apple", "ant", "ark", "mango", "m", "maple"}))
+            .value,
+        order_t({5u, 7u, 6u, 8u, 10u, 9u, 11u, 1u, 4u, 0u, 3u, 2u}));
 
     // Numeric-like strings of varying lengths
-    let_verify(auto result = sz::argsort(strs_t({"100", "1", "10", "1000", "11", "111", "101", "110"})).value,
-               result == order_t({1u, 2u, 0u, 3u, 6u, 4u, 7u, 5u}));
+    expect_equal(sz::argsort(strs_t({"100", "1", "10", "1000", "11", "111", "101", "110"})).value,
+                 order_t({1u, 2u, 0u, 3u, 6u, 4u, 7u, 5u}));
 
     // Real names with varied lengths and prefixes
-    let_verify(
-        auto result =
-            sz::argsort(strs_t({"Anna", "Andrew", "Alex", "Bob", "Bobby", "Charlie", "Chris", "David", "Dan"})).value,
-        result == order_t({2u, 1u, 0u, 3u, 4u, 5u, 6u, 8u, 7u}));
+    expect_equal(
+        sz::argsort(strs_t({"Anna", "Andrew", "Alex", "Bob", "Bobby", "Charlie", "Chris", "David", "Dan"})).value,
+        order_t({2u, 1u, 0u, 3u, 4u, 5u, 6u, 8u, 7u}));
 }
 
 /** Known-answer intersection pairs through the dispatched API and the C++ wrapper. */
@@ -192,27 +190,27 @@ void test_intersect_unit() {
         // Empty sets
         {
             result = sz::intersect(empty, empty).value;
-            verify(result.first_offsets.size() == 0 && result.second_offsets.size() == 0);
+            expect_true(result.first_offsets.size() == 0 && result.second_offsets.size() == 0);
             result = sz::intersect(abcd, empty).value;
-            verify(result.first_offsets.size() == 0 && result.second_offsets.size() == 0);
+            expect_true(result.first_offsets.size() == 0 && result.second_offsets.size() == 0);
         }
         // Identity check
         {
             result = sz::intersect(abcd, abcd).value;
-            verify(result.first_offsets.size() == 4 && result.second_offsets.size() == 4);
-            verify(to_pairs(result) == index_pairs_t({{0u, 0u}, {1u, 1u}, {2u, 2u}, {3u, 3u}}));
+            expect_true(result.first_offsets.size() == 4 && result.second_offsets.size() == 4);
+            expect_equal(to_pairs(result), index_pairs_t({{0u, 0u}, {1u, 1u}, {2u, 2u}, {3u, 3u}}));
         }
         // Identical size, different order
         {
             result = sz::intersect(abcd, dcba).value;
-            verify(result.first_offsets.size() == 4 && result.second_offsets.size() == 4);
-            verify(to_pairs(result) == index_pairs_t({{0u, 3u}, {1u, 2u}, {2u, 1u}, {3u, 0u}}));
+            expect_true(result.first_offsets.size() == 4 && result.second_offsets.size() == 4);
+            expect_equal(to_pairs(result), index_pairs_t({{0u, 3u}, {1u, 2u}, {2u, 1u}, {3u, 0u}}));
         }
         // Different sets
         {
             result = sz::intersect(abcd, abs).value;
-            verify(result.first_offsets.size() == 2 && result.second_offsets.size() == 2);
-            verify(to_pairs(result) == index_pairs_t({{0u, 0u}, {1u, 1u}}));
+            expect_true(result.first_offsets.size() == 2 && result.second_offsets.size() == 2);
+            expect_equal(to_pairs(result), index_pairs_t({{0u, 0u}, {1u, 1u}}));
         }
     }
 }
@@ -224,7 +222,8 @@ void test_intersect_unit() {
  *  @c _unit tier has to cost the same at every multiplier, and these sweeps are exactly the part
  *  that does not.
  */
-void test_intersect_equivalence(test_context_t &context) {
+void test_intersect_equivalence() {
+    split_mix_generator_t generator {case_stream_key()};
     using strs_t = std::vector<std::string>;
     using result_t = sz::intersect_result_t;
 
@@ -237,7 +236,6 @@ void test_intersect_equivalence(test_context_t &context) {
         {15, 15, 1000},
         {5, 30, 2000},
     };
-    std::mt19937 &generator = context.generator;
     for (auto experiment : experiments) {
         std::unordered_set<std::string> random_strings;
         while (random_strings.size() < experiment.count_strings)
@@ -250,8 +248,9 @@ void test_intersect_equivalence(test_context_t &context) {
 
         // Try different joins
         result_t const result = sz::intersect(all_strings, first_half).value;
-        verify(result.first_offsets.size() == first_half.size() && result.second_offsets.size() == first_half.size() &&
-               "A subset intersected with its superset must recover the whole subset");
+        expect_true(
+            result.first_offsets.size() == first_half.size() && result.second_offsets.size() == first_half.size(),
+            "A subset intersected with its superset must recover the whole subset");
     }
 }
 
@@ -264,15 +263,15 @@ void test_intersect_equivalence(test_context_t &context) {
  *  @c _unit tier has to cost the same at every multiplier, and these sweeps are exactly the part
  *  that does not.
  */
-void test_sort_reference_equivalence(test_context_t &context) {
+void test_sort_reference_equivalence() {
+    split_mix_generator_t generator {case_stream_key()};
     using strs_t = std::vector<std::string>;
     using order_t = std::vector<sz_size_t>;
 
     // Sizes scale with the multiplier, as this tier's contract requires. The largest crosses 100k strings
     // to exercise the large-input partitioning path.
     std::size_t const dataset_sizes[] = {10u, 100u, 1000u, 10000u, 100000u};
-    std::mt19937 &generator = context.generator;
-    std::size_t const experiment_count = context.iterations(10);
+    std::size_t const experiment_count = scaled_iterations(10);
 
     // Test on long strings of identical length.
     for (std::size_t string_length : {5u, 25u}) {
@@ -286,7 +285,7 @@ void test_sort_reference_equivalence(test_context_t &context) {
                 std::shuffle(dataset.begin(), dataset.end(), generator);
                 auto order = sz::argsort(dataset).value;
                 for (std::size_t i = 1; i < dataset.size(); ++i)
-                    verify(dataset[order[i - 1]] <= dataset[order[i]] && "argsort output is not sorted");
+                    expect_true(dataset[order[i - 1]] <= dataset[order[i]], "argsort output is not sorted");
             }
         }
     }
@@ -302,7 +301,7 @@ void test_sort_reference_equivalence(test_context_t &context) {
             std::shuffle(dataset.begin(), dataset.end(), generator);
             auto order = sz::argsort(dataset).value;
             for (std::size_t i = 1; i < dataset_size; ++i) {
-                verify(dataset[order[i - 1]] <= dataset[order[i]] && "argsort output is not sorted");
+                expect_true(dataset[order[i - 1]] <= dataset[order[i]], "argsort output is not sorted");
             }
         }
     }
@@ -319,7 +318,7 @@ void test_sort_reference_equivalence(test_context_t &context) {
             std::shuffle(dataset.begin(), dataset.end(), generator);
             auto order = sz::argsort(dataset).value;
             for (std::size_t i = 1; i < dataset_size; ++i) {
-                verify(dataset[order[i - 1]] <= dataset[order[i]] && "argsort output is not sorted");
+                expect_true(dataset[order[i - 1]] <= dataset[order[i]], "argsort output is not sorted");
             }
         }
     }
@@ -335,7 +334,7 @@ void test_sort_reference_equivalence(test_context_t &context) {
             std::shuffle(dataset.begin(), dataset.end(), generator);
             auto order = sz::argsort(dataset).value;
             for (std::size_t i = 1; i < dataset_size; ++i) {
-                verify(dataset[order[i - 1]] <= dataset[order[i]] && "argsort output is not sorted");
+                expect_true(dataset[order[i - 1]] <= dataset[order[i]], "argsort output is not sorted");
             }
         }
     }
@@ -388,11 +387,11 @@ void test_sort_reference_equivalence(test_context_t &context) {
     };
 
     // Ascending and descending must match a byte-key stable sort exactly.
-    verify(is_permutation(sz::argsort(mixed).value) && "argsort output is not a permutation");
-    verify(sz::argsort(mixed).value == reference_order(mixed, sort_direction_t::ascending_k) &&
-           "Ascending argsort disagrees with the stable-sort reference");
-    verify(sz::argsort(mixed, 0, true).value == reference_order(mixed, sort_direction_t::descending_k) &&
-           "Descending argsort disagrees with the stable-sort reference");
+    expect_true(is_permutation(sz::argsort(mixed).value), "argsort output is not a permutation");
+    expect_equal(sz::argsort(mixed).value, reference_order(mixed, sort_direction_t::ascending_k),
+                 "Ascending argsort disagrees with the stable-sort reference");
+    expect_equal(sz::argsort(mixed, 0, true).value, reference_order(mixed, sort_direction_t::descending_k),
+                 "Descending argsort disagrees with the stable-sort reference");
 
     // Top-K must reproduce the value-prefix of the full sort and stay a permutation.
     for (std::size_t top_count : {std::size_t(1), std::size_t(50), std::size_t(777), mixed_count}) {
@@ -400,20 +399,21 @@ void test_sort_reference_equivalence(test_context_t &context) {
             bool const reverse = direction == sort_direction_t::descending_k;
             order_t const got = sz::argsort(mixed, top_count, reverse).value;
             order_t const reference = reference_order(mixed, direction);
-            verify(is_permutation(got) && "Top-K argsort output is not a permutation");
+            expect_true(is_permutation(got), "Top-K argsort output is not a permutation");
             std::size_t const head = top_count < mixed_count ? top_count : mixed_count;
             for (std::size_t i = 0; i < head; ++i)
-                verify(mixed[got[i]] == mixed[reference[i]] && "Top-K prefix disagrees with the full sort");
+                expect_equal(mixed[got[i]], mixed[reference[i]], "Top-K prefix disagrees with the full sort");
         }
     }
 
     // Uncased sort must match folding every string then byte-stable-sorting.
     std::vector<std::string> folded(mixed_count);
     for (std::size_t i = 0; i < mixed_count; ++i) folded[i] = fold_string(mixed[i]);
-    verify(sz::argsort_utf8_uncased(mixed).value == reference_order(folded, sort_direction_t::ascending_k) &&
-           "Ascending uncased argsort disagrees with the folded stable-sort reference");
-    verify(sz::argsort_utf8_uncased(mixed, 0, true).value == reference_order(folded, sort_direction_t::descending_k) &&
-           "Descending uncased argsort disagrees with the folded stable-sort reference");
+    expect_equal(sz::argsort_utf8_uncased(mixed).value, reference_order(folded, sort_direction_t::ascending_k),
+                 "Ascending uncased argsort disagrees with the folded stable-sort reference");
+    expect_equal(sz::argsort_utf8_uncased(mixed, 0, true).value,
+                 reference_order(folded, sort_direction_t::descending_k),
+                 "Descending uncased argsort disagrees with the folded stable-sort reference");
 }
 
 #pragma region Safety
@@ -426,7 +426,10 @@ void test_sort_safety() { check_sort_safety_(sort_dispatched); }
 #pragma region Drivers
 
 /** Holds the dispatched arg-sorts to serial across the ascending, descending, and top-K modes. */
-void test_sort_all(test_context_t &context) { check_sort_equivalence_(context, sort_dispatched); }
+void test_sort_all() {
+    split_mix_generator_t generator {case_stream_key()};
+    check_sort_equivalence_(generator, sort_dispatched);
+}
 
 #pragma endregion Drivers
 

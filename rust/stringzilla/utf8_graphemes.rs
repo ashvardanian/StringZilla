@@ -38,8 +38,7 @@ pub type Utf8Graphemes<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> = Utf8S
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stringzilla::fixtures::*;
-    use crate::stringzilla::utf8_tokens::tests::assert_steps_invariant;
+    use crate::testing::*;
 
     // Pride caption: a ZWJ family and VS16 rainbow flag, a skin-tone modifier, a keycap, an
     // odd regional-indicator run.
@@ -79,7 +78,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_grapheme_utf8_splits_steps_invariance() {
+    fn graphemes_split_alike_at_every_batch_size() {
         assert_steps_invariant::<Graphemes>(b"Hi, world! A second sentence.");
     }
 }

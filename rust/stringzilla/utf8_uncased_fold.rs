@@ -72,7 +72,7 @@ mod tests {
     use crate as sz;
 
     #[test]
-    fn utf8_uncased_fold_golden_vectors() {
+    fn utf8_uncased_fold_matches_golden_vectors() {
         // One probe per kernel family: ASCII, Latin-1 at C3, Latin Extended at C4/C6, Greek with
         // final sigma, Cyrillic, Vietnamese at E1 BA, letterlike symbols, ligature expansions, and
         // the post-Unicode-15 Garay block of 4-byte sequences.

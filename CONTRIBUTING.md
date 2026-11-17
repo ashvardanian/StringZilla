@@ -43,7 +43,7 @@ cmake/                         ISA probe modules, package config templates, and 
 For minimal test coverage, check the following scripts:
 
 - `test/main_cpu.cpp` - runs the family suites over the dispatch points and the C++ wrappers, and `test/cross_<arch>.cpp` hold every capability's kernels to the serial ones, built as `stringzilla_test`, `stringzilla_shared_test` and `stringzilla_cpu_header_test`.
-- `test/cross_cuda.cu`, `test/cross_rocm.hip` and `test/cross_metal.cpp` - vendor kernels against serial answers, in the same linked test runners through `test/cross_simt.cuh` and `test/cross_metal.cpp`.
+- `test/cross_cuda.cu`, `test/cross_rocm.hip` and `test/cross_metal.cpp` - vendor kernels against serial answers, in the same linked test runners through `test/cross_device.hpp`.
 - `test/*.py` - tests the Python API against native strings, split per kernel family - `string_types.py`, `find.py`, `sort.py`, `hash.py`, `cipher.py`, `uncased.py`, `utf8_*.py` - with shared helpers in `base.py` and `utf8_helpers.py`.
 - `test/main.js`.
 
@@ -294,155 +294,6 @@ cmake --build build_release --config Release --parallel
 ./build_release/stringzilla_test.exe
 ```
 
-### Testing
-
-Using modern syntax, this is how you build and run the test suite:
-
-```bash
-cmake -D STRINGZILLA_BUILD_TEST=1 -D CMAKE_BUILD_TYPE=Debug -B build_debug
-cmake --build build_debug --config Debug --parallel   # Which will produce the following targets:
-build_debug/stringzilla_test            # Dispatch points, C++ wrappers, and every kernel of the static library
-build_debug/stringzilla_shared_test     # Dispatch points alone, through the shared library
-build_debug/stringzilla_cpu_header_test     # Kernels compiled header-only, and the dispatch-point stubs
-```
-
-Kernel cross-checks are named `test_<family>_<tier>_<capability>`, so `STRINGZILLA_FILTER='_neon$'` runs one capability.
-
-There is no separate SIMD-disabled target.
-To get a build with SIMD dispatch narrowed, pass `-D STRINGZILLA_TARGET_<CAPABILITY>=0` at configure time for each capability to leave out, for example `-D STRINGZILLA_TARGET_SKYLAKE=0 -D STRINGZILLA_TARGET_ICELAKE=0` for x86 without AVX-512, then rebuild `stringzilla_test` against that configuration.
-`-D STRINGZILLA_MARCH=<name>`, like `x86-64-v3` or `native`, raises the libraries' floor in place of the portable one, without narrowing the capabilities.
-
-Note, that Address Sanitizers have a hard time with masked load and store instructions in AVX-512 and SVE.
-
-#### Test Tiers
-
-Every kernel family registers its tests with a fixed set of suffixes, and there are no other tiers.
-Do not invent a fifth one - fold the new case into whichever tier already owns that kind of assertion.
-
-| Tier      | Asserts against                                                                          | Uses the multiplier |
-| :-------- | :--------------------------------------------------------------------------------------- | :------------------ |
-| `_unit`   | hand-written literal expectations only                                                   | no                  |
-| `_rules`  | one motif per spec rule id, plus a coverage gate asserting every required rule was hit   | no                  |
-| `_safety` | survival only - in bounds, `bytes_consumed` ≤ `length`, no crash on malformed input      | yes                 |
-| `_all`    | the serial-vs-ISA differential, plus invariants that hold independently of any reference | yes                 |
-
-The load-bearing rule is that `_unit` may never derive its expectations by calling another backend.
-If the reference is wrong, a derived expectation is wrong with it, and the test passes anyway.
-Likewise `_safety` never asserts content correctness - only that the kernel stayed inside its buffer and returned.
-
-The `_rules` tier exists only for families with a Unicode rule table - wordbreaks, graphemes, sentences, and linebreaks.
-Families without one - runes, tokens, delimiters, and norm - register three tiers rather than four.
-Registration order is `_unit`, then `_rules` where it applies, then `_safety`, then `_all`.
-
-The C++ and Python test suites support environment variables for reproducible stress testing and CI fuzzing:
-
-| Variable             | Default | Meaning                                                                      |
-| :------------------- | :------ | :--------------------------------------------------------------------------- |
-| `STRINGZILLA_SEED`   | `42`    | Seed for every random generator, or `random` to draw one, which a run prints |
-| `STRINGZILLA_SCALE`  | `1`     | Multiplier for every baseline iteration count, like `0.1` or `10`            |
-| `STRINGZILLA_FILTER` | unset   | ECMAScript regex over C++ test names or pytest node ids                      |
-
-A value that does not parse stops the run with a message naming the variable, in both suites.
-A `STRINGZILLA_FILTER` that does not compile as a regex matches as a plain substring.
-Python matches `STRINGZILLA_FILTER` against pytest node ids, alongside `pytest -k`.
-
-Each test has its own baseline iteration count tuned for its operation complexity.
-`STRINGZILLA_SCALE` is the suite's only tuning knob, and two members of the `test_context_t` a test takes put work under it.
-`context.iterations(baseline)` scales a loop count and floors at 1, so a baseline small enough for the floor to swallow the multiplier is effectively a constant - don't use tiny baselines on expensive loops.
-`context.sweep_stride(complete)` gives the step for walking an exhaustive space, such as every byte value, every byte pair, or every window phase.
-A sweep becomes complete at the `10x` stress point rather than at the default, so a default run samples every space evenly and a nightly or farm run covers them exhaustively.
-
-The intended operating points are a short default run for local iteration, `10x` for nightly CI, and `100x` for a stress farm.
-Sizing is relative rather than absolute: each family gets a comparable share of the budget, so no single test dominates a run on any machine.
-Each top-level test is also wall-clock timed and reported as `- name ... ok (N.NN s)`, so slow tests are obvious.
-
-```bash
-# Draw a fresh seed instead of the default 42; the run prints it
-STRINGZILLA_SEED=random build_debug/stringzilla_test
-
-# Quick smoke test (10% of normal iterations)
-STRINGZILLA_SCALE=0.1 build_debug/stringzilla_test
-
-# Fast inner loop: only the UTF-8 tests, at 10% iterations, reproducibly
-STRINGZILLA_FILTER=utf8 STRINGZILLA_SCALE=0.1 STRINGZILLA_SEED=42 build_debug/stringzilla_test
-
-# Thorough CI stress test (10x normal iterations)
-STRINGZILLA_SCALE=10 build_debug/stringzilla_test
-
-# Combine both for CI fuzzing
-STRINGZILLA_SEED=12345 STRINGZILLA_SCALE=5 build_debug/stringzilla_test
-
-# Python tests also respect STRINGZILLA_SEED, STRINGZILLA_SCALE and STRINGZILLA_FILTER
-STRINGZILLA_SEED=random pytest test/
-STRINGZILLA_FILTER=utf8 pytest test/
-```
-
-When a C++ test fails a `verify` or throws, the harness prints a `rerun:` line to stderr under the failure, naming the seed, a filter that selects only that test, and the binary, then moves on to the next test:
-
-```text
-- test_utf8_runes_all ... FAILED: verification failed
-  rerun: STRINGZILLA_SEED=42 STRINGZILLA_FILTER='^test_utf8_runes_all$' build_debug/stringzilla_test
-```
-
-The run still exits with 1 at the end.
-A library assertion or a crash stops the run instead, printing a backtrace where the C library can, and the last `- <name> ...` line names the test to put into the template printed at startup:
-
-```text
-- Seed: 42
-- Rerun one test: STRINGZILLA_SEED=42 STRINGZILLA_FILTER='^<name>$' build_debug/stringzilla_test
-```
-
-This is particularly useful for debugging SIMD edge cases that only manifest with specific input patterns.
-
-`STRINGZILLA_SEED` selects the seed, and `run_test` hands each test its own generator, seeded from that seed and the test name.
-A test's inputs therefore never depend on which tests ran before it, so `STRINGZILLA_SEED` together with `STRINGZILLA_FILTER` is a faithful reproduction recipe.
-Assertions use `verify`, `let_verify`, `scope_verify`, and `throws_verify`, deliberately independent of `NDEBUG`, because a plain `assert` compiles out in Release builds and silently disables the checks.
-
-The scalable-vector backends must stay correct at every hardware vector length, and the CI `test_cross_qemu` matrix sweeps them all.
-The same sweep runs locally with user-mode QEMU - on an Arm host that covers NEON-only dispatch plus SVE at 128/256/512 bits, and cross-compilers unlock the RISC-V, x86, LoongArch, and POWER backends too:
-
-```bash
-sudo apt install qemu-user gcc-x86-64-linux-gnu gcc-riscv64-linux-gnu gcc-loongarch64-linux-gnu gcc-powerpc64le-linux-gnu
-
-# Sweep SVE vector lengths on the native Arm binary (sve-max-vq is VL/128)
-for vq in 1 2 4; do
-  STRINGZILLA_FILTER=utf8 STRINGZILLA_SCALE=0.1 qemu-aarch64 -cpu max,sve-max-vq=$vq build_release/stringzilla_test
-done
-
-# NEON-only dispatch (otherwise SVE2 always wins and NEON is never exercised)
-qemu-aarch64 -cpu max,sve=off build_release/stringzilla_test
-
-# Cross-compile a single-TU probe against another backend and run it emulated
-x86_64-linux-gnu-gcc -O2 -mavx2 -mbmi -mbmi2 -mpopcnt -DSTRINGZILLA_TARGET_HASWELL=1 -Ic -Iinclude probe.c -o probe -static
-qemu-x86_64 -cpu max ./probe
-```
-
-Note that QEMU's TCG cannot execute AVX-512, so the Ice Lake and Skylake backends are compile-checked only under emulation and need real x86 hardware to run.
-
-To use CppCheck for static analysis make sure to export the compilation commands.
-Overall, CppCheck and Clang-Tidy are extremely noisy and not suitable for CI, but may be useful for local development.
-
-```bash
-sudo apt install cppcheck clang-tidy-11
-
-cmake -B build_artifacts \
-  -D CMAKE_BUILD_TYPE=RelWithDebInfo \
-  -D CMAKE_EXPORT_COMPILE_COMMANDS=1 \
-  -D STRINGZILLA_BUILD_BENCH=1 \
-  -D STRINGZILLA_BUILD_TEST=1
-
-cppcheck --project=build_artifacts/compile_commands.json --enable=all
-
-clang-tidy-11 -p build_artifacts
-```
-
-I'd recommend putting the following breakpoints:
-
-- `__asan::ReportGenericError` - to detect illegal memory accesses.
-- `__GI_exit` - to stop at exit points - the end of running any executable.
-- `__builtin_unreachable` - to catch unexpected code paths.
-- `sz_assert_failure_` - to catch StringZilla logic assertions.
-
 ### Benchmarking
 
 For benchmarks, you can use the following commands:
@@ -479,23 +330,24 @@ STRINGWARS_FILTER="sz_levenshtein_distances_cuda:0:q[0-9]+:w" STRINGWARS_DATASET
 STRINGZILLA_STRESS=0 STRINGWARS_FILTER="sz_levenshtein_distances_cuda:0:q1024:w16" STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzilla_bench
 ```
 
-The benchmark harness reads these environment variables:
+The benchmark harness reads these environment variables, and a flag overrides each:
 
-| Variable                        | Default     | Meaning                                                                              |
-| :------------------------------ | :---------- | :----------------------------------------------------------------------------------- |
-| `STRINGWARS_DATASET`            | per corpus  | Corpus file, instead of `leipzig1M.txt` or `xlsum.csv`                               |
-| `STRINGWARS_TOKENS`             | per corpus  | `file`, `lines`, `words`, or an N-gram length like `64`                              |
-| `STRINGWARS_BYTES`              | whole file  | Bytes read from the corpus, like `4096`, `64KB` or `1GB`; UTF-8 families read `64MB` |
-| `STRINGWARS_UNIQUE`             | `0`         | Sorts the tokens and drops duplicates first                                          |
-| `STRINGWARS_FILTER`             | unset       | ECMAScript regex over benchmark names, or a substring when it does not compile       |
-| `STRINGWARS_SEED`               | `42`        | Seed for every random generator, or `random` to draw one, which a run prints         |
-| `STRINGWARS_WARMUP`             | `1s`        | Untimed run before each benchmark, like `200ms` or `1s`                              |
-| `STRINGWARS_TIME_LIMIT`         | `10s`       | Timed run of each benchmark, like `200ms` or `10s`; `1s` in debug builds             |
-| `STRINGWARS_BATCH_PER_CORE`     | per backend | Candidates per call per CPU core, CUDA or ROCm multiprocessor, or Metal GPU core     |
-| `STRINGZILLA_STRESS`            | `1`         | Checks each backend against its baseline before timing                               |
-| `STRINGZILLA_STRESS_TIME_LIMIT` | time limit  | Time of each stress check, like `200ms` or `10s`                                     |
-| `STRINGZILLA_STRESS_DIR`        | `.tmp`      | Directory for stress-check failure logs                                              |
-| `STRINGZILLA_STRESS_LIMIT`      | `2`         | The stress-check failure that stops the run, so `1` stops at the first               |
+| Variable                        | Flag                  | Default     | Meaning                                                                              |
+| :------------------------------ | :-------------------- | :---------- | :----------------------------------------------------------------------------------- |
+| `STRINGWARS_DEVICES`            | `--devices`           | unset       | Comma-separated `backend:ordinal` devices, like `cuda:0,rocm:1`                      |
+| `STRINGWARS_DATASET`            | `--dataset`           | per corpus  | Corpus file, instead of `leipzig1M.txt` or `xlsum.csv`                               |
+| `STRINGWARS_TOKENS`             | `--tokens`            | per corpus  | `file`, `lines`, `words`, or an N-gram length like `64`                              |
+| `STRINGWARS_BYTES`              | `--bytes`             | whole file  | Bytes read from the corpus, like `4096`, `64KB` or `1GB`; UTF-8 families read `64MB` |
+| `STRINGWARS_UNIQUE`             | `--unique`            | `0`         | Sorts the tokens and drops duplicates first                                          |
+| `STRINGWARS_FILTER`             | `--filter`            | unset       | ECMAScript regex over benchmark names, or a substring when it does not compile       |
+| `STRINGWARS_SEED`               | `--seed`              | `42`        | Seed for every random generator, or `random` to draw one, which a run prints         |
+| `STRINGWARS_WARMUP`             | `--warmup`            | `1s`        | Untimed run before each benchmark, like `200ms` or `1s`                              |
+| `STRINGWARS_TIME_LIMIT`         | `--time-limit`        | `10s`       | Timed run of each benchmark, like `200ms` or `10s`; `1s` in debug builds             |
+| `STRINGWARS_BATCH_PER_CORE`     | `--batch-per-core`    | per backend | Candidates per call per CPU core, CUDA or ROCm multiprocessor, or Metal GPU core     |
+| `STRINGZILLA_STRESS`            | `--stress`            | `1`         | Checks each backend against its baseline before timing                               |
+| `STRINGZILLA_STRESS_TIME_LIMIT` | `--stress-time-limit` | time limit  | Time of each stress check, like `200ms` or `10s`                                     |
+| `STRINGZILLA_STRESS_DIR`        | `--stress-dir`        | `.tmp`      | Directory for stress-check failure logs                                              |
+| `STRINGZILLA_STRESS_LIMIT`      | `--stress-limit`      | `2`         | The stress-check failure that stops the run, so `1` stops at the first               |
 
 For a fast inner loop, scope to one backend on a small dataset, cap the dataset size, skip the stress phase, and use short runs:
 
@@ -695,6 +547,228 @@ A module carries one SIMD capability, `STRINGZILLA_MARCH`, so the relaxed-SIMD `
 Pass `-DSTRINGZILLA_MARCH=v128` or `=serial`, or set the environment variable, for the others; CMake turns the capability into `-msimd128` and `-mrelaxed-simd` for every unit, so no other opcode reaches the binary.
 Shared libraries stay off in both configurations, since WASI has no dynamic loader.
 
+## Test Suites
+
+### Principles
+
+Tests reach the library through its public surface: the C ABI in `c/stringzilla/`, `stringzilla.hpp`, the capability kernels the public headers declare by name, and the `pub` items of the Python module and the Rust crate.
+The few private includes are listed under [Private Surface Waivers](#private-surface-waivers), each with what the public surface lacks.
+A kernel is never its own oracle: each capability is held to the serial kernels or to known answers, and the inputs are never drawn through the kernels under test.
+Oracles never compile out, so a test checks with `expect_true` and its siblings, never `assert`, and every test unit opens with `#undef NDEBUG // ! A test's oracle must stay live in every build`.
+Benchmarks never include `test/`, each tree keeps its own harness, and neither uses a test or benchmark framework.
+One test binary carries every vendor's GPU shard, and the devices it checks are picked at runtime.
+The harness owns stdout, while test bodies write their diagnostics to stderr.
+Settings are read once, and a value that does not parse prints one line naming it and exits with 1.
+Skips are honest: a filter that selects no case fails the run, a case that cannot run says why, and a test missing a dependency names it.
+
+The C++ harness holds one mutable global, `test_run`, the run in progress: its settings, the case under way, the count of failed checks with the last one's file and line, and the passed, failed and skipped cases.
+Checks fire on worker threads and inside helpers as well as in a case's own body, so `run_test_case` diffs the failed-check count around each case rather than threading a tally through every call.
+A debugger reads it from a core dump as `p 'ashvardanian::stringzilla::test::test_run'`, and the crash handlers print the case in progress before the backtrace.
+
+### Running
+
+```bash
+cmake --preset debug             # Clang, with AddressSanitizer
+cmake --build --preset debug
+ctest --preset debug
+```
+
+The build produces three binaries over the same suites:
+
+```bash
+build_debug/stringzilla_test            # Dispatch points, C++ wrappers, and every kernel of the static library
+build_debug/stringzilla_shared_test     # Dispatch points alone, through the shared library
+build_debug/stringzilla_cpu_header_test # Kernels compiled header-only, and the dispatch-point stubs
+```
+
+The `cuda`, `rocm` and `metal` presets add each vendor's GPU checks to `stringzilla_test`.
+`STRINGZILLA_CUDA_ARCH` and `STRINGZILLA_ROCM_ARCH` may both be set in one configure, which links both vendors' shards into the same binary.
+There is no separate SIMD-disabled target: `-D STRINGZILLA_TARGET_<CAPABILITY>=0` at configure time leaves a capability out, for example `-D STRINGZILLA_TARGET_SKYLAKE=0 -D STRINGZILLA_TARGET_ICELAKE=0` for x86 without AVX-512.
+`-D STRINGZILLA_MARCH=<name>`, like `x86-64-v3` or `native`, raises the libraries' floor in place of the portable one, without narrowing the capabilities.
+Address Sanitizers have a hard time with masked load and store instructions in AVX-512 and SVE.
+
+A run prints the library and the machine, then its settings, one verdict line per case, and a summary:
+
+```text
+StringZilla 6.0.0
+- Compiled for: serial,neon,neonaes,neonsha,sve,sve2,sve2aes
+- This machine: serial,neon,neonaes,neonsha,sve,sve2,sve2aes
+- Seed: 42, scale: 1, filter: none
+- test_hash_unit ... ok (0.01 s)
+- check_find_unit_(find_haswell) ... skipped: needs sz_cap_haswell_k
+412 passed, 0 failed, 37 skipped, seed 42
+```
+
+A failed check prints where it failed, with both operands for `expect_equal`, and the case goes on, so one run lists every mismatch it reaches.
+A case with a failed check prints its verdict and a `rerun:` line on stderr, naming the binary, the seed, and a filter that selects only that case, then the run moves on:
+
+```text
+  check failed at /path/to/StringZilla/test/utf8_runes.cpp:54
+    expected 6, got 5
+- test_utf8_runes_unit ... FAILED: 1 failed check(s)
+  rerun: build_debug/stringzilla_test --seed 42 --filter '^test_utf8_runes_unit$'
+```
+
+The run exits with 1 when a case failed, a check failed outside any case, or the filter selected nothing, and with 3 when `STRINGZILLA_NO_SKIPS=1` refused a skip.
+`STRINGZILLA_TRAP_ON_FAILURE=1` raises `SIGTRAP` at the first failed check instead, which stops a debugger there, or dumps a core without one:
+
+```bash
+STRINGZILLA_TRAP_ON_FAILURE=1 STRINGZILLA_FILTER='^test_utf8_runes_unit$' gdb -ex run --args build_debug/stringzilla_test
+```
+
+A library assertion or a crash stops the run with `*** SIGSEGV in case '<label>' - backtrace follows ***` and a backtrace where the C library has one.
+Useful breakpoints are `__asan::ReportGenericError` for illegal memory accesses, `__builtin_unreachable` for unexpected code paths, and `sz_assert_failure_` for StringZilla's logic assertions.
+
+The scalable-vector backends must stay correct at every hardware vector length, and the CI `test_cross_qemu` matrix sweeps them all.
+The same sweep runs locally with user-mode QEMU - on an Arm host that covers NEON-only dispatch plus SVE at 128/256/512 bits, and cross-compilers unlock the RISC-V, x86, LoongArch, and POWER backends too:
+
+```bash
+sudo apt install qemu-user gcc-x86-64-linux-gnu gcc-riscv64-linux-gnu gcc-loongarch64-linux-gnu gcc-powerpc64le-linux-gnu
+
+# Sweep SVE vector lengths on the native Arm binary (sve-max-vq is VL/128)
+for vq in 1 2 4; do
+  STRINGZILLA_FILTER='^test_utf8_' STRINGZILLA_SCALE=0.1 qemu-aarch64 -cpu max,sve-max-vq=$vq build_release/stringzilla_test
+done
+
+# NEON-only dispatch (otherwise SVE2 always wins and NEON is never exercised)
+qemu-aarch64 -cpu max,sve=off build_release/stringzilla_test
+
+# Cross-compile a single-TU probe against another backend and run it emulated
+x86_64-linux-gnu-gcc -O2 -mavx2 -mbmi -mbmi2 -mpopcnt -DSTRINGZILLA_TARGET_HASWELL=1 -Ic -Iinclude probe.c -o probe -static
+qemu-x86_64 -cpu max ./probe
+```
+
+QEMU's TCG cannot execute AVX-512, so the Ice Lake and Skylake backends are compile-checked only under emulation and need real x86 hardware to run.
+
+CppCheck and Clang-Tidy are too noisy for CI, but may be useful locally over an exported compilation database:
+
+```bash
+sudo apt install cppcheck clang-tidy-11
+cmake -B build_artifacts -D CMAKE_BUILD_TYPE=RelWithDebInfo -D CMAKE_EXPORT_COMPILE_COMMANDS=1 \
+  -D STRINGZILLA_BUILD_BENCH=1 -D STRINGZILLA_BUILD_TEST=1
+cppcheck --project=build_artifacts/compile_commands.json --enable=all
+clang-tidy-11 -p build_artifacts
+```
+
+The Python suite runs as the CI runs it, after installing the `test` group, and `test-oracles` for the reference implementations.
+NumPy is not a required dependency, since StringZilla covers more platforms than NumPy does, so the tests that use it skip without it, as do the suites cross-checking against an oracle that is absent:
+
+```bash
+uv pip install --group test --group test-oracles                 # the suite, NumPy and the oracles
+uv pip install uniseg grapheme pysbd pyicu                        # more oracles for the UTF-8 suites
+uv run --no-project python -X faulthandler -m pytest -x           # how the CI runs it
+uv run --no-project python -m pytest test/doctests.py             # the docstring examples alone
+```
+
+The header pytest prints names the module it imported, `StringZilla <version> from <path>`, and ends with the same `- Seed: 42, scale: 1, filter: none` line as the C++ runner.
+The Rust tests run as `cargo test`, once with the default features and once with `--no-default-features`, as the [Rust](#rust) section shows.
+
+### Environment
+
+Each setting is an environment variable, and in the C++ runners a `--name` flag of the same name overrides it, as `--scale 0.1` or `--filter='^hash\.'`:
+
+| Variable                      | Flag                | Default | Meaning                                                                                 |
+| :---------------------------- | :------------------ | :------ | :-------------------------------------------------------------------------------------- |
+| `STRINGZILLA_SEED`            | `--seed`            | `42`    | Any unsigned 64-bit seed, or `random` to draw one, which a run prints                   |
+| `STRINGZILLA_SCALE`           | `--scale`           | `1`     | Multiplier for every baseline iteration count, like `0.1` or `10`                       |
+| `STRINGZILLA_FILTER`          | `--filter`          | unset   | Regex searched in C++ case labels or pytest node ids, else a substring                  |
+| `STRINGZILLA_DEVICES`         | `--devices`         | unset   | C++ only: comma-separated `backend:ordinal` devices, like `cuda:0,rocm:1`               |
+| `STRINGZILLA_TRAP_ON_FAILURE` | `--trap-on-failure` | `0`     | C++ only: raises `SIGTRAP` at the first failed check, to stop there under a debugger    |
+| `STRINGZILLA_NO_SKIPS`        | `--no-skips`        | `0`     | C++ only: exits with 3 when any case skipped, for runners that must cover everything    |
+| `STRINGZILLA_IN_QEMU`         | -                   | `0`     | Python only: marks the run as emulated in the pytest header                             |
+| `STRINGZILLA_EXPECT_SIMD`     | -                   | `1`     | Python only: `0` skips the check that a SIMD machine's baseline was compiled in         |
+
+A switch is off when unset, empty or `0`, and on otherwise.
+Python reads only the variables, beside `pytest -k` and pytest's own options, and Rust reads only `STRINGZILLA_SEED`, filtering through `cargo test <name>`.
+
+`STRINGZILLA_SEED` keys every case's own stream by the case's name, as `stream_key(seed, name, index)`, identical in C++, Python and Rust.
+A case's inputs therefore never depend on which cases ran before it, so `STRINGZILLA_SEED` together with `STRINGZILLA_FILTER` is a faithful reproduction recipe.
+
+Each case has its own baseline iteration count tuned for its operation complexity, and `STRINGZILLA_SCALE` is the suite's only tuning knob.
+The intended operating points are a short default run for local iteration, `10x` for nightly CI, and `100x` for a stress farm.
+Sizing is relative rather than absolute: each family gets a comparable share of the budget, so no single case dominates a run on any machine.
+
+```bash
+STRINGZILLA_SEED=random build_debug/stringzilla_test                                     # A fresh seed, which the run prints
+STRINGZILLA_FILTER='^test_utf8_' STRINGZILLA_SCALE=0.1 build_debug/stringzilla_test           # Fast inner loop over the UTF-8 cases
+STRINGZILLA_SEED=12345 STRINGZILLA_SCALE=10 build_debug/stringzilla_test                 # A nightly stress run
+STRINGZILLA_FILTER=utf8 uv run --no-project python -X faulthandler -m pytest -x          # A filter over pytest node ids
+```
+
+### Writing a Test
+
+A C++ case is a `void` function, or one returning `case_result_t` when it may skip, that `main` runs as `run_test_case("<label>", function, arguments...)`.
+It takes no settings or context, as the run is `test_run`, and it skips only by returning `case_result_t::skipped(reason)`, with a reason like `needs sz_cap_haswell_k` or `no CUDA device`.
+A label names the code under test: the function's own name, as `test_hash_unit`, or a call with the runtime choice's exact constants, as `check_find_unit_(find_haswell)`, so `STRINGZILLA_FILTER='^test_utf8_'` runs one family and `STRINGZILLA_FILTER='_neon\)$'` one capability.
+
+It checks with functions from `test/harness.hpp`, each of which counts a failed check at the caller's line, lets the case go on, and returns whether it held:
+
+- `expect_true(held)`, for any condition;
+- `expect_equal(actual, wanted)`, which prints both operands when they differ;
+- `expect_near(actual, wanted, tolerance)`, holding when `|actual - wanted| <= tolerance * max(1, |actual|, |wanted|)`;
+- `expect_throws<std::out_of_range>([&] { return text.substr(100); })`, whose subject is the failure.
+
+`expect_true`, `expect_equal` and `expect_near` take an optional message last, a format string and its arguments, as `expect_equal(found, wanted, "needle {:?} at {}", needle, offset)`.
+Where the step after a failed check would index or dereference past what it checked, the case stops on the check's answer, as in `if (!expect_equal(found.size(), wanted.size())) return;`.
+A case draws from `split_mix_generator_t generator {case_stream_key()}`, keyed by the run's seed and the case's label, sizes its loops through `scaled_iterations(baseline)`, which scales and floors at 1, and walks an exhaustive space by `sweep_stride(coverage)`, so that a default run samples it evenly and a `10x` run covers it.
+A wait polls through `spin_until(predicate)`, which gives up after `wait_limit_k`, so a hang fails the case rather than the CI job.
+
+Every kernel family names its drivers with a fixed set of tiers, and there are no others - fold a new case into whichever tier already owns that kind of assertion:
+
+| Tier          | Asserts against                                                                         | Scales |
+| :------------ | :-------------------------------------------------------------------------------------- | :----- |
+| `unit`        | hand-written known answers only, never another backend's                                | no     |
+| `rules`       | one motif per rule of a published spec, UAX-29 or UAX-14, plus a coverage gate          | no     |
+| `equivalence` | a reference against a candidate over generated corpora                                  | yes    |
+| `safety`      | survival only - in bounds, stated refusals, no crash on malformed input                 | yes    |
+| `all`         | nothing of its own: it drives the tiers above over the family's dispatch points         | yes    |
+
+The load-bearing rule is that `unit` may never derive its expectations by calling another backend: if the reference is wrong, a derived expectation is wrong with it, and the test passes anyway.
+Likewise `safety` never asserts content correctness - only that the kernel stayed inside its buffer and returned.
+
+A Python test is `test_<subject>_<behaviour>`, read as a sentence, with a one-line docstring saying what holds.
+It draws from the `seed`, `rng` or `np_rng` fixture, never from a literal seed.
+The seed is `stream_key(STRINGZILLA_SEED, name, step)`, where `name` is the test function and its parameters other than the `BACKEND_AXES`, here `capabilities`, and `step` is the pytest-repeat step, so every CPU mask sees the same inputs while other parameters and repeats draw apart.
+A differential test takes the `capabilities` fixture or `backend_results`, which sweep every CPU mask against the serial one, and a test of a finalizer takes `unraisable`, which collects what the interpreter could not raise.
+Axis names follow one vocabulary: `count` for the strings in a batch and `capabilities` for the kernel backend, while `length` stays a string's length; parametrize names are tuples, and marks sit above the parametrizes.
+`MAX_CASES_PER_TEST` in `test/base.py` caps how many cases one test function expands to, its backend axes aside, and raising it is a decision for review.
+A test that needs an optional dependency says so where it is decided, as `@pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")` or `pytest.importorskip("uniseg.wordbreak", reason="uniseg is not installed")`, and a build or device it needs, through a mark of `test/base.py` like `@requires_cuda`.
+Anything only a run can find out, like a library that does not load, skips inside a fixture.
+
+A Rust test is named as a behaviour sentence without a `test_` prefix, like `capability_names_match_the_c_table`, and calls the crate's `pub` API.
+The pinned region of `rust/testing.rs` gives it `skipped(reason)`, which a test that cannot run here returns, `case_stream_key(index)` for its seeds, `ScratchDirectory` and `block_on`, and the helpers several modules' tests share live below that region.
+`test/base.py`, `test/conftest.py` and `rust/testing.rs` each hold a pinned `Shared` region, which the pre-commit hook keeps identical to its canonical copy, so edit around it.
+
+### Benchmarks
+
+Each `bench/harness.hpp` carries the same pinned settings readers as `test/harness.hpp`, so its variables parse, refuse and take `--name` flags the same way, under the `STRINGWARS_` prefix that [StringWars](https://github.com/ashvardanian/StringWars) shares.
+Those names, and the `STRINGZILLA_STRESS*` variables of the stress phase, stay as they are; the [Benchmarking](#benchmarking) section lists them.
+A benchmark row is named after the kernel it times, like `sz_find_haswell` or `sz_levenshtein_distances_cuda:0:q1024:w16:sorted`, which is what `STRINGWARS_FILTER` matches, and a run prints the same machine header and `- Name: value` settings echo as the tests.
+
+### Devices
+
+`test/cross_cuda.cu`, `test/cross_rocm.hip` and `test/cross_metal.cpp` are one shard per vendor, each compiled for that vendor alone, and every shard links into `stringzilla_test` and `stringzilla_shared_test`.
+A vendor the build lacks compiles its shard as plain C++ into a stub, so the runner always links.
+The checks themselves live once, in `test/cross_device.hpp`, templated over `device_kernels`, and a shard only binds its vendor's kernels to them.
+
+A vendor switch, `STRINGZILLA_ARCH_CUDA_`, `STRINGZILLA_ARCH_ROCM_` or `STRINGZILLA_ARCH_METAL_`, is a fact about the unit, so each takes its own `#if`, never an `#elif` after another vendor's, nor a negation beside it.
+A header that assumes a single vendor says so, as `include/stringzilla/types.cuh` does with `#if STRINGZILLA_ARCH_CUDA_ + STRINGZILLA_ARCH_ROCM_ > 1` and an `#error`.
+Anything in a shared header whose meaning depends on the vendor takes internal linkage or the vendor's name, since the shards link into one binary, where two inline definitions of one name would silently merge into one.
+
+`STRINGZILLA_DEVICES=cuda:0,rocm:1` picks the devices to check by `backend:ordinal`, where the ordinal counts within its vendor.
+Unset, the runner visits device zero of each compiled vendor that answers, and an explicitly named device that is unavailable ends the run with 1.
+A GPU case on a machine without that vendor's device reports `skipped: no CUDA device`, and the Python and Rust suites skip theirs the same way.
+The benchmarks pick theirs the same way, through `STRINGWARS_DEVICES`.
+
+### Private Surface Waivers
+
+These test files include a header the public surface does not cover, each for what that surface lacks:
+
+- `test/cross.hpp` includes `stringzilla/utf8_graphemes/serial.h`, `stringzilla/utf8_norm/serial.h` and `stringzilla/utf8_wordbreaks/serial.h` for the per-position rule oracles `sz_utf8_is_grapheme_boundary_serial`, `sz_utf8_is_word_boundary_serial` and `sz_rune_is_word_char`, and the decomposition bound `sz_utf8_norm_decomp_max_k`, which the C ABI does not export.
+- `test/parallel.cpp` includes `src/parallel.h`, the tile scheduler the Python and Node extensions share, which no public header declares.
+
+The Python and Rust tests need no waiver.
+
 ## CUDA
 
 `STRINGZILLA_CUDA_ARCH` adds `src/capabilities/cuda.cu` to `stringzilla_static` and `stringzilla_shared`: the engines' `cuda` kernels, compiled from each family's `simt.cuh`, and the CUDA device exports: the producers `sz_count_devices_cuda`, `sz_capabilities_detected_cuda` and `sz_stream_init_cuda`, and the twins behind the `_best` dispatch points in `strings.h`, like `sz_allocator_init_unified_cuda` and `sz_strings_to_tape_cuda`.
@@ -731,7 +805,7 @@ cmake --build --preset metal
 ctest --preset metal
 ```
 
-`STRINGZILLA_ROCM_ARCH` adds the ROCm checks from `test/cross_rocm.hip` to the same `stringzilla_test`; CUDA and ROCm share `test/cross_simt.cuh`.
+`STRINGZILLA_ROCM_ARCH` adds the ROCm checks from `test/cross_rocm.hip` to the same `stringzilla_test`; CUDA, ROCm and Metal share `test/cross_device.hpp`.
 It builds beside the CUDA test when both are set:
 
 ```sh
@@ -779,23 +853,7 @@ uv run --no-project flake8 test/*.py --max-line-length=120
 
 ### Testing
 
-For testing we use PyTest, which may not be installed on your system.
-
-```bash
-uv pip install --group test --group test-oracles                # the suite, NumPy and the oracles
-uv run --no-project python -X faulthandler -m pytest -x          # how the CI runs it
-uv run --no-project python -m pytest test/doctests.py            # to run the docstring examples
-uv run --no-project python -c 'from stringzilla import hash as sz_hash; print(sz_hash("abc", 100))'
-```
-
-StringZilla for Python seems to cover more OS and hardware combinations, than NumPy.
-That's why NumPy isn't a required dependency.
-Still, many tests may use NumPy, so consider installing it on mainstream platforms.
-Several suites also cross-check against reference implementations, and skip themselves when those are absent:
-
-```bash
-uv pip install pycryptodome uniseg grapheme pysbd pyicu # oracles for the cipher and UTF-8 suites
-```
+The Python suite, its fixtures and its settings are described with the other suites under [Test Suites](#test-suites).
 
 ### Packaging
 

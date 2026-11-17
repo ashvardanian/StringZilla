@@ -8,7 +8,7 @@ count_byteset byteset family, partition/rpartition, the `in` operator, and the g
 mirrors of every String method; empty-needle and empty-byteset degenerate offsets across find, rfind,
 count, and utf8_uncased_search; fuzzed substring search over random alphabets; and cross-backend
 agreement across SIMD lane boundaries, vector-width haystacks, unaligned views, and random fuzzing.
-Compares against: CPython str find/rfind/count/in/partition/split, hand-written non-SIMD oracle
+Baselines: CPython str find/rfind/count/in/partition/split, hand-written non-SIMD oracle
 functions for the byteset family, and cross-backend self-consistency via capability_sweep and the
 capabilities= keyword.
 
@@ -53,7 +53,7 @@ FIND_BYTESET_EMPTY_SET_CASES = [
 ]
 
 
-def test_unit_count():
+def test_count_matches_str_count():
     """`count` matches CPython `str.count` with and without overlap for a repeated single-character body."""
     native = "aaaaa"
     big = String(native)
@@ -62,7 +62,7 @@ def test_unit_count():
     assert big.count("aa", allowoverlap=True) == 4
 
 
-def test_unit_count_byteset():
+def test_count_byteset_counts_the_bytes_in_a_set():
     """`count_byteset` counts bytes in a set across repeated patterns, start/end bounds, and empty inputs."""
     native = "abcdef"
     big = String(native)
@@ -101,7 +101,7 @@ def test_unit_count_byteset():
     assert sz.count_byteset("abc", "abc", -10, -5) == 0  # negative out of bounds
 
 
-def test_unit_contains():
+def test_contains_matches_str_containment():
     """The `in` operator on `String` matches CPython substring containment for a present and an absent needle."""
     big = String("abcdef")
     assert "a" in big
@@ -109,15 +109,15 @@ def test_unit_contains():
     assert "xxx" not in big
 
 
-@pytest.mark.parametrize("func, args, expected", FIND_BYTESET_EMPTY_SET_CASES)
-def test_unit_find_byteset_empty_set(func, args, expected):
+@pytest.mark.parametrize(("func", "args", "expected"), FIND_BYTESET_EMPTY_SET_CASES)
+def test_empty_byteset_matches_nothing_and_its_complement_everything(func, args, expected):
     """An empty byteset matches nothing for `find_*_of` (→ -1) and everything for `find_*_not_of`
     (→ first/last in-window index, never `len`)."""
     assert func(*args) == expected
 
 
 @pytest.mark.parametrize("func", [sz.find_first_not_of, sz.find_last_not_of], ids=["first_not_of", "last_not_of"])
-def test_unit_find_byteset_empty_set_index_is_subscriptable(func):
+def test_empty_byteset_index_is_subscriptable(func):
     """Regression guard: an out-of-bounds index returned for an empty not-of set crashed `h[r]`."""
     haystack = "abc"
     idx = func(haystack, "")
@@ -125,7 +125,7 @@ def test_unit_find_byteset_empty_set_index_is_subscriptable(func):
 
 
 @pytest.mark.parametrize(
-    "sz_func, native_method, args",
+    ("sz_func", "native_method", "args"),
     [
         (sz.find, "find", (0, None)),
         (sz.find, "find", (None,)),
@@ -136,13 +136,13 @@ def test_unit_find_byteset_empty_set_index_is_subscriptable(func):
     ],
     ids=["find-start_none", "find-none", "find-overflow_start", "find-overflow_end", "rfind-none_none", "count-none"],
 )
-def test_unit_index_args_none_and_overflow(sz_func, native_method, args):
+def test_none_and_overflowing_bounds_clamp_like_str(sz_func, native_method, args):
     """`None` start/end act as defaults and out-of-ssize_t ints clamp, matching CPython slicing."""
     haystack = "banana"
     assert sz_func(haystack, "a", *args) == getattr(haystack, native_method)("a", *args)
 
 
-def test_unit_globals():
+def test_member_methods_are_also_global_functions():
     """Validates that the unit-tested member methods are also visible as global functions."""
 
     assert sz.find("abcdef", "bcdef") == 1
@@ -198,9 +198,9 @@ def test_unit_globals():
     assert String("abcdef").rpartition("x") == ("", "", "abcdef")
     assert sz.partition(bytearray(b"abc:def"), b":") == (b"abc", b":", b"def")
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="empty separator"):
         sz.partition("abcdef", "")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="empty separator"):
         sz.rpartition("abcdef", "")
 
     assert sz.count("abcdef", "x") == 0
@@ -254,7 +254,7 @@ def test_slice_of_split():
 @pytest.mark.parametrize("haystack", DEGENERATE_HAYSTACKS)
 @pytest.mark.parametrize("start", DEGENERATE_BOUNDS)
 @pytest.mark.parametrize("end", DEGENERATE_BOUNDS)
-def test_unit_empty_needle_offset_parity(haystack, start, end):
+def test_empty_needle_offsets_match_str(haystack, start, end):
     """Empty-needle find/rfind must match CPython `str` across in-range, out-of-range, and inverted
     [start, end) windows. Regression guard: returning a clamped offset instead of -1 for start > len
     or start > end makes callers scanning with `start = index + 1` loop forever."""
@@ -266,7 +266,7 @@ def test_unit_empty_needle_offset_parity(haystack, start, end):
 
 @pytest.mark.parametrize("haystack", DEGENERATE_HAYSTACKS)
 @pytest.mark.parametrize("window", [None, (1, 2), (10, 20), (-100, -1)], ids=["full", "1:2", "10:20", "-100:-1"])
-def test_unit_count_empty_needle(haystack, window):
+def test_empty_needle_count_matches_str(haystack, window):
     """Empty-needle count matches CPython `str.count('')`, returning len+1 within a valid window and
     0 otherwise."""
     if window is None:
@@ -279,7 +279,7 @@ def test_unit_count_empty_needle(haystack, window):
 @pytest.mark.parametrize("haystack", ["", "abc", "Straße"])
 @pytest.mark.parametrize("start", UNCASED_DEGENERATE_BOUNDS)
 @pytest.mark.parametrize("end", UNCASED_DEGENERATE_BOUNDS)
-def test_unit_empty_needle_uncased_search_degenerate(haystack, start, end):
+def test_empty_needle_uncased_search_matches_str_find(haystack, start, end):
     """`utf8_uncased_search` with an empty needle mirrors `str.find('')` for in-range starts and reports
     -1, not a clamped offset, for out-of-range or inverted windows, so `start = index + 1` scans terminate."""
     assert sz.utf8_uncased_search(haystack, "", start) == haystack.find("", start)
@@ -287,7 +287,7 @@ def test_unit_empty_needle_uncased_search_degenerate(haystack, start, end):
 
 
 @pytest.mark.parametrize(
-    "haystack, needle, start, end, expected",
+    ("haystack", "needle", "start", "end", "expected"),
     [
         (b"hello", b"", 2, None, 2),
         (b"hello", b"", 5, None, 5),
@@ -296,7 +296,7 @@ def test_unit_empty_needle_uncased_search_degenerate(haystack, start, end):
     ],
     ids=["start_mid", "start_at_len", "start_past_len", "inverted_window"],
 )
-def test_unit_empty_needle_uncased_search_degenerate_bytes(haystack, needle, start, end, expected):
+def test_empty_needle_uncased_search_of_bytes_matches_str_find(haystack, needle, start, end, expected):
     """The byte-offset path of `utf8_uncased_search` shares the same interval helper as the codepoint path."""
     if end is None:
         assert sz.utf8_uncased_search(haystack, needle, start) == expected
@@ -316,6 +316,7 @@ def check_identical(
     needle: str,
     check_iterators: bool = False,
 ) -> None:
+    """Asserts `big` finds, counts and splits on `needle` exactly as the native `str` does."""
     present_in_native: bool = needle in native
     present_in_big = needle in big
     assert present_in_native == present_in_big
@@ -505,7 +506,7 @@ UNALIGNED_VIEW_NEEDLES = ["", "a", "ab", "ba", "abab", "Q"]
 
 @pytest.mark.parametrize("offset", LANE_STRADDLE_OFFSETS)
 @pytest.mark.parametrize("needle_length", NEEDLE_LENGTHS)
-def test_unit_backend_differential_find_lane_boundary(backend_results, needle_length, offset):
+def test_find_family_agrees_across_backends_at_lane_boundaries(backend_results, needle_length, offset):
     """The whole `find` family agrees across every `capability_sweep()` backend and with CPython `str`
     for a needle spliced across a 16/32/64-byte SIMD lane boundary; a divergence is a kernel bug, not
     a binding bug."""
@@ -517,7 +518,7 @@ def test_unit_backend_differential_find_lane_boundary(backend_results, needle_le
 @pytest.mark.parametrize("strategy", NEEDLE_STRATEGIES)
 @pytest.mark.parametrize("alphabet", HAYSTACK_ALPHABETS)
 @pytest.mark.parametrize("haystack_length", VECTOR_WIDTH_LENGTHS)
-def test_unit_backend_differential_boundary_lengths(backend_results, haystack_length, alphabet, strategy):
+def test_find_family_agrees_across_backends_at_register_widths(backend_results, haystack_length, alphabet, strategy):
     """The whole `find` family agrees across every `capability_sweep()` backend and with CPython `str`
     for haystacks bracketing the 16/32/64-byte SIMD register widths, including the degenerate
     all-same-character case, across needles that are absent, a single character, the periodic unit,
@@ -528,7 +529,7 @@ def test_unit_backend_differential_boundary_lengths(backend_results, haystack_le
 
 
 @pytest.mark.parametrize("needle", UNALIGNED_VIEW_NEEDLES)
-def test_unit_backend_differential_unaligned_views(backend_results, needle):
+def test_find_family_agrees_across_backends_on_unaligned_views(backend_results, needle):
     """The whole `find` family agrees across every `capability_sweep()` backend and with CPython `str`
     for a `String` slice sharing its parent buffer at a misaligned base pointer; a divergence is a kernel
     bug, not a binding bug."""
@@ -552,7 +553,7 @@ def test_unit_backend_differential_unaligned_views(backend_results, needle):
 @pytest.mark.parametrize("needle_length", [0, 1, 2, 3, 5])
 @pytest.mark.parametrize("haystack_length", [0, 1, 5, 17, 33, 65])
 @pytest.mark.parametrize("variability", [1, 2, 4])
-def test_unit_backend_differential_random_fuzz(
+def test_find_family_agrees_across_backends_on_random_text(
     backend_results, rng: Random, variability: int, haystack_length: int, needle_length: int
 ):
     """The whole `find` family agrees across every `capability_sweep()` backend and with CPython `str`

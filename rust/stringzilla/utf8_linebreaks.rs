@@ -42,8 +42,7 @@ pub type Utf8Linebreaks<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> = Utf8
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stringzilla::fixtures::*;
-    use crate::stringzilla::utf8_tokens::tests::assert_steps_invariant;
+    use crate::testing::*;
 
     // Science abstract: NFKC ligatures/superscripts/Roman/full-width, Kelvin and Angstrom
     // singletons, NBSP, WJ + ZWSP.
@@ -62,7 +61,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_linebreak_utf8_splits_steps_invariance() {
+    fn linebreaks_split_alike_at_every_batch_size() {
         assert_steps_invariant::<Linebreaks>(b"Hi, world! A second sentence.");
     }
 }

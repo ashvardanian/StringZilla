@@ -21,7 +21,7 @@ import itertools
 from collections.abc import Callable, Iterable, Sequence
 
 import pytest
-from base import scale_iterations
+from base import scaled_iterations
 
 # region Palettes & fixtures
 
@@ -279,7 +279,7 @@ def adversarial_utf8_inputs(rng, random_input_count: int | None = None) -> Itera
     for lead in _LEAD_BYTES:
         for trailing in range(256):
             yield bytes([lead, trailing])
-    count = scale_iterations(4000) if random_input_count is None else random_input_count
+    count = scaled_iterations(4000) if random_input_count is None else random_input_count
     for _ in range(count):
         length = rng.randint(1, _UNIT_CAPACITY)
         yield bytes(rng.randrange(256) for _ in range(length))
@@ -296,7 +296,7 @@ def icu_segmenter(kind: str) -> Callable[[str], list[str]]:
     `kind` is one of ``"word"`` / ``"grapheme"`` / ``"sentence"`` / ``"line"``. Skips the test when PyICU is
     absent.
     """
-    icu = pytest.importorskip("icu", reason="PyICU not installed")
+    icu = pytest.importorskip("icu", reason="PyICU is not installed")
     factories = {
         "word": icu.BreakIterator.createWordInstance,
         "grapheme": icu.BreakIterator.createCharacterInstance,
@@ -327,7 +327,7 @@ def icu_unicode_at_least(version: str) -> bool:
     properties changed between releases, so a *bit-exact* ICU differential would log spurious version-induced
     failures. Callers gate the strict assertion behind this and fall back to an agreement gate when ICU is behind.
     """
-    icu = pytest.importorskip("icu", reason="PyICU not installed")
+    icu = pytest.importorskip("icu", reason="PyICU is not installed")
 
     def major_minor(value: str) -> tuple:
         return tuple(int(piece) for piece in str(value).split(".")[:2] if piece.isdigit())
@@ -338,7 +338,7 @@ def icu_unicode_at_least(version: str) -> bool:
 def icu_normalizer(form: str) -> Callable[[str], str]:
     """Return an ICU `Normalizer2`-backed normalizer `text -> str` for NFC/NFD/NFKC/NFKD/NFKC_Casefold. Skips
     without PyICU."""
-    icu = pytest.importorskip("icu", reason="PyICU not installed")
+    icu = pytest.importorskip("icu", reason="PyICU is not installed")
     getters = {
         "NFC": icu.Normalizer2.getNFCInstance,
         "NFD": icu.Normalizer2.getNFDInstance,

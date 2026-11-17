@@ -131,7 +131,7 @@ mod tests {
     const CAFE_NFD: &str = "cafe\u{0301}";
 
     #[test]
-    fn utf8_norm_golden_vectors() {
+    fn utf8_norm_matches_golden_vectors() {
         // ASCII is invariant under all normalization forms.
         for form in [NormalForm::Nfd, NormalForm::Nfc, NormalForm::Nfkd, NormalForm::Nfkc] {
             let source = "Hello, world! 123";
@@ -199,7 +199,7 @@ mod tests {
     }
 
     #[test]
-    fn utf8_find_denormalized() {
+    fn utf8_find_denormalized_locates_the_first_violation() {
         // NFC string: precomposed é — no violation.
         assert_eq!(sz::utf8_find_denormalized(CAFE_NFC, NormalForm::Nfc), None, "NFC string has no NFC violation");
 

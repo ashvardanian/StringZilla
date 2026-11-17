@@ -38,8 +38,7 @@ pub type Utf8Wordbreaks<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> = Utf8
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stringzilla::fixtures::*;
-    use crate::stringzilla::utf8_tokens::tests::assert_steps_invariant;
+    use crate::testing::*;
 
     // A U+2019 contraction tiles as a single word, like the ASCII apostrophe.
     const PROSE_MICRO_APOSTROPHE: &str = "it\u{2019}s worth it";
@@ -54,7 +53,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_word_utf8_splits_steps_invariance() {
+    fn wordbreaks_split_alike_at_every_batch_size() {
         assert_steps_invariant::<Wordbreaks>(b"Hi, world! A second sentence.");
     }
 }

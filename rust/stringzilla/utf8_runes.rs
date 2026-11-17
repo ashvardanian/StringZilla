@@ -350,7 +350,7 @@ mod tests {
     }
 
     #[test]
-    fn utf8_runes_finalize_truncated_tail() {
+    fn utf8_runes_end_a_truncated_tail_with_one_replacement() {
         // The decoder itself consumes a truncated final sequence as one U+FFFD, matching
         // `String::from_utf8_lossy`, so the iterators need no patch of their own.
         let mut runes = [0u32; 4];

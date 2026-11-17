@@ -11,7 +11,7 @@
  *  compiles the kernels inline, where the dispatch points are stubs, running the cross-checks and
  *  the stubs alone.
  */
-#undef NDEBUG // ! Enable all assertions for testing
+#undef NDEBUG // ! A test's oracle must stay live in every build
 
 #undef STRINGZILLA_DEBUG
 #define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
@@ -29,7 +29,7 @@
 
 #include <fmt/format.h>
 
-#include "harness.hpp" // `read_settings`, `run_test`
+#include "harness.hpp" // `start_test_run`, `run_test_case`, `finish_test_run`
 
 using namespace ashvardanian::stringzilla::test;
 
@@ -54,20 +54,20 @@ void test_device_unit() {
     sz::device_t const cpu = sz::device_t::cpu();
     auto const [detected, detected_status] = cpu.capabilities_detected();
     auto const [enabled, enabled_status] = cpu.capabilities_enabled();
-    verify(sz::succeeded(detected_status) && sz::succeeded(enabled_status));
-    verify((enabled & sz_cap_serial_k) && !(enabled & ~(detected | sz_cap_serial_k)));
-    verify(!(enabled & ~cpu.capabilities_compiled().value));
-    verify(sz::succeeded(cpu.configure_thread(enabled)));
+    expect_true(sz::succeeded(detected_status) && sz::succeeded(enabled_status));
+    expect_true((enabled & sz_cap_serial_k) && !(enabled & ~(detected | sz_cap_serial_k)));
+    expect_true(!(enabled & ~cpu.capabilities_compiled().value));
+    expect_true(sz::succeeded(cpu.configure_thread(enabled)));
     for (sz::device_kind_t kind :
          {sz::device_kind_t::cpu_k, sz::device_kind_t::cuda_k, sz::device_kind_t::rocm_k, sz::device_kind_t::metal_k}) {
         auto const [devices, count_status] = sz::device_t::count(kind);
         if (sz::failed(count_status)) continue; // No device of this kind answers
-        verify(kind != sz::device_kind_t::cpu_k || devices == 1);
-        verify(sz::device_t::make(kind, devices).status == sz::status_t::missing_gpu_k);
+        expect_true(kind != sz::device_kind_t::cpu_k || devices == 1);
+        expect_equal(sz::device_t::make(kind, devices).status, sz::status_t::missing_gpu_k);
         if (kind == sz::device_kind_t::cpu_k) continue;
         auto const [gpu, make_status] = sz::device_t::make(kind, 0);
-        verify(sz::succeeded(make_status) && !(gpu.capabilities_compiled().value & sz_cap_cpus_k));
-        verify(gpu.configure_thread(sz_cap_any_k) == sz::status_t::missing_kernel_k);
+        expect_true(sz::succeeded(make_status) && !(gpu.capabilities_compiled().value & sz_cap_cpus_k));
+        expect_equal(gpu.configure_thread(sz_cap_any_k), sz::status_t::missing_kernel_k);
     }
 }
 
@@ -152,12 +152,12 @@ void test_dispatch_stubs_unit() {
         call_stub_(sz_utf8_uncased_order_best),
         call_stub_(sz_utf8_find_cased_best),
     };
-    for (sz_status_t status : statuses) verify(status == sz_missing_library_k);
+    for (sz_status_t status : statuses) expect_equal(status, sz_missing_library_k);
 
     // The C++ layer runs the serial kernels over the empty default mask instead.
     sz::string_view_t const text = "a quick brown fox";
-    verify(text.find("brown") == 8);
-    verify(text.utf8_count() == 17);
+    expect_equal(text.find("brown"), 8);
+    expect_equal(text.utf8_count(), 17);
 }
 
 #endif // !STRINGZILLA_HEADER_ONLY
@@ -197,21 +197,24 @@ void test_find_kernel_unit() {
         sz_capability_t expected_capability = sz_cap_serial_k;
         sz_status_t const expected = sz_find_kernel_punned(static_cast<sz_kernel_kind_t>(kind), enabled,
                                                            &expected_kernel, &expected_capability);
-        verify(expected == sz_success_k || (expected == missing && !expected_kernel && !expected_capability));
+        expect_true(expected == sz_success_k || (expected == missing && !expected_kernel && !expected_capability));
         std::size_t owners = 0;
         for (auto find_kernel : find_kernels) {
             sz_kernel_punned_t kernel = poison;
             sz_capability_t capability = sz_cap_serial_k;
             sz_status_t const status = find_kernel(static_cast<sz_kernel_kind_t>(kind), enabled, &kernel, &capability);
-            if (status == sz_success_k) verify(kernel == expected_kernel && capability == expected_capability);
-            else verify(status == missing && !kernel && !capability);
+            if (status == sz_success_k) expect_true(kernel == expected_kernel && capability == expected_capability);
+            else expect_true(status == missing && !kernel && !capability);
             owners += status == sz_success_k;
         }
-        verify(owners == (expected == sz_success_k ? 1u : 0u));
+        expect_equal(owners, expected == sz_success_k ? 1u : 0u);
     }
 }
 
-std::vector<sz::device_t> select_devices(std::optional<std::vector<device_selection_t>> const &requested) {
+/** The GPUs @c STRINGZILLA_DEVICES names, exiting when one is unavailable, or else the first of
+ *  each kind present. */
+std::vector<sz::device_t> selected_devices() {
+    std::optional<std::vector<device_selection_t>> const &requested = test_run.settings.devices;
     std::vector<sz::device_t> devices;
     if constexpr (STRINGZILLA_HEADER_ONLY) {
         if (requested) {
@@ -241,156 +244,146 @@ std::vector<sz::device_t> select_devices(std::optional<std::vector<device_select
 
 } // namespace ashvardanian::stringzilla::test
 
-int main(int, char const **argv) {
-    install_test_signal_handlers();
-    settings_t const settings = read_settings(argv[0]);
-    environment_t const env {settings, probe_machine()};
-    auto const devices = select_devices(env.settings.devices);
-    print(env.machine);
-    print(env.settings);
-    // ctest hides passing output; the blank line keeps the next binary's header out of this list
-    if (char const *summary_path = std::getenv("GITHUB_STEP_SUMMARY"))
-        if (std::FILE *summary = std::fopen(summary_path, "a"))
-            std::fputc('\n', summary), print(env.machine, summary), std::fclose(summary);
+int main(int argc, char **argv) {
+    start_test_run(argc, argv);
+    std::vector<sz::device_t> const devices = selected_devices();
 
-    std::size_t failures = 0;
-    failures += run_test(env.settings, "test_find_kernel_unit", test_find_kernel_unit);
+    run_test_case("test_find_kernel_unit", test_find_kernel_unit);
 
 #if STRINGZILLA_HEADER_ONLY
-    failures += run_test(env.settings, "test_dispatch_stubs_unit", test_dispatch_stubs_unit);
+    run_test_case("test_dispatch_stubs_unit", test_dispatch_stubs_unit);
 #else
-    failures += run_test(env.settings, "test_device_unit", test_device_unit);
-    failures += run_test(env.settings, "test_arithmetic_unit", test_arithmetic_unit);
-    failures += run_test(env.settings, "test_strings_view_unit", test_strings_view_unit);
-    failures += run_test(env.settings, "test_strings_columns_unit", test_strings_columns_unit);
-    failures += run_test(env.settings, "test_allocator_unit", test_allocator_unit);
-    failures += run_test(env.settings, "test_byteset_unit", test_byteset_unit);
+    run_test_case("test_device_unit", test_device_unit);
+    run_test_case("test_arithmetic_unit", test_arithmetic_unit);
+    run_test_case("test_strings_view_unit", test_strings_view_unit);
+    run_test_case("test_strings_columns_unit", test_strings_columns_unit);
+    run_test_case("test_allocator_unit", test_allocator_unit);
+    run_test_case("test_byteset_unit", test_byteset_unit);
 
-    failures += run_test(env.settings, "test_hash_unit", test_hash_unit);
-    failures += run_test(env.settings, "test_hash_all", test_hash_all);
-    failures += run_test(env.settings, "test_hash_multiseed_all", test_hash_multiseed_all);
-    failures += run_test(env.settings, "test_hash_safety", test_hash_safety);
+    run_test_case("test_hash_unit", test_hash_unit);
+    run_test_case("test_hash_all", test_hash_all);
+    run_test_case("test_hash_multiseed_all", test_hash_multiseed_all);
+    run_test_case("test_hash_safety", test_hash_safety);
 
-    failures += run_test(env.settings, "test_cipher_unit", test_cipher_unit);
-    failures += run_test(env.settings, "test_cipher_safety", test_cipher_safety);
-    failures += run_test(env.settings, "test_cipher_all", test_cipher_all);
+    run_test_case("test_cipher_unit", test_cipher_unit);
+    run_test_case("test_cipher_safety", test_cipher_safety);
+    run_test_case("test_cipher_all", test_cipher_all);
 
-    failures += run_test(env.settings, "test_sort_unit", test_sort_unit);
-    failures += run_test(env.settings, "test_sort_reference_equivalence", test_sort_reference_equivalence);
-    failures += run_test(env.settings, "test_sort_all", test_sort_all);
-    failures += run_test(env.settings, "test_sort_safety", test_sort_safety);
-    failures += run_test(env.settings, "test_intersect_unit", test_intersect_unit);
-    failures += run_test(env.settings, "test_intersect_equivalence", test_intersect_equivalence);
+    run_test_case("test_sort_unit", test_sort_unit);
+    run_test_case("test_sort_reference_equivalence", test_sort_reference_equivalence);
+    run_test_case("test_sort_all", test_sort_all);
+    run_test_case("test_sort_safety", test_sort_safety);
+    run_test_case("test_intersect_unit", test_intersect_unit);
+    run_test_case("test_intersect_equivalence", test_intersect_equivalence);
 
-    failures += run_test(env.settings, "test_levenshtein_unit", test_levenshtein_unit);
-    failures += run_test(env.settings, "test_levenshtein_all", test_levenshtein_all);
-    failures += run_test(env.settings, "test_levenshtein_safety", test_levenshtein_safety);
-    failures += run_test(env.settings, "test_overlap_unit", test_overlap_unit);
-    failures += run_test(env.settings, "test_overlap_all", test_overlap_all);
-    failures += run_test(env.settings, "test_overlap_safety", test_overlap_safety);
-    failures += run_test(env.settings, "test_substrings_unit", test_substrings_unit);
-    failures += run_test(env.settings, "test_substrings_all", test_substrings_all);
-    failures += run_test(env.settings, "test_substrings_safety", test_substrings_safety);
-    failures += run_test(env.settings, "test_regex_unit", test_regex_unit);
-    failures += run_test(env.settings, "test_regex_all", test_regex_all);
-    failures += run_test(env.settings, "test_regex_safety", test_regex_safety);
-    failures += run_test(env.settings, "test_subdocuments_unit", test_subdocuments_unit);
-    failures += run_test(env.settings, "test_subdocuments_all", test_subdocuments_all);
-    failures += run_test(env.settings, "test_subdocuments_safety", test_subdocuments_safety);
+    run_test_case("test_levenshtein_unit", test_levenshtein_unit);
+    run_test_case("test_levenshtein_all", test_levenshtein_all);
+    run_test_case("test_levenshtein_safety", test_levenshtein_safety);
+    run_test_case("test_overlap_unit", test_overlap_unit);
+    run_test_case("test_overlap_all", test_overlap_all);
+    run_test_case("test_overlap_safety", test_overlap_safety);
+    run_test_case("test_substrings_unit", test_substrings_unit);
+    run_test_case("test_substrings_all", test_substrings_all);
+    run_test_case("test_substrings_safety", test_substrings_safety);
+    run_test_case("test_regex_unit", test_regex_unit);
+    run_test_case("test_regex_all", test_regex_all);
+    run_test_case("test_regex_safety", test_regex_safety);
+    run_test_case("test_subdocuments_unit", test_subdocuments_unit);
+    run_test_case("test_subdocuments_all", test_subdocuments_all);
+    run_test_case("test_subdocuments_safety", test_subdocuments_safety);
 
-    failures += run_test(env.settings, "test_ascii_unit<sz::string_view_t>", test_ascii_unit<sz::string_view_t>);
-    failures += run_test(env.settings, "test_strings_unit", test_strings_unit);
-    failures += run_test(env.settings, "test_strings_all", test_strings_all);
-    failures += run_test(env.settings, "test_strings_safety", test_strings_safety);
-    failures += run_test(env.settings, "test_stl_reads_unit<std::string_view>", test_stl_reads_unit<std::string_view>);
-    failures += run_test(env.settings, "test_stl_reads_unit<std::string>", test_stl_reads_unit<std::string>);
-    failures += run_test(env.settings, "test_stl_reads_unit<sz::string_view_t>",
-                         test_stl_reads_unit<sz::string_view_t>);
-    failures += run_test(env.settings, "test_stl_updates_unit", test_stl_updates_unit);
-    failures += run_test(env.settings, "test_stl_conversions_unit", test_stl_conversions_unit);
-    failures += run_test(env.settings, "test_stl_containers_unit", test_stl_containers_unit);
-    failures += run_test(env.settings, "test_extensions_reads_unit<sz::string_view_t>",
-                         test_extensions_reads_unit<sz::string_view_t>);
-    failures += run_test(env.settings, "test_extensions_updates_unit", test_extensions_updates_unit);
-    failures += run_test(env.settings, "test_extensions_ranges_unit", test_extensions_ranges_unit);
-    failures += run_test(env.settings, "test_string_constructors_unit", test_string_constructors_unit);
-    failures += run_test(env.settings, "test_string_reserve_unit", test_string_reserve_unit);
-    failures += run_test(env.settings, "test_memory_stability_equivalence_1024",
-                         [](test_context_t &context) { test_memory_stability_equivalence(context, 1024); });
-    failures += run_test(env.settings, "test_memory_stability_equivalence_14",
-                         [](test_context_t &context) { test_memory_stability_equivalence(context, 14); });
-    failures += run_test(env.settings, "test_string_updates_equivalence",
-                         [](test_context_t &context) { test_string_updates_equivalence(context); }); // ! Defaulted
+    run_test_case("test_ascii_unit<sz::string_view_t>", test_ascii_unit<sz::string_view_t>);
+    run_test_case("test_strings_unit", test_strings_unit);
+    run_test_case("test_strings_all", test_strings_all);
+    run_test_case("test_strings_safety", test_strings_safety);
+    run_test_case("test_stl_reads_unit<std::string_view>", test_stl_reads_unit<std::string_view>);
+    run_test_case("test_stl_reads_unit<std::string>", test_stl_reads_unit<std::string>);
+    run_test_case("test_stl_reads_unit<sz::string_view_t>", test_stl_reads_unit<sz::string_view_t>);
+    run_test_case("test_stl_updates_unit", test_stl_updates_unit);
+    run_test_case("test_stl_conversions_unit", test_stl_conversions_unit);
+    run_test_case("test_stl_containers_unit", test_stl_containers_unit);
+    run_test_case("test_extensions_reads_unit<sz::string_view_t>", test_extensions_reads_unit<sz::string_view_t>);
+    run_test_case("test_extensions_updates_unit", test_extensions_updates_unit);
+    run_test_case("test_extensions_ranges_unit", test_extensions_ranges_unit);
+    run_test_case("test_string_constructors_unit", test_string_constructors_unit);
+    run_test_case("test_string_reserve_unit", test_string_reserve_unit);
+    run_test_case("test_memory_stability_equivalence(1024)", test_memory_stability_equivalence, 1024);
+    run_test_case("test_memory_stability_equivalence(14)", test_memory_stability_equivalence, 14);
+    run_test_case("test_string_updates_equivalence(1024)", test_string_updates_equivalence, 1024);
 
-    failures += run_test(env.settings, "test_compare_unit", test_compare_unit);
-    failures += run_test(env.settings, "test_find_unit", test_find_unit);
-    failures += run_test(env.settings, "test_find_all", test_find_all);
-    failures += run_test(env.settings, "test_find_safety", test_find_safety);
-    failures += run_test(env.settings, "test_lookup_equivalence",
-                         [](test_context_t &context) { test_lookup_equivalence(context); }); // ! Defaulted args
-    failures += run_test(env.settings, "test_find_misaligned_equivalence", test_find_misaligned_equivalence);
+    run_test_case("test_compare_unit", test_compare_unit);
+    run_test_case("test_find_unit", test_find_unit);
+    run_test_case("test_find_all", test_find_all);
+    run_test_case("test_find_safety", test_find_safety);
+    run_test_case("test_lookup_equivalence(32, 16)", test_lookup_equivalence, 32, 16);
+    run_test_case("test_find_misaligned_equivalence", test_find_misaligned_equivalence);
 
-    failures += run_test(env.settings, "test_utf8_runes_unit", test_utf8_runes_unit);
-    failures += run_test(env.settings, "test_utf8_runes_scripts_unit", test_utf8_runes_scripts_unit);
-    failures += run_test(env.settings, "test_utf8_runes_safety", test_utf8_runes_safety);
-    failures += run_test(env.settings, "test_utf8_runes_all", test_utf8_runes_all);
-    failures += run_test(env.settings, "test_utf8_tokens_unit", test_utf8_tokens_unit);
-    failures += run_test(env.settings, "test_utf8_tokens_scripts_unit", test_utf8_tokens_scripts_unit);
-    failures += run_test(env.settings, "test_utf8_tokens_safety", test_utf8_tokens_safety);
-    failures += run_test(env.settings, "test_utf8_tokens_all", test_utf8_tokens_all);
-    failures += run_test(env.settings, "test_utf8_wordbreaks_unit", test_utf8_wordbreaks_unit);
-    failures += run_test(env.settings, "test_utf8_wordbreaks_rules", test_utf8_wordbreaks_rules);
-    failures += run_test(env.settings, "test_utf8_wordbreaks_safety", test_utf8_wordbreaks_safety);
-    failures += run_test(env.settings, "test_utf8_wordbreaks_all", test_utf8_wordbreaks_all);
-    failures += run_test(env.settings, "test_utf8_graphemes_unit", test_utf8_graphemes_unit);
-    failures += run_test(env.settings, "test_utf8_graphemes_rules", test_utf8_graphemes_rules);
-    failures += run_test(env.settings, "test_utf8_graphemes_safety", test_utf8_graphemes_safety);
-    failures += run_test(env.settings, "test_utf8_graphemes_all", test_utf8_graphemes_all);
-    failures += run_test(env.settings, "test_utf8_sentences_unit", test_utf8_sentences_unit);
-    failures += run_test(env.settings, "test_utf8_sentences_rules", test_utf8_sentences_rules);
-    failures += run_test(env.settings, "test_utf8_sentences_safety", test_utf8_sentences_safety);
-    failures += run_test(env.settings, "test_utf8_sentences_all", test_utf8_sentences_all);
-    failures += run_test(env.settings, "test_utf8_linebreaks_unit", test_utf8_linebreaks_unit);
-    failures += run_test(env.settings, "test_utf8_linebreaks_rules", test_utf8_linebreaks_rules);
-    failures += run_test(env.settings, "test_utf8_linebreaks_safety", test_utf8_linebreaks_safety);
-    failures += run_test(env.settings, "test_utf8_linebreaks_all", test_utf8_linebreaks_all);
-    failures += run_test(env.settings, "test_utf8_delimiters_unit", test_utf8_delimiters_unit);
-    failures += run_test(env.settings, "test_utf8_delimiters_safety", test_utf8_delimiters_safety);
-    failures += run_test(env.settings, "test_utf8_delimiters_all", test_utf8_delimiters_all);
+    run_test_case("test_utf8_runes_unit", test_utf8_runes_unit);
+    run_test_case("test_utf8_runes_scripts_unit", test_utf8_runes_scripts_unit);
+    run_test_case("test_utf8_runes_safety", test_utf8_runes_safety);
+    run_test_case("test_utf8_runes_all", test_utf8_runes_all);
+    run_test_case("test_utf8_tokens_unit", test_utf8_tokens_unit);
+    run_test_case("test_utf8_tokens_scripts_unit", test_utf8_tokens_scripts_unit);
+    run_test_case("test_utf8_tokens_safety", test_utf8_tokens_safety);
+    run_test_case("test_utf8_tokens_all", test_utf8_tokens_all);
+    run_test_case("test_utf8_wordbreaks_unit", test_utf8_wordbreaks_unit);
+    run_test_case("test_utf8_wordbreaks_rules", test_utf8_wordbreaks_rules);
+    run_test_case("test_utf8_wordbreaks_safety", test_utf8_wordbreaks_safety);
+    run_test_case("test_utf8_wordbreaks_all", test_utf8_wordbreaks_all);
+    run_test_case("test_utf8_graphemes_unit", test_utf8_graphemes_unit);
+    run_test_case("test_utf8_graphemes_rules", test_utf8_graphemes_rules);
+    run_test_case("test_utf8_graphemes_safety", test_utf8_graphemes_safety);
+    run_test_case("test_utf8_graphemes_all", test_utf8_graphemes_all);
+    run_test_case("test_utf8_sentences_unit", test_utf8_sentences_unit);
+    run_test_case("test_utf8_sentences_rules", test_utf8_sentences_rules);
+    run_test_case("test_utf8_sentences_safety", test_utf8_sentences_safety);
+    run_test_case("test_utf8_sentences_all", test_utf8_sentences_all);
+    run_test_case("test_utf8_linebreaks_unit", test_utf8_linebreaks_unit);
+    run_test_case("test_utf8_linebreaks_rules", test_utf8_linebreaks_rules);
+    run_test_case("test_utf8_linebreaks_safety", test_utf8_linebreaks_safety);
+    run_test_case("test_utf8_linebreaks_all", test_utf8_linebreaks_all);
+    run_test_case("test_utf8_delimiters_unit", test_utf8_delimiters_unit);
+    run_test_case("test_utf8_delimiters_safety", test_utf8_delimiters_safety);
+    run_test_case("test_utf8_delimiters_all", test_utf8_delimiters_all);
 
-    failures += run_test(env.settings, "test_utf8_norm_unit", test_utf8_norm_unit);
-    failures += run_test(env.settings, "test_utf8_norm_safety", test_utf8_norm_safety);
-    failures += run_test(env.settings, "test_utf8_norm_all", test_utf8_norm_all);
-    failures += run_test(env.settings, "test_utf8_uncased_unit", test_utf8_uncased_unit);
-    failures += run_test(env.settings, "test_utf8_uncased_scripts_unit", test_utf8_uncased_scripts_unit);
-    failures += run_test(env.settings, "test_utf8_uncased_regressions_unit", test_utf8_uncased_regressions_unit);
-    failures += run_test(env.settings, "test_utf8_uncased_all", test_utf8_uncased_all);
-    failures += run_test(env.settings, "test_utf8_uncased_safety", test_utf8_uncased_safety);
+    run_test_case("test_utf8_norm_unit", test_utf8_norm_unit);
+    run_test_case("test_utf8_norm_safety", test_utf8_norm_safety);
+    run_test_case("test_utf8_norm_all", test_utf8_norm_all);
+    run_test_case("test_utf8_uncased_unit", test_utf8_uncased_unit);
+    run_test_case("test_utf8_uncased_scripts_unit", test_utf8_uncased_scripts_unit);
+    run_test_case("test_utf8_uncased_regressions_unit", test_utf8_uncased_regressions_unit);
+    run_test_case("test_utf8_uncased_all", test_utf8_uncased_all);
+    run_test_case("test_utf8_uncased_safety", test_utf8_uncased_safety);
 #endif // STRINGZILLA_HEADER_ONLY
 
-    failures += test_cross_serial(env);
-    failures += test_cross_x8664(env);
-    failures += test_cross_arm64(env);
-    failures += test_cross_riscv64(env);
-    failures += test_cross_loongarch64(env);
-    failures += test_cross_ppc64(env);
-    failures += test_cross_wasm(env);
+    test_cross_serial();
+    test_cross_x8664();
+    test_cross_arm64();
+    test_cross_riscv64();
+    test_cross_loongarch64();
+    test_cross_ppc64();
+    test_cross_wasm();
     if constexpr (!STRINGZILLA_HEADER_ONLY) {
         for (sz::device_t device : devices) {
             print(device);
             switch (device.kind()) {
-            case sz::device_kind_t::cuda_k: failures += test_cross_cuda(env, device.ordinal()); break;
-            case sz::device_kind_t::rocm_k: failures += test_cross_rocm(env, device.ordinal()); break;
-            case sz::device_kind_t::metal_k: failures += test_cross_metal(env, device.ordinal()); break;
+            case sz::device_kind_t::cuda_k: test_cross_cuda(device.ordinal()); break;
+            case sz::device_kind_t::rocm_k: test_cross_rocm(device.ordinal()); break;
+            case sz::device_kind_t::metal_k: test_cross_metal(device.ordinal()); break;
             case sz::device_kind_t::cpu_k: break;
             }
         }
     }
 
-    if (failures != 0) {
-        fmt::println(stderr, "\n{} test(s) failed.", failures);
-        return 1;
-    }
-    fmt::println("\nAll tests passed!");
-    return 0;
+    // A check outside every case, like a GPU suite's setup, fails the run without failing a case.
+    int const exit_code = finish_test_run();
+    // ctest hides passing output; the blank line keeps the next binary's header out of this list
+    if (char const *summary_path = std::getenv("GITHUB_STEP_SUMMARY"))
+        if (std::FILE *summary = std::fopen(summary_path, "a")) {
+            std::fputc('\n', summary), print(probe_machine(), summary);
+            fmt::println(summary, "- Cases: {} passed, {} failed, {} skipped", test_run.passed_cases,
+                         test_run.failed_cases, test_run.skipped_cases);
+            std::fclose(summary);
+        }
+    return exit_code;
 }

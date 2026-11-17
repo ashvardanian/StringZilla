@@ -53,10 +53,10 @@ std::vector<sz::device_t> select_devices(std::optional<std::vector<device_select
 
 } // namespace ashvardanian::stringzilla::bench
 
-int main() {
+int main(int argc, char **argv) {
     install_bench_signal_handlers();
     try {
-        environment_t env {read_settings(), probe_machine()};
+        environment_t env {read_bench_settings(argc, argv), probe_machine()};
         auto const devices = select_devices(env.settings.devices);
         print(env.machine);
         print(env.settings);

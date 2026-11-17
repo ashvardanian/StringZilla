@@ -1094,18 +1094,19 @@ mod tests {
     // region: Buffers
 
     #[test]
-    fn fill_random() {
+    fn fill_random_repeats_for_one_nonce() {
+        let nonce = crate::testing::case_stream_key(0);
         let mut first_buffer: Vec<u8> = vec![0; 10]; // Ten zeros
         let mut second_buffer: Vec<u8> = vec![1; 10]; // Ten ones
-        sz::fill_random(&mut first_buffer, 42);
-        sz::fill_random(&mut second_buffer, 42);
+        sz::fill_random(&mut first_buffer, nonce);
+        sz::fill_random(&mut second_buffer, nonce);
 
         // Same nonce will produce the same outputs
         assert_eq!(first_buffer, second_buffer);
     }
 
     #[test]
-    fn size_checks() {
+    fn lookup_refuses_a_source_of_another_length() {
         let long: Vec<u8> = vec![7; 20];
         let mut less_long: Vec<u8> = vec![0; 10];
         let lut: [u8; 256] = core::array::from_fn(|i| i as u8);
@@ -1558,7 +1559,7 @@ mod tests {
     #[test]
     fn metal_columns_convert_like_host_ones() {
         let Ok(capabilities) = sz::Capabilities::enabled_metal(0) else {
-            return;
+            return crate::testing::skipped("no Metal device");
         };
         let gpu = sz::Stream::new(capabilities, 0).unwrap();
         let cpu = cpu();

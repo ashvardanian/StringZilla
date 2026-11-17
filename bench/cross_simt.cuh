@@ -186,7 +186,7 @@ struct levenshtein_simt_corpus_t {
         for (std::size_t index = 0; index != count; ++index) host_sorted_views[index] = host_views[order[index]];
 
         double const mean_bytes = (double)bytes / (double)max_of<std::size_t>(count, 1);
-        host_skewed_views = simt_skewed_views(host_tape.data(), bytes, count, mean_bytes, env.settings.seed.value);
+        host_skewed_views = simt_skewed_views(host_tape.data(), bytes, count, mean_bytes, env.settings.seed);
 
         shuffled_tape = resident_strings(backend.runtime, host_candidates(levenshtein_simt_order_t::shuffled_k));
         sorted_tape = resident_strings(backend.runtime, host_candidates(levenshtein_simt_order_t::sorted_k));
@@ -419,10 +419,9 @@ inline void bench_overlap_simt(simt_backend_t const &backend, environment_t cons
     fmt::println("Starting window overlap benchmarks over {} resident candidates...", resident.candidates.size());
     bench_overlap_scores(backend, env, corpus, resident, median_token_bytes(corpus), "");
     std::size_t const bytes = resident.bytes();
-    overlap_corpus_t skewed(
-        simt_skewed_views(corpus.dataset.data(), corpus.dataset.size(), resident.candidates.size(),
-                          (double)bytes / (double)resident.candidates.size(), env.settings.seed.value),
-        backend.runtime);
+    overlap_corpus_t skewed(simt_skewed_views(corpus.dataset.data(), corpus.dataset.size(), resident.candidates.size(),
+                                              (double)bytes / (double)resident.candidates.size(), env.settings.seed),
+                            backend.runtime);
     bench_overlap_scores(backend, env, corpus, skewed, median_token_bytes(corpus), ":skewed");
 }
 

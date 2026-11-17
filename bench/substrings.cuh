@@ -69,7 +69,7 @@ static sz_substrings_overlap_policy_t const substrings_leftmost_policies_k[] = {
  *  @p kit, like @c _haswell, then the slice and the policy, so an unwanted slice is never drawn. */
 inline bool substrings_selects(environment_t const &env, std::string_view kit, std::string const &label) {
     auto const selects = [&](char const *verb, char const *policy) {
-        return env.settings.selects(fmt::format("sz_substrings_{}{}{}{}", verb, kit, label, policy));
+        return env.settings.filter.selects(fmt::format("sz_substrings_{}{}{}{}", verb, kit, label, policy));
     };
     for (sz_substrings_overlap_policy_t const policy : substrings_policies_k)
         if (selects("counts", substrings_policy_name(policy)) || selects("find", substrings_policy_name(policy)))
@@ -98,7 +98,7 @@ static constexpr std::size_t substrings_sampled_min_bytes_k = 4, substrings_samp
 
 /** Distinct substrings of haystacks at seeded random positions, so any corpus yields needles. */
 static std::vector<std::string> substrings_sampled(environment_t const &env, corpus_t const &corpus) {
-    std::mt19937_64 generator(env.settings.seed.value);
+    std::mt19937_64 generator(env.settings.seed);
     std::set<std::string> distinct;
     std::size_t attempts = 0;
     while (distinct.size() != substrings_sampled_needles_k && attempts++ != 64 * substrings_sampled_needles_k) {

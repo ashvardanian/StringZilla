@@ -8,7 +8,7 @@ multi-script and emoji text, the String method surface, adversarial-byte and win
 exact conformance against the official WordBreakTest.txt, class-adjacency pairs and triples built from
 the Word_Break property table, randomized differential fuzzing, realistic multi-script prose, and
 cross-backend agreement on realistic, malformed, and lane-straddling inputs.
-Compares against: the official Unicode WordBreakTest.txt and the uniseg library, both bit-exact UAX-29
+Baselines: the official Unicode WordBreakTest.txt and the uniseg library, both bit-exact UAX-29
 oracles, and cross-backend self-consistency across every capability_sweep() backend. It deliberately
 does not compare against ICU's word iterator, which is editor-tailored and diverges from raw UAX-29 by
 roughly 17-20%.
@@ -29,11 +29,10 @@ from random import Random
 
 import pytest
 from base import (
-    StreamKey,
     assert_backends_agree,
     malformed_utf8_corpus,
     representatives_by_class,
-    scale_iterations,
+    scaled_iterations,
     vector_width_bracketing_strings,
 )
 from utf8_helpers import (
@@ -228,7 +227,7 @@ def test_utf8_word_class_adjacency(word_break_props):
     """Every Word_Break class-adjacency pair and triple, built from one representative codepoint per class,
     must segment bit-exactly the same as uniseg, the independent UAX-29 reference. Derived from the property
     table, this exercises rare class interactions (Mid* bridges, RI parity, ExtendNumLet) the palette misses."""
-    uniseg_wordbreak = pytest.importorskip("uniseg.wordbreak", reason="uniseg not installed")
+    uniseg_wordbreak = pytest.importorskip("uniseg.wordbreak", reason="uniseg is not installed")
     representatives = representatives_by_class(word_break_props, count=1)
     cases = class_adjacency_strings(representatives, arity=2)
     cases += class_adjacency_strings(representatives, arity=3, max_cases=8000)
@@ -260,7 +259,7 @@ def test_utf8_word_boundary_differential_uniseg(rng: Random):
     generation over a boundary-relevant palette, checked against a second conformant implementation,
     surfaces corner cases the fixed suite misses, the same gap that once let a 50%-conformant kernel
     pass CI. Any divergence is a real bug in one of the two implementations."""
-    uniseg_wordbreak = pytest.importorskip("uniseg.wordbreak", reason="uniseg not installed")
+    uniseg_wordbreak = pytest.importorskip("uniseg.wordbreak", reason="uniseg is not installed")
 
     # Every WB category, including the historically-broken ones.
     palette = list(
@@ -301,7 +300,7 @@ def test_utf8_word_boundary_differential_uniseg(rng: Random):
     # palette keeps ignorable runs short, so every run stays inside one window, the domain where the kernel must
     # match exactly. (Pathological >64-byte ignorable runs exceed any fixed window; serial-only, out of scope here.)
     random_samples = (
-        "".join(rng.choice(palette) for _ in range(rng.randint(1, 100))) for _ in range(scale_iterations(2000))
+        "".join(rng.choice(palette) for _ in range(rng.randint(1, 100))) for _ in range(scaled_iterations(2000))
     )
     for text in itertools.chain(seam_regressions, random_samples):
         sz_boundaries = boundaries(str(w) for w in sz.utf8_wordbreaks(text))
@@ -315,14 +314,14 @@ def test_utf8_word_boundary_differential_uniseg(rng: Random):
     )
 
 
-def test_utf8_word_boundary_fuzz(seed: StreamKey, rng: Random):
+def test_utf8_word_boundary_fuzz(seed: int, rng: Random):
     """Fuzz test: compare the StringZilla word kernel against the independent ``uniseg`` UAX-29 implementation.
 
     An in-repo pure-Python TR29 reimplementation, ``baseline_word_boundaries``, is itself ~89% wrong vs
     ``uniseg`` on this charset, so it cannot validate a correct kernel. ``uniseg`` is a maintained
     third-party reference and agrees with the official ``WordBreakTest.txt``.
     """
-    uniseg_wordbreak = pytest.importorskip("uniseg.wordbreak", reason="uniseg not installed")
+    uniseg_wordbreak = pytest.importorskip("uniseg.wordbreak", reason="uniseg is not installed")
 
     # Generate random test strings. The charset deliberately spans every WB category, including the ones that a
     # naive kernel gets wrong: combining marks / Format / ZWJ (WB4, WB3c), emoji & symbol pictographs (WB3c),
@@ -345,7 +344,7 @@ def test_utf8_word_boundary_fuzz(seed: StreamKey, rng: Random):
         "\U0001f1e6\U0001f1fa"  # Regional_Indicators (WB15/16)
     )
 
-    for _ in range(scale_iterations(200)):
+    for _ in range(scaled_iterations(200)):
         length = rng.randint(1, 100)
         text = "".join(rng.choice(test_chars) for _ in range(length))
 
@@ -367,7 +366,7 @@ def test_utf8_word_boundary_fuzz(seed: StreamKey, rng: Random):
         )
 
 
-def test_utf8_wordbreaks_prose():
+def test_utf8_prose_wordbreak_counts():
     """Realistic multi-script paragraphs: wordbreak count matches the uniseg UAX-29 oracle; segments tile."""
     from utf8_helpers import (
         PROSE_CONCERT_POST,
@@ -389,7 +388,7 @@ def test_utf8_wordbreaks_prose():
         segments = list(sz.utf8_wordbreaks(text))
         assert_segments_tile(segments, text)
         assert len(segments) == expected
-    uniseg_wordbreak = pytest.importorskip("uniseg.wordbreak")
+    uniseg_wordbreak = pytest.importorskip("uniseg.wordbreak", reason="uniseg is not installed")
     for text, _ in cases:
         assert len(list(sz.utf8_wordbreaks(text))) == len(list(uniseg_wordbreak.words(text)))
 
@@ -414,7 +413,7 @@ WORDBREAK_REALISTIC_TEXTS = [
 @pytest.mark.parametrize(
     "text", WORDBREAK_REALISTIC_TEXTS + list(malformed_utf8_corpus()) + vector_width_bracketing_strings()
 )
-def test_utf8_wordbreaks_backend_differential(backend_results, text):
+def test_utf8_wordbreaks_agree_across_backends(backend_results, text):
     """utf8_wordbreaks must segment identically across every SIMD backend on realistic, malformed, and
     lane-straddling inputs, compared as raw segment bytes so malformed UTF-8 sweeps without raising."""
     results = backend_results(

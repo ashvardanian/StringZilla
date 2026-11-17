@@ -7,7 +7,7 @@ Covers: utf8_count and utf8_codepoints on ASCII, multi-byte, and mixed-script te
 input parity, round-trip fidelity against random valid UTF-8 corpora, malformed-byte safety
 including lossy U+FFFD decoding, and cross-backend agreement on curated, malformed, and random
 corpora.
-Compares against: CPython's own codepoint iteration for valid UTF-8, and cross-backend
+Baselines: CPython's own codepoint iteration for valid UTF-8, and cross-backend
 self-consistency across every SIMD backend.
 
 Run:
@@ -28,7 +28,7 @@ from base import (
     assert_backends_agree,
     get_random_string,
     malformed_utf8_corpus,
-    scale_iterations,
+    scaled_iterations,
     vector_width_bracketing_strings,
 )
 from utf8_helpers import adversarial_utf8_inputs, random_segmentation_corpus
@@ -38,7 +38,7 @@ import stringzilla as sz
 # region Unit
 
 
-def test_unit_utf8_count():
+def test_utf8_count_counts_scalars_not_bytes():
     """utf8_count returns the Unicode scalar count, not the byte length, across ASCII, multi-byte, and
     mixed-script text, the String method form, and bytes input."""
     # ASCII strings: len == utf8_count
@@ -68,7 +68,7 @@ def test_unit_utf8_count():
     assert sz.utf8_count("𐍈") == 1  # Gothic letter (4 bytes)
 
 
-def test_unit_utf8_codepoints():
+def test_utf8_codepoints_match_python_iteration():
     """utf8_codepoints yields one int per Unicode scalar value, matching Python's own iteration."""
     assert list(sz.utf8_codepoints("")) == []
     assert list(sz.utf8_codepoints("AB")) == [65, 66]
@@ -85,18 +85,18 @@ def test_unit_utf8_codepoints():
 # region Corner cases
 
 
-def test_utf8_count_roundtrip(rng: Random):
+def test_utf8_count_round_trip(rng: Random):
     """On valid UTF-8 corpora, utf8_count equals Python's codepoint count for both str and bytes inputs."""
-    for _ in range(scale_iterations(200)):
+    for _ in range(scaled_iterations(200)):
         raw = random_segmentation_corpus(rng.randint(1, 400), "valid", None, rng)
         text = raw.decode("utf-8")
         assert sz.utf8_count(text) == len(text)
         assert sz.utf8_count(raw) == len(text)
 
 
-def test_utf8_codepoints_roundtrip(rng: Random):
+def test_utf8_codepoints_round_trip(rng: Random):
     """On valid UTF-8 corpora, utf8_codepoints reproduces Python's codepoint sequence for str and bytes inputs."""
-    for _ in range(scale_iterations(200)):
+    for _ in range(scaled_iterations(200)):
         raw = random_segmentation_corpus(rng.randint(1, 400), "valid", None, rng)
         text = raw.decode("utf-8")
         expected = [ord(c) for c in text]
@@ -104,24 +104,23 @@ def test_utf8_codepoints_roundtrip(rng: Random):
         assert list(sz.utf8_codepoints(raw)) == expected
 
 
-def test_utf8_count_malformed():
+def test_utf8_count_malformed(rng: Random):
     """Malformed-byte safety: utf8_count must survive the adversarial battery and stay within [0, byte length]."""
-    rng = Random(0)
-    for raw in adversarial_utf8_inputs(rng, random_input_count=scale_iterations(500)):
+    for raw in adversarial_utf8_inputs(rng, random_input_count=scaled_iterations(500)):
         count = sz.utf8_count(raw)
         assert 0 <= count <= len(raw)
 
 
-def test_utf8_codepoints_malformed():
+def test_utf8_codepoints_malformed(rng: Random):
     """Lossy + total: malformed bytes decode to U+FFFD, iteration never raises, and only scalar values are emitted."""
     assert list(sz.utf8_codepoints(b"a\xffb")) == [0x61, 0xFFFD, 0x62]
     # A truncated tail is one U+FFFD, also when it starts a fresh batch past a full one.
     assert list(sz.utf8_codepoints(b"a\xe2\x82")) == [0x61, 0xFFFD]
     assert list(sz.utf8_codepoints(b"a" * 64 + b"\xe2\x82")) == [0x61] * 64 + [0xFFFD]
-    rng = Random(0)
-    for raw in adversarial_utf8_inputs(rng, random_input_count=scale_iterations(500)):
+    for raw in adversarial_utf8_inputs(rng, random_input_count=scaled_iterations(500)):
         for codepoint in sz.utf8_codepoints(raw):
-            assert 0 <= codepoint <= 0x10FFFF and not (0xD800 <= codepoint <= 0xDFFF)
+            assert 0 <= codepoint <= 0x10FFFF
+            assert not (0xD800 <= codepoint <= 0xDFFF)
 
 
 # endregion Corner cases
@@ -144,7 +143,7 @@ UTF8_CODEPOINTS_BACKEND_DIFFERENTIAL_TEXTS = [
 
 
 @pytest.mark.parametrize("text", UTF8_CODEPOINTS_BACKEND_DIFFERENTIAL_TEXTS)
-def test_utf8_count_backend_differential(backend_results, text):
+def test_utf8_count_agrees_across_backends(backend_results, text):
     """utf8_count agrees across every capability_sweep() backend and equals Python's own codepoint count
     for CJK, emoji, ZWJ, and vector-width-boundary text; a divergence is a kernel bug, not a binding bug."""
     results = backend_results(lambda capabilities: sz.utf8_count(text, capabilities=capabilities))
@@ -152,7 +151,7 @@ def test_utf8_count_backend_differential(backend_results, text):
 
 
 @pytest.mark.parametrize("text", UTF8_CODEPOINTS_BACKEND_DIFFERENTIAL_TEXTS)
-def test_utf8_codepoints_backend_differential(backend_results, text):
+def test_utf8_codepoints_agree_across_backends(backend_results, text):
     """utf8_codepoints agrees across every capability_sweep() backend on the same curated text as the
     utf8_count sweep; a divergence is a kernel bug, not a binding bug."""
     results = backend_results(lambda capabilities: list(sz.utf8_codepoints(text, capabilities=capabilities)))
@@ -160,7 +159,7 @@ def test_utf8_codepoints_backend_differential(backend_results, text):
 
 
 @pytest.mark.parametrize("raw", malformed_utf8_corpus())
-def test_utf8_count_backend_differential_malformed(backend_results, raw):
+def test_utf8_count_agrees_across_backends_on_malformed_text(backend_results, raw):
     """utf8_count agrees across every capability_sweep() backend on the malformed-byte corpus and never
     crashes; a divergence is a kernel bug, not a binding bug."""
     results = backend_results(lambda capabilities: sz.utf8_count(raw, capabilities=capabilities))
@@ -169,17 +168,18 @@ def test_utf8_count_backend_differential_malformed(backend_results, raw):
 
 
 @pytest.mark.parametrize("raw", malformed_utf8_corpus())
-def test_utf8_codepoints_backend_differential_malformed(backend_results, raw):
+def test_utf8_codepoints_agree_across_backends_on_malformed_text(backend_results, raw):
     """utf8_codepoints agrees across every capability_sweep() backend on the malformed-byte corpus, never
     crashes, and only emits valid, non-surrogate Unicode scalar values; a divergence is a kernel bug, not
     a binding bug."""
     results = backend_results(lambda capabilities: list(sz.utf8_codepoints(raw, capabilities=capabilities)))
     assert_backends_agree(results, format_inputs=lambda: raw.hex())
     for codepoint in next(iter(results.values())):
-        assert 0 <= codepoint <= 0x10FFFF and not (0xD800 <= codepoint <= 0xDFFF)
+        assert 0 <= codepoint <= 0x10FFFF
+        assert not (0xD800 <= codepoint <= 0xDFFF)
 
 
-def test_utf8_count_backend_differential_random(backend_results, rng: Random):
+def test_utf8_count_agrees_across_backends_on_random_text(backend_results, rng: Random):
     """utf8_count agrees across every capability_sweep() backend and with Python's own codepoint count
     for random ASCII corpora; a divergence is a kernel bug, not a binding bug."""
     text = get_random_string(rng)

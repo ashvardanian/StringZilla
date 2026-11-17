@@ -5,7 +5,7 @@
  *  @brief UAX-29 sentence-boundary (Sentence_Break) tests: known-answer goldens, malformed-input
  *      safety, and the serial-vs-dispatched differential over hardened corpora.
  */
-#undef NDEBUG // ! Enable all assertions for testing
+#undef NDEBUG // ! A test's oracle must stay live in every build
 
 #if defined(STRINGZILLA_DEBUG)
 #undef STRINGZILLA_DEBUG
@@ -33,16 +33,16 @@ void test_utf8_sentences_unit() {
     // C++ range wrapper known-answer: the view must faithfully expose the kernel's sentence segments.
     std::vector<std::string> const sentences =
         sz::string_view_t("Hi. Yo.").utf8_sentences().template to<std::vector<std::string>>();
-    verify(sentences.size() == 2 && "C++ utf8_sentences range");
+    expect_equal(sentences.size(), 2, "C++ utf8_sentences range");
 
     // Sentence counts for the shared prose fixtures; per-fixture rationale lives in test/utf8.hpp.
     auto count_sentences = [](std::string_view text) {
         return sz::string_view_t(text).utf8_sentences().template to<std::vector<std::string>>().size();
     };
-    verify(count_sentences(utf8_prose_hotel_review()) == 5 && "hotel_review sentences");
-    verify(count_sentences(utf8_prose_concert_post()) == 4 && "concert_post sentences");
-    verify(count_sentences(utf8_prose_news_lede()) == 6 && "news_lede sentences");
-    verify(count_sentences(utf8_prose_micro_hardbreaks()) == 3 && "micro_hardbreaks sentences");
+    expect_equal(count_sentences(utf8_prose_hotel_review()), 5, "hotel_review sentences");
+    expect_equal(count_sentences(utf8_prose_concert_post()), 4, "concert_post sentences");
+    expect_equal(count_sentences(utf8_prose_news_lede()), 6, "news_lede sentences");
+    expect_equal(count_sentences(utf8_prose_micro_hardbreaks()), 3, "micro_hardbreaks sentences");
 }
 
 #pragma endregion Unit
@@ -57,8 +57,9 @@ void test_utf8_sentences_rules() { check_utf8_sentences_rules_(utf8_sentences_di
 #pragma region Safety
 
 /** Malformed-input safety of the sentence-break dispatch point. */
-void test_utf8_sentences_safety(test_context_t &context) {
-    check_utf8_sentences_safety_(context, utf8_sentences_dispatched);
+void test_utf8_sentences_safety() {
+    split_mix_generator_t generator {case_stream_key()};
+    check_utf8_sentences_safety_(generator, utf8_sentences_dispatched);
 }
 
 #pragma endregion Safety
@@ -66,8 +67,9 @@ void test_utf8_sentences_safety(test_context_t &context) {
 #pragma region Drivers
 
 /** Serial-vs-dispatched sentence differential over the dense and long-range corpora. */
-void test_utf8_sentences_all(test_context_t &context) {
-    check_utf8_sentences_equivalence_(context, utf8_sentences_dispatched);
+void test_utf8_sentences_all() {
+    split_mix_generator_t generator {case_stream_key()};
+    check_utf8_sentences_equivalence_(generator, utf8_sentences_dispatched);
 }
 
 #pragma endregion Drivers

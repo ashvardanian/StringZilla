@@ -28,5 +28,7 @@
 extern crate alloc;
 
 mod stringzilla;
+#[cfg(test)]
+mod testing;
 
 pub use stringzilla::*;

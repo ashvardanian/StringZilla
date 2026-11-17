@@ -8,7 +8,7 @@
  *  The known answers in `cross.hpp` were settled against `regex-automata`, whose leftmost-first
  *  semantics the engine reproduces; random vocabularies hold the dispatched tier to the serial one.
  */
-#undef NDEBUG // ! Enable all assertions for testing
+#undef NDEBUG // ! A test's oracle must stay live in every build
 
 #if defined(STRINGZILLA_DEBUG)
 #undef STRINGZILLA_DEBUG
@@ -24,7 +24,7 @@
 #include "stringzilla/stringzilla.hpp" // `sz::default_capabilities`
 
 #include "cross.hpp"   // `regex_tier_t`, `check_regex_unit_`, `check_regex_equivalence_`
-#include "harness.hpp" // `handle_checked_heap_t`, `refusing_allocator_`, `test_context_t`, `verify`
+#include "harness.hpp" // `handle_checked_heap_t`, `refusing_c_allocator`, `case_stream_key`, `expect_true`
 
 namespace ashvardanian::stringzilla::test {
 
@@ -86,14 +86,15 @@ void test_regex_unit() {
         sz_strings_view_t const pattern_strings = strings_over_(patterns, pattern_views);
         sz_strings_view_t const haystack_strings = strings_over_(haystacks, haystack_views);
         sz_regex_engine_t engine;
-        verify(regex_dispatched.init(&engine, &pattern_strings, sz_cased_k, nullptr, nullptr, nullptr) == sz_success_k);
+        expect_equal(regex_dispatched.init(&engine, &pattern_strings, sz_cased_k, nullptr, nullptr, nullptr),
+                     sz_success_k);
         std::vector<sz_size_t> counts(haystacks.size());
         std::vector<sz_u1x8_t> contained((haystacks.size() + 7) / 8, 0xFF);
-        verify(sz_regex_counts(&engine, &haystack_strings, counts.data(), 1, nullptr) == sz_success_k);
-        verify(sz_regex_contains(&engine, &haystack_strings, contained.data(), nullptr) == sz_success_k);
+        expect_equal(sz_regex_counts(&engine, &haystack_strings, counts.data(), 1, nullptr), sz_success_k);
+        expect_equal(sz_regex_contains(&engine, &haystack_strings, contained.data(), nullptr), sz_success_k);
         for (std::size_t index = 0; index != haystacks.size(); ++index)
-            verify(((contained[index >> 3] >> (index & 7) & 1) != 0) == (counts[index] != 0));
-        verify((contained.back() >> (haystacks.size() & 7)) == 0);
+            expect_equal((contained[index >> 3] >> (index & 7) & 1) != 0, counts[index] != 0);
+        expect_equal(contained.back() >> (haystacks.size() & 7), 0);
         sz_regex_engine_free(&engine, nullptr);
     }
 
@@ -108,18 +109,20 @@ void test_regex_unit() {
         std::vector<sz_string_view_t> views;
         sz_strings_view_t const strings = strings_over_(patterns, views);
         sz_regex_engine_t engine;
-        verify(regex_dispatched.init(&engine, &strings, sz_cased_k, nullptr, &heap.allocator, nullptr) == sz_success_k);
-        verify(engine.lookarounds_count == sz_regex_columned_lookarounds_k + index);
-        verify((engine.forward_rows != nullptr) == (index == 0) && (engine.reverse_rows != nullptr) == (index == 0));
-        verify(regex_matches_(regex_dispatched, &engine, {"Passw0rdX", "password1", "Sh0rt", "NODIGITS"}) ==
-               cases_t({{0, 0, 0, 9}}));
+        expect_equal(regex_dispatched.init(&engine, &strings, sz_cased_k, nullptr, &heap.allocator, nullptr),
+                     sz_success_k);
+        expect_equal(engine.lookarounds_count, sz_regex_columned_lookarounds_k + index);
+        expect_true((engine.forward_rows != nullptr) == (index == 0) &&
+                    (engine.reverse_rows != nullptr) == (index == 0));
+        expect_equal(regex_matches_(regex_dispatched, &engine, {"Passw0rdX", "password1", "Sh0rt", "NODIGITS"}),
+                     cases_t({{0, 0, 0, 9}}));
         sz_regex_engine_free(&engine, nullptr);
-        verify(heap.live_allocations == 0);
+        expect_equal(heap.live_allocations, 0);
     }
 }
 
 /** What the verbs refuse, which is as much of the contract as what they accept. */
-void test_regex_safety(test_context_t &) {
+void test_regex_safety() {
     std::vector<std::string> const patterns {"[a-z]+", "\\d+"};
     std::vector<std::string> const haystacks {"abc 123"};
     std::vector<sz_string_view_t> pattern_views, haystack_views;
@@ -134,10 +137,11 @@ void test_regex_safety(test_context_t &) {
         sz_strings_view_t const strings = strings_over_(malformed, views);
         sz_regex_engine_t engine {};
         sz_size_t index = STRINGZILLA_SIZE_MAX;
-        verify(sz_regex_engine_init(&engine, &strings, sz_cased_k, &index, sz::default_capabilities(), &heap.allocator,
-                                    nullptr) == sz_invalid_syntax_k);
-        verify(index == 1 && engine.memory == nullptr);
-        verify(heap.live_allocations == 0);
+        expect_equal(sz_regex_engine_init(&engine, &strings, sz_cased_k, &index, sz::default_capabilities(),
+                                          &heap.allocator, nullptr),
+                     sz_invalid_syntax_k);
+        expect_true(index == 1 && engine.memory == nullptr);
+        expect_equal(heap.live_allocations, 0);
     }
 
     // Malformed haystacks are searched as they are: no class matches a malformed byte, and what is
@@ -145,51 +149,56 @@ void test_regex_safety(test_context_t &) {
     {
         handle_checked_heap_t heap;
         sz_regex_engine_t engine;
-        verify(sz_regex_engine_init(&engine, &pattern_strings, sz_cased_k, nullptr, sz::default_capabilities(),
-                                    &heap.allocator, nullptr) == sz_success_k);
+        expect_equal(sz_regex_engine_init(&engine, &pattern_strings, sz_cased_k, nullptr, sz::default_capabilities(),
+                                          &heap.allocator, nullptr),
+                     sz_success_k);
         std::vector<std::string> const malformed {std::string("ab\xFF\xC3" "1\xE2\x82", 7), // `\xC3` ends before `1`
                                                   std::string("\x80\x80", 2)};
         using cases_t = std::vector<substrings_case_t>;
-        verify(regex_matches_(regex_dispatched, &engine, malformed) == cases_t({{0, 0, 0, 2}, {0, 1, 4, 1}}));
+        expect_equal(regex_matches_(regex_dispatched, &engine, malformed), cases_t({{0, 0, 0, 2}, {0, 1, 4, 1}}));
 
         // A stride of zero addresses no entry.
         std::vector<sz_size_t> counts(1, STRINGZILLA_SIZE_MAX);
-        verify(sz_regex_counts(&engine, &haystack_strings, counts.data(), 0, nullptr) == sz_unexpected_dimensions_k);
-        verify(counts[0] == STRINGZILLA_SIZE_MAX);
+        expect_equal(sz_regex_counts(&engine, &haystack_strings, counts.data(), 0, nullptr),
+                     sz_unexpected_dimensions_k);
+        expect_equal(counts[0], STRINGZILLA_SIZE_MAX);
         sz_regex_engine_free(&engine, nullptr);
 
         // An emptied engine compiles nothing to run.
         std::vector<sz_size_t> offsets(2, 0);
-        verify(sz_regex_find_serial(&engine, &haystack_strings, nullptr, 0, offsets.data(), nullptr) ==
-               sz_missing_kernel_k);
-        verify(heap.live_allocations == 0);
+        expect_equal(sz_regex_find_serial(&engine, &haystack_strings, nullptr, 0, offsets.data(), nullptr),
+                     sz_missing_kernel_k);
+        expect_equal(heap.live_allocations, 0);
     }
 
     // Rewriting needs one replacement per pattern, and extraction a pattern the vocabulary holds.
     {
         handle_checked_heap_t heap;
         sz_regex_engine_t engine;
-        verify(sz_regex_engine_init(&engine, &pattern_strings, sz_cased_k, nullptr, sz::default_capabilities(),
-                                    &heap.allocator, nullptr) == sz_success_k);
+        expect_equal(sz_regex_engine_init(&engine, &pattern_strings, sz_cased_k, nullptr, sz::default_capabilities(),
+                                          &heap.allocator, nullptr),
+                     sz_success_k);
         std::vector<std::string> const one_replacement {"x"};
         std::vector<sz_string_view_t> replacement_views;
         sz_strings_view_t const replacement_strings = strings_over_(one_replacement, replacement_views);
         std::vector<sz_size_t> offsets(2, 0);
-        verify(sz_regex_replace(&engine, &haystack_strings, &replacement_strings, nullptr, 0, offsets.data(),
-                                nullptr) == sz_unexpected_dimensions_k);
-        verify(sz_regex_extract(&engine, &haystack_strings, 2, nullptr, 0, offsets.data(), nullptr) ==
-               sz_unexpected_dimensions_k);
+        expect_equal(
+            sz_regex_replace(&engine, &haystack_strings, &replacement_strings, nullptr, 0, offsets.data(), nullptr),
+            sz_unexpected_dimensions_k);
+        expect_equal(sz_regex_extract(&engine, &haystack_strings, 2, nullptr, 0, offsets.data(), nullptr),
+                     sz_unexpected_dimensions_k);
         sz_regex_engine_free(&engine, nullptr);
-        verify(heap.live_allocations == 0);
+        expect_equal(heap.live_allocations, 0);
     }
 
     // A refused allocation is `sz_bad_alloc_k`, from the build and from a search's scratch alike.
     {
-        sz_allocator_t refusing = refusing_allocator_();
+        sz_allocator_t refusing = refusing_c_allocator();
         sz_regex_engine_t engine {};
-        verify(sz_regex_engine_init(&engine, &pattern_strings, sz_cased_k, nullptr, sz::default_capabilities(),
-                                    &refusing, nullptr) == sz_bad_alloc_k);
-        verify(engine.memory == nullptr);
+        expect_equal(sz_regex_engine_init(&engine, &pattern_strings, sz_cased_k, nullptr, sz::default_capabilities(),
+                                          &refusing, nullptr),
+                     sz_bad_alloc_k);
+        expect_equal(engine.memory, nullptr);
     }
 
     // Every allocation of the build refused in turn returns all the others, and a build granted
@@ -201,13 +210,14 @@ void test_regex_safety(test_context_t &) {
                                                         sz::default_capabilities(), &rationed.allocator, nullptr);
         if (status == sz_success_k) {
             std::vector<sz_size_t> offsets(2, 0);
-            verify(sz_regex_find(&engine, &haystack_strings, nullptr, 0, offsets.data(), nullptr) == sz_bad_alloc_k);
+            expect_equal(sz_regex_find(&engine, &haystack_strings, nullptr, 0, offsets.data(), nullptr),
+                         sz_bad_alloc_k);
             sz_regex_engine_free(&engine, nullptr);
-            verify(rationed.live_allocations == 0);
+            expect_equal(rationed.live_allocations, 0);
             break;
         }
-        verify(status == sz_bad_alloc_k);
-        verify(engine.memory == nullptr && rationed.live_allocations == 0);
+        expect_equal(status, sz_bad_alloc_k);
+        expect_true(engine.memory == nullptr && rationed.live_allocations == 0);
     }
 
     // The same sweep over a vocabulary whose start pass runs bit-parallel and whose end walks run
@@ -224,17 +234,18 @@ void test_regex_safety(test_context_t &) {
                                                       0, &rationed.allocator, &engine, sz_cap_serial_k);
             if (status == sz_success_k) {
                 sz_regex_engine_free(&engine, nullptr);
-                verify(rationed.live_allocations == 0);
+                expect_equal(rationed.live_allocations, 0);
                 break;
             }
-            verify(status == sz_bad_alloc_k);
-            verify(engine.memory == nullptr && rationed.live_allocations == 0);
+            expect_equal(status, sz_bad_alloc_k);
+            expect_true(engine.memory == nullptr && rationed.live_allocations == 0);
         }
 }
 
 /** Random vocabularies over random haystacks through the dispatched verbs. */
-void test_regex_all(test_context_t &context) {
-    check_regex_equivalence_(context, regex_dispatched, regex_dispatched_rewriting);
+void test_regex_all() {
+    split_mix_generator_t generator {case_stream_key()};
+    check_regex_equivalence_(generator, regex_dispatched, regex_dispatched_rewriting);
 }
 
 #pragma endregion Unit Cases

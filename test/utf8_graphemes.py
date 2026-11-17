@@ -7,7 +7,7 @@ Covers: ASCII, combining-mark, ZWJ-emoji-family, regional-indicator-flag, and sk
 cluster iteration and the String method surface, malformed-byte and SIMD window-seam safety sweeps,
 class-adjacency pairs and triples, fuzz against the pure-Python UAX-29 baseline and multi-script
 prose paragraphs, and cross-backend agreement on regular and malformed inputs.
-Compares against: the official UCD GraphemeBreakTest, ICU's createCharacterInstance segmenter,
+Baselines: the official UCD GraphemeBreakTest, ICU's createCharacterInstance segmenter,
 the grapheme and uniseg libraries, and cross-backend self-consistency.
 
 Run:
@@ -25,13 +25,12 @@ from random import Random
 
 import pytest
 from base import (
-    StreamKey,
     assert_backends_agree,
     baseline_grapheme_boundaries,
     get_random_string,
     malformed_utf8_corpus,
     representatives_by_class,
-    scale_iterations,
+    scaled_iterations,
     vector_width_bracketing_strings,
 )
 from utf8_helpers import (
@@ -195,7 +194,7 @@ def test_utf8_grapheme_class_adjacency(grapheme_break_props):
     """Every Grapheme_Cluster_Break class-adjacency pair and triple, built from one representative codepoint
     per class, must segment bit-exactly the same as ICU. Derives the corpus from the property table rather
     than a hand-picked palette, so rare class interactions are exercised exhaustively."""
-    icu = pytest.importorskip("icu", reason="PyICU not installed")
+    icu = pytest.importorskip("icu", reason="PyICU is not installed")
     icu_graphemes = icu_segmenter("grapheme")
     representatives = representatives_by_class(grapheme_break_props, count=1)
     cases = class_adjacency_strings(representatives, arity=2)
@@ -221,9 +220,9 @@ def test_utf8_grapheme_class_adjacency(grapheme_break_props):
 # region Oracles
 
 
-def test_utf8_grapheme_boundary_fuzz(seed: StreamKey, rng: Random, grapheme_break_props):
+def test_utf8_grapheme_boundary_fuzz(seed: int, rng: Random, grapheme_break_props):
     """Fuzz: compare the C grapheme iterator vs the pure-Python UAX-29 baseline."""
-    for _ in range(scale_iterations(200)):
+    for _ in range(scaled_iterations(200)):
         text = "".join(rng.choice(_SEGMENTATION_PALETTE) for _ in range(rng.randint(1, 100)))
         try:
             expected = baseline_grapheme_boundaries(text, grapheme_break_props)
@@ -240,13 +239,13 @@ def test_utf8_grapheme_boundary_fuzz(seed: StreamKey, rng: Random, grapheme_brea
 def test_utf8_grapheme_differential_grapheme(rng: Random):
     """Differential fuzz against an independent grapheme library (``grapheme`` / ``uniseg``)."""
     try:
-        graphemes_fn = pytest.importorskip("grapheme", reason="grapheme not installed").graphemes
+        graphemes_fn = pytest.importorskip("grapheme", reason="grapheme is not installed").graphemes
     except Exception:
-        uniseg_gc = pytest.importorskip("uniseg.graphemecluster", reason="uniseg not installed")
+        uniseg_gc = pytest.importorskip("uniseg.graphemecluster", reason="uniseg is not installed")
         graphemes_fn = uniseg_gc.grapheme_clusters
 
     failures = []
-    for _ in range(scale_iterations(2000)):
+    for _ in range(scaled_iterations(2000)):
         text = "".join(rng.choice(_SEGMENTATION_PALETTE) for _ in range(rng.randint(1, 24)))
         sz_boundaries = _byte_boundaries(sz.utf8_graphemes(text))
         ref_boundaries = _byte_boundaries(graphemes_fn(text))
@@ -268,7 +267,7 @@ def test_utf8_grapheme_differential_icu(rng: Random):
     GraphemeBreakTest (`test_utf8_grapheme_boundary_official_conformance`), version-pinned to UNICODE_VERSION."""
     icu_graphemes = icu_segmenter("grapheme")
     icu_current = icu_unicode_at_least("17")
-    iterations = scale_iterations(2000)
+    iterations = scaled_iterations(2000)
     failures = []
     for _ in range(iterations):
         text = "".join(rng.choice(SEGMENTATION_PALETTE) for _ in range(rng.randint(1, 32)))
@@ -289,7 +288,7 @@ def test_utf8_grapheme_differential_icu(rng: Random):
         )
 
 
-def test_utf8_graphemes_prose():
+def test_utf8_prose_grapheme_counts():
     """Realistic multi-script paragraphs: grapheme count matches the ICU root oracle; clusters != codepoints."""
     from utf8_helpers import (
         PROSE_CONCERT_POST,
@@ -346,7 +345,7 @@ GRAPHEME_BACKEND_DIFFERENTIAL_TEXTS = [
 
 
 @pytest.mark.parametrize("text", GRAPHEME_BACKEND_DIFFERENTIAL_TEXTS)
-def test_utf8_graphemes_backend_differential(backend_results, text):
+def test_utf8_graphemes_agree_across_backends(backend_results, text):
     """utf8_graphemes must segment identically across every SIMD backend, covering emoji ZWJ sequences,
     combining marks, CRLF, and inputs straddling the 16/32/64-byte SIMD lanes."""
     results = backend_results(lambda capabilities: _grapheme_segment_bytes(text, capabilities))
@@ -354,7 +353,7 @@ def test_utf8_graphemes_backend_differential(backend_results, text):
 
 
 @pytest.mark.parametrize("raw", malformed_utf8_corpus())
-def test_utf8_graphemes_backend_differential_malformed(backend_results, raw):
+def test_utf8_graphemes_agree_across_backends_on_malformed_text(backend_results, raw):
     """Malformed UTF-8 must segment identically and never crash across every SIMD backend, and every
     backend's output must still tile the raw input bytes exactly."""
 
@@ -367,7 +366,7 @@ def test_utf8_graphemes_backend_differential_malformed(backend_results, raw):
     assert_backends_agree(results, format_inputs=lambda: raw.hex())
 
 
-def test_utf8_graphemes_backend_differential_random(backend_results, rng: Random):
+def test_utf8_graphemes_agree_across_backends_on_random_text(backend_results, rng: Random):
     """Random ASCII corpora, one cluster per byte, must segment identically across every SIMD backend."""
     text = get_random_string(rng)
     results = backend_results(lambda capabilities: _grapheme_segment_bytes(text, capabilities))

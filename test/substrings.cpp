@@ -10,7 +10,7 @@
  *  with the library's own @c sz_utf8_uncased_fold and searches the folded haystack, then snaps the
  *  span it found back onto whole source codepoints, testing the automaton rather than the fold.
  */
-#undef NDEBUG // ! Enable all assertions for testing
+#undef NDEBUG // ! A test's oracle must stay live in every build
 
 #if defined(STRINGZILLA_DEBUG)
 #undef STRINGZILLA_DEBUG
@@ -20,7 +20,6 @@
 #include <stringzilla/stringzilla.h>   // Primary C API
 #include <stringzilla/stringzilla.hpp> // C++ string class replacement
 
-#include <cmath>   // `std::fabs`
 #include <cstdlib> // `std::malloc`, `std::free`
 
 #include <algorithm> // `std::sort`
@@ -28,7 +27,7 @@
 #include <vector>    // `std::vector`
 
 #include "cross.hpp"   // `substrings_tier_t`, `check_substrings_unit_`, `check_substrings_equivalence_`
-#include "harness.hpp" // `random_string`, `refusing_allocator_`, `test_context_t`, `verify`
+#include "harness.hpp" // `random_string`, `refusing_c_allocator`, `case_stream_key`, `expect_true`
 
 namespace ashvardanian::stringzilla::test {
 
@@ -101,12 +100,12 @@ static void check_build_refusals_(std::vector<std::string> const &needles, sz_ca
         sz_status_t const status = build_over_(needles, sensitivity, &rationed.allocator, &engine);
         if (status == sz_success_k) {
             sz_substrings_engine_free(&engine, nullptr);
-            verify(rationed.bytes_held == 0);
+            expect_equal(rationed.bytes_held, 0);
             return;
         }
-        verify(status == sz_bad_alloc_k);
-        verify(engine.memory == nullptr && "A refused build leaves the engine untouched");
-        verify(rationed.bytes_held == 0 && "A refused build returns everything it took");
+        expect_equal(status, sz_bad_alloc_k);
+        expect_equal(engine.memory, nullptr, "A refused build leaves the engine untouched");
+        expect_equal(rationed.bytes_held, 0, "A refused build returns everything it took");
     }
 }
 
@@ -130,22 +129,23 @@ void test_substrings_unit() {
     for (sz_substrings_overlap_policy_t const policy :
          {sz_substrings_overlapping_k, sz_substrings_leftmost_longest_k}) {
         sz_substrings_engine_t engine;
-        verify(substrings_dispatched.init(&engine, &needle_strings, sz_cased_k, policy,
-                                          STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0, nullptr,
-                                          nullptr) == sz_success_k);
+        expect_equal(substrings_dispatched.init(&engine, &needle_strings, sz_cased_k, policy,
+                                                STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0, nullptr, nullptr),
+                     sz_success_k);
         std::vector<sz_size_t> counts(haystacks.size());
         std::vector<sz_u1x8_t> contained((haystacks.size() + 7) / 8, 0xFF);
-        verify(sz_substrings_counts(&engine, &haystack_strings, counts.data(), 1, nullptr) == sz_success_k);
-        verify(sz_substrings_contains(&engine, &haystack_strings, contained.data(), nullptr) == sz_success_k);
+        expect_equal(sz_substrings_counts(&engine, &haystack_strings, counts.data(), 1, nullptr), sz_success_k);
+        expect_equal(sz_substrings_contains(&engine, &haystack_strings, contained.data(), nullptr), sz_success_k);
         for (std::size_t index = 0; index != haystacks.size(); ++index)
-            verify(((contained[index >> 3] >> (index & 7) & 1) != 0) == (counts[index] != 0));
-        verify((contained.back() >> (haystacks.size() & 7)) == 0);
+            expect_equal((contained[index >> 3] >> (index & 7) & 1) != 0, counts[index] != 0);
+        expect_equal(contained.back() >> (haystacks.size() & 7), 0);
         sz_substrings_engine_free(&engine, nullptr);
     }
 }
 
 /** What the verbs refuse, which is as much of the contract as what they accept. */
-void test_substrings_safety(test_context_t &context) {
+void test_substrings_safety() {
+    split_mix_generator_t generator {case_stream_key()};
     handle_checked_heap_t heap;
     sz_substrings_engine_t engine;
     std::vector<sz_string_view_t> views;
@@ -154,20 +154,20 @@ void test_substrings_safety(test_context_t &context) {
     // every later needle's reported index.
     {
         std::vector<std::string> const empty_needle {"ab", "", "cd"};
-        verify(build_over_(empty_needle, sz_cased_k, &heap.allocator, &engine) == sz_unexpected_dimensions_k);
+        expect_equal(build_over_(empty_needle, sz_cased_k, &heap.allocator, &engine), sz_unexpected_dimensions_k);
     }
 
     // An empty vocabulary has no automaton to build.
     {
         std::vector<std::string> const no_needles;
-        verify(build_over_(no_needles, sz_cased_k, &heap.allocator, &engine) == sz_unexpected_dimensions_k);
+        expect_equal(build_over_(no_needles, sz_cased_k, &heap.allocator, &engine), sz_unexpected_dimensions_k);
     }
 
     // A folded vocabulary needs well-formed UTF-8, since the walk resets on a malformed haystack byte and a
     // needle carrying one could never match.
     {
         std::vector<std::string> const malformed {std::string("ab\xFF", 3)};
-        verify(build_over_(malformed, sz_uncased_k, &heap.allocator, &engine) == sz_invalid_utf8_k);
+        expect_equal(build_over_(malformed, sz_uncased_k, &heap.allocator, &engine), sz_invalid_utf8_k);
     }
 
     std::vector<std::string> const needles {"ab", "cd"};
@@ -177,25 +177,27 @@ void test_substrings_safety(test_context_t &context) {
     sz_strings_view_t const needle_strings = strings_over_(needles, views);
     sz_strings_view_t const haystack_strings = strings_over_(haystacks, haystack_views);
     sz_strings_view_t const replacement_strings = strings_over_(replacements, replacement_views);
-    verify(sz_substrings_engine_init(&engine, &needle_strings, sz_cased_k, sz_substrings_overlapping_k,
-                                     STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0, sz::default_capabilities(),
-                                     &heap.allocator, nullptr) == sz_success_k);
+    expect_equal(sz_substrings_engine_init(&engine, &needle_strings, sz_cased_k, sz_substrings_overlapping_k,
+                                           STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0, sz::default_capabilities(),
+                                           &heap.allocator, nullptr),
+                 sz_success_k);
 
     // A capacity that cannot hold the matches is not an error: the report names the true total and the
     // shortfall beside it, which is the one contract a device verb can also keep.
     {
         std::vector<sz_size_t> offsets(haystacks.size() + 1, STRINGZILLA_SIZE_MAX);
-        verify(sz_substrings_find(&engine, &haystack_strings, nullptr, 0, offsets.data(), nullptr) == sz_success_k);
-        verify(engine.report->matches_emitted == 2);
-        verify(engine.report->matches_stored == 0 && engine.report->shortfall == 2);
-        verify(offsets[haystacks.size()] == 2);
+        expect_equal(sz_substrings_find(&engine, &haystack_strings, nullptr, 0, offsets.data(), nullptr), sz_success_k);
+        expect_equal(engine.report->matches_emitted, 2);
+        expect_true(engine.report->matches_stored == 0 && engine.report->shortfall == 2);
+        expect_equal(offsets[haystacks.size()], 2);
     }
 
     // A substitution over matches that share bytes is not a function, so the overlapping policy is refused.
     {
         std::vector<sz_size_t> offsets(haystacks.size() + 1, 0);
-        verify(sz_substrings_replace(&engine, &haystack_strings, &replacement_strings, nullptr, 0, offsets.data(),
-                                     nullptr) == sz_status_unknown_k);
+        expect_equal(sz_substrings_replace(&engine, &haystack_strings, &replacement_strings, nullptr, 0, offsets.data(),
+                                           nullptr),
+                     sz_status_unknown_k);
     }
 
     // An output stride of zero cannot address one entry per haystack, whatever the haystack count.
@@ -204,11 +206,12 @@ void test_substrings_safety(test_context_t &context) {
         sz_substrings_bm25_t const unnormalized {1.2f, 0.0f, 0.0f};
         sz_f32_t const weights[] {1.0f, 2.0f};
         sz_f32_t score = -1;
-        verify(sz_substrings_counts(&engine, &haystack_strings, counts.data(), 0, nullptr) ==
-               sz_unexpected_dimensions_k);
-        verify(sz_substrings_bm25_scores(&engine, &haystack_strings, nullptr, &unnormalized, weights, &score, 0,
-                                         nullptr) == sz_unexpected_dimensions_k);
-        verify(counts[0] == STRINGZILLA_SIZE_MAX && score == -1);
+        expect_equal(sz_substrings_counts(&engine, &haystack_strings, counts.data(), 0, nullptr),
+                     sz_unexpected_dimensions_k);
+        expect_equal(
+            sz_substrings_bm25_scores(&engine, &haystack_strings, nullptr, &unnormalized, weights, &score, 0, nullptr),
+            sz_unexpected_dimensions_k);
+        expect_true(counts[0] == STRINGZILLA_SIZE_MAX && score == -1);
     }
 
     // BM25 needs one weight per needle, and a mean to normalize by whenever it normalizes at all.
@@ -217,15 +220,18 @@ void test_substrings_safety(test_context_t &context) {
         sz_f32_t score = -1;
         sz_substrings_bm25_t const meanless {1.2f, 0.75f, 0.0f};
         sz_substrings_bm25_t const unnormalized {1.2f, 0.0f, 0.0f};
-        verify(sz_substrings_bm25_scores(&engine, &haystack_strings, nullptr, &unnormalized, nullptr, &score, 1,
-                                         nullptr) == sz_unexpected_dimensions_k);
-        verify(sz_substrings_bm25_scores(&engine, &haystack_strings, nullptr, &meanless, weights, &score, 1, nullptr) ==
-               sz_unexpected_dimensions_k);
-        verify(score == -1);
+        expect_equal(
+            sz_substrings_bm25_scores(&engine, &haystack_strings, nullptr, &unnormalized, nullptr, &score, 1, nullptr),
+            sz_unexpected_dimensions_k);
+        expect_equal(
+            sz_substrings_bm25_scores(&engine, &haystack_strings, nullptr, &meanless, weights, &score, 1, nullptr),
+            sz_unexpected_dimensions_k);
+        expect_equal(score, -1);
         // Without normalization the mean is never read: "ab" and "cd" once each, `tf·(k1+1)/(tf+k1)` = 1.
-        verify(sz_substrings_bm25_scores(&engine, &haystack_strings, nullptr, &unnormalized, weights, &score, 1,
-                                         nullptr) == sz_success_k);
-        verify(std::fabs(score - 3.0f) <= 1e-6f);
+        expect_equal(
+            sz_substrings_bm25_scores(&engine, &haystack_strings, nullptr, &unnormalized, weights, &score, 1, nullptr),
+            sz_success_k);
+        expect_near(score, 3.0f, 1e-6f);
     }
 
     sz_substrings_engine_free(&engine, nullptr);
@@ -237,28 +243,30 @@ void test_substrings_safety(test_context_t &context) {
         sz_strings_view_t const one_strings = strings_over_(one_replacement, one_views);
         std::vector<sz_size_t> offsets(haystacks.size() + 1, 0);
         sz_substrings_engine_t covering;
-        verify(sz_substrings_engine_init(&covering, &needle_strings, sz_cased_k, sz_substrings_leftmost_first_k,
-                                         STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0, sz::default_capabilities(),
-                                         &heap.allocator, nullptr) == sz_success_k);
-        verify(sz_substrings_replace(&covering, &haystack_strings, &one_strings, nullptr, 0, offsets.data(), nullptr) ==
-               sz_unexpected_dimensions_k);
+        expect_equal(sz_substrings_engine_init(&covering, &needle_strings, sz_cased_k, sz_substrings_leftmost_first_k,
+                                               STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0, sz::default_capabilities(),
+                                               &heap.allocator, nullptr),
+                     sz_success_k);
+        expect_equal(
+            sz_substrings_replace(&covering, &haystack_strings, &one_strings, nullptr, 0, offsets.data(), nullptr),
+            sz_unexpected_dimensions_k);
         sz_substrings_engine_free(&covering, nullptr);
     }
-    verify(heap.live_allocations == 0);
+    expect_equal(heap.live_allocations, 0);
 
     // A refused allocation is reported as `sz_bad_alloc_k`, and construction is the only verb that allocates.
     {
-        sz_allocator_t refusing = refusing_allocator_();
+        sz_allocator_t refusing = refusing_c_allocator();
         sz_substrings_engine_t refused {};
-        verify(build_over_(needles, sz_cased_k, &refusing, &refused) == sz_bad_alloc_k);
-        verify(refused.memory == nullptr);
+        expect_equal(build_over_(needles, sz_cased_k, &refusing, &refused), sz_bad_alloc_k);
+        expect_equal(refused.memory, nullptr);
     }
 
     // Every allocation site of the build refused in turn, past the trie's and the arena's first growth.
     {
         std::vector<std::string> wide;
         for (std::size_t index = 0; index != 600; ++index)
-            wide.push_back(random_string(context.generator, 3 + index % 6, "abcdefghijklmnopqrstuvwxyz"));
+            wide.push_back(random_string(generator, 3 + index % 6, "abcdefghijklmnopqrstuvwxyz"));
         std::sort(wide.begin(), wide.end());
         wide.erase(std::unique(wide.begin(), wide.end()), wide.end());
         check_build_refusals_(wide, sz_cased_k);
@@ -268,7 +276,10 @@ void test_substrings_safety(test_context_t &context) {
 
 /** Random vocabularies over random corpora through the dispatched verbs, which is what reaches the
  *  packing search's fallbacks. */
-void test_substrings_all(test_context_t &context) { check_substrings_equivalence_(context, substrings_dispatched); }
+void test_substrings_all() {
+    split_mix_generator_t generator {case_stream_key()};
+    check_substrings_equivalence_(generator, substrings_dispatched);
+}
 
 #pragma endregion Unit Cases
 

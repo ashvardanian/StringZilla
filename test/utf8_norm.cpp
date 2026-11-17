@@ -4,7 +4,7 @@
  *  @date June 15, 2026
  *  @brief UTF-8 normalization (NFC/NFD/NFKC/NFKD) known-answer, differential and safety tests.
  */
-#undef NDEBUG // ! Enable all assertions for testing
+#undef NDEBUG // ! A test's oracle must stay live in every build
 
 #if defined(STRINGZILLA_DEBUG)
 #undef STRINGZILLA_DEBUG
@@ -39,39 +39,45 @@ void test_utf8_norm_unit() {
     // C++ binding round-trip: NFC → NFD → NFC should recover the original NFC string.
     char const cafe_nfc[] = "caf\xC3\xA9"; // U+00E9 (precomposed é), 5 bytes
     sz::string_t nfc_str;
-    verify(sz::succeeded(nfc_str.assign(cafe_nfc)));
-    verify(sz::succeeded(nfc_str.utf8_normalize(sz_normal_form_nfd_k)));
-    verify(sz::succeeded(nfc_str.utf8_normalize(sz_normal_form_nfc_k)));
-    verify(nfc_str == cafe_nfc);
+    expect_true(sz::succeeded(nfc_str.assign(cafe_nfc)));
+    expect_true(sz::succeeded(nfc_str.utf8_normalize(sz_normal_form_nfd_k)));
+    expect_true(sz::succeeded(nfc_str.utf8_normalize(sz_normal_form_nfc_k)));
+    expect_equal(nfc_str, cafe_nfc);
 
     // is_normalized: NFC string is normalized under NFC, not NFD (é decomposes in NFD).
     sz::string_view_t nfc_view {cafe_nfc};
-    verify(nfc_view.is_normalized(sz_normal_form_nfc_k));
-    verify(!nfc_view.is_normalized(sz_normal_form_nfd_k));
+    expect_true(nfc_view.is_normalized(sz_normal_form_nfc_k));
+    expect_true(!nfc_view.is_normalized(sz_normal_form_nfd_k));
 
     // is_normalized on the owning type mirrors the view behaviour.
     sz::string_t nfc_own;
-    verify(sz::succeeded(nfc_own.assign(cafe_nfc)));
-    verify(nfc_own.is_normalized(sz_normal_form_nfc_k));
-    verify(!nfc_own.is_normalized(sz_normal_form_nfd_k));
+    expect_true(sz::succeeded(nfc_own.assign(cafe_nfc)));
+    expect_true(nfc_own.is_normalized(sz_normal_form_nfc_k));
+    expect_true(!nfc_own.is_normalized(sz_normal_form_nfd_k));
 
     // utf8_find_denormalized returns non-null for a non-normalized string.
-    verify(nfc_view.utf8_find_denormalized(sz_normal_form_nfd_k) != STRINGZILLA_NULL_CHAR);
-    verify(nfc_own.utf8_find_denormalized(sz_normal_form_nfd_k) != STRINGZILLA_NULL_CHAR);
+    expect_true(nfc_view.utf8_find_denormalized(sz_normal_form_nfd_k) != STRINGZILLA_NULL_CHAR);
+    expect_true(nfc_own.utf8_find_denormalized(sz_normal_form_nfd_k) != STRINGZILLA_NULL_CHAR);
 
     // NFKD of "ﬁ" (U+FB01 LATIN SMALL LIGATURE FI) decomposes to "fi".
     char const ligature_fi[] = "\xEF\xAC\x81"; // U+FB01
     sz::string_t fi_str;
-    verify(sz::succeeded(fi_str.assign(ligature_fi)));
-    verify(sz::succeeded(fi_str.utf8_normalize(sz_normal_form_nfkd_k)));
-    verify(fi_str.contains('f'));
-    verify(fi_str.contains('i'));
+    expect_true(sz::succeeded(fi_str.assign(ligature_fi)));
+    expect_true(sz::succeeded(fi_str.utf8_normalize(sz_normal_form_nfkd_k)));
+    expect_true(fi_str.contains('f'));
+    expect_true(fi_str.contains('i'));
 }
 
 /** Malformed-input normalization safety probe through the dispatch points. */
-void test_utf8_norm_safety(test_context_t &context) { check_utf8_norm_safety_(context, utf8_norm_dispatched); }
+void test_utf8_norm_safety() {
+    split_mix_generator_t generator {case_stream_key()};
+    check_utf8_norm_safety_(generator, utf8_norm_dispatched);
+}
 
 /** The normalization differential fuzz of the dispatch points against the serial kernels. */
-void test_utf8_norm_all(test_context_t &context) { check_utf8_norm_equivalence_(context, utf8_norm_dispatched); }
+void test_utf8_norm_all() {
+    split_mix_generator_t generator {case_stream_key()};
+    check_utf8_norm_equivalence_(generator, utf8_norm_dispatched);
+}
 
 } // namespace ashvardanian::stringzilla::test

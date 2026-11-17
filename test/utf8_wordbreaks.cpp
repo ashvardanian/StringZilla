@@ -5,7 +5,7 @@
  *  @brief UAX-29 word-boundary (Word_Break) tests: known-answer goldens, malformed-input safety,
  *      and the serial-vs-dispatched differential over hardened corpora.
  */
-#undef NDEBUG // ! Enable all assertions for testing
+#undef NDEBUG // ! A test's oracle must stay live in every build
 
 #undef STRINGZILLA_DEBUG
 #define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
@@ -27,41 +27,41 @@ static utf8_segment_backend_t const utf8_wordbreaks_dispatched = {"dispatched", 
 /** Known-answer table for @c sz_rune_is_word_char, the UAX-29 word-character classification. */
 static void check_utf8_wordbreaks_classification_() {
     // ASCII letters, digits, underscore, and the mid-word apostrophe are word characters.
-    verify(sz_rune_is_word_char('A') == sz_true_k);
-    verify(sz_rune_is_word_char('z') == sz_true_k);
-    verify(sz_rune_is_word_char('0') == sz_true_k);
-    verify(sz_rune_is_word_char('9') == sz_true_k);
-    verify(sz_rune_is_word_char('_') == sz_true_k);
-    verify(sz_rune_is_word_char('\'') == sz_true_k);
+    expect_equal(sz_rune_is_word_char('A'), sz_true_k);
+    expect_equal(sz_rune_is_word_char('z'), sz_true_k);
+    expect_equal(sz_rune_is_word_char('0'), sz_true_k);
+    expect_equal(sz_rune_is_word_char('9'), sz_true_k);
+    expect_equal(sz_rune_is_word_char('_'), sz_true_k);
+    expect_equal(sz_rune_is_word_char('\''), sz_true_k);
 
     // ASCII whitespace and punctuation are boundaries.
-    verify(sz_rune_is_word_char(' ') == sz_false_k);
-    verify(sz_rune_is_word_char('\n') == sz_false_k);
-    verify(sz_rune_is_word_char('\t') == sz_false_k);
-    verify(sz_rune_is_word_char('!') == sz_false_k);
-    verify(sz_rune_is_word_char('-') == sz_false_k);
+    expect_equal(sz_rune_is_word_char(' '), sz_false_k);
+    expect_equal(sz_rune_is_word_char('\n'), sz_false_k);
+    expect_equal(sz_rune_is_word_char('\t'), sz_false_k);
+    expect_equal(sz_rune_is_word_char('!'), sz_false_k);
+    expect_equal(sz_rune_is_word_char('-'), sz_false_k);
 
     // Latin Extended, Greek, Cyrillic, Hebrew, Arabic letters and Hangul syllables are word characters.
-    verify(sz_rune_is_word_char(0x00DF) == sz_true_k); // ß
-    verify(sz_rune_is_word_char(0x0100) == sz_true_k); // Latin Extended-A start
-    verify(sz_rune_is_word_char(0x03B1) == sz_true_k); // Greek alpha
-    verify(sz_rune_is_word_char(0x0430) == sz_true_k); // Cyrillic a
-    verify(sz_rune_is_word_char(0x05D0) == sz_true_k); // Hebrew alef
-    verify(sz_rune_is_word_char(0x0627) == sz_true_k); // Arabic alef
-    verify(sz_rune_is_word_char(0xAC00) == sz_true_k); // Hangul first
-    verify(sz_rune_is_word_char(0xD7A3) == sz_true_k); // Hangul last
+    expect_equal(sz_rune_is_word_char(0x00DF), sz_true_k); // ß
+    expect_equal(sz_rune_is_word_char(0x0100), sz_true_k); // Latin Extended-A start
+    expect_equal(sz_rune_is_word_char(0x03B1), sz_true_k); // Greek alpha
+    expect_equal(sz_rune_is_word_char(0x0430), sz_true_k); // Cyrillic a
+    expect_equal(sz_rune_is_word_char(0x05D0), sz_true_k); // Hebrew alef
+    expect_equal(sz_rune_is_word_char(0x0627), sz_true_k); // Arabic alef
+    expect_equal(sz_rune_is_word_char(0xAC00), sz_true_k); // Hangul first
+    expect_equal(sz_rune_is_word_char(0xD7A3), sz_true_k); // Hangul last
 
     // CJK ideographs, spaces, dashes, and emoji are boundaries (not word characters under TR29).
-    verify(sz_rune_is_word_char(0x4E00) == sz_false_k);  // CJK first
-    verify(sz_rune_is_word_char(0x9FFF) == sz_false_k);  // CJK last
-    verify(sz_rune_is_word_char(0x3000) == sz_false_k);  // Ideographic space
-    verify(sz_rune_is_word_char(0x2014) == sz_false_k);  // Em dash
-    verify(sz_rune_is_word_char(0x1F600) == sz_false_k); // emoji
+    expect_equal(sz_rune_is_word_char(0x4E00), sz_false_k);  // CJK first
+    expect_equal(sz_rune_is_word_char(0x9FFF), sz_false_k);  // CJK last
+    expect_equal(sz_rune_is_word_char(0x3000), sz_false_k);  // Ideographic space
+    expect_equal(sz_rune_is_word_char(0x2014), sz_false_k);  // Em dash
+    expect_equal(sz_rune_is_word_char(0x1F600), sz_false_k); // emoji
 
     // Edge cases.
-    verify(sz_rune_is_word_char(0x0000) == sz_false_k); // NUL
-    verify(sz_rune_is_word_char(0x007F) == sz_false_k); // DEL
-    verify(sz_rune_is_word_char(0xFFFF) == sz_false_k); // BMP max
+    expect_equal(sz_rune_is_word_char(0x0000), sz_false_k); // NUL
+    expect_equal(sz_rune_is_word_char(0x007F), sz_false_k); // DEL
+    expect_equal(sz_rune_is_word_char(0xFFFF), sz_false_k); // BMP max
 }
 
 /** Known-answer word-break vectors via the dispatch point and the C++ range. */
@@ -74,21 +74,21 @@ void test_utf8_wordbreaks_unit() {
     {
         sz::string_view_t const text("Hello, world!");
         auto segments = text.utf8_wordbreaks().template to<std::vector<std::string>>();
-        verify(segments.size() == 5 && segments[0] == "Hello" && segments[3] == "world" && "C++ utf8_wordbreaks");
+        expect_true(segments.size() == 5 && segments[0] == "Hello" && segments[3] == "world", "C++ utf8_wordbreaks");
         std::string rejoined;
         for (auto const &s : segments) rejoined += s;
-        verify(rejoined == "Hello, world!" && "wordbreaks tile losslessly");
+        expect_equal(rejoined, "Hello, world!", "wordbreaks tile losslessly");
     }
 
     // Word-break counts for the shared prose fixtures; per-fixture rationale lives in test/utf8.hpp.
     auto count_wordbreaks = [](std::string_view text) {
         return sz::string_view_t(text).utf8_wordbreaks().template to<std::vector<std::string>>().size();
     };
-    verify(count_wordbreaks(utf8_prose_hotel_review()) == 100 && "hotel_review wordbreaks");
-    verify(count_wordbreaks(utf8_prose_news_lede()) == 83 && "news_lede wordbreaks");
-    verify(count_wordbreaks(utf8_prose_concert_post()) == 69 && "concert_post wordbreaks");
-    verify(count_wordbreaks(utf8_prose_rtl_scripts()) == 98 && "rtl_scripts wordbreaks");
-    verify(count_wordbreaks(utf8_prose_micro_apostrophe()) == 5 && "micro_apostrophe wordbreaks");
+    expect_equal(count_wordbreaks(utf8_prose_hotel_review()), 100, "hotel_review wordbreaks");
+    expect_equal(count_wordbreaks(utf8_prose_news_lede()), 83, "news_lede wordbreaks");
+    expect_equal(count_wordbreaks(utf8_prose_concert_post()), 69, "concert_post wordbreaks");
+    expect_equal(count_wordbreaks(utf8_prose_rtl_scripts()), 98, "rtl_scripts wordbreaks");
+    expect_equal(count_wordbreaks(utf8_prose_micro_apostrophe()), 5, "micro_apostrophe wordbreaks");
 }
 
 #pragma endregion Unit
@@ -103,8 +103,9 @@ void test_utf8_wordbreaks_rules() { check_utf8_wordbreaks_rules_(utf8_wordbreaks
 #pragma region Safety
 
 /** Malformed-input safety of the word-break dispatch point. */
-void test_utf8_wordbreaks_safety(test_context_t &context) {
-    check_utf8_wordbreaks_safety_(context, utf8_wordbreaks_dispatched);
+void test_utf8_wordbreaks_safety() {
+    split_mix_generator_t generator {case_stream_key()};
+    check_utf8_wordbreaks_safety_(generator, utf8_wordbreaks_dispatched);
 }
 
 #pragma endregion Safety
@@ -112,8 +113,9 @@ void test_utf8_wordbreaks_safety(test_context_t &context) {
 #pragma region Drivers
 
 /** Serial-vs-dispatched word differential over the dense, long-range and seam corpora. */
-void test_utf8_wordbreaks_all(test_context_t &context) {
-    check_utf8_wordbreaks_equivalence_(context, utf8_wordbreaks_dispatched);
+void test_utf8_wordbreaks_all() {
+    split_mix_generator_t generator {case_stream_key()};
+    check_utf8_wordbreaks_equivalence_(generator, utf8_wordbreaks_dispatched);
 }
 
 #pragma endregion Drivers

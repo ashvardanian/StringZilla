@@ -10,20 +10,24 @@ Author: Ash Vardanian
 Date: June 18, 2023
 """
 
+import contextlib
+import gc
 import io
-import math
 import os
+import random
 import re
-import secrets
 import tempfile
 import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
-from collections.abc import Callable
 from dataclasses import dataclass
 from random import Random
 from string import ascii_lowercase
-from typing import NewType
+from typing import NoReturn
+
+import pytest
+
+import stringzilla as sz
 
 # NumPy is available on most platforms and is required for many tests. PyPy on some platforms raises
 # a weird error that is not an `ImportError`, so the naked `except` is a necessary evil.
@@ -41,6 +45,26 @@ try:
     pyarrow_available = True
 except:  # noqa: E722
     pyarrow_available = False
+
+# A build without CUDA and a machine without a device both refuse the first ordinal.
+try:
+    sz.capabilities_enabled_cuda(0)
+    cuda_available = True
+except RuntimeError:
+    cuda_available = False
+
+requires_cuda = pytest.mark.skipif(not cuda_available, reason="no CUDA device")
+
+
+@contextlib.contextmanager
+def skip_when_memory_refused(reason: str):
+    """Skips the test when its body is refused memory, so a small machine stays green, and collects after."""
+    try:
+        yield
+    except (MemoryError, OSError):
+        pytest.skip(reason)
+    finally:
+        gc.collect()
 
 
 def _write_cache_atomically(cache_path: str, payload: bytes) -> None:
@@ -1312,49 +1336,89 @@ def representatives_by_class(
 # the Unicode data loaders above and the seeding / random-string utilities below. The NumPy /
 # PyArrow availability flags and their defensive imports live in the top import block.
 
-
-def env_text(name: str) -> str | None:
-    """Reads `name`, or `None` when it is unset or empty."""
-    return os.environ.get(name) or None
+# region Shared Settings
+_UINT64_MASK = 2**64 - 1
 
 
-def env_parsed(name: str, fallback, parse: Callable[[str], object], expected: str):
-    """Reads `name` through `parse`, or `fallback` when unset or empty; exits with status 1 if it does not parse."""
-    text = env_text(name)
+def env_text(variable: str) -> str | None:
+    """The stripped text of the environment `variable`, or None when unset or blank."""
+    text = os.environ.get(variable, "").strip()
+    return text or None
+
+
+def exit_unparsed(variable: str, text: str, expected: str) -> NoReturn:
+    """Stops the session on a setting that does not parse, naming it as the C and C++ suites do."""
+    raise SystemExit(f'{variable}="{text}" does not parse, expected {expected}')
+
+
+def env_seed(variable: str) -> int:
+    """An unsigned 64-bit seed: 42 when unset, drawn afresh for `random`."""
+    text = env_text(variable)
+    if text is None:
+        return 42
+    if text == "random":
+        return random.SystemRandom().getrandbits(64)
+    if not text.isdigit() or int(text) > _UINT64_MASK:
+        exit_unparsed(variable, text, "an unsigned integer or random")
+    return int(text)
+
+
+def env_real(variable: str, fallback: float) -> float:
+    """A positive real, `fallback` when unset."""
+    text = env_text(variable)
     if text is None:
         return fallback
     try:
-        parsed = parse(text)
-    except (ValueError, TypeError):
-        parsed = None
-    if parsed is None:
-        raise SystemExit(f'{name}="{text}" does not parse, expected {expected}')
-    return parsed
+        value = float(text)
+    except ValueError:
+        value = 0.0
+    if not value > 0 or value == float("inf"):
+        exit_unparsed(variable, text, "a positive number like 0.1 or 10")
+    return value
 
 
-def env_flag(name: str, fallback: bool) -> bool:
-    """Reads `0`, `1`, `true` or `false`, or `fallback` when unset or empty; exits if it does not parse."""
-    return env_parsed(name, fallback, {"0": False, "false": False, "1": True, "true": True}.get, "0, 1, true or false")
+def env_count(variable: str, fallback: int) -> int:
+    """A whole number, `fallback` when unset."""
+    text = env_text(variable)
+    if text is None:
+        return fallback
+    if not text.isdigit():
+        exit_unparsed(variable, text, "a whole number")
+    return int(text)
 
 
-Seed = NewType("Seed", int)  # 32-bit; derive streams from it with `stream_key`, never add to it
-StreamKey = NewType("StreamKey", int)  # 64-bit, from `stream_key`; seeds one test's generators
+def env_flag(variable: str, fallback: bool = False) -> bool:
+    """A switch, `fallback` when unset: 0, false, off and no turn it off."""
+    text = env_text(variable)
+    if text is None:
+        return fallback
+    return text not in {"0", "false", "off", "no"}
 
 
-def env_seed(name: str, fallback: Seed) -> Seed:
-    """Reads an unsigned 32-bit seed or `random`, or `fallback` when unset or empty."""
-    return env_parsed(name, fallback, parse_seed, "an unsigned integer or random")
+@dataclass(frozen=True)
+class Filter:
+    """Which node ids a run selects: a regex search when the pattern compiles, else a substring, all when empty."""
+
+    pattern: str
+    regex: re.Pattern[str] | None
+
+    def selects(self, nodeid: str) -> bool:
+        """Whether `nodeid` passes the filter."""
+        if not self.pattern:
+            return True
+        if self.regex is not None:
+            return self.regex.search(nodeid) is not None
+        return self.pattern in nodeid
 
 
-def parse_seed(text: str) -> Seed | None:
-    """Parses an unsigned 32-bit integer like `42`, or `random` to draw one from system entropy."""
-    if text == "random":
-        return Seed(secrets.randbits(32))
-    digits = re.fullmatch(r"[0-9]+", text) is not None
-    return Seed(int(text)) if digits and int(text) < 2**32 else None
-
-
-_UINT64_MASK = 2**64 - 1
+def env_filter(variable: str) -> Filter:
+    """The filter the environment `variable` spells, compiled once."""
+    pattern = env_text(variable) or ""
+    try:
+        regex = re.compile(pattern) if pattern else None
+    except re.error:
+        regex = None
+    return Filter(pattern, regex)
 
 
 def mix(value: int) -> int:
@@ -1364,56 +1428,47 @@ def mix(value: int) -> int:
     return value ^ (value >> 31)
 
 
-def stream_key(seed: Seed, name: str) -> StreamKey:
-    """The key of stream `name`, `mix(mix(seed ^ fnv1a64(name)))`, bit-identical to C++ `stream_key`."""
+def stream_key(seed: int, name: str, index: int = 0) -> int:
+    """The `index`-th stream of the family `name` under `seed`, identical in C, C++, Rust and Mojo."""
     hashed = 0xCBF29CE484222325
     for byte in name.encode():
         hashed = ((hashed ^ byte) * 0x100000001B3) & _UINT64_MASK
-    return StreamKey(mix(mix(seed ^ hashed)))
+    return mix((mix(seed ^ hashed) + index) & _UINT64_MASK)
+
+
+# endregion Shared Settings
 
 
 @dataclass(frozen=True)
 class Settings:
     """Every `STRINGZILLA_*` variable the Python suite reads, parsed once at import."""
 
-    seed: Seed
-    filter: str
-    filter_pattern: re.Pattern | None
+    seed: int
+    filter: Filter
     scale: float
     in_qemu: bool
-
-    def selects(self, name: str) -> bool:
-        """Whether `STRINGZILLA_FILTER` selects the test `name`, as a regex or else as a substring."""
-        return bool(self.filter_pattern.search(name)) if self.filter_pattern else self.filter in name
+    expect_simd: bool
 
 
-def read_settings() -> Settings:
-    """Reads every `STRINGZILLA_*` variable, exiting with status 1 on the first that does not parse."""
-    filter = env_text("STRINGZILLA_FILTER") or ""
-    try:
-        filter_pattern = re.compile(filter) if filter else None
-    except re.error:
-        filter_pattern = None
-    return Settings(
-        seed=env_seed("STRINGZILLA_SEED", Seed(42)),
-        filter=filter,
-        filter_pattern=filter_pattern,
-        # Stress depth shared with the C++ suite: scales every fuzz baseline, so CI can shrink it.
-        scale=env_parsed(
-            "STRINGZILLA_SCALE",
-            1.0,
-            lambda text: scale if 0 < (scale := float(text)) < math.inf else None,
-            "a positive number like 0.1 or 10",
-        ),
-        in_qemu=env_flag("STRINGZILLA_IN_QEMU", False),
-    )
+SETTINGS = Settings(
+    seed=env_seed("STRINGZILLA_SEED"),
+    filter=env_filter("STRINGZILLA_FILTER"),
+    scale=env_real("STRINGZILLA_SCALE", 1.0),
+    in_qemu=env_flag("STRINGZILLA_IN_QEMU"),
+    # On unless set to `0`, for a deliberately scalar build on a SIMD-capable machine.
+    expect_simd=env_flag("STRINGZILLA_EXPECT_SIMD", fallback=True),
+)
+
+BACKEND_AXES = {"capabilities"}
+"""The axes the seed and the case cap leave out, so every CPU mask draws the same inputs."""
+
+MAX_CASES_PER_TEST = 588
+"""The most cases one test function may expand to, its backend axes aside; raising it is a decision for review."""
 
 
-SETTINGS = read_settings()
-
-
-def scale_iterations(baseline: int) -> int:
-    return max(1, int(baseline * SETTINGS.scale))
+def scaled_iterations(baseline: int) -> int:
+    """`baseline` iterations under `STRINGZILLA_SCALE`, never fewer than one."""
+    return max(1, round(baseline * SETTINGS.scale))
 
 
 def get_random_string(
@@ -1462,8 +1517,6 @@ def capability_sweep():
     that config, harmless redundancy, while the config that does enable its SIMD path exercises it. Any
     divergence across the sweep is a kernel bug.
     """
-    import stringzilla as sz
-
     enabled = sz.capabilities_enabled_cpu()
     simd = [capability for capability in sz.Capability if capability in enabled and capability != sz.Capability.SERIAL]
     sweep = [sz.Capability.SERIAL] + [sz.Capability.SERIAL | capability for capability in simd]
@@ -1509,8 +1562,6 @@ def unaligned_views(text, offsets=(0, 1, 3, 7, 15)):
 
     Slicing a ``String`` shares the parent's allocation at the sliced offset, so the kernel receives a
     misaligned base pointer, the cheap way to exercise unaligned loads from Python."""
-    import stringzilla as sz
-
     parent = sz.String(text)
     for offset in offsets:
         if offset <= len(parent):

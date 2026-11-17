@@ -135,7 +135,7 @@ mod tests {
     use crate as sz;
 
     #[test]
-    fn argsort_default() {
+    fn argsort_orders_strings_lexicographically() {
         // Test with a slice of string literals.
         let fruits = ["banana", "apple", "cherry"];
         let mut order = [0; 3]; // output buffer must be at least fruits.len()
@@ -155,7 +155,7 @@ mod tests {
     }
 
     #[test]
-    fn argsort_by_custom() {
+    fn argsort_by_orders_custom_types_by_key() {
         // Define a custom type.
         #[derive(Debug)]
         #[allow(dead_code)]
@@ -193,7 +193,7 @@ mod tests {
     }
 
     #[test]
-    fn argsort_top_k_prefix() {
+    fn argsort_top_sorts_only_the_smallest_prefix() {
         let words = ["delta", "alpha", "echo", "bravo", "charlie"];
         let mut order = [0; 5];
         sz::argsort(&words, &mut order, sz::ArgsortOptions::default().top(2)).expect("argsort failed");
@@ -207,7 +207,7 @@ mod tests {
     }
 
     #[test]
-    fn argsort_uncased() {
+    fn argsort_uncased_keeps_fold_equal_strings_in_input_order() {
         let labels = ["Banana", "apple", "BANANA", "Apple"];
         let mut order = [0; 4];
         sz::argsort(&labels, &mut order, sz::ArgsortOptions::default().uncased()).expect("argsort failed");

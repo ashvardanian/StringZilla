@@ -29,5 +29,6 @@ def _run(module, extraglobs):
 
 
 def test_stringzilla_doctests():
+    """Every `>>>` example in the module's docstrings runs and prints what it shows."""
     attempted = _run(sz, extraglobs={"sz": sz, "hashlib": hashlib})
     assert attempted > 0, "no doctests were discovered in stringzilla"

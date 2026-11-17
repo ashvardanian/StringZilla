@@ -9,7 +9,7 @@ and paragraph separator, plus vertical tab and form feed; utf8_split_whitespaces
 Unicode whitespace code points NBSP, ideographic space, and en/em space; the with_separators lossless
 reconstruction and skip_empty pruning on both splitters; the String method forms; and malformed-byte
 safety across both splitters.
-Compares against: CPython str.splitlines() and str.split() under skip_empty, and cross-backend
+Baselines: CPython str.splitlines() and str.split() under skip_empty, and cross-backend
 self-consistency across every capability_sweep() backend.
 
 Run:
@@ -231,7 +231,7 @@ TOKEN_REALISTIC_TEXTS = [
 @pytest.mark.parametrize(
     "text", TOKEN_REALISTIC_TEXTS + list(malformed_utf8_corpus()) + vector_width_bracketing_strings()
 )
-def test_utf8_tokens_backend_differential(backend_results, text):
+def test_utf8_tokens_agree_across_backends(backend_results, text):
     """utf8_split_whitespaces must split identically across every SIMD backend on realistic, malformed, and
     lane-straddling inputs, compared as raw segment bytes so malformed UTF-8 sweeps without raising."""
     results = backend_results(

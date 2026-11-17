@@ -4,7 +4,7 @@
  *  @date December 21, 2023
  *  @brief Comparisons, search/find_all/split, misaligned-repetition search, and replacement tests.
  */
-#undef NDEBUG // ! Enable all assertions for testing
+#undef NDEBUG // ! A test's oracle must stay live in every build
 
 #undef STRINGZILLA_DEBUG
 #define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
@@ -30,7 +30,7 @@
 #include <fmt/format.h>
 
 #include "cross.hpp"   // `check_find_unit_`, `check_compare_unit_`, `find_backend_t`
-#include "harness.hpp" // `randomize_string`, `test_context_t`
+#include "harness.hpp" // `randomize_string`, `case_stream_key`
 
 namespace ashvardanian::stringzilla::test {
 using sz::literals::operator""_sv; // for `sz::string_view_t`
@@ -62,12 +62,12 @@ static compare_backend_t const compare_dispatched {"dispatched", cpu_best<sz_equ
  */
 static void check_find_views_unit_(sz::string_view_t haystack, sz::string_view_t needle, sz_size_t forward_offset,
                                    sz_size_t backward_offset) {
-    verify(haystack.find(needle) ==
-               (forward_offset == STRINGZILLA_SIZE_MAX ? sz::string_view_t::npos : forward_offset) &&
-           "sz::string_view_t::find must agree with the C API's forward offset");
-    verify(haystack.rfind(needle) ==
-               (backward_offset == STRINGZILLA_SIZE_MAX ? sz::string_view_t::npos : backward_offset) &&
-           "sz::string_view_t::rfind must agree with the C API's backward offset");
+    expect_equal(haystack.find(needle),
+                 forward_offset == STRINGZILLA_SIZE_MAX ? sz::string_view_t::npos : forward_offset,
+                 "sz::string_view_t::find must agree with the C API's forward offset");
+    expect_equal(haystack.rfind(needle),
+                 backward_offset == STRINGZILLA_SIZE_MAX ? sz::string_view_t::npos : backward_offset,
+                 "sz::string_view_t::rfind must agree with the C API's backward offset");
 }
 
 #pragma endregion Helpers
@@ -96,19 +96,20 @@ void test_find_unit() {
 
     // A mask of no CPU capability finds no kernel; the finder picks what the dispatch point runs.
     sz_cptr_t unused = nullptr;
-    verify(sz_find_best(hello, hello_length, "wor", 3, &unused, sz_cap_metal_k, nullptr) == sz_missing_kernel_k);
+    expect_equal(sz_find_best(hello, hello_length, "wor", 3, &unused, sz_cap_metal_k, nullptr), sz_missing_kernel_k);
     sz_kernel_punned_t kernel = nullptr;
     sz_capability_t capability = 0;
     // A monoversioned table holds one kernel per operation, so only it may lack the serial kernel.
     sz_status_t const serial = sz_find_kernel_punned(sz_kernel_find_k, sz_cap_serial_k, &kernel, &capability);
-    verify((serial == sz_success_k && capability == sz_cap_serial_k) ||
-           (!STRINGZILLA_MULTIVERSIONED && serial == sz_missing_kernel_k));
+    expect_true((serial == sz_success_k && capability == sz_cap_serial_k) ||
+                (!STRINGZILLA_MULTIVERSIONED && serial == sz_missing_kernel_k));
     if (serial == sz_success_k)
-        verify(kernel_result<sz_cptr_t>((sz_kernel_find_t)kernel, hello, hello_length, "wor", 3) == hello + 6);
-    verify(sz_find_kernel_punned(sz_kernel_find_k, sz::default_capabilities(), &kernel, &capability) == sz_success_k);
-    verify((capability & (capability - 1)) == 0);
-    verify(kernel_result<sz_cptr_t>((sz_kernel_find_t)kernel, hello, hello_length, "wor", 3) ==
-           kernel_result<sz_cptr_t>(cpu_best<sz_find_best>, hello, hello_length, "wor", 3));
+        expect_equal(kernel_result<sz_cptr_t>((sz_kernel_find_t)kernel, hello, hello_length, "wor", 3), hello + 6);
+    expect_equal(sz_find_kernel_punned(sz_kernel_find_k, sz::default_capabilities(), &kernel, &capability),
+                 sz_success_k);
+    expect_equal(capability & (capability - 1), 0);
+    expect_equal(kernel_result<sz_cptr_t>((sz_kernel_find_t)kernel, hello, hello_length, "wor", 3),
+                 kernel_result<sz_cptr_t>(cpu_best<sz_find_best>, hello, hello_length, "wor", 3));
 
     // `sz_find_byte_from` / `sz_find_byte_not_from` / `sz_rfind_byte_from` /
     // `sz_rfind_byte_not_from`: the `_from` family takes the needle bytes as the accepted set (the
@@ -117,18 +118,18 @@ void test_find_unit() {
     // "hello world" and the needle "helo" (accepts h, e, l, o): the first accepted byte is 'h' at
     // offset 0 and the last is 'l' at offset 9; the first byte not in the set is ' ' at offset 5,
     // and the last byte not in the set is 'd' at offset 10.
-    verify(sz_find_byte_from(hello, hello_length, "helo", 4) == hello + 0);       // First accepted: 'h'
-    verify(sz_rfind_byte_from(hello, hello_length, "helo", 4) == hello + 9);      // Last accepted: 'l'
-    verify(sz_find_byte_not_from(hello, hello_length, "helo", 4) == hello + 5);   // First rejected: ' '
-    verify(sz_rfind_byte_not_from(hello, hello_length, "helo", 4) == hello + 10); // Last rejected: 'd'
+    expect_equal(sz_find_byte_from(hello, hello_length, "helo", 4), hello + 0);       // First accepted: 'h'
+    expect_equal(sz_rfind_byte_from(hello, hello_length, "helo", 4), hello + 9);      // Last accepted: 'l'
+    expect_equal(sz_find_byte_not_from(hello, hello_length, "helo", 4), hello + 5);   // First rejected: ' '
+    expect_equal(sz_rfind_byte_not_from(hello, hello_length, "helo", 4), hello + 10); // Last rejected: 'd'
     // An empty needle accepts nothing, so `_from` must miss everywhere and `_not_from` must hit immediately.
-    verify(sz_find_byte_from(hello, hello_length, "", 0) == STRINGZILLA_NULL_CHAR);
-    verify(sz_rfind_byte_from(hello, hello_length, "", 0) == STRINGZILLA_NULL_CHAR);
-    verify(sz_find_byte_not_from(hello, hello_length, "", 0) == hello + 0);
-    verify(sz_rfind_byte_not_from(hello, hello_length, "", 0) == hello + hello_length - 1);
+    expect_equal(sz_find_byte_from(hello, hello_length, "", 0), STRINGZILLA_NULL_CHAR);
+    expect_equal(sz_rfind_byte_from(hello, hello_length, "", 0), STRINGZILLA_NULL_CHAR);
+    expect_equal(sz_find_byte_not_from(hello, hello_length, "", 0), hello + 0);
+    expect_equal(sz_rfind_byte_not_from(hello, hello_length, "", 0), hello + hello_length - 1);
     // A needle covering the whole alphabet present in the haystack leaves `_not_from` with nothing to reject.
-    verify(sz_find_byte_not_from(hello, hello_length, hello, hello_length) == STRINGZILLA_NULL_CHAR);
-    verify(sz_rfind_byte_not_from(hello, hello_length, hello, hello_length) == STRINGZILLA_NULL_CHAR);
+    expect_equal(sz_find_byte_not_from(hello, hello_length, hello, hello_length), STRINGZILLA_NULL_CHAR);
+    expect_equal(sz_rfind_byte_not_from(hello, hello_length, hello, hello_length), STRINGZILLA_NULL_CHAR);
 
     // `sz_order_best` / `sz_equal_best`: ordering and byte-equality on hand-verifiable pairs.
     check_compare_unit_(compare_dispatched);
@@ -137,22 +138,22 @@ void test_find_unit() {
 /** Tests the string class comparison methods, such as @c compare and `operator==`. */
 void test_compare_unit() {
     // Comparing relative order of the strings
-    verify("a"_sv.compare("a") == 0);
-    verify("a"_sv.compare("ab") == -1);
-    verify("ab"_sv.compare("a") == 1);
-    verify("a"_sv.compare("a\0"_sv) == -1);
-    verify("a\0"_sv.compare("a") == 1);
-    verify("a\0"_sv.compare("a\0"_sv) == 0);
-    verify("a"_sv == "a"_sv);
-    verify("a"_sv != "a\0"_sv);
-    verify("a\0"_sv == "a\0"_sv);
+    expect_equal("a"_sv.compare("a"), 0);
+    expect_equal("a"_sv.compare("ab"), -1);
+    expect_equal("ab"_sv.compare("a"), 1);
+    expect_equal("a"_sv.compare("a\0"_sv), -1);
+    expect_equal("a\0"_sv.compare("a"), 1);
+    expect_equal("a\0"_sv.compare("a\0"_sv), 0);
+    expect_equal("a"_sv, "a"_sv);
+    expect_true("a"_sv != "a\0"_sv);
+    expect_equal("a\0"_sv, "a\0"_sv);
 
     // The relational operators over the same orderings.
-    verify("abc"_sv == "abc"_sv); // Equality operator
-    verify("abc"_sv != "abd"_sv); // Inequality operator
-    verify("abc"_sv < "abd"_sv);  // Strictly-less operator
-    verify("abd"_sv > "abc"_sv);  // Strictly-greater operator
-    verify("ab"_sv < "abc"_sv);   // Prefix orders before the longer string
+    expect_equal("abc"_sv, "abc"_sv);  // Equality operator
+    expect_true("abc"_sv != "abd"_sv); // Inequality operator
+    expect_true("abc"_sv < "abd"_sv);  // Strictly-less operator
+    expect_true("abd"_sv > "abc"_sv);  // Strictly-greater operator
+    expect_true("ab"_sv < "abc"_sv);   // Prefix orders before the longer string
 }
 
 #pragma endregion Unit
@@ -178,12 +179,11 @@ static std::size_t stl_last_not_of_(std::string_view h, std::string_view n) { re
  *  haystack formed of @p haystack_pattern repeated from one to @c max_repeats times, misaligned by
  *  @p misalignment bytes within the cacheline. */
 template <typename stl_matches_, typename sz_matches_>
-void check_find_misaligned_(test_context_t &context, std::string_view haystack_pattern,
-                            typename stl_matches_::matcher_type const &stl_matcher,
+void check_find_misaligned_(std::string_view haystack_pattern, typename stl_matches_::matcher_type const &stl_matcher,
                             typename sz_matches_::matcher_type const &sz_matcher, std::size_t misalignment) {
     // Each repetition re-scans the whole growing haystack, so the work is quadratic in this count, and it is
     // multiplied again by every case, misalignment and matcher family.
-    std::size_t const max_repeats = context.iterations_quadratic(40);
+    std::size_t const max_repeats = iterations_quadratic(40);
 
     // Allocate a buffer to store the haystack with enough padding to mis-align it.
     std::size_t haystack_buffer_length = max_repeats * haystack_pattern.size() + 2 * sz_default_alignment_k;
@@ -235,16 +235,16 @@ void check_find_misaligned_(test_context_t &context, std::string_view haystack_p
                 fmt::println(stderr, "Mismatch at index #{}: {} != {}", match_idx,
                              match_stl.data() - haystack_stl.data(), match_sz.data() - haystack_sz.data());
                 print_all_matches();
-                verify(false && "StringZilla must land on the same match offset as the STL reference matcher");
+                expect_true(false, "StringZilla must land on the same match offset as the STL reference matcher");
             }
         }
 
         if (count_stl != count_sz) {
             print_all_matches();
-            verify(false && "StringZilla must report the same match count as the STL reference matcher");
+            expect_true(false, "StringZilla must report the same match count as the STL reference matcher");
         }
-        verify(begin_stl == end_stl && begin_sz == end_sz &&
-               "Both matchers must exhaust their ranges together, not leave one with unconsumed matches");
+        expect_true(begin_stl == end_stl && begin_sz == end_sz,
+                    "Both matchers must exhaust their ranges together, not leave one with unconsumed matches");
 
 #if defined(__SANITIZE_ADDRESS__)
         // Don't forget to manually unpoison the prefix and the suffix.
@@ -257,129 +257,128 @@ void check_find_misaligned_(test_context_t &context, std::string_view haystack_p
 /** Evaluates the correctness of a "matcher", searching for all the occurrences of the
  *  @p needle_stl, as a substring, as a set of allowed characters, or as a set of disallowed
  *  characters, in a haystack. */
-void check_find_misaligned_(test_context_t &context, std::string_view haystack_pattern, std::string_view needle_stl,
-                            std::size_t misalignment) {
+void check_find_misaligned_(std::string_view haystack_pattern, std::string_view needle_stl, std::size_t misalignment) {
     sz::string_view_t const needle_sz(needle_stl.data(), needle_stl.size());
     sz::byteset_t const set(needle_stl.data(), needle_stl.size());
 
     check_find_misaligned_<                                                             //
         sz::find_matches_view<std::string_view, sz::matcher_find<std::string_view>>,    //
         sz::find_matches_view<sz::string_view_t, sz::matcher_find<sz::string_view_t>>>( //
-        context, haystack_pattern, {needle_stl}, {needle_sz}, misalignment);
+        haystack_pattern, {needle_stl}, {needle_sz}, misalignment);
 
     check_find_misaligned_<                                                               //
         sz::rfind_matches_view<std::string_view, sz::matcher_rfind<std::string_view>>,    //
         sz::rfind_matches_view<sz::string_view_t, sz::matcher_rfind<sz::string_view_t>>>( //
-        context, haystack_pattern, {needle_stl}, {needle_sz}, misalignment);
+        haystack_pattern, {needle_stl}, {needle_sz}, misalignment);
 
     check_find_misaligned_<                                                                      //
         sz::find_matches_view<std::string_view, stl_matcher_bytes_<stl_first_of_>>,              //
         sz::find_matches_view<sz::string_view_t, sz::matcher_find_first_of<sz::string_view_t>>>( //
-        context, haystack_pattern, {needle_stl}, {set}, misalignment);
+        haystack_pattern, {needle_stl}, {set}, misalignment);
 
     check_find_misaligned_<                                                                      //
         sz::rfind_matches_view<std::string_view, stl_matcher_bytes_<stl_last_of_>>,              //
         sz::rfind_matches_view<sz::string_view_t, sz::matcher_find_last_of<sz::string_view_t>>>( //
-        context, haystack_pattern, {needle_stl}, {set}, misalignment);
+        haystack_pattern, {needle_stl}, {set}, misalignment);
 
     check_find_misaligned_<                                                                      //
         sz::find_matches_view<std::string_view, stl_matcher_bytes_<stl_first_not_of_>>,          //
         sz::find_matches_view<sz::string_view_t, sz::matcher_find_first_of<sz::string_view_t>>>( //
-        context, haystack_pattern, {needle_stl}, {set.inverted()}, misalignment);
+        haystack_pattern, {needle_stl}, {set.inverted()}, misalignment);
 
     check_find_misaligned_<                                                                      //
         sz::rfind_matches_view<std::string_view, stl_matcher_bytes_<stl_last_not_of_>>,          //
         sz::rfind_matches_view<sz::string_view_t, sz::matcher_find_last_of<sz::string_view_t>>>( //
-        context, haystack_pattern, {needle_stl}, {set.inverted()}, misalignment);
+        haystack_pattern, {needle_stl}, {set.inverted()}, misalignment);
 }
 
 /** Replays the misaligned-repetition search across a fixed sweep of intra-cacheline offsets. */
-void check_find_misaligned_(test_context_t &context, std::string_view haystack_pattern, std::string_view needle_stl) {
-    check_find_misaligned_(context, haystack_pattern, needle_stl, 0);
-    check_find_misaligned_(context, haystack_pattern, needle_stl, 1);
-    check_find_misaligned_(context, haystack_pattern, needle_stl, 2);
-    check_find_misaligned_(context, haystack_pattern, needle_stl, 3);
-    check_find_misaligned_(context, haystack_pattern, needle_stl, 63);
-    check_find_misaligned_(context, haystack_pattern, needle_stl, 24);
-    check_find_misaligned_(context, haystack_pattern, needle_stl, 33);
+void check_find_misaligned_(std::string_view haystack_pattern, std::string_view needle_stl) {
+    check_find_misaligned_(haystack_pattern, needle_stl, 0);
+    check_find_misaligned_(haystack_pattern, needle_stl, 1);
+    check_find_misaligned_(haystack_pattern, needle_stl, 2);
+    check_find_misaligned_(haystack_pattern, needle_stl, 3);
+    check_find_misaligned_(haystack_pattern, needle_stl, 63);
+    check_find_misaligned_(haystack_pattern, needle_stl, 24);
+    check_find_misaligned_(haystack_pattern, needle_stl, 33);
 }
 
 /** Extensively tests the string class search methods, such as @c find and @c find_first_of,
  *  covering alignment cases within a cache line, repetitive patterns, and overlapping matches. */
-void test_find_misaligned_equivalence(test_context_t &context) {
+void test_find_misaligned_equivalence() {
     // When haystack is only formed of needles:
-    check_find_misaligned_(context, "a", "a");
-    check_find_misaligned_(context, "ab", "ab");
-    check_find_misaligned_(context, "abc", "abc");
-    check_find_misaligned_(context, "abcd", "abcd");
-    check_find_misaligned_(context, {sz::base64(), sizeof(sz::base64())}, {sz::base64(), sizeof(sz::base64())});
-    check_find_misaligned_(context, {sz::ascii_lowercase(), sizeof(sz::ascii_lowercase())},
+    check_find_misaligned_("a", "a");
+    check_find_misaligned_("ab", "ab");
+    check_find_misaligned_("abc", "abc");
+    check_find_misaligned_("abcd", "abcd");
+    check_find_misaligned_({sz::base64(), sizeof(sz::base64())}, {sz::base64(), sizeof(sz::base64())});
+    check_find_misaligned_({sz::ascii_lowercase(), sizeof(sz::ascii_lowercase())},
                            {sz::ascii_lowercase(), sizeof(sz::ascii_lowercase())});
-    check_find_misaligned_(context, {sz::ascii_printables(), sizeof(sz::ascii_printables())},
+    check_find_misaligned_({sz::ascii_printables(), sizeof(sz::ascii_printables())},
                            {sz::ascii_printables(), sizeof(sz::ascii_printables())});
 
     // When we are dealing with NULL characters inside the string
-    check_find_misaligned_(context, "\0", "\0");
-    check_find_misaligned_(context, "a\0", "a\0");
-    check_find_misaligned_(context, "ab\0", "ab");
-    check_find_misaligned_(context, "ab\0", "ab\0");
-    check_find_misaligned_(context, "abc\0", "abc");
-    check_find_misaligned_(context, "abc\0", "abc\0");
-    check_find_misaligned_(context, "abcd\0", "abcd");
+    check_find_misaligned_("\0", "\0");
+    check_find_misaligned_("a\0", "a\0");
+    check_find_misaligned_("ab\0", "ab");
+    check_find_misaligned_("ab\0", "ab\0");
+    check_find_misaligned_("abc\0", "abc");
+    check_find_misaligned_("abc\0", "abc\0");
+    check_find_misaligned_("abcd\0", "abcd");
 
     // When searching for all-null needles in a haystack with no null bytes.
     // This exercises the SIMD tail path where masked-off lanes are zeroed:
     // if the needle characters are also zero, spurious matches appear at
     // invalid offsets beyond the haystack, causing OOB reads.
-    check_find_misaligned_(context, "a", {"\0\0", 2});
-    check_find_misaligned_(context, "a", {"\0\0\0", 3});
-    check_find_misaligned_(context, "a", {"\0\0\0\0", 4});
-    check_find_misaligned_(context, "a", {"\0\0\0\0\0", 5});
-    check_find_misaligned_(context, "abcd", {"\0\0", 2});
-    check_find_misaligned_(context, "abcd", {"\0\0\0\0", 4});
+    check_find_misaligned_("a", {"\0\0", 2});
+    check_find_misaligned_("a", {"\0\0\0", 3});
+    check_find_misaligned_("a", {"\0\0\0\0", 4});
+    check_find_misaligned_("a", {"\0\0\0\0\0", 5});
+    check_find_misaligned_("abcd", {"\0\0", 2});
+    check_find_misaligned_("abcd", {"\0\0\0\0", 4});
 
     // When haystack is formed of equidistant needles:
-    check_find_misaligned_(context, "ab", "a");
-    check_find_misaligned_(context, "abc", "a");
-    check_find_misaligned_(context, "abcd", "a");
+    check_find_misaligned_("ab", "a");
+    check_find_misaligned_("abc", "a");
+    check_find_misaligned_("abcd", "a");
 
     // When matches occur in between pattern words:
-    check_find_misaligned_(context, "ab", "ba");
-    check_find_misaligned_(context, "abc", "ca");
-    check_find_misaligned_(context, "abcd", "da");
+    check_find_misaligned_("ab", "ba");
+    check_find_misaligned_("abc", "ca");
+    check_find_misaligned_("abcd", "da");
 
     // Examples targeted exactly against the Raita heuristic,
     // which matches the first, the last, and the middle characters with SIMD.
-    check_find_misaligned_(context, "aaabbccc", "aaabbccc");
-    check_find_misaligned_(context, "axabbcxc", "aaabbccc");
-    check_find_misaligned_(context, "axabbcxcaaabbccc", "aaabbccc");
+    check_find_misaligned_("aaabbccc", "aaabbccc");
+    check_find_misaligned_("axabbcxc", "aaabbccc");
+    check_find_misaligned_("axabbcxcaaabbccc", "aaabbccc");
 }
 
 /** Evaluates the correctness of look-up table transforms using random lookup tables. */
-void test_lookup_equivalence(test_context_t &context, std::size_t lookup_tables_to_try, std::size_t slices_per_table) {
+void test_lookup_equivalence(std::size_t lookup_tables_to_try, std::size_t slices_per_table) {
+    split_mix_generator_t generator {case_stream_key()};
 
     std::size_t const body_length = 1024 * 1024;
     std::string body(body_length, '\0'), transformed(body_length, '\0');
-    randomize_string(context.generator, body);
+    randomize_string(generator, body);
     std::uniform_int_distribution<int> byte_distribution(0, 255);
 
     // One scaled count over the whole slice budget, so the cost tracks the multiplier linearly rather than
     // compounding across nested loops. A fresh table every `slices_per_table` slices keeps the original mix.
     sz::look_up_table_t lut;
-    for (std::size_t slice = 0; slice != context.iterations(lookup_tables_to_try * slices_per_table); ++slice) {
+    for (std::size_t slice = 0; slice != scaled_iterations(lookup_tables_to_try * slices_per_table); ++slice) {
         if (slice % slices_per_table == 0)
-            for (std::size_t index = 0; index < 256; ++index)
-                lut[(char)index] = (char)byte_distribution(context.generator);
+            for (std::size_t index = 0; index < 256; ++index) lut[(char)index] = (char)byte_distribution(generator);
 
         std::uniform_int_distribution<std::size_t> offset_distribution(0, body_length - 1);
-        std::size_t const slice_offset = offset_distribution(context.generator);
+        std::size_t const slice_offset = offset_distribution(generator);
         std::uniform_int_distribution<std::size_t> length_distribution(0, body_length - slice_offset - 1);
-        std::size_t const slice_length = length_distribution(context.generator);
+        std::size_t const slice_length = length_distribution(generator);
 
-        verify(sz::succeeded(sz::lookup(sz::string_view_t(body.data() + slice_offset, slice_length), lut,
-                                        &transformed[0] + slice_offset)));
+        expect_true(sz::succeeded(sz::lookup(sz::string_view_t(body.data() + slice_offset, slice_length), lut,
+                                             &transformed[0] + slice_offset)));
         for (std::size_t index = 0; index != slice_length; ++index)
-            verify(transformed[slice_offset + index] == lut[body[slice_offset + index]]);
+            expect_equal(transformed[slice_offset + index], lut[body[slice_offset + index]]);
     }
 }
 
@@ -392,7 +391,10 @@ void test_find_safety() { check_find_safety_(find_dispatched); }
 
 /** Drives the serial-vs-dispatched substring-search and byteset-search differential tests, each
  *  forward and backward; the kernels of each capability face them in `cross_<arch>.cpp`. */
-void test_find_all(test_context_t &context) { check_find_equivalence_(context, find_dispatched); }
+void test_find_all() {
+    split_mix_generator_t generator {case_stream_key()};
+    check_find_equivalence_(generator, find_dispatched);
+}
 
 #pragma endregion Drivers
 

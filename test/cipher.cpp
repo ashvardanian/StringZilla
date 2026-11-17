@@ -4,7 +4,7 @@
  *  @date August 3, 2026
  *  @brief AES-256 counter and Galois/counter mode known-answer, safety, and equivalence tests.
  */
-#undef NDEBUG // ! Enable all assertions for testing
+#undef NDEBUG // ! A test's oracle must stay live in every build
 
 #if defined(STRINGZILLA_DEBUG)
 #undef STRINGZILLA_DEBUG
@@ -19,7 +19,7 @@
 #include <cstring> // `std::memcpy`
 
 #include "cross.hpp"   // `check_cipher_unit_`, `check_cipher_equivalence_`
-#include "harness.hpp" // `verify`, `randomize_string`, `test_context_t`
+#include "harness.hpp" // `expect_true`, `randomize_string`, `case_stream_key`
 
 namespace ashvardanian::stringzilla::test {
 
@@ -64,7 +64,8 @@ void test_cipher_unit() { check_cipher_unit_(ctr_dispatched, gcm_dispatched); }
  *  and both must leave the bytes on either side of the buffer untouched. Whether the bytes they
  *  write are the right ones is the unit tier's question, not this one's.
  */
-void test_cipher_safety(test_context_t &context) {
+void test_cipher_safety() {
+    split_mix_generator_t generator {case_stream_key()};
     sz_u8_t secret[32], nonce[12], tag[16];
     for (std::size_t index = 0; index != 32; ++index) secret[index] = (sz_u8_t)(index * 11 + 3);
     for (std::size_t index = 0; index != 12; ++index) nonce[index] = (sz_u8_t)(index * 2 + 1);
@@ -72,41 +73,48 @@ void test_cipher_safety(test_context_t &context) {
     sz_aes256_key_t counter_key;
     sz_aes256_gcm_key_t authenticated_key;
     sz_capability_t const capabilities = sz::default_capabilities();
-    verify(sz_aes256_key_init_best(&counter_key, secret, capabilities, nullptr) == sz_success_k);
-    verify(sz_aes256_gcm_key_init_best(&authenticated_key, secret, capabilities, nullptr) == sz_success_k);
+    expect_equal(sz_aes256_key_init_best(&counter_key, secret, capabilities, nullptr), sz_success_k);
+    expect_equal(sz_aes256_gcm_key_init_best(&authenticated_key, secret, capabilities, nullptr), sz_success_k);
 
-    sz_size_t const longest = (sz_size_t)context.iterations(200);
+    sz_size_t const longest = (sz_size_t)scaled_iterations(200);
     for (sz_size_t length = 0; length <= longest; ++length) {
         with_guarded_buffer_(length, [&](sz_ptr_t pointer, std::size_t usable) {
-            randomize_string(context.generator, {pointer, usable});
-            verify(sz_aes256_ctr_xor_best(&counter_key, nonce, 0, pointer, (sz_size_t)usable, pointer, capabilities,
-                                          nullptr) == sz_success_k);
+            randomize_string(generator, {pointer, usable});
+            expect_equal(sz_aes256_ctr_xor_best(&counter_key, nonce, 0, pointer, (sz_size_t)usable, pointer,
+                                                capabilities, nullptr),
+                         sz_success_k);
         });
         with_guarded_buffer_(length, [&](sz_ptr_t pointer, std::size_t usable) {
-            randomize_string(context.generator, {pointer, usable});
-            verify(sz_aes256_gcm_encrypt_best(&authenticated_key, nonce, STRINGZILLA_NULL, 0, pointer,
-                                              (sz_size_t)usable, pointer, tag, capabilities, nullptr) == sz_success_k);
+            randomize_string(generator, {pointer, usable});
+            expect_equal(sz_aes256_gcm_encrypt_best(&authenticated_key, nonce, STRINGZILLA_NULL, 0, pointer,
+                                                    (sz_size_t)usable, pointer, tag, capabilities, nullptr),
+                         sz_success_k);
         });
         // Opening in place has to stay inside the buffer on both outcomes, and the rejected
         // path writes the most: it clears every byte it was given.
         with_guarded_buffer_(length, [&](sz_ptr_t pointer, std::size_t usable) {
-            randomize_string(context.generator, {pointer, usable});
-            verify(sz_aes256_gcm_encrypt_best(&authenticated_key, nonce, STRINGZILLA_NULL, 0, pointer,
-                                              (sz_size_t)usable, pointer, tag, capabilities, nullptr) == sz_success_k);
-            verify(sz_aes256_gcm_decrypt_best(&authenticated_key, nonce, STRINGZILLA_NULL, 0, pointer,
-                                              (sz_size_t)usable, pointer, tag, capabilities, nullptr) == sz_success_k);
+            randomize_string(generator, {pointer, usable});
+            expect_equal(sz_aes256_gcm_encrypt_best(&authenticated_key, nonce, STRINGZILLA_NULL, 0, pointer,
+                                                    (sz_size_t)usable, pointer, tag, capabilities, nullptr),
+                         sz_success_k);
+            expect_equal(sz_aes256_gcm_decrypt_best(&authenticated_key, nonce, STRINGZILLA_NULL, 0, pointer,
+                                                    (sz_size_t)usable, pointer, tag, capabilities, nullptr),
+                         sz_success_k);
             sz_u8_t forged[16];
             std::memcpy(forged, tag, 16);
             forged[0] ^= 0x01;
-            verify(sz_aes256_gcm_decrypt_best(&authenticated_key, nonce, STRINGZILLA_NULL, 0, pointer,
-                                              (sz_size_t)usable, pointer, forged, capabilities,
-                                              nullptr) == sz_authentication_failed_k);
+            expect_equal(sz_aes256_gcm_decrypt_best(&authenticated_key, nonce, STRINGZILLA_NULL, 0, pointer,
+                                                    (sz_size_t)usable, pointer, forged, capabilities, nullptr),
+                         sz_authentication_failed_k);
         });
     }
 }
 
 /** Drives the serial-versus-dispatched differential over both cipher modes. */
-void test_cipher_all(test_context_t &context) { check_cipher_equivalence_(context, ctr_dispatched, gcm_dispatched); }
+void test_cipher_all() {
+    split_mix_generator_t generator {case_stream_key()};
+    check_cipher_equivalence_(generator, ctr_dispatched, gcm_dispatched);
+}
 
 #pragma endregion Drivers
 

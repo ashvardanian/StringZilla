@@ -8,7 +8,7 @@
  *  The checks live in `cross.hpp`, where every CPU tier runs them by name; this file runs them over
  *  the dispatch points, plus what only a library build compiles: patterns the regex family refuses.
  */
-#undef NDEBUG // ! Enable all assertions for testing
+#undef NDEBUG // ! A test's oracle must stay live in every build
 
 #if defined(STRINGZILLA_DEBUG)
 #undef STRINGZILLA_DEBUG
@@ -22,7 +22,7 @@
 #include "stringzilla/stringzilla.hpp" // `sz::default_capabilities`
 
 #include "cross.hpp"   // `subdocuments_tier_t`, `check_subdocuments_unit_`, `check_subdocuments_safety_`
-#include "harness.hpp" // `test_context_t`, `verify`
+#include "harness.hpp" // `case_stream_key`, `expect_true`
 
 namespace ashvardanian::stringzilla::test {
 
@@ -62,28 +62,29 @@ void test_subdocuments_unit() {
         sz_strings_view_t const document_strings = strings_over_(documents, document_views);
         sz_subdocuments_engine_t engine;
         sz_size_t malformed_index = 0;
-        verify(subdocuments_compile_(subdocuments_dispatched, &engine, paths, sz_subdocuments_json_k, &malformed_index,
-                                     nullptr) == sz_success_k);
+        expect_equal(subdocuments_compile_(subdocuments_dispatched, &engine, paths, sz_subdocuments_json_k,
+                                           &malformed_index, nullptr),
+                     sz_success_k);
         std::vector<sz_size_t> counts(documents.size());
         std::vector<sz_u1x8_t> contained((documents.size() + 7) / 8, 0xFF);
-        verify(sz_subdocuments_counts(&engine, &document_strings, counts.data(), 1, &malformed_index, nullptr) ==
-               sz_success_k);
-        verify(sz_subdocuments_contains(&engine, &document_strings, contained.data(), &malformed_index, nullptr) ==
-               sz_success_k);
+        expect_equal(sz_subdocuments_counts(&engine, &document_strings, counts.data(), 1, &malformed_index, nullptr),
+                     sz_success_k);
+        expect_equal(sz_subdocuments_contains(&engine, &document_strings, contained.data(), &malformed_index, nullptr),
+                     sz_success_k);
         for (std::size_t index = 0; index != documents.size(); ++index)
-            verify(((contained[index >> 3] >> (index & 7) & 1) != 0) == (counts[index] != 0));
-        verify((contained.back() >> (documents.size() & 7)) == 0);
+            expect_equal((contained[index >> 3] >> (index & 7) & 1) != 0, counts[index] != 0);
+        expect_equal(contained.back() >> (documents.size() & 7), 0);
 
         // The walk stops at its first match, so a document broken past it is marked, not refused.
         std::vector<std::string> const broken {R"({"a": {"c": 3}, )"};
         std::vector<sz_string_view_t> broken_views;
         sz_strings_view_t const broken_strings = strings_over_(broken, broken_views);
         sz_u1x8_t broken_contained = 0;
-        verify(sz_subdocuments_contains(&engine, &broken_strings, &broken_contained, &malformed_index, nullptr) ==
-               sz_success_k);
-        verify(broken_contained == 1);
-        verify(sz_subdocuments_counts(&engine, &broken_strings, counts.data(), 1, &malformed_index, nullptr) ==
-               sz_invalid_syntax_k);
+        expect_equal(sz_subdocuments_contains(&engine, &broken_strings, &broken_contained, &malformed_index, nullptr),
+                     sz_success_k);
+        expect_equal(broken_contained, 1);
+        expect_equal(sz_subdocuments_counts(&engine, &broken_strings, counts.data(), 1, &malformed_index, nullptr),
+                     sz_invalid_syntax_k);
         sz_subdocuments_engine_free(&engine, nullptr);
     }
 
@@ -106,12 +107,13 @@ void test_subdocuments_unit() {
                 sz_strings_view_t const path_strings = strings_over_(paths, path_views);
                 sz_subdocuments_engine_t engine;
                 sz_size_t malformed_index = 0, count = 0;
-                verify(sz_subdocuments_engine_init(&engine, &path_strings, sz_subdocuments_json_k, options,
-                                                   &malformed_index, sz::default_capabilities(), nullptr,
-                                                   nullptr) == sz_success_k);
-                verify(sz_subdocuments_counts(&engine, &document_strings, &count, 1, &malformed_index, nullptr) ==
-                       sz_success_k);
-                verify(count == (options == sz_subdocuments_options_none_k ? expected.repeated : expected.first));
+                expect_equal(
+                    sz_subdocuments_engine_init(&engine, &path_strings, sz_subdocuments_json_k, options,
+                                                &malformed_index, sz::default_capabilities(), nullptr, nullptr),
+                    sz_success_k);
+                expect_equal(sz_subdocuments_counts(&engine, &document_strings, &count, 1, &malformed_index, nullptr),
+                             sz_success_k);
+                expect_equal(count, options == sz_subdocuments_options_none_k ? expected.repeated : expected.first);
                 sz_subdocuments_engine_free(&engine, nullptr);
             }
         }
@@ -121,37 +123,42 @@ void test_subdocuments_unit() {
     {
         sz_subdocuments_engine_t engine;
         sz_size_t malformed_index = 0;
-        verify(subdocuments_compile_(subdocuments_dispatched, &engine, {"?@.a > 2", "$.c"}, sz_subdocuments_json_k,
-                                     &malformed_index, nullptr) == sz_success_k);
+        expect_equal(subdocuments_compile_(subdocuments_dispatched, &engine, {"?@.a > 2", "$.c"},
+                                           sz_subdocuments_json_k, &malformed_index, nullptr),
+                     sz_success_k);
         subdocuments_found_t const found = subdocuments_find_(
             subdocuments_dispatched, &engine, {R"({"a":1,"b":2})", R"({"a":5})", R"({"c":3})", "[1,2]"});
-        verify(found.status == sz_success_k);
-        verify(found.offsets == std::vector<sz_size_t>({0, 0, 1, 2, 2}));
-        verify(found.matches[0].haystack_index == 1 && found.matches[0].needle_index == 0);
-        verify(found.matches[0].byte_offset == 0 && found.matches[0].byte_length == 7);
-        verify(found.matches[1].haystack_index == 2 && found.matches[1].needle_index == 1);
-        verify(found.matches[1].byte_offset == 5 && found.matches[1].byte_length == 1);
+        expect_equal(found.status, sz_success_k);
+        expect_equal(found.offsets, std::vector<sz_size_t>({0, 0, 1, 2, 2}));
+        expect_true(found.matches[0].haystack_index == 1 && found.matches[0].needle_index == 0);
+        expect_true(found.matches[0].byte_offset == 0 && found.matches[0].byte_length == 7);
+        expect_true(found.matches[1].haystack_index == 2 && found.matches[1].needle_index == 1);
+        expect_true(found.matches[1].byte_offset == 5 && found.matches[1].byte_length == 1);
         sz_subdocuments_engine_free(&engine, nullptr);
-        verify(subdocuments_compile_status_(subdocuments_dispatched, {"?@.a,", "$.a"}, sz_subdocuments_json_k,
-                                            malformed_index) == sz_invalid_syntax_k);
-        verify(malformed_index == 0);
+        expect_equal(subdocuments_compile_status_(subdocuments_dispatched, {"?@.a,", "$.a"}, sz_subdocuments_json_k,
+                                                  malformed_index),
+                     sz_invalid_syntax_k);
+        expect_equal(malformed_index, 0);
     }
 }
 
 /** What the verbs refuse, which is as much of the contract as what they accept. */
-void test_subdocuments_safety(test_context_t &) {
+void test_subdocuments_safety() {
     check_subdocuments_safety_(subdocuments_dispatched);
 
     // A pattern the regex family refuses refuses the path spelling it, whichever filter holds it.
     sz_size_t malformed_index = 0;
-    verify(subdocuments_compile_status_(subdocuments_dispatched, {"$.a", "$[?@.b]", "$[?@.c || match(@.a, 'x[')]"},
-                                        sz_subdocuments_json_k, malformed_index) == sz_invalid_syntax_k);
-    verify(malformed_index == 2);
+    expect_equal(
+        subdocuments_compile_status_(subdocuments_dispatched, {"$.a", "$[?@.b]", "$[?@.c || match(@.a, 'x[')]"},
+                                     sz_subdocuments_json_k, malformed_index),
+        sz_invalid_syntax_k);
+    expect_equal(malformed_index, 2);
 }
 
 /** Random paths over random documents through the dispatched verbs, against the serial ones. */
-void test_subdocuments_all(test_context_t &context) {
-    check_subdocuments_equivalence_(context, subdocuments_dispatched);
+void test_subdocuments_all() {
+    split_mix_generator_t generator {case_stream_key()};
+    check_subdocuments_equivalence_(generator, subdocuments_dispatched);
 }
 
 #pragma endregion Unit Cases

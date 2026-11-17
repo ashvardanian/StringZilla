@@ -21,40 +21,20 @@ Date: September 29, 2026
 
 import concurrent.futures
 import ctypes
-import ctypes.util
-import os
-import platform
-import sys
 import threading
 import time
 import weakref
 
 import pytest
-from base import get_random_string, scale_iterations
+from base import SETTINGS, get_random_string, numpy_available, requires_cuda, scaled_iterations
 
 import stringzilla as sz
 
-BASELINE_BY_MACHINE = {
-    ("x86_64", "amd64", "x64"): sz.Capability.HASWELL,
-    ("arm64", "aarch64"): sz.Capability.NEON,
-}
-"""The capability every supported toolchain emits for a given 64-bit architecture. A machine that
-detects one of these but did not compile it in has a broken probe, not a slow CPU.
-"""
+if numpy_available:
+    import numpy as np
 
 
-def baseline_for_this_machine():
-    """The capability this machine is expected to carry, or None where none is guaranteed."""
-    if not sys.maxsize > 2**32:
-        return None  # 32-bit targets (i686, armv7) have no guaranteed baseline
-    machine = platform.machine().lower()
-    for names, baseline in BASELINE_BY_MACHINE.items():
-        if machine in names:
-            return baseline
-    return None
-
-
-def test_capability_members_are_the_cpu_capabilities():
+def test_capability_names_match_the_c_table():
     """`Capability` has one member per CPU capability, in bit order, and none for the GPU capabilities.
 
     A name missing or moved here means the names drifted from the `sz_cap_*_k` bits.
@@ -94,24 +74,16 @@ def test_masks_past_this_cpu_are_clamped():
     assert sz.hash(text, capabilities=everything) == sz.hash(text)
 
 
-def test_compiled_covers_the_baseline_this_machine_detects():
+@pytest.mark.skipif(not SETTINGS.expect_simd, reason="built without SIMD on purpose: STRINGZILLA_EXPECT_SIMD=0")
+def test_compiled_covers_the_baseline_this_machine_detects(detected_baseline: sz.Capability):
     """A build whose ISA probes failed is scalar, and only `compiled` can see it.
 
     Skips where there is no SIMD to expect, so genuinely serial targets stay green: a 32-bit
     or exotic arch, or a CPU too old for the baseline. Set `STRINGZILLA_EXPECT_SIMD=0` to skip a
     deliberately scalar build on a SIMD-capable machine.
     """
-    if os.environ.get("STRINGZILLA_EXPECT_SIMD") == "0":
-        pytest.skip("STRINGZILLA_EXPECT_SIMD=0: this build is deliberately scalar")
-
-    baseline = baseline_for_this_machine()
-    if baseline is None:
-        pytest.skip(f"no SIMD baseline is guaranteed on {platform.machine()}")
-    if baseline not in sz.capabilities_detected_cpu():
-        pytest.skip(f"this CPU does not report {baseline.name}; nothing to verify")
-
-    assert baseline in sz.capabilities_compiled_cpu(), (
-        f"this CPU reports {baseline.name} but no {baseline.name} kernels were compiled in - "
+    assert detected_baseline in sz.capabilities_compiled_cpu(), (
+        f"this CPU reports {detected_baseline.name} but no {detected_baseline.name} kernels were compiled in - "
         f"the ISA probes failed at build time and this build is scalar"
     )
 
@@ -143,16 +115,17 @@ def test_engine_capabilities_narrow_the_cpu():
     for capabilities in (sz.Capability.SERIAL, everything):
         distances = memoryview(bytearray(4 * 8)).cast("Q", (2, 2))
         sz.LevenshteinEngine(queries, capabilities=capabilities).distances(queries, distances)
-        assert distances[0, 0] == distances[1, 1] == 0 and distances[0, 1] == distances[1, 0] == 7
+        assert distances[0, 0] == distances[1, 1] == 0
+        assert distances[0, 1] == distances[1, 0] == 7
     with pytest.raises(TypeError):
         sz.LevenshteinEngine(queries, device=0)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="takes no stream"):
         sz.LevenshteinEngine(queries, stream=1)
     with pytest.raises(LookupError):
         sz.LevenshteinEngine(queries, capabilities=sz.Capability(0))
 
 
-def test_gpu_producers_report_clamped_capabilities():
+def test_producers_report_clamped_capabilities():
     """Each GPU vendor counts its devices, or raises without one, enables what is both detected and compiled,
     and makes a stream on its last device that synchronizes and frees."""
     for vendor in ("cuda", "rocm", "metal"):
@@ -162,9 +135,9 @@ def test_gpu_producers_report_clamped_capabilities():
         enabled = getattr(sz, f"capabilities_enabled_{vendor}")
         stream_init = getattr(sz, f"stream_init_{vendor}")
         stream_free = getattr(sz, f"stream_free_{vendor}")
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="ordinal must be non-negative"):
             enabled(-1)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="ordinal must be non-negative"):
             stream_init(-1)
         try:
             count = count_devices()
@@ -179,7 +152,8 @@ def test_gpu_producers_report_clamped_capabilities():
             enabled(count)
         assert enabled(count - 1) == detected(count - 1) & compiled(count - 1)
         stream = stream_init(count - 1)
-        assert sz.synchronize(enabled(count - 1), stream) is None and stream_free(stream) is None
+        assert sz.synchronize(enabled(count - 1), stream) is None
+        assert stream_free(stream) is None
 
 
 def test_cpu_copies_read_like_their_strings():
@@ -187,7 +161,8 @@ def test_cpu_copies_read_like_their_strings():
     texts = ["kitten", "", "sitting"]
     capabilities = sz.capabilities_enabled_cpu()
     tape = sz.Strings(texts).copy(capabilities)
-    assert tape == sz.Strings(texts) and [str(text) for text in tape[1:]] == texts[1:]
+    assert tape == sz.Strings(texts)
+    assert [str(text) for text in tape[1:]] == texts[1:]
     queries = sz.Strings(["kitten"])
     from_strings = memoryview(bytearray(len(texts) * 8)).cast("Q", (1, len(texts)))
     from_tape = memoryview(bytearray(len(texts) * 8)).cast("Q", (1, len(texts)))
@@ -195,7 +170,8 @@ def test_cpu_copies_read_like_their_strings():
     engine.distances(sz.Strings(texts), from_strings)
     engine.distances(tape, from_tape)
     assert from_tape.tolist() == from_strings.tolist()
-    assert sz.synchronize(capabilities) is None and sz.synchronize(capabilities, stream=None) is None
+    assert sz.synchronize(capabilities) is None
+    assert sz.synchronize(capabilities, stream=None) is None
     with pytest.raises(TypeError):
         sz.Strings(texts).copy()
 
@@ -211,8 +187,10 @@ def test_levenshtein_bound_clips_distances_past_it():
         return distances.tolist()[0]
 
     exact = [0, 1, 2, 3]
-    assert distances_for() == exact and distances_for(bound=None) == exact
-    assert distances_for(bound=3) == exact and distances_for(bound=2) == exact
+    assert distances_for() == exact
+    assert distances_for(bound=None) == exact
+    assert distances_for(bound=3) == exact
+    assert distances_for(bound=2) == exact
     assert distances_for(bound=1) == [0, 1, 2, 2]
     assert distances_for(bound=0) == [0, 1, 1, 1]
     assert distances_for(bound=2**64 - 1) == exact
@@ -236,7 +214,9 @@ def test_overlap_radius_zeroes_pairs_past_it():
     exact = scores_for()
     assert exact[0] == [1.0, 1.0]
     assert all(0.0 < share < 1.0 for share in exact[1] + exact[2])
-    assert scores_for(radius=None) == exact and scores_for(radius=1.0) == exact and scores_for(radius=2) == exact
+    assert scores_for(radius=None) == exact
+    assert scores_for(radius=1.0) == exact
+    assert scores_for(radius=2) == exact
     assert scores_for(radius=8 / 11) == exact
     assert scores_for(radius=7 / 11) == [exact[0], exact[1], [0.0, 0.0]]
     assert scores_for(radius=2 / 11) == [exact[0], exact[1], [0.0, 0.0]]
@@ -244,7 +224,7 @@ def test_overlap_radius_zeroes_pairs_past_it():
     assert scores_for(radius=0) == [exact[0], [0.0, 0.0], [0.0, 0.0]]
     with pytest.raises(TypeError):
         scores_for(radius="1")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="radius must be a share"):
         scores_for(radius=-0.5)
 
 
@@ -269,8 +249,8 @@ def test_engine_calls_from_many_threads_agree():
 @pytest.mark.thread_unsafe  # Times one call against a spinning thread, which other test threads would slow down.
 def test_engine_verbs_release_the_gil(rng):
     """Another Python thread keeps running through a long engine call, which only holds the engine's own lock."""
-    queries = sz.Strings([get_random_string(rng, 60, alphabet="acgt") for _ in range(scale_iterations(64))])
-    candidates = sz.Strings([get_random_string(rng, 60, alphabet="acgt") for _ in range(scale_iterations(8192))])
+    queries = sz.Strings([get_random_string(rng, 60, alphabet="acgt") for _ in range(scaled_iterations(64))])
+    candidates = sz.Strings([get_random_string(rng, 60, alphabet="acgt") for _ in range(scaled_iterations(8192))])
     engine = sz.LevenshteinEngine(queries)
     distances = memoryview(bytearray(len(queries) * len(candidates) * 8)).cast("Q", (len(queries), len(candidates)))
     ticks, stop = [0], threading.Event()
@@ -295,22 +275,8 @@ def test_engine_verbs_release_the_gil(rng):
     assert during > rate * elapsed / 4, f"spinner ran {during} ticks in a {elapsed:.3f} s call, at {rate:.0f}/s"
 
 
-def cuda_capabilities_or_skip():
-    """The capabilities of CUDA device 0, skipping the test where no CUDA device answers."""
-    try:
-        return sz.capabilities_enabled_cuda(0)
-    except RuntimeError:
-        pytest.skip("no CUDA device answers here")
-
-
-def unified_array(shape, dtype):
+def unified_array(cudart: ctypes.CDLL, shape, dtype):
     """A NumPy array over CUDA managed memory, which the host and the device both address, freed with the array."""
-    np = pytest.importorskip("numpy")
-    library = ctypes.util.find_library("cudart") or "libcudart.so"
-    try:
-        cudart = ctypes.CDLL(library)
-    except OSError:
-        pytest.skip(f"no CUDA runtime library to allocate managed memory with: {library}")
     dtype = np.dtype(dtype)
     bytes_count = int(np.prod(shape)) * dtype.itemsize
     pointer = ctypes.c_void_p()
@@ -320,16 +286,21 @@ def unified_array(shape, dtype):
     return np.frombuffer(memory, dtype=dtype).reshape(shape)
 
 
-def test_gpu_engine_reads_gpu_tapes():
+@requires_cuda
+@pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
+def test_gpu_engine_reads_gpu_tapes(cudart: ctypes.CDLL):
     """A CUDA engine scores `Strings.copy` candidates as the CPU engine does, once the stream is synchronized.
 
     The CPU engine reads the same tape, while the strings in host memory are refused by the device.
     """
-    gpu = cuda_capabilities_or_skip()
+    gpu = sz.capabilities_enabled_cuda(0)
     texts = ["sitting", "sunday", "monday", "", "kitten"]
     candidates = sz.Strings(texts).copy(gpu)
-    assert len(candidates) == len(texts) and [str(text) for text in candidates] == texts
-    assert candidates == sz.Strings(texts) and str(candidates[1]) == "sunday" and str(candidates[-1]) == "kitten"
+    assert len(candidates) == len(texts)
+    assert [str(text) for text in candidates] == texts
+    assert candidates == sz.Strings(texts)
+    assert str(candidates[1]) == "sunday"
+    assert str(candidates[-1]) == "kitten"
 
     queries = sz.Strings(["kitten", "saturday"])
     expected = memoryview(bytearray(len(queries) * len(texts) * 8)).cast("Q", (len(queries), len(texts)))
@@ -338,7 +309,7 @@ def test_gpu_engine_reads_gpu_tapes():
     sz.LevenshteinEngine(queries).distances(candidates, from_tape)
     assert from_tape.tolist() == expected.tolist()
     engine = sz.LevenshteinEngine(queries, capabilities=gpu)
-    distances = unified_array((len(queries), len(texts)), "uintp")
+    distances = unified_array(cudart, (len(queries), len(texts)), "uintp")
     engine.distances(candidates, distances)
     sz.synchronize(gpu)
     assert distances.tolist() == expected.tolist()

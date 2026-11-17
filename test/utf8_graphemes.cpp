@@ -5,7 +5,7 @@
  *  @brief UAX-29 grapheme-cluster (Grapheme_Cluster_Break) tests: known-answer goldens,
  *      malformed-input safety, and the serial-vs-dispatched differential over hardened corpora.
  */
-#undef NDEBUG // ! Enable all assertions for testing
+#undef NDEBUG // ! A test's oracle must stay live in every build
 
 #if defined(STRINGZILLA_DEBUG)
 #undef STRINGZILLA_DEBUG
@@ -33,23 +33,24 @@ void test_utf8_graphemes_unit() {
     // C++ range wrapper known-answer: the view must faithfully expose the kernel's clusters.
     std::vector<std::string> const clusters =
         sz::string_view_t("ab").utf8_graphemes().template to<std::vector<std::string>>();
-    verify(clusters.size() == 2 && clusters[0] == "a" && clusters[1] == "b" && "C++ utf8_graphemes range");
+    expect_true(clusters.size() == 2 && clusters[0] == "a" && clusters[1] == "b", "C++ utf8_graphemes range");
 
     // Grapheme-cluster counts for the shared prose fixtures; per-fixture rationale lives in test/utf8.hpp.
     auto count_graphemes = [](std::string_view text) {
         return sz::string_view_t(text).utf8_graphemes().template to<std::vector<std::string>>().size();
     };
-    verify(count_graphemes(utf8_prose_pride_caption()) == 206 && "pride_caption graphemes");
-    verify(count_graphemes(utf8_prose_devanagari_tip()) == 252 && "devanagari_tip graphemes");
-    verify(count_graphemes(utf8_prose_concert_post()) == 134 && "concert_post graphemes");
-    verify(count_graphemes(utf8_prose_rtl_scripts()) == 256 && "rtl_scripts graphemes");
-    verify(count_graphemes(utf8_prose_micro_prepend()) == 3 && "micro_prepend graphemes");
+    expect_equal(count_graphemes(utf8_prose_pride_caption()), 206, "pride_caption graphemes");
+    expect_equal(count_graphemes(utf8_prose_devanagari_tip()), 252, "devanagari_tip graphemes");
+    expect_equal(count_graphemes(utf8_prose_concert_post()), 134, "concert_post graphemes");
+    expect_equal(count_graphemes(utf8_prose_rtl_scripts()), 256, "rtl_scripts graphemes");
+    expect_equal(count_graphemes(utf8_prose_micro_prepend()), 3, "micro_prepend graphemes");
 
     // Codepoints are not clusters: the emoji paragraph has more runes than grapheme clusters.
     std::size_t const pride_caption_runes =
         sz::string_view_t(utf8_prose_pride_caption()).utf8_runes().template to<std::vector<sz_rune_t>>().size();
-    verify(pride_caption_runes == 222 && "pride_caption runes");
-    verify(pride_caption_runes > count_graphemes(utf8_prose_pride_caption()) && "pride_caption runes exceed graphemes");
+    expect_equal(pride_caption_runes, 222, "pride_caption runes");
+    expect_true(pride_caption_runes > count_graphemes(utf8_prose_pride_caption()),
+                "pride_caption runes exceed graphemes");
 }
 
 #pragma endregion Unit
@@ -64,8 +65,9 @@ void test_utf8_graphemes_rules() { check_utf8_graphemes_rules_(utf8_graphemes_di
 #pragma region Safety
 
 /** Malformed-input safety of the grapheme-cluster dispatch point. */
-void test_utf8_graphemes_safety(test_context_t &context) {
-    check_utf8_graphemes_safety_(context, utf8_graphemes_dispatched);
+void test_utf8_graphemes_safety() {
+    split_mix_generator_t generator {case_stream_key()};
+    check_utf8_graphemes_safety_(generator, utf8_graphemes_dispatched);
 }
 
 #pragma endregion Safety
@@ -73,8 +75,9 @@ void test_utf8_graphemes_safety(test_context_t &context) {
 #pragma region Drivers
 
 /** Serial-vs-dispatched grapheme differential over the dense and long-range corpora. */
-void test_utf8_graphemes_all(test_context_t &context) {
-    check_utf8_graphemes_equivalence_(context, utf8_graphemes_dispatched);
+void test_utf8_graphemes_all() {
+    split_mix_generator_t generator {case_stream_key()};
+    check_utf8_graphemes_equivalence_(generator, utf8_graphemes_dispatched);
 }
 
 #pragma endregion Drivers

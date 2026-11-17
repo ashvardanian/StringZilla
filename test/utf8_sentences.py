@@ -8,7 +8,7 @@ terminators, malformed-byte and window-seam tiling safety, full UAX-29 SentenceB
 conformance and Sentence_Break class-adjacency pairs, differential fuzzing against ICU or pysbd
 and against a pure-Python UAX-29 baseline arbitrated by ICU, realistic multi-script prose, and
 cross-backend agreement on realistic, malformed, and lane-straddling inputs.
-Compares against: the official UCD SentenceBreakTest.txt, ICU BreakIterator sentence segmentation
+Baselines: the official UCD SentenceBreakTest.txt, ICU BreakIterator sentence segmentation
 with pysbd as a fallback oracle, a pure-Python UAX-29 baseline, and cross-backend self-consistency
 via capability_sweep.
 
@@ -27,12 +27,11 @@ from random import Random
 
 import pytest
 from base import (
-    StreamKey,
     assert_backends_agree,
     baseline_sentence_boundaries,
     malformed_utf8_corpus,
     representatives_by_class,
-    scale_iterations,
+    scaled_iterations,
     vector_width_bracketing_strings,
 )
 from utf8_helpers import (
@@ -178,7 +177,7 @@ def test_utf8_sentence_differential_icu(rng: Random):
     """Differential fuzz against an independent sentence segmenter (``icu``, else ``pysbd``)."""
 
     def icu_boundaries():
-        icu = pytest.importorskip("icu", reason="PyICU not installed")
+        icu = pytest.importorskip("icu", reason="PyICU is not installed")
         bi = icu.BreakIterator.createSentenceInstance(icu.Locale.getRoot())
 
         def segments(text):
@@ -198,7 +197,7 @@ def test_utf8_sentence_differential_icu(rng: Random):
     try:
         ref_segments = icu_boundaries()
     except Exception:
-        pysbd = pytest.importorskip("pysbd", reason="neither PyICU nor pysbd installed")
+        pysbd = pytest.importorskip("pysbd", reason="pysbd is not installed")
         segmenter = pysbd.Segmenter(language="en", clean=False)
         ref_segments = lambda text: segmenter.segment(text)  # noqa: E731
 
@@ -206,7 +205,7 @@ def test_utf8_sentence_differential_icu(rng: Random):
     # letters, spaces and newlines. Emoji/RI sentence behavior is not portable across segmenters.
     palette = list("abZ59 \t\n.,;:!?'\"()éαаカ中\u2028\u2029")
 
-    iterations = scale_iterations(500)
+    iterations = scaled_iterations(500)
     failures = []
     for _ in range(iterations):
         text = "".join(rng.choice(palette) for _ in range(rng.randint(1, 24)))
@@ -224,7 +223,7 @@ def test_utf8_sentence_differential_icu(rng: Random):
     )
 
 
-def test_utf8_sentence_boundary_fuzz(seed: StreamKey, rng: Random, sentence_break_props):
+def test_utf8_sentence_boundary_fuzz(seed: int, rng: Random, sentence_break_props):
     """Fuzz: compare the C sentence iterator vs the pure-Python UAX-29 baseline."""
 
     # The pure-Python `baseline_sentence_boundaries` is an imperfect SB reference, missing the SB11 break
@@ -240,7 +239,7 @@ def test_utf8_sentence_boundary_fuzz(seed: StreamKey, rng: Random, sentence_brea
 
     total = 0
     disagreements = []
-    for _ in range(scale_iterations(200)):
+    for _ in range(scaled_iterations(200)):
         text = "".join(rng.choice(SEGMENTATION_PALETTE) for _ in range(rng.randint(1, 100)))
         try:
             expected = baseline_sentence_boundaries(text, sentence_break_props)
@@ -264,7 +263,7 @@ def test_utf8_sentence_boundary_fuzz(seed: StreamKey, rng: Random, sentence_brea
     )
 
 
-def test_utf8_sentences_prose():
+def test_utf8_prose_sentence_counts():
     """Realistic multi-script paragraphs: sentence count matches the ICU root oracle; segments tile."""
     from utf8_helpers import (
         PROSE_CONCERT_POST,
@@ -308,7 +307,7 @@ SENTENCE_REALISTIC_TEXTS = [
 @pytest.mark.parametrize(
     "text", SENTENCE_REALISTIC_TEXTS + list(malformed_utf8_corpus()) + vector_width_bracketing_strings()
 )
-def test_utf8_sentences_backend_differential(backend_results, text):
+def test_utf8_sentences_agree_across_backends(backend_results, text):
     """utf8_sentences must segment identically across every SIMD backend on realistic, malformed, and
     lane-straddling inputs, compared as raw segment bytes so malformed UTF-8 sweeps without raising."""
     results = backend_results(

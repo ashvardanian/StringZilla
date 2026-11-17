@@ -211,6 +211,7 @@ extend-select = [
   "E", # pycodestyle errors
   "F", # pyflakes
   "I", # isort
+  "PT", # flake8-pytest-style
   "TID", # flake8-tidy-imports
 ]
 
@@ -218,7 +219,9 @@ extend-select = [
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
-"!python/**" = ["D"]
+"!{python,test}/**" = ["D"]
+# Tests owe a docstring on every module-level function (D103) and nothing else from pydocstyle.
+"test/**" = ["D100", "D101", "D102", "D104", "D105", "D106", "D107", "D2", "D3", "D4"]
 "*.pyi" = ["D", "E501"]  # verbatim copies of the C literals
 
 [tool.ruff.lint.flake8-tidy-imports]

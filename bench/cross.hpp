@@ -55,7 +55,7 @@ inline void log_kernel(environment_t &env, std::optional<row_t> const &row, std:
 
 /** Whether the filter keeps the kernel @p name but dropped the serial row it prints against. */
 inline bool needs_serial_row(environment_t const &env, std::string_view name, std::string_view serial_name) {
-    return name != serial_name && env.settings.selects(name) && !env.serial_rows.contains(serial_name);
+    return name != serial_name && env.settings.filter.selects(name) && !env.serial_rows.contains(serial_name);
 }
 
 /** Keeps @p row, timed under a kept kernel's name, as the serial row @p serial_name, unprinted. */
@@ -744,10 +744,10 @@ struct intersect_inputs_t {
     tokens_t tokens_a, tokens_b;
     permute_t permute_a, permute_b;
 
-    intersect_inputs_t(corpus_t const &corpus, std::uint32_t seed) {
+    intersect_inputs_t(corpus_t const &corpus, std::uint64_t seed) {
         std::unordered_set<std::string_view> unique_tokens(corpus.tokens.begin(), corpus.tokens.end());
         tokens_a.assign(unique_tokens.begin(), unique_tokens.end());
-        std::mt19937 generator(seed);
+        std::mt19937_64 generator(seed);
         std::sample(unique_tokens.begin(), unique_tokens.end(), //
                     std::back_inserter(tokens_b), corpus.tokens.size() / 2, generator);
         std::size_t const max_tokens_in_intersection = min_of(tokens_a.size(), tokens_b.size());
@@ -800,7 +800,7 @@ void bench_sort_order_kernels(environment_t &env, std::string_view kit) {
 template <sz_kernel_intersect_t intersect_>
 void bench_intersect_kernels(environment_t &env, std::string_view kit) {
     corpus_t const &corpus = env.corpora.words();
-    intersect_inputs_t inputs(corpus, env.settings.seed.value);
+    intersect_inputs_t inputs(corpus, env.settings.seed);
     bench_kernel_nullary(env, corpus, fmt::format("sz_intersect_{}", kit), "sz_intersect_serial",
                          intersect_strings_via_sz<sz_intersect_serial> {inputs},
                          intersect_strings_via_sz<intersect_> {inputs});
@@ -2066,7 +2066,7 @@ inline sz_strings_view_t regex_replacements(vocabulary_t const &vocabulary) noex
  *  unwanted vocabulary is never compiled. */
 inline bool regex_selects(environment_t const &env, std::string_view kit, vocabulary_t const &vocabulary) {
     for (char const *verb : {"engine_init", "counts", "find", "replace", "extract"})
-        if (env.settings.selects(fmt::format("sz_regex_{}{}{}", verb, kit, vocabulary.label))) return true;
+        if (env.settings.filter.selects(fmt::format("sz_regex_{}{}{}", verb, kit, vocabulary.label))) return true;
     return false;
 }
 
@@ -2366,7 +2366,7 @@ inline bool subdocuments_selects(environment_t const &env, std::string_view kit)
     for (sz_subdocuments_format_t const format : {sz_subdocuments_json_k, sz_subdocuments_xml_k})
         for (vocabulary_t const &vocabulary : subdocuments_vocabularies(format))
             for (char const *verb : {"counts", "find"})
-                if (env.settings.selects(fmt::format("sz_subdocuments_{}{}{}", verb, kit, vocabulary.label)))
+                if (env.settings.filter.selects(fmt::format("sz_subdocuments_{}{}{}", verb, kit, vocabulary.label)))
                     return true;
     return false;
 }

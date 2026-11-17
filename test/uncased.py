@@ -7,7 +7,7 @@ Covers: case folding across ASCII, Latin-1, German sharp S, ligatures, Greek, an
 uncased substring search and the match iterator with codepoint and byte offsets, degenerate and
 negative offset handling, uncased ordering, an exhaustive Unicode 17.0 CaseFolding.txt codepoint
 sweep with adversarial preimage and crossing-expansion probes, and backend agreement.
-Compares against: Python str.casefold, the official Unicode CaseFolding.txt rules via the
+Baselines: Python str.casefold, the official Unicode CaseFolding.txt rules via the
 unicode_folds session fixture, and cross-backend agreement.
 
 Run:
@@ -28,7 +28,7 @@ from base import (
     assert_backends_agree,
     get_random_string,
     malformed_utf8_corpus,
-    scale_iterations,
+    scaled_iterations,
     vector_width_bracketing_strings,
 )
 
@@ -43,7 +43,7 @@ UNCASED_DEGENERATE_BOUNDS = [-11, -2, 0, 2, 6, 7]
 # region Unit
 
 
-def test_unit_utf8_uncased_fold():
+def test_utf8_uncased_fold_lowers_text_and_bytes():
     """Folds ASCII text, empty input, German sharp S, and both String and bytes input forms to lowercase."""
     # ASCII
     assert sz.utf8_uncased_fold("HELLO") == b"hello"
@@ -63,7 +63,7 @@ def test_unit_utf8_uncased_fold():
 
 
 @pytest.mark.parametrize(
-    "haystack, needle, expected",
+    ("haystack", "needle", "expected"),
     [
         # ASCII basic cases
         ("Hello World", "WORLD", 6),
@@ -170,7 +170,7 @@ def test_utf8_uncased_search_slicing():
 
 
 @pytest.mark.parametrize(
-    "haystack, needle, expected_matches",
+    ("haystack", "needle", "expected_matches"),
     [
         # ASCII - multiple matches
         ("Hello HELLO hello HeLLo", "hello", ["Hello", "HELLO", "hello", "HeLLo"]),
@@ -302,7 +302,7 @@ def test_utf8_uncased_search_degenerate_offsets(haystack, start):
 
 
 @pytest.mark.parametrize(
-    "haystack, needle, start, end, expected",
+    ("haystack", "needle", "start", "end", "expected"),
     [
         ("hello", "", 6, None, -1),
         ("hello", "", 2, 1, -1),
@@ -324,7 +324,7 @@ def test_utf8_uncased_search_degenerate_offsets_report_negative_one(haystack, ne
 
 
 @pytest.mark.parametrize(
-    "input_str, expected",
+    ("input_str", "expected"),
     [
         ("A", b"a"),
         ("Z", b"z"),
@@ -524,7 +524,7 @@ def test_utf8_uncased_fold_random_strings(rng: Random):
     """Random ASCII-uppercase and Latin Extended strings fold identically to Python's str.casefold()."""
 
     # Test with ASCII uppercase
-    for _ in range(scale_iterations(50)):
+    for _ in range(scaled_iterations(50)):
         length = rng.randint(1, 100)
         test_str = "".join(chr(rng.randint(0x41, 0x5A)) for _ in range(length))  # A-Z
         python_folded = test_str.casefold().encode("utf-8")
@@ -532,7 +532,7 @@ def test_utf8_uncased_fold_random_strings(rng: Random):
         assert python_folded == sz_folded, f"Mismatch for: {test_str!r}"
 
     # Test with Latin Extended characters
-    for _ in range(scale_iterations(50)):
+    for _ in range(scaled_iterations(50)):
         length = rng.randint(1, 50)
         # Mix of ASCII uppercase and Latin Extended (includes ß, etc.)
         codepoints = [rng.randint(0x41, 0x5A) for _ in range(length)]
@@ -543,7 +543,7 @@ def test_utf8_uncased_fold_random_strings(rng: Random):
         assert python_folded == sz_folded, f"Mismatch for: {test_str!r}"
 
 
-def test_utf8_uncased_prose():
+def test_utf8_prose_uncased_search_finds_folded_terms():
     """Case-folded search finds realistic terms that a plain byte search misses."""
     from utf8_helpers import PROSE_HOTEL_REVIEW, PROSE_LANGUAGE_LESSON, PROSE_SCIENCE_ABSTRACT
 
@@ -555,7 +555,8 @@ def test_utf8_uncased_prose():
     for haystack, needle in cases:
         assert haystack.find(needle) == -1  # plain byte search misses
         result = sz.utf8_uncased_search(haystack, needle)
-        assert result is not None and result >= 0
+        assert result is not None
+        assert result >= 0
 
 
 # endregion Oracles
@@ -608,7 +609,7 @@ UNCASED_ORDER_BACKEND_DIFFERENTIAL_PAIRS = [
 
 
 @pytest.mark.parametrize("text", UNCASED_FOLD_BACKEND_DIFFERENTIAL_TEXTS)
-def test_utf8_uncased_fold_backend_differential(backend_results, text):
+def test_utf8_uncased_fold_agrees_across_backends(backend_results, text):
     """utf8_uncased_fold must agree across every SIMD backend over ASCII, mixed-case Unicode such as Straße,
     Café, Greek, and Cyrillic, expansions such as ß and ligatures, and inputs straddling the 16/32/64-byte
     SIMD lanes."""
@@ -619,7 +620,7 @@ def test_utf8_uncased_fold_backend_differential(backend_results, text):
 
 
 @pytest.mark.parametrize("raw", malformed_utf8_corpus())
-def test_utf8_uncased_fold_backend_differential_malformed(backend_results, raw):
+def test_utf8_uncased_fold_agrees_across_backends_on_malformed_text(backend_results, raw):
     """Malformed UTF-8 must fold identically across every SIMD backend without crashing."""
     assert_backends_agree(
         backend_results(lambda capabilities: sz.utf8_uncased_fold(raw, capabilities=capabilities)),
@@ -627,7 +628,7 @@ def test_utf8_uncased_fold_backend_differential_malformed(backend_results, raw):
     )
 
 
-def test_utf8_uncased_fold_backend_differential_random(backend_results, rng: Random):
+def test_utf8_uncased_fold_agrees_across_backends_on_random_text(backend_results, rng: Random):
     """Random ASCII corpora must fold identically across every SIMD backend."""
     text = get_random_string(rng)
     assert_backends_agree(
@@ -636,8 +637,8 @@ def test_utf8_uncased_fold_backend_differential_random(backend_results, rng: Ran
     )
 
 
-@pytest.mark.parametrize("haystack, needle", UNCASED_SEARCH_BACKEND_DIFFERENTIAL_CASES)
-def test_utf8_uncased_search_backend_differential(backend_results, haystack, needle):
+@pytest.mark.parametrize(("haystack", "needle"), UNCASED_SEARCH_BACKEND_DIFFERENTIAL_CASES)
+def test_utf8_uncased_search_agrees_across_backends(backend_results, haystack, needle):
     """utf8_uncased_search must agree across every SIMD backend, including codepoint-expansion needles
     like ß folding to ss and ligatures that can cross a folded haystack's expansion boundaries."""
     assert_backends_agree(
@@ -647,7 +648,7 @@ def test_utf8_uncased_search_backend_differential(backend_results, haystack, nee
 
 
 @pytest.mark.parametrize("text", vector_width_bracketing_strings())
-def test_utf8_uncased_search_backend_differential_vector_width(backend_results, text):
+def test_utf8_uncased_search_agrees_across_backends_at_lane_boundaries(backend_results, text):
     """utf8_uncased_search must agree across every SIMD backend when the match sits at a 16/32/64-byte lane
     boundary, searching for the literal padding tail planted after the multibyte codepoint."""
     assert_backends_agree(
@@ -657,7 +658,7 @@ def test_utf8_uncased_search_backend_differential_vector_width(backend_results, 
 
 
 @pytest.mark.parametrize("raw", malformed_utf8_corpus())
-def test_utf8_uncased_search_backend_differential_malformed(backend_results, raw):
+def test_utf8_uncased_search_agrees_across_backends_on_malformed_text(backend_results, raw):
     """Malformed UTF-8 haystacks must search identically across every SIMD backend without crashing."""
     needle = raw[:2] if len(raw) >= 2 else raw
     assert_backends_agree(
@@ -666,8 +667,8 @@ def test_utf8_uncased_search_backend_differential_malformed(backend_results, raw
     )
 
 
-@pytest.mark.parametrize("left, right", UNCASED_ORDER_BACKEND_DIFFERENTIAL_PAIRS)
-def test_utf8_uncased_order_backend_differential(backend_results, left, right):
+@pytest.mark.parametrize(("left", "right"), UNCASED_ORDER_BACKEND_DIFFERENTIAL_PAIRS)
+def test_utf8_uncased_order_agrees_across_backends(backend_results, left, right):
     """utf8_uncased_order must agree across every SIMD backend, including German-sharp-S equivalence."""
     assert_backends_agree(
         backend_results(lambda capabilities: sz.utf8_uncased_order(left, right, capabilities=capabilities)),
@@ -676,7 +677,7 @@ def test_utf8_uncased_order_backend_differential(backend_results, left, right):
 
 
 @pytest.mark.parametrize("raw", malformed_utf8_corpus())
-def test_utf8_uncased_order_backend_differential_malformed(backend_results, raw):
+def test_utf8_uncased_order_agrees_across_backends_on_malformed_text(backend_results, raw):
     """Malformed UTF-8 must order identically against itself across every SIMD backend without crashing."""
     assert_backends_agree(
         backend_results(lambda capabilities: sz.utf8_uncased_order(raw, raw, capabilities=capabilities)),

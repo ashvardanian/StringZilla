@@ -26,9 +26,13 @@
 /*  A library holds one unit per vendor it was built for, each compiled for exactly one of them,
  *  and its host units, which list every vendor's kernels, never include a `.cuh`, so the vendor's
  *  switch alone picks the runtime here. */
+#if STRINGZILLA_ARCH_CUDA_ + STRINGZILLA_ARCH_ROCM_ > 1
+#error "A .cuh unit compiles for one vendor; host units list every vendor's kernels and never include it"
+#endif
 #if STRINGZILLA_ARCH_ROCM_
 #include <hip/hip_runtime.h> // `__shfl_up`, `__ballot`, `atomicAdd`
-#elif STRINGZILLA_ARCH_CUDA_
+#endif
+#if STRINGZILLA_ARCH_CUDA_
 #include <cuda_runtime.h> // `__shfl_up_sync`, `__any_sync`, `atomicAdd`
 #endif
 

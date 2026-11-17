@@ -28,26 +28,19 @@ The GPU tests check each vendor's engine kernels by name, and the dispatch point
 - `cross_cuda.cu`, `cross_rocm.hip`, `cross_metal.cpp` — vendor entry points called by the common runner.
 - `cross_device.hpp` — the device checks CUDA, ROCm and Metal share, over device-reachable memory, device-bound sequences, a caller's own stream, and the refusals that keep host pointers off the device.
 
-All enabled vendors build into `stringzilla_test`; CUDA and ROCm can coexist in one build and run.
-`STRINGZILLA_DEVICES=cuda:0,rocm:1` selects vendor-qualified ordinals. Unset, the runner visits device zero of each available compiled vendor; an explicit unavailable device is an error.
+All enabled vendors build into `stringzilla_test`; how the shards share one binary and how `STRINGZILLA_DEVICES` picks devices is under "Devices" in the "Test Suites" section of `CONTRIBUTING.md`.
 
 ## Running
 
-- Cross-checks are named `test_<family>_<tier>_<capability>`, so `STRINGZILLA_FILTER='_haswell$'` runs one capability and `STRINGZILLA_FILTER='^test_find_'` one family across all of them.
-- `STRINGZILLA_SEED`, `STRINGZILLA_SCALE` and `STRINGZILLA_FILTER` are listed with their defaults in the header of `harness.hpp` and in `CONTRIBUTING.md`.
-- A failing test prints `rerun: STRINGZILLA_SEED=<n> STRINGZILLA_FILTER='^<name>$' <binary>` to stderr, which reruns exactly that test, and the run moves on to the next one.
-- A crash stops the run, and the startup `- Rerun one test:` line holds the same command for the last test named.
+The "Test Suites" section of `CONTRIBUTING.md` covers running every suite here, their environment variables and flags, the verdict, `rerun:` and summary lines, and how to write a test in each language.
 
 ## Python
 
 The Python modules follow the C++ translation units, with `string_types.py` covering `string.cpp`, and run under pytest.
 
 - `find.py`, `hash.py`, `sort.py`, `string_types.py`, `uncased.py`, `cipher.py`, `utf8_*.py`, and `doctests.py` — per-family tests.
-- `base.py` and `utf8_helpers.py` are shared helpers; `conftest.py` holds the pytest configuration.
-- The modules are flat and import each other by basename, as `from base import ...`, so none may share a stdlib module's name.
-- Install the `test` group and run the suite with `python -X faulthandler -m pytest -x`, as the CI does.
-- Seeded tests take the `seed` fixture: 42, a numeric `STRINGZILLA_SEED` replaces it, `random` draws one, and pytest's header prints it as `- Seed: <n>`.
-- `STRINGZILLA_SCALE` applies as in C++, and `STRINGZILLA_FILTER` keeps the tests whose node id it matches, alongside `pytest -k`.
+- `base.py` holds the settings, gates and differential helpers, `utf8_helpers.py` the UTF-8 fixtures, and `conftest.py` the pytest hooks and fixtures.
+- The modules are flat and import the helpers by basename, as `from base import ...`, so none may share a stdlib module's name.
 
 ## JavaScript
 

@@ -5,7 +5,7 @@
  *  @brief Window overlap tests: known answers and an ordered-set oracle, and the dispatched
  *      engine against them.
  */
-#undef NDEBUG // ! Enable all assertions for testing
+#undef NDEBUG // ! A test's oracle must stay live in every build
 
 #if defined(STRINGZILLA_DEBUG)
 #undef STRINGZILLA_DEBUG
@@ -21,7 +21,7 @@
 #include <vector> // `std::vector`
 
 #include "cross.hpp"   // `overlap_backend_t`, `check_overlap_equivalence_`, `check_overlap_safety_`
-#include "harness.hpp" // `strings_from_`, `test_context_t`
+#include "harness.hpp" // `strings_from_`, `case_stream_key`
 
 namespace ashvardanian::stringzilla::test {
 
@@ -48,13 +48,14 @@ static void check_overlap_pair_(std::string const &query, std::string const &can
     sz_strings_view_t const query_strings = strings_from_(queries);
     sz_strings_view_t const candidate_strings = strings_from_(candidates);
     sz_overlap_engine_t engine {};
-    verify(sz_overlap_engine_init(&engine, &query_strings, &width, 1, 0, sz::default_capabilities(), &heap.allocator,
-                                  nullptr) == sz_success_k);
+    expect_equal(sz_overlap_engine_init(&engine, &query_strings, &width, 1, 0, sz::default_capabilities(),
+                                        &heap.allocator, nullptr),
+                 sz_success_k);
     sz_u32_t matches = 0xFFFFFFFFu;
-    verify(sz_overlap_scores(&engine, &candidate_strings, 1.0f, &matches, 1, 1, nullptr) == sz_success_k);
+    expect_equal(sz_overlap_scores(&engine, &candidate_strings, 1.0f, &matches, 1, 1, nullptr), sz_success_k);
     sz_overlap_engine_free(&engine, nullptr);
-    verify(heap.live_allocations == 0);
-    verify(matches == expected);
+    expect_equal(heap.live_allocations, 0);
+    expect_equal(matches, expected);
 }
 
 #pragma endregion Helpers
@@ -73,18 +74,19 @@ void test_overlap_unit() {
     sz_strings_view_t const query_strings = strings_from_(queries);
     sz_strings_view_t const candidate_strings = strings_from_(candidates);
     sz_overlap_engine_t engine {};
-    verify(sz_overlap_engine_init(&engine, &query_strings, widths.data(), widths.size(), 0, sz::default_capabilities(),
-                                  &heap.allocator, nullptr) == sz_success_k);
+    expect_equal(sz_overlap_engine_init(&engine, &query_strings, widths.data(), widths.size(), 0,
+                                        sz::default_capabilities(), &heap.allocator, nullptr),
+                 sz_success_k);
     sz_u32_t matches[4 * 7];
-    verify(sz_overlap_scores(&engine, &candidate_strings, 1.0f, matches, 4 * 7, 7, nullptr) == sz_success_k);
+    expect_equal(sz_overlap_scores(&engine, &candidate_strings, 1.0f, matches, 4 * 7, 7, nullptr), sz_success_k);
     for (std::size_t width_index = 0; width_index != widths.size(); ++width_index) {
-        verify(matches[0 * 7 + width_index] == fox.size() - widths[width_index] + 1);
-        verify(matches[1 * 7 + width_index] == 0);
-        verify(matches[3 * 7 + width_index] == 0);
+        expect_equal(matches[0 * 7 + width_index], fox.size() - widths[width_index] + 1);
+        expect_equal(matches[1 * 7 + width_index], 0);
+        expect_equal(matches[3 * 7 + width_index], 0);
     }
-    verify(matches[2 * 7 + 0] == 3 && matches[2 * 7 + 1] == 2 && matches[2 * 7 + 2] == 1);
+    expect_true(matches[2 * 7 + 0] == 3 && matches[2 * 7 + 1] == 2 && matches[2 * 7 + 2] == 1);
     for (std::size_t width_index = 3; width_index != widths.size(); ++width_index)
-        verify(matches[2 * 7 + width_index] == 0);
+        expect_equal(matches[2 * 7 + width_index], 0);
 
     // A candidate stride wider than the widths leaves the gap it names alone, and every count lands
     // where it says, read this time from a tape of the same candidates.
@@ -93,25 +95,26 @@ void test_overlap_unit() {
     sz_strings_view_t const candidate_tape = strings_tape_from_(candidates, payload, offsets);
     sz_u32_t padded[4 * 9];
     for (sz_u32_t &slot : padded) slot = 0xFFFFFFFFu;
-    verify(sz_overlap_scores(&engine, &candidate_tape, 1.0f, padded, 4 * 9, 9, nullptr) == sz_success_k);
+    expect_equal(sz_overlap_scores(&engine, &candidate_tape, 1.0f, padded, 4 * 9, 9, nullptr), sz_success_k);
     for (std::size_t candidate = 0; candidate != candidates.size(); ++candidate) {
         for (std::size_t width_index = 0; width_index != widths.size(); ++width_index)
-            verify(padded[candidate * 9 + width_index] == matches[candidate * 7 + width_index]);
-        verify(padded[candidate * 9 + 7] == 0xFFFFFFFFu && padded[candidate * 9 + 8] == 0xFFFFFFFFu);
+            expect_equal(padded[candidate * 9 + width_index], matches[candidate * 7 + width_index]);
+        expect_true(padded[candidate * 9 + 7] == 0xFFFFFFFFu && padded[candidate * 9 + 8] == 0xFFFFFFFFu);
     }
 
     // A stride under the axis it spans would write one row into its neighbour's, so it is refused.
-    verify(sz_overlap_scores(&engine, &candidate_strings, 1.0f, matches, 4 * 7, 6, nullptr) ==
-           sz_unexpected_dimensions_k);
-    verify(sz_overlap_scores(&engine, &candidate_strings, 1.0f, matches, 4 * 7 - 1, 7, nullptr) ==
-           sz_unexpected_dimensions_k);
+    expect_equal(sz_overlap_scores(&engine, &candidate_strings, 1.0f, matches, 4 * 7, 6, nullptr),
+                 sz_unexpected_dimensions_k);
+    expect_equal(sz_overlap_scores(&engine, &candidate_strings, 1.0f, matches, 4 * 7 - 1, 7, nullptr),
+                 sz_unexpected_dimensions_k);
     sz_overlap_engine_free(&engine, nullptr);
 
     // Zero widths answer nothing, and are refused before anything is prepared.
     sz_overlap_engine_t refused {};
-    verify(sz_overlap_engine_init(&refused, &query_strings, widths.data(), 0, 0, sz::default_capabilities(),
-                                  &heap.allocator, nullptr) == sz_unexpected_dimensions_k);
-    verify(heap.live_allocations == 0);
+    expect_equal(sz_overlap_engine_init(&refused, &query_strings, widths.data(), 0, 0, sz::default_capabilities(),
+                                        &heap.allocator, nullptr),
+                 sz_unexpected_dimensions_k);
+    expect_equal(heap.live_allocations, 0);
 
     // "aaaa" holds one distinct window at width one, so "ab" finds one in four; the other way finds all four.
     check_overlap_pair_("aaaa", "ab", 1, 1);
@@ -130,10 +133,13 @@ void test_overlap_unit() {
 /** Degenerate inputs for the window-overlap family, asserting survival and the stated refusals.
  *  Answers are not the subject here: empties and narrow candidates are accepted, zero widths and a
  *  refused allocation are reported, and no failure writes an output. */
-void test_overlap_safety(test_context_t &) { check_overlap_safety_(overlap_dispatched); }
+void test_overlap_safety() { check_overlap_safety_(overlap_dispatched); }
 
 /** Holds the dispatched engine to the @c std::set oracle and to serial's answers, bit for bit. */
-void test_overlap_all(test_context_t &context) { check_overlap_equivalence_(context, overlap_dispatched); }
+void test_overlap_all() {
+    split_mix_generator_t generator {case_stream_key()};
+    check_overlap_equivalence_(generator, overlap_dispatched);
+}
 
 #pragma endregion Drivers
 

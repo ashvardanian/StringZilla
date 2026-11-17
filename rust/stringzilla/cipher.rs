@@ -662,7 +662,7 @@ mod tests {
     ];
 
     #[test]
-    fn aes256_counter_round_trip() {
+    fn aes256_counter_mode_round_trips() {
         let secret = [0x2Bu8; sz::AES256_KEY_LENGTH];
         let nonce = [0x07u8; sz::AES256_NONCE_LENGTH];
         let key = sz::Aes256CtrKey::new(&secret);
@@ -684,7 +684,7 @@ mod tests {
     }
 
     #[test]
-    fn aes256_counter_seek() {
+    fn aes256_counter_mode_seeks_to_any_offset() {
         let secret = [0x3Cu8; sz::AES256_KEY_LENGTH];
         let nonce = [0x5Du8; sz::AES256_NONCE_LENGTH];
         let key = sz::Aes256CtrKey::new(&secret);
@@ -703,7 +703,7 @@ mod tests {
     }
 
     #[test]
-    fn aes256_gcm_known_answers() {
+    fn aes256_gcm_reaches_the_known_answers() {
         for vector in KNOWN_GCM_VECTORS.iter() {
             let mut secret = [0u8; sz::AES256_KEY_LENGTH];
             let mut nonce = [0u8; sz::AES256_NONCE_LENGTH];
@@ -739,7 +739,7 @@ mod tests {
     }
 
     #[test]
-    fn aes256_gcm_forged_tag() {
+    fn aes256_gcm_refuses_a_forged_tag() {
         let secret = [0x11u8; sz::AES256_KEY_LENGTH];
         let nonce = [0x22u8; sz::AES256_NONCE_LENGTH];
         let associated = b"routing header";
@@ -780,7 +780,7 @@ mod tests {
     }
 
     #[test]
-    fn aes256_gcm_streaming() {
+    fn aes256_gcm_chunks_reach_the_one_shot_tag() {
         let secret = [0x9Eu8; sz::AES256_KEY_LENGTH];
         let nonce = [0x4Fu8; sz::AES256_NONCE_LENGTH];
         let associated = b"chunked records still authenticate their header";
@@ -837,7 +837,7 @@ mod tests {
     /// The encryptor lives in storage this test owns so the bytes can be read back. Only the named
     /// fields are checked; the six trailing padding bytes are never written by the C core.
     #[test]
-    fn aes256_gcm_streaming_scrubs_on_drop() {
+    fn aes256_gcm_chunked_states_scrub_on_drop() {
         use core::mem::{MaybeUninit, size_of};
 
         let secret = [0xA5u8; sz::AES256_KEY_LENGTH];
@@ -860,7 +860,7 @@ mod tests {
     }
 
     #[test]
-    fn aes256_gcm_decryptor_alone() {
+    fn aes256_gcm_decryptor_takes_its_header_in_pieces() {
         let secret = [0x6Du8; sz::AES256_KEY_LENGTH];
         let nonce = [0x1Au8; sz::AES256_NONCE_LENGTH];
         let associated = b"a header the caller happens to hold in two pieces";

@@ -4,17 +4,17 @@
  *  @date January 7, 2024
  *  @brief Helper structures and functions for C++ unit- and stress-tests.
  *
- *  @section test_environment_variables Environment Variables
+ *  Every setting is a @c STRINGZILLA_<NAME> variable that a @c --name flag overrides;
+ *  CONTRIBUTING.md lists them. A filter that selects no case fails the run rather than passing
+ *  an empty suite.
  *
- *  Read once by @c read_settings, with a value that does not parse ending the run with status 1:
+ *  @section test_failure_model Failure Model
  *
- *  @verbatim
- *  Variable            Default  Meaning
- *  STRINGZILLA_SEED    42       Seed for every random generator, or "random" to draw one, which a run prints
- *  STRINGZILLA_SCALE   1        Multiplier for every baseline iteration count, like 0.1 or 10
- *  STRINGZILLA_FILTER  none     ECMAScript regex over test names, or a substring when it does not compile
- *  STRINGZILLA_DEVICES none     Comma-separated devices to run on, such as cuda:0,rocm:1
- *  @endverbatim
+ *  A failed check prints where it failed, counts into @c test_run, and lets the case go on, so one
+ *  run lists every mismatch it reaches. @c run_test_case diffs that count around each case and
+ *  prints a rerun line under a failing one; @c finish_test_run makes the exit status. Where the
+ *  step after a failed check would index or dereference past what it checked, the case returns on
+ *  the check's answer instead, as in <tt>if (!expect_true(found)) return;</tt>.
  *
  *  @section test_driver_tiers Driver Tiers
  *
@@ -36,9 +36,14 @@
  *    its own; a literal here belongs in @c _unit.
  *  - @c _rules : Annex rule coverage, where a family transcribes a published spec: UAX-29, UAX-14.
  *
- *  The family files test the dispatch points and `stringzilla.hpp`. The kernel-level checks live in
- *  `cross.hpp`, and each `cross_<arch>.cpp` runs them over that architecture's kernels by name, one
- *  @c cross_section_t section per capability, as `test_<family>_<tier>_<capability>`.
+ *  An exhaustive space strides by <tt>sweep_stride(test_run.settings.scale / 10)</tt>, so a default run
+ *  samples a tenth of it and the 10x stress run covers it, reaching the far end at every scale.
+ *
+ *  A case's label names the code under test: a driver's own function name, as @c test_hash_unit,
+ *  or a kernel cross-check as a call, as @c check_find_unit_(find_haswell). The family files test
+ *  the dispatch points and @c stringzilla.hpp. The kernel-level checks live in @c cross.hpp, and
+ *  each @c cross_<arch>.cpp runs them over that architecture's kernels by name, behind one
+ *  @c capability_gate_t per capability.
  *
  *  @section test_example_usage Example Usage
  *
@@ -47,10 +52,10 @@
  *  STRINGZILLA_SEED=random ./build_release/stringzilla_test
  *
  *  # Quick smoke test (10% of normal iterations)
- *  STRINGZILLA_SCALE=0.1 ./build_release/stringzilla_test
+ *  ./build_release/stringzilla_test --scale 0.1
  *
- *  # Fast inner loop: only the UTF-8 tests, at 10% iterations
- *  STRINGZILLA_FILTER=utf8 STRINGZILLA_SCALE=0.1 ./build_release/stringzilla_test
+ *  # Fast inner loop: only the UTF-8 families, at 10% iterations
+ *  STRINGZILLA_FILTER='^test_utf8_' STRINGZILLA_SCALE=0.1 ./build_release/stringzilla_test
  *
  *  # Thorough CI stress test (10x normal iterations)
  *  STRINGZILLA_SCALE=10 ./build_release/stringzilla_test
@@ -60,32 +65,37 @@
  *  @endcode
  */
 #pragma once
-#include <climits> // `INT_MAX`
-#include <cmath>   // `std::isfinite`
-#include <csignal> // `std::signal`, `SIGSEGV`, `SIGABRT`
-#include <cstddef> // `std::ptrdiff_t`
-#include <cstdint> // `std::uintptr_t` for cache-line alignment
-#include <cstdio>  // `std::setvbuf`, `stderr`
-#include <cstdlib> // `std::getenv`, `std::strtod`, `std::exit`, `std::malloc`, `std::free`
-#include <cstring> // `std::strcmp`, `std::strlen`
+#include <cctype>    // `std::tolower`
+#include <cinttypes> // `PRIu64`, `PRIuLEAST32`
+#include <cmath>     // `std::isfinite`, `std::llround`
+#include <csignal>   // `std::signal`, `std::raise`, `SIGSEGV`, `SIGABRT`, `SIGTRAP`
+#include <cstddef>   // `std::ptrdiff_t`
+#include <cstdint>   // `std::uintptr_t` for cache-line alignment, `std::uint_least32_t`
+#include <cstdio>    // `std::setvbuf`, `std::fprintf`, `stderr`
+#include <cstdlib>   // `std::getenv`, `std::strtod`, `std::exit`, `std::malloc`, `std::free`
+#include <cstring>   // `std::strcmp`, `std::strncmp`, `std::strlen`
 
-#include <algorithm>    // `std::copy`, `std::generate`
-#include <array>        // `std::array`
-#include <charconv>     // `std::from_chars`
-#include <chrono>       // `std::chrono::steady_clock` for per-test timing
-#include <exception>    // `std::exception`
-#include <memory>       // `std::unique_ptr`, which owns a backend's arena block
-#include <optional>     // `std::optional`
-#include <random>       // `std::random_device`
-#include <regex>        // `std::regex_search` for `STRINGZILLA_FILTER`
-#include <span>         // `std::span`, `std::as_bytes`
-#include <string>       // `std::string`
-#include <string_view>  // `std::string_view`
-#include <system_error> // `std::errc`
-#include <tuple>        // `std::tuple`, for `call_best`
-#include <type_traits>  // `std::is_enum_v`
-#include <utility>      // `std::index_sequence`
-#include <vector>       // `std::vector`
+#include <algorithm>       // `std::copy`, `std::generate`, `std::max`
+#include <array>           // `std::array`
+#include <atomic>          // `std::atomic`, for `test_run`
+#include <charconv>        // `std::from_chars`
+#include <chrono>          // `std::chrono::steady_clock` for per-case timing
+#include <functional>      // `std::invoke`
+#include <memory>          // `std::unique_ptr`, which owns a backend's arena block
+#include <optional>        // `std::optional`
+#include <random>          // `std::random_device`, `std::uniform_int_distribution`
+#include <regex>           // `std::regex_search` for `STRINGZILLA_FILTER`
+#include <source_location> // `std::source_location`, the line a failed check names
+#include <span>            // `std::span`, `std::as_bytes`
+#include <string>          // `std::string`
+#include <string_view>     // `std::string_view`
+#include <system_error>    // `std::errc`
+#include <thread>          // `std::this_thread::yield`
+#include <tuple>           // `std::tuple`, for `call_best`
+#include <type_traits>     // `std::is_enum_v`, `std::invoke_result_t`
+#include <typeinfo>        // `typeid`, naming the exception `expect_throws` wanted
+#include <utility>         // `std::index_sequence`
+#include <vector>          // `std::vector`
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -106,9 +116,491 @@
 
 namespace sz = ashvardanian::stringzilla;
 
-#pragma region Assertion Helpers
-
 namespace ashvardanian::stringzilla::test {
+
+/** Stops in an attached debugger, or dumps core without one; SIGTRAP stays outside the crash
+ *  handlers. */
+inline void trap_into_debugger() noexcept {
+#if STRINGZILLA_OS_WINDOWS_
+    __debugbreak();
+#else
+    std::raise(SIGTRAP);
+#endif
+}
+
+/** Prints the case in progress and a backtrace on a fatal signal; defined beside the run. */
+inline void install_test_signal_handlers() noexcept;
+
+#pragma region Shared Settings
+
+/** Exits with one line naming a setting that does not parse, so a bad value never runs anything. */
+[[noreturn]] inline void exit_unparsed(char const *variable, char const *text, char const *expected) noexcept {
+    std::fprintf(stderr, "%s=\"%s\" does not parse, expected %s\n", variable, text, expected);
+    std::exit(1);
+}
+
+/** The text of a setting: its @p flag when given, else its environment @p variable , else null. */
+inline char const *setting_text(int argc, char **argv, char const *variable, std::string_view flag) noexcept {
+    for (int index = 1; index < argc; ++index) {
+        std::string_view const argument {argv[index]};
+        if (argument == flag)
+            return index + 1 < argc && std::strncmp(argv[index + 1], "--", 2) != 0 ? argv[index + 1] : "1";
+        if (argument.size() > flag.size() && argument.starts_with(flag) && argument[flag.size()] == '=')
+            return argv[index] + flag.size() + 1;
+    }
+    char const *text = std::getenv(variable);
+    return text && *text ? text : nullptr;
+}
+
+/** A switch, @p fallback when unset: 0, false, off and no turn it off, anything else on. */
+inline bool read_flag_setting(int argc, char **argv, char const *variable, std::string_view flag,
+                              bool fallback = false) noexcept {
+    char const *text = setting_text(argc, argv, variable, flag);
+    if (!text) return fallback;
+    for (char const *off : {"0", "false", "off", "no"})
+        if (std::strcmp(text, off) == 0) return false;
+    return true;
+}
+
+/** A whole number, @p fallback when unset. */
+inline std::size_t read_count_setting(int argc, char **argv, char const *variable, std::string_view flag,
+                                      std::size_t fallback) noexcept {
+    char const *text = setting_text(argc, argv, variable, flag);
+    if (!text) return fallback;
+    std::string_view const spelled {text};
+    std::size_t count = 0;
+    auto const [end, error] = std::from_chars(spelled.data(), spelled.data() + spelled.size(), count);
+    if (error != std::errc {} || end != spelled.data() + spelled.size())
+        exit_unparsed(variable, text, "a whole number");
+    return count;
+}
+
+/** A positive real, @p fallback when unset. */
+inline double read_real_setting(int argc, char **argv, char const *variable, std::string_view flag,
+                                double fallback) noexcept {
+    char const *text = setting_text(argc, argv, variable, flag);
+    if (!text) return fallback;
+    char *end = nullptr;
+    double const value = std::strtod(text, &end);
+    if (*end != '\0' || !(value > 0) || !std::isfinite(value))
+        exit_unparsed(variable, text, "a positive number like 0.1 or 10");
+    return value;
+}
+
+/** A positive duration such as 200ms, 10s or 2m, @p fallback when unset. */
+inline std::chrono::milliseconds read_duration_setting(int argc, char **argv, char const *variable,
+                                                       std::string_view flag,
+                                                       std::chrono::milliseconds fallback) noexcept {
+    char const *text = setting_text(argc, argv, variable, flag);
+    if (!text) return fallback;
+    std::string_view const spelled {text};
+    std::uint32_t count = 0;
+    auto const [end, error] = std::from_chars(spelled.data(), spelled.data() + spelled.size(), count);
+    std::string_view const unit = spelled.substr(static_cast<std::size_t>(end - spelled.data()));
+    if (error == std::errc {} && count != 0) {
+        if (unit == "ms") return std::chrono::milliseconds(count);
+        if (unit == "s") return std::chrono::seconds(count);
+        if (unit == "m") return std::chrono::minutes(count);
+    }
+    exit_unparsed(variable, text, "a duration like 200ms, 10s or 2m");
+}
+
+/** The run's seed: 42 when unset, drawn afresh for @c random , else any unsigned 64-bit value. */
+inline std::uint64_t read_seed_setting(int argc, char **argv, char const *variable, std::string_view flag) noexcept {
+    char const *text = setting_text(argc, argv, variable, flag);
+    if (!text) return 42;
+    std::string_view const spelled {text};
+    if (spelled == "random") {
+        std::random_device device;
+        return (static_cast<std::uint64_t>(device()) << 32) ^ device();
+    }
+    std::uint64_t seed = 0;
+    auto const [end, error] = std::from_chars(spelled.data(), spelled.data() + spelled.size(), seed);
+    if (error != std::errc {} || end != spelled.data() + spelled.size())
+        exit_unparsed(variable, text, "an unsigned integer or random");
+    return seed;
+}
+
+/** Which labels a run selects: a regex search when the pattern compiles, else a substring. */
+struct filter_t {
+    std::string pattern;
+    std::optional<std::regex> regex;
+
+    bool selects(std::string_view label) const noexcept {
+        if (pattern.empty()) return true;
+        if (regex) return std::regex_search(label.begin(), label.end(), *regex);
+        return label.find(pattern) != std::string_view::npos;
+    }
+};
+
+/** The filter a setting spells, compiled once; empty, selecting everything, when unset. */
+inline filter_t read_filter_setting(int argc, char **argv, char const *variable, std::string_view flag) noexcept {
+    filter_t filter;
+    char const *text = setting_text(argc, argv, variable, flag);
+    if (!text) return filter;
+    filter.pattern = text;
+#if defined(__cpp_exceptions) && __cpp_exceptions
+    try {
+        filter.regex.emplace(filter.pattern);
+    }
+    catch (std::regex_error const &) {
+    }
+#else
+    filter.regex.emplace(filter.pattern);
+#endif
+    return filter;
+}
+
+/** What every suite and bench reads before its own settings; @c program starts the rerun lines. */
+struct common_settings_t {
+    std::uint64_t seed = 42;
+    filter_t filter;
+    char const *program = "";
+};
+
+/** SplitMix64's finalizer, a bijection that spreads every input bit over all 64 output bits. */
+constexpr std::uint64_t split_mix_bits(std::uint64_t value) noexcept {
+    value = (value ^ (value >> 30)) * 0xBF58476D1CE4E5B9ull;
+    value = (value ^ (value >> 27)) * 0x94D049BB133111EBull;
+    return value ^ (value >> 31);
+}
+
+/** The @p index -th stream of the family @p name under @p seed , identical in every language. */
+constexpr std::uint64_t stream_key(std::uint64_t seed, std::string_view name, std::uint64_t index = 0) noexcept {
+    std::uint64_t hashed = 0xCBF29CE484222325ull;
+    for (char const character : name) hashed = (hashed ^ static_cast<std::uint8_t>(character)) * 0x100000001B3ull;
+    return split_mix_bits(split_mix_bits(seed ^ hashed) + index);
+}
+
+/**
+ *  @brief SplitMix64 over one 64-bit state, seeded by a @ref stream_key , bit-identical to the
+ *      JavaScript generator NumKong ships.
+ *
+ *  Distributions are not specified to draw the same sequence on every standard library, so a
+ *  failure would stop reproducing from its seed when the toolchain changed; @ref below is the
+ *  portable bounded draw.
+ */
+struct split_mix_generator_t {
+    using result_type = std::uint64_t;
+    std::uint64_t state = 0;
+
+    explicit split_mix_generator_t(std::uint64_t key) noexcept : state(key) {}
+    static constexpr result_type(min)() noexcept { return 0; }
+    static constexpr result_type(max)() noexcept { return ~result_type {0}; }
+    result_type operator()() noexcept { return split_mix_bits(state += 0x9E3779B97F4A7C15ull); }
+
+    /** A uniform draw below @p bound , zero for an empty bound, without the bias of a modulo. */
+    std::uint64_t below(std::uint64_t bound) noexcept {
+        if (bound == 0) return 0;
+        std::uint64_t const rejection_floor = (0u - bound) % bound;
+        std::uint64_t draw = (*this)();
+        while (draw < rejection_floor) draw = (*this)();
+        return draw % bound;
+    }
+};
+
+#pragma endregion Shared Settings
+
+/** A requested GPU, before checking whether its runtime and ordinal are available. */
+struct device_selection_t {
+    sz::device_kind_t backend;
+    std::size_t ordinal;
+};
+
+inline std::string_view device_name(sz::device_kind_t kind) noexcept {
+    switch (kind) {
+    case sz::device_kind_t::cpu_k: return "cpu";
+    case sz::device_kind_t::cuda_k: return "cuda";
+    case sz::device_kind_t::rocm_k: return "rocm";
+    case sz::device_kind_t::metal_k: return "metal";
+    }
+    return "unrecognized";
+}
+
+inline std::optional<std::vector<device_selection_t>> parse_devices(std::string_view text) {
+    std::vector<device_selection_t> devices;
+    do {
+        std::size_t const comma = text.find(',');
+        std::string_view const entry = text.substr(0, comma);
+        std::size_t const colon = entry.find(':');
+        if (colon == std::string_view::npos) return std::nullopt;
+        std::string_view const vendor = entry.substr(0, colon);
+        sz::device_kind_t backend;
+        if (vendor == "cuda") backend = sz::device_kind_t::cuda_k;
+        else if (vendor == "rocm") backend = sz::device_kind_t::rocm_k;
+        else if (vendor == "metal") backend = sz::device_kind_t::metal_k;
+        else return std::nullopt;
+        std::string_view const number = entry.substr(colon + 1);
+        std::size_t ordinal = 0;
+        auto const [end, error] = std::from_chars(number.data(), number.data() + number.size(), ordinal);
+        if (error != std::errc {} || end != number.data() + number.size()) return std::nullopt;
+        devices.push_back({backend, ordinal});
+        if (comma == std::string_view::npos) return devices;
+        text.remove_prefix(comma + 1);
+    } while (!text.empty());
+    return std::nullopt;
+}
+
+/** What a run reads: the common settings, how hard to push and how to treat failures and skips,
+ *  then the GPUs. */
+struct test_settings_t : common_settings_t {
+    double scale = 1.0;
+    bool trap_on_failure = false;
+    bool refuse_skips = false;
+
+    /** The GPUs @c STRINGZILLA_DEVICES names, or every one this machine has when unset. */
+    std::optional<std::vector<device_selection_t>> devices;
+};
+
+/** Reads every @c test_settings_t field; defined once the run's own reader exists. */
+inline test_settings_t read_test_settings(int argc, char **argv) noexcept;
+
+/** The facts this binary and this machine report: the library version, the capabilities compiled
+ *  in and detected. */
+struct machine_t {
+    std::array<unsigned, 3> version {STRINGZILLA_VERSION_MAJOR, STRINGZILLA_VERSION_MINOR, STRINGZILLA_VERSION_PATCH};
+    sz_capability_t compiled = 0;
+    sz_capability_t detected = 0;
+};
+
+/** Probes the capabilities @c machine_t reports. */
+inline machine_t probe_machine() noexcept {
+    machine_t machine;
+    sz_capabilities_compiled_cpu(&machine.compiled), sz_capabilities_detected_cpu(&machine.detected);
+    return machine;
+}
+
+/** Prints the version line, the capabilities as "- Compiled for:" and "- This machine:", and in
+ *  GPU builds "- CUDA:", "- ROCm:" or "- Metal:". */
+inline void print(machine_t const &machine, std::FILE *stream = stdout) {
+    char compiled[STRINGZILLA_CAPABILITIES_NAME_CAPACITY], detected[STRINGZILLA_CAPABILITIES_NAME_CAPACITY];
+    sz_capabilities_name(machine.compiled, compiled, sizeof(compiled));
+    sz_capabilities_name(machine.detected, detected, sizeof(detected));
+    fmt::println(stream, "StringZilla {}.{}.{}", machine.version[0], machine.version[1], machine.version[2]);
+    fmt::println(stream, "- Compiled for: {}", compiled);
+    fmt::println(stream, "- This machine: {}", detected);
+}
+
+#pragma region Shared Run
+
+/** What a case reports beyond its checks: that it ran, or why it skipped. */
+struct case_result_t {
+    char const *skip_reason = nullptr;
+
+    [[nodiscard]] static constexpr case_result_t skipped(char const *reason) noexcept { return {reason}; }
+};
+
+/**
+ *  @brief The run in progress: the harness's one sanctioned mutable global.
+ *
+ *  Checks fire on worker threads and inside helpers as well as in a case's own body, so the run
+ *  counts failed checks in one place and @ref run_test_case diffs that count around each case,
+ *  rather than threading a tally through every call. After a crash, printing @c test_run from a
+ *  core dump names the case in progress and the last failed check, and the signal handlers print
+ *  the case too.
+ */
+struct test_run_t {
+    test_settings_t settings {};
+    char const *current_case = nullptr;
+    std::atomic<std::size_t> failed_checks {0};
+    std::atomic<char const *> last_failed_file {nullptr};
+    std::atomic<std::uint_least32_t> last_failed_line {0};
+    std::size_t passed_cases = 0;
+    std::size_t failed_cases = 0;
+    std::size_t skipped_cases = 0;
+};
+
+inline test_run_t test_run;
+
+/** How long any wait in a test may take; a passing case never waits it out, so it bounds hangs. */
+inline constexpr std::chrono::seconds wait_limit_k {120};
+
+/** Yields until @p predicate holds; false when @ref wait_limit_k passed first. */
+template <typename predicate_type_>
+bool spin_until(predicate_type_ &&predicate) noexcept {
+    auto const deadline = std::chrono::steady_clock::now() + wait_limit_k;
+    while (!predicate()) {
+        if (std::chrono::steady_clock::now() > deadline) return false;
+        std::this_thread::yield();
+    }
+    return true;
+}
+
+/** @p baseline iterations under the @c SCALE setting, never fewer than one. */
+inline std::size_t scaled_iterations(std::size_t baseline) noexcept {
+    double const scaled = static_cast<double>(baseline) * test_run.settings.scale;
+    return scaled < 1 ? 1 : static_cast<std::size_t>(std::llround(scaled));
+}
+
+/** The step that visits a @p coverage fraction of a sweep, at least one. */
+inline std::size_t sweep_stride(double coverage) noexcept {
+    double const stride = 1.0 / coverage;
+    return stride < 1 ? 1 : static_cast<std::size_t>(std::llround(stride));
+}
+
+/** The @p index -th stream of the case in progress, so a filtered run draws what a full one did. */
+inline std::uint64_t case_stream_key(std::uint64_t index = 0) noexcept {
+    return stream_key(test_run.settings.seed, test_run.current_case ? test_run.current_case : "", index);
+}
+
+/** Line-buffers stdout, prints the machine, reads the settings, arms the crash handlers and
+ *  prints the settings line, before the first case. */
+inline void start_test_run(int argc, char **argv) noexcept {
+    std::setvbuf(stdout, nullptr, _IOLBF, BUFSIZ); // before any output, or the C library keeps its buffering
+    print(probe_machine());
+    test_run.settings = read_test_settings(argc, argv);
+    install_test_signal_handlers();
+    std::printf("- Seed: %" PRIu64 ", scale: %g, filter: %s\n", test_run.settings.seed, test_run.settings.scale,
+                test_run.settings.filter.pattern.empty() ? "none" : test_run.settings.filter.pattern.c_str());
+}
+
+/** Counts one failed check at @p where , and traps when the run asked to stop at the first. */
+inline void record_failed_check(std::source_location where) noexcept {
+    std::fflush(stdout); // so a log that merges both streams keeps the failure under its case
+    std::fprintf(stderr, "  check failed at %s:%" PRIuLEAST32 "\n", where.file_name(), where.line());
+    test_run.last_failed_file.store(where.file_name(), std::memory_order_relaxed);
+    test_run.last_failed_line.store(where.line(), std::memory_order_relaxed);
+    test_run.failed_checks.fetch_add(1, std::memory_order_relaxed);
+    if (test_run.settings.trap_on_failure) trap_into_debugger();
+}
+
+/** Holds when @p is_met does; otherwise counts a failed check at the caller's line. */
+inline bool expect_true(bool is_met, std::source_location where = std::source_location::current()) noexcept {
+    if (!is_met) record_failed_check(where);
+    return is_met;
+}
+
+/** Prints one case's verdict, and the line that reruns it alone when it failed. */
+inline void report_test_case(char const *label, std::size_t failed_checks, char const *skip_reason,
+                             double seconds) noexcept {
+    if (skip_reason) {
+        std::printf("- %s ... skipped: %s\n", label, skip_reason);
+        return;
+    }
+    if (failed_checks == 0) {
+        std::printf("- %s ... ok (%.2f s)\n", label, seconds);
+        return;
+    }
+    std::fflush(stdout);
+    std::fprintf(stderr, "- %s ... FAILED: %zu failed check(s)\n", label, failed_checks);
+    std::fprintf(stderr, "  rerun: %s --seed %" PRIu64 " --filter '^", test_run.settings.program,
+                 test_run.settings.seed);
+    for (char const *character = label; *character; ++character) {
+        if (std::strchr("\\^$.|?*+()[]{}", *character)) std::fputc('\\', stderr); // labels are code, the filter a regex
+        std::fputc(*character, stderr);
+    }
+    std::fputs("$'\n", stderr);
+}
+
+/** Runs one case unless the filter leaves it out, and records whether it passed or skipped. */
+template <typename case_function_type_, typename... argument_types_>
+void run_test_case(char const *label, case_function_type_ &&case_function, argument_types_ &&...arguments) noexcept {
+    if (!test_run.settings.filter.selects(label)) return;
+    test_run.current_case = label;
+    std::size_t const failed_before = test_run.failed_checks.load();
+    auto const started = std::chrono::steady_clock::now();
+    case_result_t result {};
+    using returned_type = std::invoke_result_t<case_function_type_, argument_types_...>;
+    if constexpr (std::is_void_v<returned_type>)
+        std::invoke(case_function, std::forward<argument_types_>(arguments)...);
+    else result = std::invoke(case_function, std::forward<argument_types_>(arguments)...);
+    std::chrono::duration<double> const elapsed = std::chrono::steady_clock::now() - started;
+    std::size_t const failed_checks = test_run.failed_checks.load() - failed_before;
+    if (result.skip_reason) ++test_run.skipped_cases;
+    else if (failed_checks != 0) ++test_run.failed_cases;
+    else ++test_run.passed_cases;
+    report_test_case(label, failed_checks, result.skip_reason, elapsed.count());
+    test_run.current_case = nullptr;
+}
+
+/** The exit code: 1 when a case or a check outside any case failed, or nothing ran; 3 when
+ *  skips are refused and one happened; else 0. */
+inline int finish_test_run() noexcept {
+    std::printf("%zu passed, %zu failed, %zu skipped, seed %" PRIu64 "\n", test_run.passed_cases, test_run.failed_cases,
+                test_run.skipped_cases, test_run.settings.seed);
+    bool const failed = test_run.failed_cases != 0 || test_run.failed_checks.load() != 0;
+    if (failed || test_run.passed_cases + test_run.skipped_cases == 0) return 1;
+    if (test_run.skipped_cases != 0 && test_run.settings.refuse_skips) return 3;
+    return 0;
+}
+
+#pragma endregion Shared Run
+
+inline test_settings_t read_test_settings(int argc, char **argv) noexcept {
+    test_settings_t settings;
+    settings.seed = read_seed_setting(argc, argv, "STRINGZILLA_SEED", "--seed");
+    settings.filter = read_filter_setting(argc, argv, "STRINGZILLA_FILTER", "--filter");
+    settings.program = argc != 0 ? argv[0] : "";
+    settings.scale = read_real_setting(argc, argv, "STRINGZILLA_SCALE", "--scale", 1.0);
+    settings.trap_on_failure = read_flag_setting(argc, argv, "STRINGZILLA_TRAP_ON_FAILURE", "--trap-on-failure");
+    settings.refuse_skips = read_flag_setting(argc, argv, "STRINGZILLA_NO_SKIPS", "--no-skips");
+    if (char const *text = setting_text(argc, argv, "STRINGZILLA_DEVICES", "--devices")) {
+        settings.devices = parse_devices(text);
+        if (!settings.devices)
+            exit_unparsed("STRINGZILLA_DEVICES", text, "comma-separated devices such as cuda:0,rocm:1");
+    }
+    return settings;
+}
+
+#pragma region Crash Localization
+
+/**
+ *  @brief Names the signal and the case in progress, prints a backtrace, then re-raises the signal,
+ *      so a crashing or aborting kernel self-localizes instead of dying silently under CI's output
+ *      redirection. Library asserts via @c sz_assert_ abort the process and land here too.
+ *
+ *  Writes through a raw @c write, since the crashing thread may already hold the stdio lock that
+ *  @c fmt::println takes.
+ */
+inline void test_fatal_signal_handler(int signal_number) noexcept {
+    auto const write_text = [](std::string_view text) noexcept {
+#if STRINGZILLA_OS_WINDOWS_
+        [[maybe_unused]] auto const written = _write(2, text.data(), static_cast<unsigned>(text.size()));
+#else
+        [[maybe_unused]] auto const written = ::write(STDERR_FILENO, text.data(), text.size());
+#endif
+    };
+    std::string_view signal_name = "SIGSEGV";
+    if (signal_number == SIGABRT) signal_name = "SIGABRT";
+    else if (signal_number == SIGILL) signal_name = "SIGILL";
+    else if (signal_number == SIGFPE) signal_name = "SIGFPE";
+#if defined(SIGBUS)
+    else if (signal_number == SIGBUS) signal_name = "SIGBUS";
+#endif
+    write_text("\n*** ");
+    write_text(signal_name);
+    write_text(" in case '");
+    write_text(test_run.current_case ? test_run.current_case : "none");
+    write_text("' - backtrace follows ***\n");
+#if (defined(__GLIBC__) || STRINGZILLA_OS_APPLE_) && __has_include(<execinfo.h>)
+    void *frames[64];
+    int const frames_count = backtrace(frames, sizeof(frames) / sizeof(frames[0]));
+    backtrace_symbols_fd(frames, frames_count, STDERR_FILENO);
+#endif
+    // Restore and re-raise, so the shell still sees the real signal and any core dump is produced.
+    std::signal(signal_number, SIG_DFL);
+    std::raise(signal_number);
+}
+
+inline void install_test_signal_handlers() noexcept {
+    for (int signal_number : {SIGSEGV, SIGABRT, SIGILL, SIGFPE}) std::signal(signal_number, test_fatal_signal_handler);
+#if defined(SIGBUS)
+    std::signal(SIGBUS, test_fatal_signal_handler);
+#endif
+}
+
+#pragma endregion Crash Localization
+
+/** Baseline for a loop whose work grows with the square of its trip count, like a sweep over
+ *  lengths that re-scans a growing buffer, so doubling the scale only doubles the work. */
+inline std::size_t iterations_quadratic(std::size_t baseline) noexcept {
+    std::size_t const work = scaled_iterations(baseline * baseline);
+    std::size_t bound = 1;
+    while (bound * bound < work) ++bound;
+    return bound;
+}
+
+#pragma region Assertion Helpers
 
 /** One operand of a failed comparison, cut at a few hundred bytes so a megabyte string cannot drown
  *  the report printed on failure. */
@@ -136,136 +628,114 @@ std::string render_operand(value_type_ const &value) {
 /** The bytes of @p text, space-separated, printing a hex dump under @c {:02X}. */
 inline auto hex_bytes(std::string_view text) noexcept { return fmt::join(std::as_bytes(std::span(text)), " "); }
 
-/** What a failed @c verify throws once its diagnostic is printed, for @c run_test to report. */
-struct test_failure_t : std::exception {
-    char const *what() const noexcept override { return "verification failed"; }
+/** A format string bundled with the source location of the call that spelled it, so a check's
+ *  context rides behind a variadic pack, where a defaulted trailing argument cannot go. */
+struct format_at_t {
+    char const *format = nullptr;
+    std::source_location location {};
+
+    format_at_t(char const *format, std::source_location location = std::source_location::current()) noexcept
+        : format(format), location(location) {}
 };
 
-/** The state of one @c verify: its leftmost comparison's operands, rendered only if it fails. */
-struct assertion_t {
-    std::string expansion;
+/** Prints the @p context of a failed check, formatted with @p args , under its location line. */
+template <typename... args_types_>
+void print_check_context_(format_at_t context, args_types_ const &...args) {
+    fmt::println(stderr, "    {}", fmt::vformat(context.format, fmt::make_format_args(args...)));
+}
 
-    /** Throws outside the checking function, so a @c verify in a @c noexcept one terminates without
-     *  tripping GCC's @c -Wterminate. */
-    [[noreturn]] void fail(char const *expression, char const *file, int line) const {
-        fmt::println(stderr, "Test verification failed: {}, {}:{}", expression, file, line);
-        if (!expansion.empty()) fmt::println(stderr, "  with expansion: {}", expansion);
-        throw test_failure_t {};
-    }
-};
+/** Holds when @p held does; otherwise counts a failed check and prints the @p context under it. */
+template <typename... args_types_>
+bool expect_true(bool is_met, format_at_t context, args_types_ const &...args) {
+    if (expect_true(is_met, context.location)) return true;
+    print_check_context_(context, args...);
+    return false;
+}
 
-/** Left operand of a @c verify, awaiting the comparison that decides whether to render it. */
-template <typename left_type_>
-struct left_operand {
-    assertion_t &assertion;
-    left_type_ const &value;
-
-    explicit operator bool() const { return static_cast<bool>(value); }
-
-    template <typename right_type_>
-    bool record(bool holds, char const *operator_name, right_type_ const &right) const {
-        if (!holds)
-            assertion.expansion = fmt::format("{} {} {}", render_operand(value), operator_name, render_operand(right));
-        return holds;
-    }
-
+/** Holds when @p actual equals @p wanted; otherwise counts a failed check at the caller's line and
+ *  prints both under it, cut by @ref render_operand . */
+template <typename actual_type_, typename wanted_type_>
+bool expect_equal(actual_type_ const &actual, wanted_type_ const &wanted,
+                  std::source_location where = std::source_location::current()) {
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wsign-compare"
 #endif
-    template <typename right_type_>
-    friend bool operator==(left_operand &&left, right_type_ const &right) {
-        return left.record(left.value == right, "==", right);
-    }
-    template <typename right_type_>
-    friend bool operator!=(left_operand &&left, right_type_ const &right) {
-        return left.record(left.value != right, "!=", right);
-    }
-    template <typename right_type_>
-    friend bool operator<(left_operand &&left, right_type_ const &right) {
-        return left.record(left.value < right, "<", right);
-    }
-    template <typename right_type_>
-    friend bool operator<=(left_operand &&left, right_type_ const &right) {
-        return left.record(left.value <= right, "<=", right);
-    }
-    template <typename right_type_>
-    friend bool operator>(left_operand &&left, right_type_ const &right) {
-        return left.record(left.value > right, ">", right);
-    }
-    template <typename right_type_>
-    friend bool operator>=(left_operand &&left, right_type_ const &right) {
-        return left.record(left.value >= right, ">=", right);
-    }
+    bool const held = actual == wanted;
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
-};
-
-/** Binds tighter than any comparison without being one, so `assertion <=> a == b` captures @c a
- *  before @c == runs, and GCC's @c -Wparentheses sees no comparison nested in another. */
-template <typename left_type_>
-left_operand<left_type_> operator<=>(assertion_t &assertion, left_type_ const &value) noexcept {
-    return {assertion, value};
+    if (!held) {
+        record_failed_check(where);
+        fmt::println(stderr, "    expected {}, got {}", render_operand(wanted), render_operand(actual));
+    }
+    return held;
 }
 
-} // namespace ashvardanian::stringzilla::test
+/** As @ref expect_equal , printing the @p context under the failed check. */
+template <typename actual_type_, typename wanted_type_, typename... args_types_>
+bool expect_equal(actual_type_ const &actual, wanted_type_ const &wanted, format_at_t context,
+                  args_types_ const &...args) {
+    if (expect_equal(actual, wanted, context.location)) return true;
+    print_check_context_(context, args...);
+    return false;
+}
 
-/** Test-suite verification - always active, regardless of @c NDEBUG or @c STRINGZILLA_DEBUG. Unlike
- *  @c sz_assert_, a debug-only invariant check for the library, a test's oracle must never be a
- *  no-op. A failing comparison prints both of its operands. */
-#define verify(condition)                                                                       \
-    do {                                                                                        \
-        ::ashvardanian::stringzilla::test::assertion_t sz_assertion_;                           \
-        if (!(sz_assertion_ <=> condition)) sz_assertion_.fail(#condition, __FILE__, __LINE__); \
-    } while (0)
+/** Holds when @p actual lies within @p tolerance of @p wanted, scaled by the larger of one and
+ *  either magnitude, and never for NaN; otherwise counts a failed check at the caller's line
+ *  and prints both. */
+template <typename actual_type_, typename wanted_type_, typename tolerance_type_>
+bool expect_near(actual_type_ const &actual, wanted_type_ const &wanted, tolerance_type_ const &tolerance,
+                 std::source_location where = std::source_location::current()) {
+    double const actual_value = static_cast<double>(actual), wanted_value = static_cast<double>(wanted);
+    double const magnitude = max_of(max_of(1.0, std::fabs(actual_value)), std::fabs(wanted_value));
+    bool const held = std::fabs(actual_value - wanted_value) <= static_cast<double>(tolerance) * magnitude;
+    if (!held) {
+        record_failed_check(where);
+        fmt::println(stderr, "    expected {} within {}, got {}", wanted, tolerance, actual);
+    }
+    return held;
+}
 
-/**
- *  @brief One case whose subject has to be named before it can be asserted on, scoped to the case.
- *
- *  Prefer it wherever a bare @c verify would need a preceding declaration that outlives its one
- *  use: a run of these reads as a table of cases, the same run written longhand as prose.
- */
-#define let_verify(init, condition) \
-    do {                            \
-        init;                       \
-        verify(condition);          \
-    } while (0)
+/** As @ref expect_near , printing the @p context under the failed check. */
+template <typename actual_type_, typename wanted_type_, typename tolerance_type_, typename... args_types_>
+bool expect_near(actual_type_ const &actual, wanted_type_ const &wanted, tolerance_type_ const &tolerance,
+                 format_at_t context, args_types_ const &...args) {
+    if (expect_near(actual, wanted, tolerance, context.location)) return true;
+    print_check_context_(context, args...);
+    return false;
+}
 
-/** As @c let_verify, when the subject must also be acted on before the assertion holds - a mutation
- *  whose result is the subject itself, so there is nothing for the condition to bind. */
-#define scope_verify(init, operation, condition) \
-    do {                                         \
-        init;                                    \
-        operation;                               \
-        verify(condition);                       \
-    } while (0)
-
-/** That @p expression throws @p exception_type. The only assertion whose subject is the failure,
- *  so a passing call - or one that throws something else - is the defect it reports. */
-#define throws_verify(expression, exception_type) \
-    do {                                          \
-        try {                                     \
-            sz_unused_(expression);               \
-        }                                         \
-        catch (exception_type const &) {          \
-            break;                                \
-        }                                         \
-        verify(false);                            \
-    } while (0)
+/** Holds when @p callable throws @p exception_type_ , the one check whose subject is the failure,
+ *  so a call that returns, or throws something else, is the defect it counts. */
+template <typename exception_type_, typename callable_type_>
+bool expect_throws(callable_type_ &&callable, std::source_location where = std::source_location::current()) {
+    try {
+        callable();
+    }
+    catch (exception_type_ const &) {
+        return true;
+    }
+    catch (...) {
+    }
+    record_failed_check(where);
+    fmt::println(stderr, "    expected {} to be thrown", typeid(exception_type_).name());
+    return false;
+}
 
 #pragma endregion Assertion Helpers
 
 #pragma region Backend Tables
 
 /**
- *  @brief Reports which backend broke a check, then fails the test through the suite's oracle.
+ *  @brief Reports the backend that broke a check, counted as a failed check at the caller's line.
  *  @param[in] name The row's spelling in its family's backend table.
  *  @param[in] what What the row disagreed with: its oracle, known answer, or reference backend.
  */
-inline void fail_backend_(char const *name, char const *what) {
-    fmt::println(stderr, "Backend {} failed: {}", name, what);
-    verify(false && "A backend disagreed with its oracle, its known answer, or the reference");
+inline void fail_backend_(char const *name, char const *what,
+                          std::source_location where = std::source_location::current()) {
+    record_failed_check(where);
+    fmt::println(stderr, "    backend {} failed: {}", name, what);
 }
 
 /** The row named @p name, so a reordering cannot silently hand the differential a new reference. */
@@ -273,13 +743,11 @@ template <typename backend_type_, std::size_t count_>
 backend_type_ const &backend_named_(backend_type_ const (&backends)[count_], char const *name) {
     for (std::size_t index = 0; index != count_; ++index)
         if (std::strcmp(backends[index].name, name) == 0) return backends[index];
-    verify(false && "The backend table must carry the named reference");
+    expect_true(false, "The backend table must carry the named reference");
     return backends[0];
 }
 
 #pragma endregion Backend Tables
-
-namespace ashvardanian::stringzilla::test {
 
 /** Calls the dispatch point @p best_ over @p capabilities with the arguments of its capability
  *  kernels, whose last one, the stream, follows the mask. */
@@ -298,11 +766,11 @@ inline constexpr auto cpu_best =
     [](auto... arguments) noexcept { return call_best<best_>(default_capabilities(), arguments...); };
 
 /** Calls @p kernel, a CPU capability kernel or a @c cpu_best, whose result is the out-parameter
- *  just before the stream; verifies that it succeeded and returns that result. */
+ *  just before the stream; checks that it succeeded and returns that result. */
 template <typename result_type_, typename kernel_type_, typename... arguments_types_>
 result_type_ kernel_result(kernel_type_ const &kernel, arguments_types_... arguments) {
     result_type_ result {};
-    verify(kernel(arguments..., &result, nullptr) == sz_success_k);
+    expect_equal(kernel(arguments..., &result, nullptr), sz_success_k);
     return result;
 }
 
@@ -376,195 +844,11 @@ struct stream_t {
 
     stream_t(sz_size_t ordinal, sz_status_t (*init)(sz_size_t, sz_stream_t *), sz_status_t (*release)(sz_stream_t))
         : release(release) {
-        verify(init(ordinal, &handle) == sz_success_k);
+        expect_equal(init(ordinal, &handle), sz_success_k);
     }
     stream_t(stream_t const &) = delete;
     stream_t &operator=(stream_t const &) = delete;
     ~stream_t() noexcept { release(handle); }
-};
-
-/** A 32-bit generator seed, kept apart from counts so neither passes for the other. */
-struct seed_t {
-    std::uint32_t value = 0;
-};
-
-/** The text of the environment variable @p name, or nothing when it is unset or empty. */
-inline std::optional<std::string_view> env_text(char const *name) noexcept {
-    char const *const text = std::getenv(name);
-    if (!text || !*text) return std::nullopt;
-    return std::string_view(text);
-}
-
-/** Parses the environment variable @p name with @p parse, or returns @p fallback when it is unset
- *  or empty. Text that does not parse prints `NAME="text" does not parse, expected <expected>` and
- *  exits with status 1, which leaves crash handlers quiet. */
-template <typename value_type_, typename parse_type_>
-[[nodiscard]] value_type_ env_parsed(char const *name, value_type_ fallback, parse_type_ &&parse,
-                                     char const *expected) noexcept {
-    std::optional<std::string_view> const text = env_text(name);
-    if (!text) return fallback;
-    if (std::optional<value_type_> value = parse(*text)) return *std::move(value);
-    fmt::println(stderr, "{}=\"{}\" does not parse, expected {}", name, *text, expected);
-    std::exit(1);
-}
-
-/** A 32-bit seed, or "random" for a fresh draw from @c std::random_device. */
-inline std::optional<seed_t> parse_seed(std::string_view text) noexcept {
-    if (text == "random") return seed_t {static_cast<std::uint32_t>(std::random_device {}())};
-    std::uint32_t seed = 0;
-    auto const [end, error] = std::from_chars(text.data(), text.data() + text.size(), seed);
-    if (error != std::errc {} || end != text.data() + text.size()) return std::nullopt;
-    return seed_t {seed};
-}
-
-inline seed_t env_seed(char const *name, seed_t fallback) noexcept {
-    return env_parsed(name, fallback, parse_seed, "an unsigned integer or random");
-}
-
-/** A requested GPU, before checking whether its runtime and ordinal are available. */
-struct device_selection_t {
-    sz::device_kind_t backend;
-    std::size_t ordinal;
-};
-
-inline std::string_view device_name(sz::device_kind_t kind) noexcept {
-    switch (kind) {
-    case sz::device_kind_t::cpu_k: return "cpu";
-    case sz::device_kind_t::cuda_k: return "cuda";
-    case sz::device_kind_t::rocm_k: return "rocm";
-    case sz::device_kind_t::metal_k: return "metal";
-    }
-    return "unrecognized";
-}
-
-inline std::optional<std::vector<device_selection_t>> parse_devices(std::string_view text) {
-    std::vector<device_selection_t> devices;
-    do {
-        std::size_t const comma = text.find(',');
-        std::string_view const entry = text.substr(0, comma);
-        std::size_t const colon = entry.find(':');
-        if (colon == std::string_view::npos) return std::nullopt;
-        std::string_view const vendor = entry.substr(0, colon);
-        sz::device_kind_t backend;
-        if (vendor == "cuda") backend = sz::device_kind_t::cuda_k;
-        else if (vendor == "rocm") backend = sz::device_kind_t::rocm_k;
-        else if (vendor == "metal") backend = sz::device_kind_t::metal_k;
-        else return std::nullopt;
-        std::string_view const number = entry.substr(colon + 1);
-        std::size_t ordinal = 0;
-        auto const [end, error] = std::from_chars(number.data(), number.data() + number.size(), ordinal);
-        if (error != std::errc {} || end != number.data() + number.size()) return std::nullopt;
-        devices.push_back({backend, ordinal});
-        if (comma == std::string_view::npos) return devices;
-        text.remove_prefix(comma + 1);
-    } while (!text.empty());
-    return std::nullopt;
-}
-
-/** Every test setting, with its default as the initializer, filled once by @c read_settings. */
-struct settings_t {
-    std::optional<std::vector<device_selection_t>> devices;
-
-    /** Seed every test's generator is mixed from. */
-    seed_t seed {42};
-
-    /** Multiplier for each test's own iteration counts. */
-    double iterations_scale = 1.0;
-
-    /** Tests to run, by ECMAScript regex or else substring; points into @c environ. */
-    std::string_view filter;
-    std::optional<std::regex> filter_regex;
-
-    /** The binary's @c argv[0], which closes every rerun line. */
-    std::string_view program;
-
-    /** Whether @p name passes the filter. */
-    bool selects(std::string_view name) const {
-        if (filter.empty()) return true;
-        if (filter_regex) return std::regex_search(name.begin(), name.end(), *filter_regex);
-        return name.find(filter) != std::string_view::npos;
-    }
-};
-
-/** Reads every @c settings_t variable for the binary named @p program. */
-inline settings_t read_settings(char const *program) noexcept {
-    settings_t settings;
-    if (env_text("STRINGZILLA_DEVICES"))
-        settings.devices = env_parsed("STRINGZILLA_DEVICES", std::vector<device_selection_t> {}, parse_devices,
-                                      "comma-separated devices such as cuda:0,rocm:1");
-    settings.program = program;
-    auto const parse_scale = [](std::string_view text) -> std::optional<double> {
-        std::string const terminated(text);
-        char *end = nullptr;
-        double const value = std::strtod(terminated.c_str(), &end);
-        if (end != terminated.c_str() + terminated.size() || !(value > 0) || !std::isfinite(value)) return std::nullopt;
-        return value;
-    };
-    settings.filter = env_text("STRINGZILLA_FILTER").value_or("");
-    if (!settings.filter.empty()) {
-#if defined(__cpp_exceptions) && __cpp_exceptions
-        try {
-            settings.filter_regex.emplace(settings.filter.begin(), settings.filter.end());
-        }
-        catch (std::regex_error const &) {
-        }
-#else
-        settings.filter_regex.emplace(settings.filter.begin(), settings.filter.end());
-#endif
-    }
-    settings.seed = env_seed("STRINGZILLA_SEED", settings.seed);
-    settings.iterations_scale = env_parsed("STRINGZILLA_SCALE", settings.iterations_scale, parse_scale,
-                                           "a positive number like 0.1 or 10");
-    return settings;
-}
-
-/**
- *  @brief The seed of the test named @p name in a run seeded with @p seed.
- *
- *  FNV-1a over @c std::uint32_t is exact on every platform, like @c std::seed_seq, and never
- *  touches the kernels under test, unlike @c sz_hash_best. The harness must not draw its inputs
- *  through the kernels it validates, and it must land on the same stream everywhere, or
- *  `STRINGZILLA_SEED=7` stops meaning the same bytes on Arm as it does on x86.
- */
-constexpr std::uint32_t mix_seed(seed_t seed, std::string_view name) noexcept {
-    std::uint32_t mixed = seed.value ^ 2166136261u;
-    for (char const character : name) mixed = (mixed ^ static_cast<unsigned char>(character)) * 16777619u;
-    return mixed;
-}
-
-/** What one test draws its inputs from and sizes its loops by, built for it by @c run_test. */
-struct test_context_t {
-    std::mt19937 generator;
-    double iterations_scale = 1.0;
-
-    /** Scales a @p baseline iteration count by @c STRINGZILLA_SCALE, never below 1. */
-    std::size_t iterations(std::size_t baseline) const noexcept {
-        double const scaled = baseline * iterations_scale;
-        return scaled < 1.0 ? 1 : static_cast<std::size_t>(scaled);
-    }
-
-    /** Baseline for a loop whose work grows with the square of its trip count, like a sweep over
-     *  lengths that re-scans a growing buffer, so doubling the multiplier only doubles the work. */
-    std::size_t iterations_quadratic(std::size_t baseline) const noexcept {
-        std::size_t const work = iterations(baseline * baseline);
-        std::size_t bound = 1;
-        while (bound * bound < work) ++bound;
-        return bound;
-    }
-
-    /**
-     *  @brief Step for walking an exhaustive space, so the multiplier dials sweeps, not just loops.
-     *
-     *  Striding rather than truncating keeps the far end of the space - where the window-edge cases
-     *  live - reachable at a low multiplier. The sweep completes at the 10× stress point rather
-     *  than at the default, so a default run samples every space and a stress run covers them.
-     */
-    std::size_t sweep_stride(std::size_t complete) const noexcept {
-        double const coverage = iterations_scale / 10.0;
-        if (coverage >= 1.0 || complete == 0) return 1;
-        std::size_t const wanted = static_cast<std::size_t>(complete * coverage);
-        return wanted < 1 ? complete : complete / wanted;
-    }
 };
 
 /** The @p step -th value of a rotation over @p count items that also advances a phase each full
@@ -610,7 +894,8 @@ struct uniform_u8_distribution_t {
 };
 
 /** Fills @p text with bytes drawn uniformly from @p alphabet, or from 1 to 255 when it is empty. */
-inline void randomize_string(std::mt19937 &generator, std::span<char> text, std::string_view alphabet = {}) noexcept {
+inline void randomize_string(split_mix_generator_t &generator, std::span<char> text,
+                             std::string_view alphabet = {}) noexcept {
     if (alphabet.empty()) {
         uniform_u8_distribution_t distribution;
         std::generate(text.begin(), text.end(), [&]() -> char { return distribution(generator); });
@@ -620,7 +905,7 @@ inline void randomize_string(std::mt19937 &generator, std::span<char> text, std:
     std::generate(text.begin(), text.end(), [&]() -> char { return alphabet[distribution(generator)]; });
 }
 
-inline std::string random_string(std::mt19937 &generator, std::size_t length,
+inline std::string random_string(split_mix_generator_t &generator, std::size_t length,
                                  std::string_view alphabet) noexcept(false) {
     std::string result(length, '\0');
     randomize_string(generator, result, alphabet);
@@ -635,7 +920,7 @@ inline std::string repeat(std::string const &patten, std::size_t count) noexcept
 
 /** Randomly slices a string into consecutive parts and passes those to @p slice_callback. */
 template <typename slice_callback_type_>
-inline void iterate_in_random_slices(std::mt19937 &generator, std::string const &text,
+inline void iterate_in_random_slices(split_mix_generator_t &generator, std::string const &text,
                                      slice_callback_type_ &&slice_callback) {
     std::size_t remaining = text.size();
     while (remaining > 0) {
@@ -680,8 +965,8 @@ inline void with_guarded_buffer_(std::size_t length, body_type_ &&body) {
     unsigned char *usable = storage.data() + guard_width;
     body(reinterpret_cast<sz_ptr_t>(usable), length);
     for (std::size_t index = 0; index != guard_width; ++index) {
-        verify(storage[index] == canary_value && "front canary overwritten");
-        verify(storage[guard_width + length + index] == canary_value && "back canary overwritten");
+        expect_equal(storage[index], canary_value, "front canary overwritten");
+        expect_equal(storage[guard_width + length + index], canary_value, "back canary overwritten");
     }
 }
 
@@ -704,7 +989,7 @@ inline void with_guarded_span_(std::size_t count, std::size_t payload_bytes, bod
 
 /** An allocator refusing every request, for asserting a kernel reports @c sz_bad_alloc_k and leaves
  *  its outputs alone. */
-inline sz_allocator_t refusing_allocator_() noexcept {
+inline sz_allocator_t refusing_c_allocator() noexcept {
     sz_allocator_t refusing;
     refusing.allocate = +[](sz_size_t, void *, sz_stream_t) -> void * { return nullptr; };
     refusing.reallocate = +[](void *, sz_size_t, sz_size_t, void *, sz_stream_t) -> void * { return nullptr; };
@@ -770,7 +1055,7 @@ inline std::vector<std::string> alphabet_characters(std::string const &alphabet)
 }
 
 /** Concatenates @p length characters drawn uniformly from @p characters. */
-inline std::string random_string(std::mt19937 &generator, std::size_t length,
+inline std::string random_string(split_mix_generator_t &generator, std::size_t length,
                                  std::vector<std::string> const &characters) noexcept(false) {
     std::uniform_int_distribution<std::size_t> distribution(0, characters.size() - 1);
     std::string result;
@@ -845,7 +1130,8 @@ struct fuzzy_config_t {
           max_string_length(max_string_length) {}
 };
 
-inline void randomize_strings(std::mt19937 &generator, fuzzy_config_t config, std::vector<std::string> &array) {
+inline void randomize_strings(split_mix_generator_t &generator, fuzzy_config_t config,
+                              std::vector<std::string> &array) {
     array.resize(config.batch_size);
 
     std::vector<std::string> const characters = alphabet_characters(config.alphabet);
@@ -874,146 +1160,38 @@ inline void print(sz::device_t const &device) {
     fmt::println("Device: {}:{}", device_name(device.kind()), device.ordinal());
 }
 
-/** Prints each setting as "- Name: value", in the grammar it parses from, then a rerun template. */
-inline void print(settings_t const &settings) {
-    if (settings.devices) {
-        for (device_selection_t const &device : *settings.devices)
-            fmt::println("- Device: {}:{}", device_name(device.backend), device.ordinal);
-    }
-    else fmt::println("- Devices: auto");
-    fmt::println("- Seed: {}", settings.seed.value);
-    fmt::println("- Filter: {}", settings.filter.empty() ? std::string_view("none") : settings.filter);
-    fmt::println("- Scale: {}", settings.iterations_scale);
-    fmt::println("- Rerun one test: STRINGZILLA_SEED={} STRINGZILLA_FILTER='^<name>$' {}", settings.seed.value,
-                 settings.program);
-}
-
-/** The facts this binary and this machine report: the library version, the capabilities compiled
- *  in and detected. */
-struct machine_t {
-    std::array<unsigned, 3> version {STRINGZILLA_VERSION_MAJOR, STRINGZILLA_VERSION_MINOR, STRINGZILLA_VERSION_PATCH};
-    sz_capability_t compiled = 0;
-    sz_capability_t detected = 0;
-};
-
-/** Probes the capabilities @c machine_t reports. */
-inline machine_t probe_machine() noexcept {
-    machine_t machine;
-    sz_capabilities_compiled_cpu(&machine.compiled), sz_capabilities_detected_cpu(&machine.detected);
-    return machine;
-}
-
-/** Prints the version line, the capabilities as "- Compiled for:" and "- This machine:", and in
- *  GPU builds "- CUDA:", "- ROCm:" or "- Metal:". */
-inline void print(machine_t const &machine, std::FILE *stream = stdout) {
-    char compiled[STRINGZILLA_CAPABILITIES_NAME_CAPACITY], detected[STRINGZILLA_CAPABILITIES_NAME_CAPACITY];
-    sz_capabilities_name(machine.compiled, compiled, sizeof(compiled));
-    sz_capabilities_name(machine.detected, detected, sizeof(detected));
-    fmt::println(stream, "StringZilla {}.{}.{}", machine.version[0], machine.version[1], machine.version[2]);
-    fmt::println(stream, "- Compiled for: {}", compiled);
-    fmt::println(stream, "- This machine: {}", detected);
-}
-
-/** Everything a test reads, built once in @c main and passed down by reference. */
-struct environment_t {
-    settings_t settings;
-    machine_t machine;
-};
-
 #pragma region Test Runner
 
-/** Prints a backtrace on a fatal signal, so a crashing/aborting kernel self-localizes instead of
- *  dying silently - especially under output redirection in CI. Writes raw, since the crashing
- *  thread may already hold the stdio lock that @c fmt::println takes. */
-inline void test_fatal_signal_handler(int signal_number) noexcept {
-    std::string_view constexpr message = "\n*** Fatal signal - backtrace follows ***\n";
-#if STRINGZILLA_OS_WINDOWS_
-    [[maybe_unused]] auto const written = _write(2, message.data(), static_cast<unsigned>(message.size()));
-#else
-    [[maybe_unused]] auto const written = ::write(STDERR_FILENO, message.data(), message.size());
-#endif
-#if (defined(__GLIBC__) || STRINGZILLA_OS_APPLE_) && __has_include(<execinfo.h>)
-    void *frames[64];
-    int const frames_count = backtrace(frames, sizeof(frames) / sizeof(frames[0]));
-    backtrace_symbols_fd(frames, frames_count, STDERR_FILENO);
-#endif
-    std::signal(signal_number, SIG_DFL);
-    std::raise(signal_number);
-}
-
-/** Installs the fatal-signal backtrace handler and line-buffers stdout. Shared by the serial
- *  @c .cpp and CUDA @c .cu test entry points; call once from @c main. */
-inline void install_test_signal_handlers() noexcept {
-    // Line-buffer, so progress survives a crash under output redirection.
-    // Size must be nonzero: Windows ucrt fast-fails on a zero-sized buffering mode.
-    std::setvbuf(stdout, nullptr, _IOLBF, BUFSIZ);
-    for (int signal_number : {SIGSEGV, SIGABRT, SIGILL, SIGFPE}) std::signal(signal_number, test_fatal_signal_handler);
-#if defined(SIGBUS)
-    std::signal(SIGBUS, test_fatal_signal_handler);
-#endif
-}
-
 /**
- *  @brief Runs one named test: honors @c STRINGZILLA_FILTER, times it, and reports the outcome.
- *  @return The number of failures: 0 on success or when skipped, 1 on a failed check or a thrown
- *      exception, which are reported with the line that reruns the test alone.
+ *  @brief The case adapter of the kernels that need @c needed : each case runs where @c detected
+ *      has it, and otherwise skips as <tt>needs sz_cap_<capability>_k</tt>.
  *
- *  A test taking a @c test_context_t draws from a generator seeded by @c mix_seed, so its inputs
- *  never depend on which tests ran first. Library asserts via @c sz_assert_ still abort the
- *  process, self-localizing through the installed signal handler.
+ *  <tt>#if STRINGZILLA_TARGET_<CAPABILITY></tt> says a capability's kernels are built, and the
+ *  gate says whether this machine runs them, as in
+ *  <tt>run_test_case("check_find_unit_(find_haswell)", haswell, body)</tt>. A @p body taking a
+ *  generator gets one keyed to its case.
  */
-template <typename function_type_>
-inline std::size_t run_test(settings_t const &settings, std::string_view name,
-                            function_type_ &&test_function) noexcept {
-    if (!settings.selects(name)) {
-        fmt::println("- {} ... skipped (STRINGZILLA_FILTER)", name);
-        return 0;
-    }
-    fmt::println("- {} ...", name);
-    test_context_t context {std::mt19937(mix_seed(settings.seed, name)), settings.iterations_scale};
-    auto const start = std::chrono::steady_clock::now();
-    try {
-        if constexpr (std::is_invocable_v<function_type_ &, test_context_t &>) test_function(context);
-        else test_function();
-    }
-    catch (std::exception const &error) {
-        fmt::println(stderr, "- {} ... FAILED: {}", name, error.what());
-        fmt::println(stderr, "  rerun: STRINGZILLA_SEED={} STRINGZILLA_FILTER='^{}$' {}", settings.seed.value, name,
-                     settings.program);
-        return 1;
-    }
-    double const seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-    fmt::println("- {} ... ok ({:.2f} s)", name, seconds);
-    return 0;
-}
+struct capability_gate_t {
+    sz_capability_t needed = 0;
+    sz_capability_t detected = 0;
+    char skip_reason[STRINGZILLA_CAPABILITIES_NAME_CAPACITY + 16] = "needs sz_cap_";
 
-/**
- *  @brief Runs an architecture's kernel cross-checks via @c run_test, a section per capability.
- *
- *  `#if STRINGZILLA_TARGET_<CAPABILITY>` says a capability's kernels are built, and @c section says
- *  whether this CPU runs them, announcing once a section it cannot run and skipping its checks.
- */
-struct cross_section_t {
-    environment_t const &env;
-    sz_capability_t detected = env.machine.detected;
-    bool runnable = true;
-    std::size_t failures = 0;
-
-    explicit cross_section_t(environment_t const &env) noexcept : env(env) {}
-
-    /** Opens the section of the kernels that need @p capability. */
-    void section(std::string_view title, sz_capability_t capability) noexcept {
-        runnable = (detected & capability) != 0;
-        if (runnable) return fmt::println("\n{}:", title);
-        char missing_names[STRINGZILLA_CAPABILITIES_NAME_CAPACITY];
-        sz_capabilities_name(capability & ~detected, missing_names, sizeof(missing_names));
-        fmt::println("\n{}: skipped, {} not detected", title, missing_names);
+    explicit capability_gate_t(sz_capability_t needed, sz_capability_t detected = probe_machine().detected) noexcept
+        : needed(needed), detected(detected) {
+        constexpr std::size_t prefix = sizeof("needs sz_cap_") - 1;
+        sz_size_t length = sz_capabilities_name(needed, skip_reason + prefix, sizeof(skip_reason) - prefix - 3);
+        std::memcpy(skip_reason + prefix + length, "_k", 3);
     }
 
-    /** Runs @p test as @c run_test does, unless this CPU lacks the section's capability. */
-    template <typename function_type_>
-    void operator()(std::string_view name, function_type_ &&test) {
-        if (runnable) failures += run_test(env.settings, name, std::forward<function_type_>(test));
+    template <typename body_type_>
+    case_result_t operator()(body_type_ &&body) const {
+        if ((detected & needed) == 0) return case_result_t::skipped(skip_reason);
+        if constexpr (std::is_invocable_v<body_type_ &, split_mix_generator_t &>) {
+            split_mix_generator_t generator {case_stream_key()};
+            body(generator);
+        }
+        else body();
+        return {};
     }
 };
 
@@ -1021,16 +1199,16 @@ struct cross_section_t {
 
 #pragma region Kernel Cross Checks
 
-std::size_t test_cross_serial(environment_t const &env);
-std::size_t test_cross_x8664(environment_t const &env);
-std::size_t test_cross_arm64(environment_t const &env);
-std::size_t test_cross_riscv64(environment_t const &env);
-std::size_t test_cross_loongarch64(environment_t const &env);
-std::size_t test_cross_ppc64(environment_t const &env);
-std::size_t test_cross_wasm(environment_t const &env);
-std::size_t test_cross_cuda(environment_t const &env, std::size_t ordinal);
-std::size_t test_cross_rocm(environment_t const &env, std::size_t ordinal);
-std::size_t test_cross_metal(environment_t const &env, std::size_t ordinal);
+void test_cross_serial();
+void test_cross_x8664();
+void test_cross_arm64();
+void test_cross_riscv64();
+void test_cross_loongarch64();
+void test_cross_ppc64();
+void test_cross_wasm();
+void test_cross_cuda(std::size_t ordinal);
+void test_cross_rocm(std::size_t ordinal);
+void test_cross_metal(std::size_t ordinal);
 
 #pragma endregion Kernel Cross Checks
 
@@ -1048,16 +1226,16 @@ void test_byteset_unit();
 
 void test_hash_unit();
 void test_hash_safety();
-void test_hash_all(test_context_t &context);
-void test_hash_multiseed_all(test_context_t &context);
+void test_hash_all();
+void test_hash_multiseed_all();
 
 #pragma endregion Hashing
 
 #pragma region Ciphers
 
 void test_cipher_unit();
-void test_cipher_safety(test_context_t &context);
-void test_cipher_all(test_context_t &context);
+void test_cipher_safety();
+void test_cipher_all();
 
 #pragma endregion Ciphers
 
@@ -1065,34 +1243,34 @@ void test_cipher_all(test_context_t &context);
 
 void test_utf8_runes_unit();
 void test_utf8_runes_scripts_unit();
-void test_utf8_runes_safety(test_context_t &context);
-void test_utf8_runes_all(test_context_t &context);
+void test_utf8_runes_safety();
+void test_utf8_runes_all();
 void test_utf8_tokens_unit();
 void test_utf8_tokens_scripts_unit();
-void test_utf8_tokens_safety(test_context_t &context);
-void test_utf8_tokens_all(test_context_t &context);
+void test_utf8_tokens_safety();
+void test_utf8_tokens_all();
 void test_utf8_wordbreaks_unit();
 void test_utf8_wordbreaks_rules();
-void test_utf8_wordbreaks_safety(test_context_t &context);
-void test_utf8_wordbreaks_all(test_context_t &context);
+void test_utf8_wordbreaks_safety();
+void test_utf8_wordbreaks_all();
 void test_utf8_graphemes_unit();
 void test_utf8_graphemes_rules();
-void test_utf8_graphemes_safety(test_context_t &context);
-void test_utf8_graphemes_all(test_context_t &context);
+void test_utf8_graphemes_safety();
+void test_utf8_graphemes_all();
 void test_utf8_sentences_unit();
 void test_utf8_sentences_rules();
-void test_utf8_sentences_safety(test_context_t &context);
-void test_utf8_sentences_all(test_context_t &context);
+void test_utf8_sentences_safety();
+void test_utf8_sentences_all();
 void test_utf8_linebreaks_unit();
 void test_utf8_linebreaks_rules();
-void test_utf8_linebreaks_safety(test_context_t &context);
-void test_utf8_linebreaks_all(test_context_t &context);
+void test_utf8_linebreaks_safety();
+void test_utf8_linebreaks_all();
 void test_utf8_norm_unit();
-void test_utf8_norm_safety(test_context_t &context);
-void test_utf8_norm_all(test_context_t &context);
+void test_utf8_norm_safety();
+void test_utf8_norm_all();
 void test_utf8_delimiters_unit();
-void test_utf8_delimiters_safety(test_context_t &context);
-void test_utf8_delimiters_all(test_context_t &context);
+void test_utf8_delimiters_safety();
+void test_utf8_delimiters_all();
 
 #pragma endregion UTF8
 
@@ -1101,8 +1279,8 @@ void test_utf8_delimiters_all(test_context_t &context);
 void test_utf8_uncased_unit();
 void test_utf8_uncased_scripts_unit();
 void test_utf8_uncased_regressions_unit();
-void test_utf8_uncased_all(test_context_t &context);
-void test_utf8_uncased_safety(test_context_t &context);
+void test_utf8_uncased_all();
+void test_utf8_uncased_safety();
 
 #pragma endregion Uncased UTF8
 
@@ -1112,7 +1290,7 @@ template <typename string_type>
 void test_ascii_unit();
 
 void test_strings_unit();
-void test_strings_all(test_context_t &context);
+void test_strings_all();
 void test_strings_safety();
 
 template <typename string_type>
@@ -1129,8 +1307,8 @@ void test_extensions_reads_unit();
 void test_extensions_updates_unit();
 void test_string_constructors_unit();
 void test_string_reserve_unit();
-void test_memory_stability_equivalence(test_context_t &context, std::size_t length);
-void test_string_updates_equivalence(test_context_t &context, std::size_t repetitions = 1024);
+void test_memory_stability_equivalence(std::size_t length);
+void test_string_updates_equivalence(std::size_t repetitions);
 
 #pragma endregion String Class and STL Compatibility
 
@@ -1140,36 +1318,35 @@ void test_compare_unit();
 void test_extensions_ranges_unit();
 void test_find_unit();
 void test_find_safety();
-void test_find_all(test_context_t &context);
-void test_find_misaligned_equivalence(test_context_t &context);
-void test_lookup_equivalence(test_context_t &context, std::size_t lookup_tables_to_try = 32,
-                             std::size_t slices_per_table = 16);
+void test_find_all();
+void test_find_misaligned_equivalence();
+void test_lookup_equivalence(std::size_t lookup_tables_to_try, std::size_t slices_per_table);
 
 #pragma endregion Search and Comparison
 
 #pragma region Sequence Algorithms
 
-void test_sort_all(test_context_t &context);
+void test_sort_all();
 void test_sort_unit();
 void test_sort_safety();
-void test_sort_reference_equivalence(test_context_t &context);
+void test_sort_reference_equivalence();
 void test_intersect_unit();
-void test_intersect_equivalence(test_context_t &context);
+void test_intersect_equivalence();
 void test_levenshtein_unit();
-void test_levenshtein_all(test_context_t &context);
-void test_levenshtein_safety(test_context_t &context);
+void test_levenshtein_all();
+void test_levenshtein_safety();
 void test_overlap_unit();
-void test_overlap_all(test_context_t &context);
-void test_overlap_safety(test_context_t &context);
+void test_overlap_all();
+void test_overlap_safety();
 void test_substrings_unit();
-void test_substrings_all(test_context_t &context);
-void test_substrings_safety(test_context_t &context);
+void test_substrings_all();
+void test_substrings_safety();
 void test_regex_unit();
-void test_regex_all(test_context_t &context);
-void test_regex_safety(test_context_t &context);
+void test_regex_all();
+void test_regex_safety();
 void test_subdocuments_unit();
-void test_subdocuments_all(test_context_t &context);
-void test_subdocuments_safety(test_context_t &context);
+void test_subdocuments_all();
+void test_subdocuments_safety();
 
 #pragma endregion Sequence Algorithms
 

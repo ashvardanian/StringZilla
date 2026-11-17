@@ -9,7 +9,7 @@ function; adversarial malformed UTF-8 safety and SIMD window-seam and byte-offse
 bit-exact conformance against every case in the official LineBreakTest, Line_Break class-adjacency
 pairs, differential fuzzing, and realistic multi-script prose; and cross-backend agreement on
 realistic, malformed, and lane-straddling inputs.
-Compares against: the official UCD LineBreakTest, the uniseg library with broad-agreement tolerance
+Baselines: the official UCD LineBreakTest, the uniseg library with broad-agreement tolerance
 for its default UAX-14 tailorings, and cross-backend self-consistency.
 
 Run:
@@ -30,7 +30,7 @@ from base import (
     assert_backends_agree,
     malformed_utf8_corpus,
     representatives_by_class,
-    scale_iterations,
+    scaled_iterations,
     vector_width_bracketing_strings,
 )
 from utf8_helpers import (
@@ -166,7 +166,7 @@ def test_utf8_linewrap_class_adjacency(line_break_props):
     against uniseg. Line breaking has the largest property alphabet, about 40 classes, so this derives far
     more class interactions than the palette; agreement-gated, not bit-exact, because uniseg applies
     default UAX-14 tailorings StringZilla may differ on."""
-    uniseg_linebreak = pytest.importorskip("uniseg.linebreak", reason="uniseg not installed")
+    uniseg_linebreak = pytest.importorskip("uniseg.linebreak", reason="uniseg is not installed")
     representatives = representatives_by_class(line_break_props, count=1)
     cases = class_adjacency_strings(representatives, arity=2)
 
@@ -192,12 +192,12 @@ def test_utf8_linewrap_class_adjacency(line_break_props):
 
 def test_utf8_linewrap_differential_uniseg(rng: Random):
     """Differential fuzz against ``uniseg.linebreak`` for line-break-opportunity segments."""
-    uniseg_linebreak = pytest.importorskip("uniseg.linebreak", reason="uniseg not installed")
+    uniseg_linebreak = pytest.importorskip("uniseg.linebreak", reason="uniseg is not installed")
 
     def ref_segments(text):
         return list(uniseg_linebreak.line_break_units(text))
 
-    iterations = scale_iterations(2000)
+    iterations = scaled_iterations(2000)
     failures = []
     for _ in range(iterations):
         text = "".join(rng.choice(SEGMENTATION_PALETTE) for _ in range(rng.randint(1, 24)))
@@ -215,7 +215,7 @@ def test_utf8_linewrap_differential_uniseg(rng: Random):
     )
 
 
-def test_utf8_linebreaks_prose():
+def test_utf8_prose_linebreak_counts():
     """Realistic multi-script paragraphs: the UAX-14 line-break count matches the ICU root oracle, and
     segments tile."""
     from utf8_helpers import (
@@ -258,7 +258,7 @@ LINEBREAK_REALISTIC_TEXTS = [
 @pytest.mark.parametrize(
     "text", LINEBREAK_REALISTIC_TEXTS + list(malformed_utf8_corpus()) + vector_width_bracketing_strings()
 )
-def test_utf8_linebreaks_backend_differential(backend_results, text):
+def test_utf8_linebreaks_agree_across_backends(backend_results, text):
     """`utf8_linebreaks` agrees across every `capability_sweep()` backend on realistic, malformed, and
     lane-straddling inputs, compared as raw segment bytes so malformed UTF-8 sweeps safely; a divergence
     is a kernel bug, not a binding bug."""

@@ -8,7 +8,7 @@ Covers: Strings.sorted() and argsort() over Strings collections, repr/str trunca
 ordering, uncased case-folded sorting, the argsort(out=...) buffer protocol and its rejections,
 Strings.intersect() position pairing and duplicate collapsing, sampling, and a batch-size and
 corpus-shape sweep across every capability_sweep() backend.
-Compares against: CPython sorted() in byte mode, and cross-backend permutation agreement across
+Baselines: CPython sorted() in byte mode, and cross-backend permutation agreement across
 every capability_sweep() backend.
 
 Run:
@@ -33,18 +33,14 @@ from base import (
 
 from stringzilla import String, Strings
 
-# NumPy is optional; the naked `except` also catches PyPy, which fails this import with an error
-# other than `ImportError`.
-try:
+if numpy_available:
     import numpy as np
-except:  # noqa: E722
-    pass
 
 
 # region Unit
 
 
-def test_unit_strings_sequence():
+def test_strings_sequence_sorts_and_samples_like_a_list():
     """`Strings` sequence smoke test: splitlines, repr/str truncation on large arrays, sorted()/argsort()
     with reverse and top-K, uncased stable ordering that keeps fold-equal strings in input order, the
     keyword-only argument surface, and sample()."""
@@ -84,11 +80,8 @@ def test_unit_strings_sequence():
     assert ["Banana", "BANANA", "apple", "Apple"] == list(mixed.sorted(uncased=True, reverse=True))
 
     # Keyword-only: positional arguments are rejected.
-    try:
+    with pytest.raises(TypeError):
         lines.sorted(True)
-        assert False, "sorted() should reject positional arguments"
-    except TypeError:
-        pass
 
     # Sampling an array
     sampled = lines.sample(100, seed=42)
@@ -96,7 +89,7 @@ def test_unit_strings_sequence():
     assert "p4" not in sampled
 
 
-def test_unit_strings_intersect():
+def test_strings_intersect_maps_each_shared_value_once():
     """`Strings.intersect` returns parallel position tuples mapping equal strings across two collections,
     matching each distinct shared value exactly once even when either side holds duplicates."""
     first = String("banana\napple\ncherry").splitlines()
@@ -122,14 +115,11 @@ def test_unit_strings_intersect():
     assert len(dup_ours) == len(dup_theirs) == 1
 
     # Only Strings-to-Strings intersections are supported.
-    try:
+    with pytest.raises(TypeError):
         first.intersect(["banana"])
-        assert False, "intersect() should reject non-Strings arguments"
-    except TypeError:
-        pass
 
 
-def test_unit_strings_argsort_out():
+def test_strings_argsort_writes_into_out():
     """`argsort(out=...)` writes the permutation into a caller pointer-width buffer and returns it."""
     import array
     import struct
@@ -153,7 +143,7 @@ def test_unit_strings_argsort_out():
     # `sorted()` has no `out=`.
     with pytest.raises(TypeError):
         strings.argsort(out=array.array("H", [0] * n))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="out holds 4 entries"):
         strings.argsort(out=array.array(index_code, [0] * (n - 1)))
     with pytest.raises((TypeError, BufferError)):
         strings.argsort(out=bytes(8 * n))
@@ -203,14 +193,14 @@ def assert_sort_family_matches_oracles(
     assert sorted_order == expected_full[:expected_count]
 
 
-@pytest.mark.parametrize("list_length", [10, 20, 30, 40, 50])
+@pytest.mark.parametrize("count", [10, 20, 30, 40, 50])
 @pytest.mark.parametrize("part_length", [5, 10])
 @pytest.mark.parametrize("variability", [2, 3])
-def test_fuzzy_sorting(list_length: int, part_length: int, variability: int, rng: Random):
+def test_fuzzy_sorting(count: int, part_length: int, variability: int, rng: Random):
     """Fuzzed `Strings.argsort()`/`.sorted()` agree with Python's native `sorted()` on randomized batches:
     the pairwise `<`/`>` comparator, the permutation, and the re-split substrings all match, and the
     `argsort(out=...)` NumPy buffer path returns the same permutation."""
-    native_list = [get_random_string(rng, variability=variability, length=part_length) for _ in range(list_length)]
+    native_list = [get_random_string(rng, variability=variability, length=part_length) for _ in range(count)]
     native_joined = ".".join(native_list)
     big_joined = String(native_joined)
     big_list = big_joined.split(".")
@@ -234,13 +224,13 @@ def test_fuzzy_sorting(list_length: int, part_length: int, variability: int, rng
 
     native_ordered = sorted(native_list)
     native_order = big_list.argsort()
-    for i in range(list_length):
+    for i in range(count):
         assert native_ordered[i] == native_list[native_order[i]], "Order is wrong"
         assert native_ordered[i] == str(big_list[int(native_order[i])]), "Split is wrong?!"
 
     # The buffer-protocol `out=` path must produce the same permutation as the tuple path.
     if numpy_available:
-        out = np.zeros(list_length, dtype=np.uintp)
+        out = np.zeros(count, dtype=np.uintp)
         returned = big_list.argsort(out=out)
         assert returned is out
         assert out.tolist() == list(native_order)
@@ -297,32 +287,32 @@ BATCH_BUILDERS = {
 
 @pytest.mark.parametrize("uncased", [False, True])
 @pytest.mark.parametrize("batch_name", sorted(BATCH_BUILDERS))
-@pytest.mark.parametrize("batch_size", BATCH_SIZES)
-def test_unit_backend_differential_sorted_argsort(
-    backend_results, rng: Random, batch_size: int, batch_name: str, uncased: bool
+@pytest.mark.parametrize("count", BATCH_SIZES)
+def test_sorted_and_argsort_agree_across_backends(
+    backend_results, rng: Random, count: int, batch_name: str, uncased: bool
 ):
     """`Strings.sorted()`/`.argsort()` agree across every `capability_sweep()` backend and with CPython
     `sorted()`, byte mode or case-folded when `uncased=True`, across batch sizes bracketing
     SIMD/threading thresholds and the all-equal, single-char, length-1, and empty-mixed corner shapes;
     a divergence is a kernel bug, not a binding bug."""
-    native_list = BATCH_BUILDERS[batch_name](rng, batch_size)
+    native_list = BATCH_BUILDERS[batch_name](rng, count)
     assert_sort_family_matches_oracles(backend_results, native_list, uncased=uncased)
 
 
 @pytest.mark.parametrize("reverse", [False, True])
 @pytest.mark.parametrize("top", [None, 1, 5, 50, 10_000])
-@pytest.mark.parametrize("batch_size", BATCH_SIZES)
-def test_unit_backend_differential_sorted_argsort_top_reverse(
-    backend_results, rng: Random, batch_size: int, top: int | None, reverse: bool
+@pytest.mark.parametrize("count", BATCH_SIZES)
+def test_partial_and_reverse_sorts_agree_across_backends(
+    backend_results, rng: Random, count: int, top: int | None, reverse: bool
 ):
     """`top=K` partial sort and `reverse=True` descending sort agree across every `capability_sweep()`
     backend and with CPython `sorted()[:K]`, for `top` values from below the batch size up to 10_000,
     far beyond it; a divergence is a kernel bug, not a binding bug."""
-    native_list = random_batch(rng, batch_size)
+    native_list = random_batch(rng, count)
     assert_sort_family_matches_oracles(backend_results, native_list, top=top, reverse=reverse)
 
 
-def test_unit_backend_differential_sorted_argsort_empty(backend_results):
+def test_empty_strings_sort_to_empty_on_every_backend(backend_results):
     """An empty `Strings` collection sorts to empty on every `capability_sweep()` backend for every
     `uncased`/`reverse` combination; a divergence is a kernel bug, not a binding bug."""
     for uncased in (False, True):

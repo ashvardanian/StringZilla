@@ -114,7 +114,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "std")]
-    fn intersection_default() {
+    fn intersection_finds_the_shared_strings() {
         // Two slices of string literals.
         let set1 = ["banana", "apple", "cherry"];
         let set2 = ["cherry", "orange", "pineapple", "banana"];
@@ -143,7 +143,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "std")]
-    fn intersection_by_custom() {
+    fn intersection_by_finds_shared_keys_of_custom_types() {
         // Define a custom type.
         #[derive(Debug)]
         #[allow(dead_code)]
@@ -190,7 +190,7 @@ mod tests {
     }
 
     #[test]
-    fn intersection_size_checks() {
+    fn intersection_refuses_outputs_of_another_length() {
         let data = [vec![0x41u8; 12], vec![0x42u8; 12], vec![0x43u8; 12]];
         let mut indices = [0usize; 10];
         let mut too_few = [0usize; 2];
@@ -202,7 +202,7 @@ mod tests {
     }
 
     #[test]
-    fn intersection_sequences_sharing_an_empty_string() {
+    fn intersection_matches_a_shared_empty_string() {
         // Regression check for sequences that are each individually duplicate-free but happen
         // to share an empty string - a corner case that must keep working correctly.
         let set1 = ["", "p", "q"];

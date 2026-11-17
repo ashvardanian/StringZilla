@@ -658,12 +658,12 @@ mod tests {
     use crate as sz;
 
     #[test]
-    fn bytesum() {
+    fn bytesum_adds_the_bytes() {
         assert_eq!(sz::bytesum("hi"), 209u64);
     }
 
     #[test]
-    fn hash() {
+    fn hasher_matches_one_shot_hash_under_every_seed() {
         let hash_hello = sz::hash("Hello");
         let hash_world = sz::hash("World");
         assert_ne!(hash_hello, hash_world);
@@ -681,7 +681,7 @@ mod tests {
     }
 
     #[test]
-    fn streaming_hash() {
+    fn streamed_hash_matches_one_shot() {
         let mut hasher = sz::Hasher::new(123);
         hasher.write(b"Hello, ");
         hasher.write(b"world!");
@@ -694,7 +694,7 @@ mod tests {
     }
 
     #[test]
-    fn multiseed_hash() {
+    fn multiseed_hash_matches_one_hash_per_seed() {
         // More than four seeds to exercise the 4-wide tail handling on the Ice Lake backend.
         let seeds: Vec<u64> = (0..9u64).map(|i| i.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(7)).collect();
         let texts: [&[u8]; 5] = [
@@ -718,7 +718,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "std")]
-    fn hashmap_with_sz() {
+    fn sz_hasher_backs_a_hashmap() {
         let mut map: HashMap<&str, i32, sz::BuildSzHasher> = HashMap::with_hasher(sz::BuildSzHasher::with_seed(0));
         map.insert("a", 1);
         map.insert("b", 2);
@@ -731,7 +731,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "std")]
-    fn hashset_with_sz() {
+    fn sz_hasher_backs_a_hashset() {
         let mut set: HashSet<&str, sz::BuildSzHasher> = HashSet::with_hasher(sz::BuildSzHasher::with_seed(42));
         assert!(set.insert("alpha"));
         assert!(set.insert("beta"));
@@ -744,7 +744,7 @@ mod tests {
     }
 
     #[test]
-    fn sha256_empty() {
+    fn sha256_of_nothing_matches_the_standard() {
         let hash = sz::Sha256::hash(b"");
         let expected = [
             0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14, 0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f, 0xb9, 0x24, 0x27, 0xae,
@@ -754,7 +754,7 @@ mod tests {
     }
 
     #[test]
-    fn sha256_abc() {
+    fn sha256_of_abc_matches_the_standard() {
         let hash = sz::Sha256::hash(b"abc");
         let expected = [
             0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22, 0x23, 0xb0, 0x03,
@@ -764,7 +764,7 @@ mod tests {
     }
 
     #[test]
-    fn sha256_incremental() {
+    fn sha256_updates_match_one_shot() {
         let mut hasher = sz::Sha256::new();
         hasher.update(b"ab");
         hasher.update(b"c");
@@ -777,7 +777,7 @@ mod tests {
     }
 
     #[test]
-    fn sha256_multistate_matches_single() {
+    fn sha256_multistate_matches_one_state_per_lane() {
         // Lane counts bracketing both vector widths, with ragged lengths and an empty lane
         for lanes_count in [1usize, 7, 8, 9, 16, 17, 33] {
             let messages: Vec<Vec<u8>> = (0..lanes_count)
@@ -827,7 +827,7 @@ mod tests {
     }
 
     #[test]
-    fn sha256_multistate_size_checks() {
+    fn sha256_multistate_refuses_mismatched_lengths() {
         let mut states = vec![sz::Sha256::new(); 3];
         let too_few: Vec<&[u8]> = vec![b"a".as_slice(), b"b".as_slice()];
         assert_eq!(sz::sha256_multistate_update(&mut states, &too_few), Err(sz::Status::UnexpectedDimensions));
@@ -837,7 +837,7 @@ mod tests {
     }
 
     #[test]
-    fn sha256_long() {
+    fn sha256_of_a_two_block_message_matches_the_standard() {
         let msg = b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
         let hash = sz::Sha256::hash(msg);
         let expected = [
@@ -848,7 +848,7 @@ mod tests {
     }
 
     #[test]
-    fn hmac_sha256_basic() {
+    fn hmac_sha256_of_an_empty_key_and_message_matches_the_standard() {
         // Degenerate case: an empty key is zero-padded to a full block, an empty
         // message adds nothing.
         let key = b"";
@@ -863,7 +863,7 @@ mod tests {
     }
 
     #[test]
-    fn hmac_sha256_multistate_matches_single() {
+    fn hmac_sha256_multistate_matches_one_state_per_lane() {
         // Lane counts bracketing both vector widths, with ragged lengths, an empty message,
         // and keys on either side of the one-block boundary where the key is replaced by
         // its own digest.
@@ -886,7 +886,7 @@ mod tests {
     }
 
     #[test]
-    fn hmac_sha256_multistate_size_checks() {
+    fn hmac_sha256_multistate_refuses_mismatched_lengths() {
         let messages: Vec<&[u8]> = vec![b"a".as_slice(), b"b".as_slice()];
         let mut states = vec![sz::Sha256::new(); 2];
         let mut too_few = vec![[0u8; sz::SHA256_DIGEST_LENGTH]; 1];
@@ -897,7 +897,7 @@ mod tests {
     }
 
     #[test]
-    fn hmac_sha256_rfc4231_case1() {
+    fn hmac_sha256_matches_rfc4231_case_1() {
         // The published vector, so this checks against the standard rather than against ourselves.
         let key = [0x0bu8; 20];
         let mac = sz::hmac_sha256(&key, b"Hi There");
@@ -909,7 +909,7 @@ mod tests {
     }
 
     #[test]
-    fn hmac_sha256_short_key() {
+    fn hmac_sha256_pads_a_short_key() {
         // Test with short key and message
         let key = b"key";
         let message = b"The quick brown fox jumps over the lazy dog";
@@ -923,7 +923,7 @@ mod tests {
     }
 
     #[test]
-    fn hmac_sha256_long_key() {
+    fn hmac_sha256_hashes_a_long_key() {
         // Test with key longer than block size (> 64 bytes)
         let key = b"this is a very long key that exceeds the SHA256 block size of 64 bytes for testing purposes";
         let message = b"message";

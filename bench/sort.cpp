@@ -244,7 +244,7 @@ struct intersect_strings_via_std_t {
  *  @warning Some algorithms use more memory than others; this benchmark does not account for it.
  */
 void bench_intersections(environment_t const &env, corpus_t const &corpus) {
-    intersect_inputs_t inputs(corpus, env.settings.seed.value);
+    intersect_inputs_t inputs(corpus, env.settings.seed);
 
     auto base_call = intersect_strings_via_sz<cpu_best<sz_intersect_best>> {inputs};
     std::optional<row_t> const base = bench_nullary(env, corpus, "sz_intersect_best", base_call);

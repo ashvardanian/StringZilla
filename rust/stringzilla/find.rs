@@ -860,7 +860,7 @@ mod tests {
     use crate as sz;
 
     #[test]
-    fn search() {
+    fn finds_agree_on_strings_strs_and_cows() {
         let my_string: String = String::from("Hello, world!");
         let my_str: &str = my_string.as_str();
         let my_cow_str: Cow<'_, str> = Cow::from(&my_string);
@@ -922,7 +922,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_matches_forward() {
+    fn sz_matches_yield_every_occurrence() {
         let haystack = b"hello world hello universe";
         let needle = b"hello";
         let matches: Vec<_> = haystack.sz_matches(needle).collect();
@@ -930,7 +930,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_matches_reverse() {
+    fn sz_rmatches_yield_every_occurrence_from_the_end() {
         let haystack = b"hello world hello universe";
         let needle = b"hello";
         let matches: Vec<_> = haystack.sz_rmatches(needle).collect();
@@ -938,7 +938,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_splits_forward() {
+    fn sz_splits_yield_the_parts_between_needles() {
         let haystack = b"alpha,beta;gamma";
         let needle = b",";
         let splits: Vec<_> = haystack.sz_splits(needle).collect();
@@ -946,7 +946,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_splits_reverse() {
+    fn sz_rsplits_yield_the_parts_from_the_end() {
         let haystack = b"alpha,beta;gamma";
         let needle = b";";
         let splits: Vec<_> = haystack.sz_rsplits(needle).collect();
@@ -954,7 +954,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_splits_with_empty_parts() {
+    fn sz_splits_keep_empty_parts() {
         let haystack = b"a,,b,";
         let needle = b",";
         let splits: Vec<_> = haystack.sz_splits(needle).collect();
@@ -962,7 +962,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_splits_empty_haystack_yields_one_empty_segment() {
+    fn splits_of_an_empty_haystack_yield_one_empty_part() {
         // Mirrors `"".split(",") == [""]`, not zero segments.
         let matcher = Matcher::Substring(b",");
         let splits: Vec<_> = FindSplits::new(b"", matcher).collect();
@@ -970,7 +970,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_matches_forward_empty_needle_matches_std() {
+    fn empty_needle_matches_follow_std() {
         let empty = Matcher::Substring(b"");
         let matches: Vec<_> = FindMatches::new(b"abc", empty).collect();
         assert_eq!(matches, vec![&b""[..]; 4]);
@@ -980,7 +980,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_matches_reverse_empty_needle() {
+    fn empty_needle_rmatches_follow_std() {
         let empty = Matcher::Substring(b"");
         let matches: Vec<_> = RFindMatches::new(b"abc", empty).collect();
         assert_eq!(matches, vec![&b""[..]; 4]);
@@ -989,19 +989,19 @@ mod tests {
     }
 
     #[test]
-    fn iter_splits_forward_empty_needle() {
+    fn splits_on_an_empty_needle_yield_the_whole_haystack() {
         let splits: Vec<_> = FindSplits::new(b"abc", Matcher::Substring(b"")).collect();
         assert_eq!(splits, vec![&b"abc"[..]]);
     }
 
     #[test]
-    fn iter_splits_reverse_empty_needle() {
+    fn rsplits_on_an_empty_needle_yield_the_whole_haystack() {
         let splits: Vec<_> = RFindSplits::new(b"abc", Matcher::Substring(b"")).collect();
         assert_eq!(splits, vec![&b"abc"[..]]);
     }
 
     #[test]
-    fn iter_splits_forward_skip_empty() {
+    fn sz_splits_skip_empty_drops_empty_parts() {
         // Default KEEP yields empties; skip_empty drops every zero-length segment.
         let haystack = b"a,,b,";
         let needle = b",";
@@ -1012,7 +1012,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_splits_reverse_skip_empty() {
+    fn sz_rsplits_skip_empty_drops_empty_parts() {
         // KEEP rsplit of "a,,b," is the reverse of the forward split, empties included.
         let haystack = b"a,,b,";
         let needle = b",";
@@ -1023,7 +1023,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_splits_byteset_skip_empty() {
+    fn byteset_splits_skip_empty_drops_empty_parts() {
         // Byteset matcher (split on any of ",;"): adjacent delimiters yield empties under
         // the KEEP default.
         let haystack = b",a;;b,";
@@ -1037,7 +1037,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_matches_with_overlaps() {
+    fn sz_matches_overlap_only_when_asked() {
         let haystack = b"aaaa";
         let needle = b"aa";
         // Default is non-overlapping; `.overlapping()` opts into the
@@ -1049,7 +1049,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_splits_with_utf8_haystack() {
+    fn sz_splits_keep_multibyte_characters_whole() {
         let haystack = "こんにちは,世界".as_bytes();
         let needle = b",";
         let splits: Vec<_> = haystack.sz_splits(needle).collect();
@@ -1057,7 +1057,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_find_first_of() {
+    fn sz_find_first_of_yields_each_byte_in_the_set() {
         let haystack = b"hello world";
         let needles = b"or";
         let matches: Vec<_> = haystack.sz_find_first_of(needles).collect();
@@ -1065,7 +1065,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_find_last_of() {
+    fn sz_find_last_of_yields_each_byte_in_the_set_from_the_end() {
         let haystack = b"hello world";
         let needles = b"or";
         let matches: Vec<_> = haystack.sz_find_last_of(needles).collect();
@@ -1073,7 +1073,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_find_first_not_of() {
+    fn sz_find_first_not_of_yields_each_byte_outside_the_set() {
         let haystack = b"aabbbcccd";
         let needles = b"ab";
         let matches: Vec<_> = haystack.sz_find_first_not_of(needles).collect();
@@ -1081,7 +1081,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_find_last_not_of() {
+    fn sz_find_last_not_of_yields_each_byte_outside_the_set_from_the_end() {
         let haystack = b"aabbbcccd";
         let needles = b"cd";
         let matches: Vec<_> = haystack.sz_find_last_not_of(needles).collect();
@@ -1089,7 +1089,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_find_first_of_empty_needles() {
+    fn sz_find_first_of_an_empty_set_yields_nothing() {
         let haystack = b"hello world";
         let needles = b"";
         let matches: Vec<_> = haystack.sz_find_first_of(needles).collect();
@@ -1097,7 +1097,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_find_last_of_empty_haystack() {
+    fn sz_find_last_of_in_an_empty_haystack_yields_nothing() {
         let haystack = b"";
         let needles = b"abc";
         let matches: Vec<_> = haystack.sz_find_last_of(needles).collect();
@@ -1105,7 +1105,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_find_first_not_of_all_matching() {
+    fn sz_find_first_not_of_yields_nothing_when_every_byte_is_in_the_set() {
         let haystack = b"aaabbbccc";
         let needles = b"abc";
         let matches: Vec<_> = haystack.sz_find_first_not_of(needles).collect();
@@ -1113,7 +1113,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_find_last_not_of_all_not_matching() {
+    fn sz_find_last_not_of_yields_every_byte_when_none_is_in_the_set() {
         let haystack = b"hello world";
         let needles = b"xyz";
         let matches: Vec<_> = haystack.sz_find_last_not_of(needles).collect();
@@ -1121,7 +1121,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_find_matches_overlapping() {
+    fn find_matches_overlap_when_asked() {
         let haystack = b"aaaa";
         let matcher = Matcher::Substring(b"aa");
         let matches: Vec<_> = FindMatches::new(haystack, matcher).overlapping().collect();
@@ -1129,7 +1129,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_find_matches_non_overlapping() {
+    fn find_matches_skip_overlaps_by_default() {
         let haystack = b"aaaa";
         let matcher = Matcher::Substring(b"aa");
         let matches: Vec<_> = FindMatches::new(haystack, matcher).collect();
@@ -1137,7 +1137,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_rfind_matches_overlapping() {
+    fn rfind_matches_overlap_when_asked() {
         let haystack = b"aaaa";
         let matcher = Matcher::Substring(b"aa");
         let matches: Vec<_> = RFindMatches::new(haystack, matcher).overlapping().collect();
@@ -1145,7 +1145,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_rfind_matches_non_overlapping() {
+    fn rfind_matches_skip_overlaps_by_default() {
         let haystack = b"aaaa";
         let matcher = Matcher::Substring(b"aa");
         let matches: Vec<_> = RFindMatches::new(haystack, matcher).collect();
@@ -1154,7 +1154,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "std")]
-    fn replace_all_same_length() {
+    fn replace_all_swaps_needles_of_equal_length() {
         let mut buffer = b"abcabc".to_vec();
         let replaced = sz::replace_all(&mut buffer, b"ab", b"XY").expect("replace_all failed");
         assert_eq!(replaced, 2);
@@ -1163,7 +1163,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "std")]
-    fn replace_all_shrinks() {
+    fn replace_all_shrinks_the_buffer() {
         let mut buffer = b"aaaa".to_vec();
         let replaced = sz::replace_all(&mut buffer, b"aa", b"b").expect("replace_all failed");
         assert_eq!(replaced, 2);
@@ -1172,7 +1172,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "std")]
-    fn replace_all_grows() {
+    fn replace_all_grows_the_buffer() {
         let mut buffer = b"aba".to_vec();
         let replaced = sz::replace_all(&mut buffer, b"a", b"XYZ").expect("replace_all failed");
         assert_eq!(replaced, 2);
@@ -1181,7 +1181,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "std")]
-    fn replace_all_byteset_basic() {
+    fn replace_all_byteset_replaces_each_byte_in_the_set() {
         let mut buffer = b"hello world".to_vec();
         let vowels = sz::Byteset::from("aeiou");
         let replaced = sz::replace_all_byteset(&mut buffer, vowels, b"_").expect("replace_all_byteset failed");
@@ -1191,7 +1191,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "std")]
-    fn replace_all_byteset_grows() {
+    fn replace_all_byteset_grows_the_buffer() {
         let mut buffer = b"yzz".to_vec();
         let vowels = sz::Byteset::from("y");
         let replaced = sz::replace_all_byteset(&mut buffer, vowels, b"(y)").expect("replace_all_byteset failed");
@@ -1201,7 +1201,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "std")]
-    fn replace_all_noop_on_empty_pattern() {
+    fn replace_all_leaves_the_buffer_alone_for_an_empty_needle() {
         let mut buffer = b"unchanged".to_vec();
         let replaced = sz::replace_all(&mut buffer, b"", b"anything").expect("replace_all failed");
         assert_eq!(replaced, 0);

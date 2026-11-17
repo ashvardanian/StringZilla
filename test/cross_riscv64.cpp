@@ -4,17 +4,18 @@
  *  @date September 29, 2026
  *  @brief Kernel cross-checks - RISC-V family: RVV, RVV Crypto.
  */
+#undef NDEBUG // ! A test's oracle must stay live in every build
+
 #include "cross.hpp"
 
 namespace ashvardanian::stringzilla::test {
 
-std::size_t test_cross_riscv64(environment_t const &env) {
-    [[maybe_unused]] cross_section_t check(env);
-
+void test_cross_riscv64() {
 #if STRINGZILLA_TARGET_RVV
-    check.section("Cross RVV", sz_cap_rvv_k);
+    capability_gate_t const rvv(sz_cap_rvv_k);
 
-    check("test_compare_unit_rvv", [] { check_compare_unit_({"rvv", sz_equal_rvv, sz_order_rvv}); });
+    run_test_case("check_compare_unit_({sz_equal_rvv, sz_order_rvv})", rvv,
+                  [] { check_compare_unit_({"rvv", sz_equal_rvv, sz_order_rvv}); });
 
     constexpr strings_backend_t strings_rvv {"rvv",
                                              sz_strings_to_tape_rvv,
@@ -23,10 +24,10 @@ std::size_t test_cross_riscv64(environment_t const &env) {
                                              sz_strings_unescape_rvv,
                                              sz_strings_lookup_rvv,
                                              sz_strings_normalize_rvv};
-    check("test_strings_unit_rvv", [&] { check_strings_unit_(strings_rvv); });
-    check("test_strings_equivalence_rvv",
-          [&](test_context_t &context) { check_strings_equivalence_(context, strings_rvv); });
-    check("test_strings_safety_rvv", [&] { check_strings_safety_(strings_rvv); });
+    run_test_case("check_strings_unit_(strings_rvv)", rvv, [&] { check_strings_unit_(strings_rvv); });
+    run_test_case("check_strings_equivalence_(strings_rvv)", rvv,
+                  [&](split_mix_generator_t &generator) { check_strings_equivalence_(generator, strings_rvv); });
+    run_test_case("check_strings_safety_(strings_rvv)", rvv, [&] { check_strings_safety_(strings_rvv); });
 
     constexpr find_backend_t find_rvv {
         .name = "rvv",
@@ -37,9 +38,10 @@ std::size_t test_cross_riscv64(environment_t const &env) {
         .find_byteset = sz_find_byteset_rvv,
         .rfind_byteset = sz_rfind_byteset_rvv,
     };
-    check("test_find_unit_rvv", [&] { check_find_unit_(find_rvv); });
-    check("test_find_equivalence_rvv", [&](test_context_t &context) { check_find_equivalence_(context, find_rvv); });
-    check("test_find_safety_rvv", [&] { check_find_safety_(find_rvv); });
+    run_test_case("check_find_unit_(find_rvv)", rvv, [&] { check_find_unit_(find_rvv); });
+    run_test_case("check_find_equivalence_(find_rvv)", rvv,
+                  [&](split_mix_generator_t &generator) { check_find_equivalence_(generator, find_rvv); });
+    run_test_case("check_find_safety_(find_rvv)", rvv, [&] { check_find_safety_(find_rvv); });
 
     constexpr hash_backend_t hash_rvv {
         .hash_kernel = sz_hash_rvv,
@@ -52,24 +54,27 @@ std::size_t test_cross_riscv64(environment_t const &env) {
         .update_kernel = sz_sha256_state_update_rvv,
         .digest_kernel = sz_sha256_state_digest_rvv,
     };
-    check("test_hash_equivalence_rvv", [&](test_context_t &context) {
-        check_bytesum_equivalence_(context, sz_bytesum_rvv);
-        check_hash_equivalence_(context, hash_rvv);
-        check_fill_random_equivalence_(context, sz_fill_random_rvv);
-        check_sha256_equivalence_(context, sha256_rvv);
+    run_test_case("check_bytesum_equivalence_(sz_bytesum_rvv)", rvv, [&](split_mix_generator_t &generator) {
+        check_bytesum_equivalence_(generator, sz_bytesum_rvv);
+        check_hash_equivalence_(generator, hash_rvv);
+        check_fill_random_equivalence_(sz_fill_random_rvv);
+        check_sha256_equivalence_(generator, sha256_rvv);
     });
 
     constexpr sort_backend_t sort_rvv {"rvv", sz_sort_order_rvv, sz_sort_uncased_order_rvv};
-    check("test_sort_unit_rvv", [&] { check_sort_unit_(sort_rvv); });
-    check("test_sort_equivalence_rvv", [&](test_context_t &context) { check_sort_equivalence_(context, sort_rvv); });
-    check("test_sort_safety_rvv", [&] { check_sort_safety_(sort_rvv); });
+    run_test_case("check_sort_unit_(sort_rvv)", rvv, [&] { check_sort_unit_(sort_rvv); });
+    run_test_case("check_sort_equivalence_(sort_rvv)", rvv,
+                  [&](split_mix_generator_t &generator) { check_sort_equivalence_(generator, sort_rvv); });
+    run_test_case("check_sort_safety_(sort_rvv)", rvv, [&] { check_sort_safety_(sort_rvv); });
 
     constexpr levenshtein_backend_t levenshtein_rvv {"rvv", sz_levenshtein_engine_init_rvv,
                                                      sz_levenshtein_distances_rvv};
-    check("test_levenshtein_unit_rvv", [&] { check_levenshtein_unit_(levenshtein_rvv); });
-    check("test_levenshtein_equivalence_rvv",
-          [&](test_context_t &context) { check_levenshtein_equivalence_(context, levenshtein_rvv); });
-    check("test_levenshtein_safety_rvv", [&] { check_levenshtein_safety_(levenshtein_rvv); });
+    run_test_case("check_levenshtein_unit_(levenshtein_rvv)", rvv, [&] { check_levenshtein_unit_(levenshtein_rvv); });
+    run_test_case("check_levenshtein_equivalence_(levenshtein_rvv)", rvv, [&](split_mix_generator_t &generator) {
+        check_levenshtein_equivalence_(generator, levenshtein_rvv);
+    });
+    run_test_case("check_levenshtein_safety_(levenshtein_rvv)", rvv,
+                  [&] { check_levenshtein_safety_(levenshtein_rvv); });
 
     constexpr substrings_tier_t substrings_rvv {
         .init = sz_substrings_engine_init_rvv,
@@ -78,68 +83,81 @@ std::size_t test_cross_riscv64(environment_t const &env) {
         .replace = sz_substrings_replace_rvv,
         .bm25_scores = sz_substrings_bm25_scores_rvv,
     };
-    check("test_substrings_unit_rvv", [&] { check_substrings_unit_(substrings_rvv); });
-    check("test_substrings_equivalence_rvv",
-          [&](test_context_t &context) { check_substrings_equivalence_(context, substrings_rvv); });
+    run_test_case("check_substrings_unit_(substrings_rvv)", rvv, [&] { check_substrings_unit_(substrings_rvv); });
+    run_test_case("check_substrings_equivalence_(substrings_rvv)", rvv,
+                  [&](split_mix_generator_t &generator) { check_substrings_equivalence_(generator, substrings_rvv); });
 
     constexpr subdocuments_tier_t subdocuments_rvv {
         .init = sz_subdocuments_engine_init_rvv,
         .counts = sz_subdocuments_counts_rvv,
         .find = sz_subdocuments_find_rvv,
     };
-    check("test_subdocuments_unit_rvv", [&] { check_subdocuments_unit_(subdocuments_rvv); });
-    check("test_subdocuments_safety_rvv", [&] { check_subdocuments_safety_(subdocuments_rvv); });
-    check("test_subdocuments_equivalence_rvv",
-          [&](test_context_t &context) { check_subdocuments_equivalence_(context, subdocuments_rvv); });
+    run_test_case("check_subdocuments_unit_(subdocuments_rvv)", rvv,
+                  [&] { check_subdocuments_unit_(subdocuments_rvv); });
+    run_test_case("check_subdocuments_safety_(subdocuments_rvv)", rvv,
+                  [&] { check_subdocuments_safety_(subdocuments_rvv); });
+    run_test_case("check_subdocuments_equivalence_(subdocuments_rvv)", rvv, [&](split_mix_generator_t &generator) {
+        check_subdocuments_equivalence_(generator, subdocuments_rvv);
+    });
 
     constexpr utf8_runes_backend_t utf8_runes_rvv {"rvv", sz_utf8_count_rvv, sz_utf8_seek_rvv, sz_utf8_decode_rvv};
-    check("test_utf8_runes_unit_rvv", [&] { check_utf8_runes_unit_(utf8_runes_rvv); });
-    check("test_utf8_runes_safety_rvv",
-          [&](test_context_t &context) { check_utf8_runes_safety_(context, utf8_runes_rvv); });
-    check("test_utf8_runes_equivalence_rvv",
-          [&](test_context_t &context) { check_utf8_runes_equivalence_(context, utf8_runes_rvv); });
+    run_test_case("check_utf8_runes_unit_(utf8_runes_rvv)", rvv, [&] { check_utf8_runes_unit_(utf8_runes_rvv); });
+    run_test_case("check_utf8_runes_safety_(utf8_runes_rvv)", rvv,
+                  [&](split_mix_generator_t &generator) { check_utf8_runes_safety_(generator, utf8_runes_rvv); });
+    run_test_case("check_utf8_runes_equivalence_(utf8_runes_rvv)", rvv,
+                  [&](split_mix_generator_t &generator) { check_utf8_runes_equivalence_(generator, utf8_runes_rvv); });
 
     constexpr utf8_tokens_backend_t utf8_tokens_rvv {"rvv", sz_utf8_count_rvv, sz_utf8_newlines_rvv,
                                                      sz_utf8_whitespaces_rvv};
-    check("test_utf8_tokens_unit_rvv", [&] { check_utf8_tokens_unit_(utf8_tokens_rvv); });
-    check("test_utf8_tokens_safety_rvv",
-          [&](test_context_t &context) { check_utf8_tokens_safety_(context, utf8_tokens_rvv); });
-    check("test_utf8_tokens_equivalence_rvv",
-          [&](test_context_t &context) { check_utf8_tokens_equivalence_(context, utf8_tokens_rvv); });
+    run_test_case("check_utf8_tokens_unit_(utf8_tokens_rvv)", rvv, [&] { check_utf8_tokens_unit_(utf8_tokens_rvv); });
+    run_test_case("check_utf8_tokens_safety_(utf8_tokens_rvv)", rvv,
+                  [&](split_mix_generator_t &generator) { check_utf8_tokens_safety_(generator, utf8_tokens_rvv); });
+    run_test_case("check_utf8_tokens_equivalence_(utf8_tokens_rvv)", rvv, [&](split_mix_generator_t &generator) {
+        check_utf8_tokens_equivalence_(generator, utf8_tokens_rvv);
+    });
 
     constexpr utf8_delimiters_backend_t utf8_delimiters_rvv {"rvv", sz_utf8_delimiters_rvv};
-    check("test_utf8_delimiters_unit_rvv", [&] { check_utf8_delimiters_unit_(utf8_delimiters_rvv); });
-    check("test_utf8_delimiters_safety_rvv",
-          [&](test_context_t &context) { check_utf8_delimiters_safety_(context, utf8_delimiters_rvv); });
-    check("test_utf8_delimiters_equivalence_rvv",
-          [&](test_context_t &context) { check_utf8_delimiters_equivalence_(context, utf8_delimiters_rvv); });
+    run_test_case("check_utf8_delimiters_unit_(utf8_delimiters_rvv)", rvv,
+                  [&] { check_utf8_delimiters_unit_(utf8_delimiters_rvv); });
+    run_test_case("check_utf8_delimiters_safety_(utf8_delimiters_rvv)", rvv, [&](split_mix_generator_t &generator) {
+        check_utf8_delimiters_safety_(generator, utf8_delimiters_rvv);
+    });
+    run_test_case(
+        "check_utf8_delimiters_equivalence_(utf8_delimiters_rvv)", rvv,
+        [&](split_mix_generator_t &generator) { check_utf8_delimiters_equivalence_(generator, utf8_delimiters_rvv); });
 
     constexpr utf8_segment_backend_t utf8_wordbreaks_rvv {"rvv", sz_utf8_wordbreaks_rvv};
-    check("test_utf8_wordbreaks_unit_rvv", [&] { check_utf8_wordbreaks_unit_(utf8_wordbreaks_rvv); });
-    check("test_utf8_wordbreaks_rules_rvv", [&] { check_utf8_wordbreaks_rules_(utf8_wordbreaks_rvv); });
-    check("test_utf8_wordbreaks_safety_rvv",
-          [&](test_context_t &context) { check_utf8_wordbreaks_safety_(context, utf8_wordbreaks_rvv); });
-    check("test_utf8_wordbreaks_equivalence_rvv",
-          [&](test_context_t &context) { check_utf8_wordbreaks_equivalence_(context, utf8_wordbreaks_rvv); });
+    run_test_case("check_utf8_wordbreaks_unit_(utf8_wordbreaks_rvv)", rvv,
+                  [&] { check_utf8_wordbreaks_unit_(utf8_wordbreaks_rvv); });
+    run_test_case("check_utf8_wordbreaks_rules_(utf8_wordbreaks_rvv)", rvv,
+                  [&] { check_utf8_wordbreaks_rules_(utf8_wordbreaks_rvv); });
+    run_test_case("check_utf8_wordbreaks_safety_(utf8_wordbreaks_rvv)", rvv, [&](split_mix_generator_t &generator) {
+        check_utf8_wordbreaks_safety_(generator, utf8_wordbreaks_rvv);
+    });
+    run_test_case(
+        "check_utf8_wordbreaks_equivalence_(utf8_wordbreaks_rvv)", rvv,
+        [&](split_mix_generator_t &generator) { check_utf8_wordbreaks_equivalence_(generator, utf8_wordbreaks_rvv); });
 
     constexpr utf8_norm_kernels_t utf8_norm_rvv {sz_utf8_norm_rvv, sz_utf8_find_denormalized_rvv};
-    check("test_utf8_norm_unit_rvv", [&] { check_utf8_norm_unit_(utf8_norm_rvv); });
-    check("test_utf8_norm_equivalence_rvv",
-          [&](test_context_t &context) { check_utf8_norm_equivalence_(context, utf8_norm_rvv); });
-    check("test_utf8_norm_safety_rvv",
-          [&](test_context_t &context) { check_utf8_norm_safety_(context, utf8_norm_rvv); });
+    run_test_case("check_utf8_norm_unit_(utf8_norm_rvv)", rvv, [&] { check_utf8_norm_unit_(utf8_norm_rvv); });
+    run_test_case("check_utf8_norm_equivalence_(utf8_norm_rvv)", rvv,
+                  [&](split_mix_generator_t &generator) { check_utf8_norm_equivalence_(generator, utf8_norm_rvv); });
+    run_test_case("check_utf8_norm_safety_(utf8_norm_rvv)", rvv,
+                  [&](split_mix_generator_t &generator) { check_utf8_norm_safety_(generator, utf8_norm_rvv); });
 
     constexpr utf8_uncased_kernels_t utf8_uncased_rvv {sz_utf8_uncased_fold_rvv, sz_utf8_uncased_search_rvv,
                                                        sz_utf8_uncased_order_rvv, sz_utf8_find_cased_rvv};
-    check("test_utf8_uncased_unit_rvv", [&] { check_utf8_uncased_unit_(utf8_uncased_rvv); });
-    check("test_utf8_uncased_equivalence_rvv",
-          [&](test_context_t &context) { check_utf8_uncased_equivalence_(context, utf8_uncased_rvv); });
-    check("test_utf8_uncased_safety_rvv",
-          [&](test_context_t &context) { check_utf8_uncased_safety_(context, utf8_uncased_rvv); });
+    run_test_case("check_utf8_uncased_unit_(utf8_uncased_rvv)", rvv,
+                  [&] { check_utf8_uncased_unit_(utf8_uncased_rvv); });
+    run_test_case("check_utf8_uncased_equivalence_(utf8_uncased_rvv)", rvv, [&](split_mix_generator_t &generator) {
+        check_utf8_uncased_equivalence_(generator, utf8_uncased_rvv);
+    });
+    run_test_case("check_utf8_uncased_safety_(utf8_uncased_rvv)", rvv,
+                  [&](split_mix_generator_t &generator) { check_utf8_uncased_safety_(generator, utf8_uncased_rvv); });
 #endif // STRINGZILLA_TARGET_RVV
 
 #if STRINGZILLA_TARGET_RVVCRYPTO
-    check.section("Cross RVV Crypto", sz_cap_rvvcrypto_k);
+    capability_gate_t const rvvcrypto(sz_cap_rvvcrypto_k);
 
     constexpr hash_backend_t hash_rvvcrypto {
         .hash_kernel = sz_hash_rvvcrypto,
@@ -153,18 +171,19 @@ std::size_t test_cross_riscv64(environment_t const &env) {
         .update_kernel = sz_sha256_state_update_rvvcrypto,
         .digest_kernel = sz_sha256_state_digest_rvvcrypto,
     };
-    check("test_hash_multiseed_equivalence_rvvcrypto", [](test_context_t &context) {
-        check_hash_multiseed_equivalence_(context, {sz_hash_multiseed_rvvcrypto, sz_hash_rvvcrypto});
-    });
+    run_test_case("check_hash_multiseed_equivalence_({sz_hash_multiseed_rvvcrypto, sz_hash_rvvcrypto})", rvvcrypto,
+                  [](split_mix_generator_t &generator) {
+                      check_hash_multiseed_equivalence_(generator, {sz_hash_multiseed_rvvcrypto, sz_hash_rvvcrypto});
+                  });
     constexpr sha256_multistate_backend_t sha256_multistate_rvvcrypto {
         .update_kernel = sz_sha256_multistate_update_rvvcrypto,
         .digest_kernel = sz_sha256_multistate_digest_rvvcrypto,
     };
-    check("test_hash_equivalence_rvvcrypto", [&](test_context_t &context) {
-        check_hash_equivalence_(context, hash_rvvcrypto);
-        check_fill_random_equivalence_(context, sz_fill_random_rvvcrypto);
-        check_sha256_equivalence_(context, sha256_rvvcrypto);
-        check_sha256_multistate_equivalence_(context, sha256_multistate_rvvcrypto);
+    run_test_case("check_hash_equivalence_(hash_rvvcrypto)", rvvcrypto, [&](split_mix_generator_t &generator) {
+        check_hash_equivalence_(generator, hash_rvvcrypto);
+        check_fill_random_equivalence_(sz_fill_random_rvvcrypto);
+        check_sha256_equivalence_(generator, sha256_rvvcrypto);
+        check_sha256_multistate_equivalence_(generator, sha256_multistate_rvvcrypto);
     });
 
     constexpr ctr_backend_t ctr_rvvcrypto {"rvvcrypto", sz_aes256_key_init_rvvcrypto, sz_aes256_ctr_xor_rvvcrypto};
@@ -182,12 +201,12 @@ std::size_t test_cross_riscv64(environment_t const &env) {
         .opener_update = sz_aes256_gcm_decryptor_update_unverified_rvvcrypto,
         .opener_verify = sz_aes256_gcm_decryptor_verify_rvvcrypto,
     };
-    check("test_cipher_unit_rvvcrypto", [&] { check_cipher_unit_(ctr_rvvcrypto, gcm_rvvcrypto); });
-    check("test_cipher_equivalence_rvvcrypto",
-          [&](test_context_t &context) { check_cipher_equivalence_(context, ctr_rvvcrypto, gcm_rvvcrypto); });
+    run_test_case("check_cipher_unit_(ctr_rvvcrypto, gcm_rvvcrypto)", rvvcrypto,
+                  [&] { check_cipher_unit_(ctr_rvvcrypto, gcm_rvvcrypto); });
+    run_test_case(
+        "check_cipher_equivalence_(ctr_rvvcrypto, gcm_rvvcrypto)", rvvcrypto,
+        [&](split_mix_generator_t &generator) { check_cipher_equivalence_(generator, ctr_rvvcrypto, gcm_rvvcrypto); });
 #endif // STRINGZILLA_TARGET_RVVCRYPTO
-
-    return check.failures;
 }
 
 } // namespace ashvardanian::stringzilla::test

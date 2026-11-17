@@ -7,7 +7,7 @@ Mirrors the C++ test/utf8_tokens.cpp delimiter coverage.
 Covers: the delimiter-splitting iterator and its skip_empty flag, module function and String.utf8_split_delimiters
 method parity, adversarial-byte safety against malformed UTF-8, and cross-backend agreement on realistic,
 malformed, and lane-straddling inputs.
-Compares against: cross-backend self-consistency across every capability_sweep() backend; utf8_split_delimiters
+Baselines: cross-backend self-consistency across every capability_sweep() backend; utf8_split_delimiters
 has no external oracle.
 
 Run:
@@ -101,7 +101,7 @@ DELIMITER_REALISTIC_TEXTS = [
 @pytest.mark.parametrize(
     "text", DELIMITER_REALISTIC_TEXTS + list(malformed_utf8_corpus()) + vector_width_bracketing_strings()
 )
-def test_utf8_delimiters_backend_differential(backend_results, text):
+def test_utf8_delimiters_agree_across_backends(backend_results, text):
     """utf8_split_delimiters must split identically across every SIMD backend on realistic, malformed, and
     lane-straddling inputs, compared as raw segment bytes so malformed UTF-8 sweeps without raising."""
     results = backend_results(

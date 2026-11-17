@@ -6,7 +6,7 @@
  *
  *  Every check takes its kernels by pointer and holds them to known answers, or to the serial
  *  kernel of the same operation. The family files run them over the dispatch points, and each
- *  `cross_<arch>.cpp` over its architecture's kernels by name, one section per capability.
+ *  @c cross_<arch>.cpp over its architecture's kernels by name, one gate per capability.
  *
  *  Nothing here may reach a dispatch point or the C++ layer of `stringzilla.hpp`, because the
  *  header-only test runs these checks, where every dispatch point is a stub.
@@ -26,7 +26,7 @@
 #include <array>       // `std::array`
 #include <limits>      // `std::numeric_limits`
 #include <map>         // `std::map`, the block sizes a sized heap remembers
-#include <random>      // `std::mt19937`, `std::uniform_int_distribution`
+#include <random>      // `std::uniform_int_distribution`
 #include <set>         // `std::set`, the window-overlap oracle and intersection pairs
 #include <string>      // `std::string`
 #include <string_view> // `std::string_view`
@@ -67,17 +67,17 @@ struct compare_backend_t {
 inline void check_compare_unit_(compare_backend_t const &backend) {
     sz_kernel_equal_t const equal = backend.equal;
     sz_kernel_order_t const order = backend.order;
-    verify(kernel_result<sz_ordering_t>(order, "abc", 3, "abc", 3) == sz_equal_k);     // Equal strings
-    verify(kernel_result<sz_ordering_t>(order, "abc", 3, "abd", 3) == sz_less_k);      // Differ in the last byte
-    verify(kernel_result<sz_ordering_t>(order, "abd", 3, "abc", 3) == sz_greater_k);   // Differ in the last byte
-    verify(kernel_result<sz_ordering_t>(order, "ab", 2, "abc", 3) == sz_less_k);       // Prefix orders before
-    verify(kernel_result<sz_ordering_t>(order, "abc", 3, "ab", 2) == sz_greater_k);    // Longer orders after
-    verify(kernel_result<sz_bool_t>(equal, "abc", "abc", 3) == sz_true_k);             // Identical bytes
-    verify(kernel_result<sz_bool_t>(equal, "abc", "abd", 3) == sz_false_k);            // Differing bytes
-    verify(kernel_result<sz_ordering_t>(order, nullptr, 0, nullptr, 0) == sz_equal_k); // Two null empty strings
-    verify(kernel_result<sz_ordering_t>(order, nullptr, 0, "a", 1) == sz_less_k);      // A null empty one first
-    verify(kernel_result<sz_ordering_t>(order, "a", 1, nullptr, 0) == sz_greater_k);   // A null empty one last
-    verify(kernel_result<sz_bool_t>(equal, nullptr, nullptr, 0) == sz_true_k);         // Null empty bytes
+    expect_equal(kernel_result<sz_ordering_t>(order, "abc", 3, "abc", 3), sz_equal_k);     // Equal strings
+    expect_equal(kernel_result<sz_ordering_t>(order, "abc", 3, "abd", 3), sz_less_k);      // Differ in the last byte
+    expect_equal(kernel_result<sz_ordering_t>(order, "abd", 3, "abc", 3), sz_greater_k);   // Differ in the last byte
+    expect_equal(kernel_result<sz_ordering_t>(order, "ab", 2, "abc", 3), sz_less_k);       // Prefix orders before
+    expect_equal(kernel_result<sz_ordering_t>(order, "abc", 3, "ab", 2), sz_greater_k);    // Longer orders after
+    expect_equal(kernel_result<sz_bool_t>(equal, "abc", "abc", 3), sz_true_k);             // Identical bytes
+    expect_equal(kernel_result<sz_bool_t>(equal, "abc", "abd", 3), sz_false_k);            // Differing bytes
+    expect_equal(kernel_result<sz_ordering_t>(order, nullptr, 0, nullptr, 0), sz_equal_k); // Two null empty strings
+    expect_equal(kernel_result<sz_ordering_t>(order, nullptr, 0, "a", 1), sz_less_k);      // A null empty one first
+    expect_equal(kernel_result<sz_ordering_t>(order, "a", 1, nullptr, 0), sz_greater_k);   // A null empty one last
+    expect_equal(kernel_result<sz_bool_t>(equal, nullptr, nullptr, 0), sz_true_k);         // Null empty bytes
 
     std::string left, right;
     for (sz_size_t const length : span_over(backend_ladder_lengths_)) {
@@ -86,10 +86,10 @@ inline void check_compare_unit_(compare_backend_t const &backend) {
         right = left;
         if (kernel_result<sz_bool_t>(equal, left.data(), right.data(), length) != sz_true_k) {
             fmt::println(stderr, "{}: equal() denied identical {}-byte inputs", backend.name, (std::size_t)length);
-            verify(false && "Comparison backend must accept identical inputs at every ladder length");
+            expect_true(false, "Comparison backend must accept identical inputs at every ladder length");
         }
-        verify(kernel_result<sz_ordering_t>(order, left.data(), length, right.data(), length) == sz_equal_k &&
-               "Comparison backend must order two identical inputs as equal");
+        expect_equal(kernel_result<sz_ordering_t>(order, left.data(), length, right.data(), length), sz_equal_k,
+                     "Comparison backend must order two identical inputs as equal");
 
         sz_size_t const positions[] = {0, length / 2, length - 1};
         for (sz_size_t const position : span_over(positions)) {
@@ -97,12 +97,12 @@ inline void check_compare_unit_(compare_backend_t const &backend) {
             if (kernel_result<sz_bool_t>(equal, left.data(), right.data(), length) != sz_false_k) {
                 fmt::println(stderr, "{}: equal() missed a difference at byte {} of {}", backend.name,
                              (std::size_t)position, (std::size_t)length);
-                verify(false && "Comparison backend must see a single differing byte at every ladder length");
+                expect_true(false, "Comparison backend must see a single differing byte at every ladder length");
             }
-            verify(kernel_result<sz_ordering_t>(order, left.data(), length, right.data(), length) == sz_less_k &&
-                   "Comparison backend must order the byte-decreased input as lesser");
-            verify(kernel_result<sz_ordering_t>(order, right.data(), length, left.data(), length) == sz_greater_k &&
-                   "Comparison backend must order the byte-increased input as greater");
+            expect_equal(kernel_result<sz_ordering_t>(order, left.data(), length, right.data(), length), sz_less_k,
+                         "Comparison backend must order the byte-decreased input as lesser");
+            expect_equal(kernel_result<sz_ordering_t>(order, right.data(), length, left.data(), length), sz_greater_k,
+                         "Comparison backend must order the byte-increased input as greater");
         }
     }
 }
@@ -195,7 +195,7 @@ inline std::vector<std::string> normalized_alone_(std::vector<std::string> const
         std::string output((string.size() + 1) * sz_utf8_norm_decomp_max_k, '\0');
         sz_size_t const length = kernel_result<sz_size_t>(sz_utf8_norm_serial, string.data(), string.size(), form,
                                                           output.data());
-        verify(length <= string.size() * sz_utf8_norm_decomp_max_k);
+        expect_true(length <= string.size() * sz_utf8_norm_decomp_max_k);
         output.resize(length);
         normalized.push_back(std::move(output));
     }
@@ -419,16 +419,16 @@ inline strings_outcome_t strings_outcome_(strings_backend_t const &backend, stri
         break;
     default: outcome.status = backend.lookup(&strings, order, count, rotation.data(), allocator, &tape, stream);
     }
-    if (device) verify(sz_stream_synchronize_best(device->capabilities, stream) == sz_success_k);
+    if (device) expect_equal(sz_stream_synchronize_best(device->capabilities, stream), sz_success_k);
     if (outcome.status != sz_invalid_utf8_k) outcome.malformed_index = 0;
     if (outcome.status == sz_success_k) {
-        verify(tape.count == count);
-        verify(tape.layout == sz_strings_u32_tape_k && tape.data.u32_tape.offsets != nullptr);
-        verify(tape.data.u32_tape.offsets[0] == 0);
+        expect_equal(tape.count, count);
+        expect_true(tape.layout == sz_strings_u32_tape_k && tape.data.u32_tape.offsets != nullptr);
+        expect_equal(tape.data.u32_tape.offsets[0], 0);
     }
-    else verify(std::memcmp(&tape, &prior, sizeof(tape)) == 0 && strings_in_(tape) == prior_strings);
+    else expect_true(std::memcmp(&tape, &prior, sizeof(tape)) == 0 && strings_in_(tape) == prior_strings);
     for (sz_size_t index = 0; index < tape.count; ++index)
-        verify(span_offset_(tape, index) <= span_offset_(tape, index + 1));
+        expect_true(span_offset_(tape, index) <= span_offset_(tape, index + 1));
     outcome.strings = strings_in_(tape);
     return outcome;
 }
@@ -524,11 +524,11 @@ inline strings_outcome_t split_outcome_(strings_backend_t const &backend, split_
                          ? backend.split_lines(text, length, allocator, &tape, nullptr)
                          : backend.split(text, length, &delimiters, verb.kind, allocator, &tape, nullptr);
     if (outcome.status == sz_success_k)
-        verify(tape.layout == sz_strings_u32_tape_k && tape.data.u32_tape.offsets != nullptr &&
-               tape.data.u32_tape.offsets[0] == 0);
-    else verify(std::memcmp(&tape, &prior, sizeof(tape)) == 0 && strings_in_(tape) == prior_strings);
+        expect_true(tape.layout == sz_strings_u32_tape_k && tape.data.u32_tape.offsets != nullptr &&
+                    tape.data.u32_tape.offsets[0] == 0);
+    else expect_true(std::memcmp(&tape, &prior, sizeof(tape)) == 0 && strings_in_(tape) == prior_strings);
     for (sz_size_t index = 0; index < tape.count; ++index)
-        verify(span_offset_(tape, index) <= span_offset_(tape, index + 1));
+        expect_true(span_offset_(tape, index) <= span_offset_(tape, index + 1));
     outcome.strings = strings_in_(tape);
     return outcome;
 }
@@ -567,13 +567,13 @@ inline void check_split_spans_(strings_backend_t const &backend, split_verb_t co
     borrowed.layout = sz_strings_u32_tape_k, borrowed.count = expected.size();
     borrowed.data.u32_tape.data = payload.data(), borrowed.data.u32_tape.offsets = offsets.data();
     demand("a borrowed span", split_outcome_(backend, verb, text.data(), text.size(), nullptr, borrowed));
-    verify(borrowed.data.u32_tape.data == payload.data() && borrowed.data.u32_tape.offsets == offsets.data());
+    expect_true(borrowed.data.u32_tape.data == payload.data() && borrowed.data.u32_tape.offsets == offsets.data());
 
     sz_strings_span_t own = span_from_({text}, sz_strings_u32_tape_k, heap.allocator);
     demand("the span holding it",
            split_outcome_(backend, verb, own.data.u32_tape.data, text.size(), &heap.allocator, own));
     sz_strings_span_free(&own, &heap.allocator, nullptr);
-    verify(heap.mismatches == 0 && heap.blocks.empty());
+    expect_true(heap.mismatches == 0 && heap.blocks.empty());
 }
 
 /** Python's `str.join` generalized to rows of @p columns, each framed by @p frames. */
@@ -598,12 +598,14 @@ inline void check_join_(strings_backend_t const &backend, std::vector<sz_strings
     for (std::string const &frame : frames) frame_views.push_back({frame.data(), frame.size()});
     sz_string_view_t const between_view {between.data(), between.size()};
     sz_size_t length = 0;
-    verify(backend.join(columns.data(), columns.size(), rows, frame_views.data(), between_view, nullptr, &length,
-                        nullptr) == sz_success_k);
+    expect_equal(
+        backend.join(columns.data(), columns.size(), rows, frame_views.data(), between_view, nullptr, &length, nullptr),
+        sz_success_k);
     if (length != expected.size()) fail_backend_(backend.name, "a join measured other than its oracle's length");
     with_guarded_buffer_(length, [&](sz_ptr_t output, std::size_t) {
-        verify(backend.join(columns.data(), columns.size(), rows, frame_views.data(), between_view, output, &length,
-                            nullptr) == sz_success_k);
+        expect_equal(backend.join(columns.data(), columns.size(), rows, frame_views.data(), between_view, output,
+                                  &length, nullptr),
+                     sz_success_k);
         if (std::string_view(output, length) != expected)
             fail_backend_(backend.name, "a join wrote other than its oracle");
     });
@@ -620,53 +622,53 @@ inline void check_strings_split_unit_(strings_backend_t const &backend) {
         strings_outcome_t const outcome = split_outcome_(backend, verb, text.data(), text.size(), &heap.allocator,
                                                          tape);
         sz_strings_span_free(&tape, &heap.allocator, nullptr);
-        verify(outcome.status == sz_success_k);
+        expect_equal(outcome.status, sz_success_k);
         return outcome.strings;
     };
 
     // `bytes.split(sep)`: a text of n delimiters always makes n + 1 parts, empty ones included.
     split_verb_t const comma {sz_kernel_strings_split_k, sz_split_each_k, ","};
-    verify(split(comma, "a,b,,c") == strings_t({"a", "b", "", "c"}));
-    verify(split(comma, "") == strings_t({""}));
-    verify(split(comma, ",a,") == strings_t({"", "a", ""}));
-    verify(split(comma, ",") == strings_t({"", ""}));
-    verify(split(comma, "abc") == strings_t({"abc"}));
-    verify(split({sz_kernel_strings_split_k, sz_split_each_k, ",;"}, "a;b,c") == strings_t({"a", "b", "c"}));
+    expect_equal(split(comma, "a,b,,c"), strings_t({"a", "b", "", "c"}));
+    expect_equal(split(comma, ""), strings_t({""}));
+    expect_equal(split(comma, ",a,"), strings_t({"", "a", ""}));
+    expect_equal(split(comma, ","), strings_t({"", ""}));
+    expect_equal(split(comma, "abc"), strings_t({"abc"}));
+    expect_equal(split({sz_kernel_strings_split_k, sz_split_each_k, ",;"}, "a;b,c"), strings_t({"a", "b", "c"}));
 
     // `bytes.split()`: every run of whitespace ends one part, and the runs at either end none.
     split_verb_t const whitespace {sz_kernel_strings_split_k, sz_split_runs_k, " \t\n\v\f\r"};
-    verify(split(whitespace, "") == strings_t {});
-    verify(split(whitespace, "  ") == strings_t {});
-    verify(split(whitespace, " a  b ") == strings_t({"a", "b"}));
-    verify(split(whitespace, "\ta\nb\r\n c\f") == strings_t({"a", "b", "c"}));
-    verify(split(whitespace, "\v\fx\x1cy") == strings_t({"x\x1cy"}));
-    verify(split(whitespace, "a\xC2\xA0z") == strings_t({"a\xC2\xA0z"}));
+    expect_equal(split(whitespace, ""), strings_t {});
+    expect_equal(split(whitespace, "  "), strings_t {});
+    expect_equal(split(whitespace, " a  b "), strings_t({"a", "b"}));
+    expect_equal(split(whitespace, "\ta\nb\r\n c\f"), strings_t({"a", "b", "c"}));
+    expect_equal(split(whitespace, "\v\fx\x1cy"), strings_t({"x\x1cy"}));
+    expect_equal(split(whitespace, "a\xC2\xA0z"), strings_t({"a\xC2\xA0z"}));
 
     // `str.splitlines()`: LF, VT, FF, CR, FS, GS, RS, CR LF as one, NEL, LS and PS, no empty line
     // after a final break, and neither US, a lone 0x85, NBSP nor a near miss of LS a break.
     split_verb_t const lines {sz_kernel_strings_split_lines_k};
-    verify(split(lines, "") == strings_t {});
-    verify(split(lines, "\n") == strings_t({""}));
-    verify(split(lines, "a\nb") == strings_t({"a", "b"}));
-    verify(split(lines, "a\n") == strings_t({"a"}));
-    verify(split(lines, "a\n\nb") == strings_t({"a", "", "b"}));
-    verify(split(lines, "a\r\nb\rc\n") == strings_t({"a", "b", "c"}));
-    verify(split(lines, "\r\r\n") == strings_t({"", ""}));
-    verify(split(lines, "\n\r") == strings_t({"", ""}));
-    verify(split(lines, "a\r") == strings_t({"a"}));
-    verify(split(lines, "a\vb\fc") == strings_t({"a", "b", "c"}));
-    verify(split(lines, "a\x1c" "b\x1d" "c\x1e" "d") == strings_t({"a", "b", "c", "d"})); // "\x1cb" is one escape
-    verify(split(lines, "a\xC2\x85z") == strings_t({"a", "z"}));
-    verify(split(lines, "a\xE2\x80\xA8z\xE2\x80\xA9" "c") == strings_t({"a", "z", "c"})); // "\xA9c" is one escape
-    verify(split(lines, "\x1f") == strings_t({"\x1f"}));
-    verify(split(lines, "a\x85z") == strings_t({"a\x85z"}));
-    verify(split(lines, "\xC2\xA0") == strings_t({"\xC2\xA0"}));
-    verify(split(lines, "a\xE2\x80\xA7z\xE2\x80\xAA") == strings_t({"a\xE2\x80\xA7z\xE2\x80\xAA"}));
+    expect_equal(split(lines, ""), strings_t {});
+    expect_equal(split(lines, "\n"), strings_t({""}));
+    expect_equal(split(lines, "a\nb"), strings_t({"a", "b"}));
+    expect_equal(split(lines, "a\n"), strings_t({"a"}));
+    expect_equal(split(lines, "a\n\nb"), strings_t({"a", "", "b"}));
+    expect_equal(split(lines, "a\r\nb\rc\n"), strings_t({"a", "b", "c"}));
+    expect_equal(split(lines, "\r\r\n"), strings_t({"", ""}));
+    expect_equal(split(lines, "\n\r"), strings_t({"", ""}));
+    expect_equal(split(lines, "a\r"), strings_t({"a"}));
+    expect_equal(split(lines, "a\vb\fc"), strings_t({"a", "b", "c"}));
+    expect_equal(split(lines, "a\x1c" "b\x1d" "c\x1e" "d"), strings_t({"a", "b", "c", "d"})); // "\x1cb" is one escape
+    expect_equal(split(lines, "a\xC2\x85z"), strings_t({"a", "z"}));
+    expect_equal(split(lines, "a\xE2\x80\xA8z\xE2\x80\xA9" "c"), strings_t({"a", "z", "c"})); // "\xA9c" is one escape
+    expect_equal(split(lines, "\x1f"), strings_t({"\x1f"}));
+    expect_equal(split(lines, "a\x85z"), strings_t({"a\x85z"}));
+    expect_equal(split(lines, "\xC2\xA0"), strings_t({"\xC2\xA0"}));
+    expect_equal(split(lines, "a\xE2\x80\xA7z\xE2\x80\xAA"), strings_t({"a\xE2\x80\xA7z\xE2\x80\xAA"}));
 
     // No bytes at a null text make one empty part at each delimiter, and no part at all otherwise.
     for (split_verb_t const &verb : split_verbs_()) {
         sz_strings_span_t tape {};
-        verify(split_outcome_(backend, verb, nullptr, 0, &heap.allocator, tape).strings == split_oracle_(verb, ""));
+        expect_equal(split_outcome_(backend, verb, nullptr, 0, &heap.allocator, tape).strings, split_oracle_(verb, ""));
         sz_strings_span_free(&tape, &heap.allocator, nullptr);
     }
 
@@ -692,20 +694,19 @@ inline void check_strings_split_unit_(strings_backend_t const &backend) {
         sz_string_view_t const quarters[2] = {{nullptr, half / 2}, {nullptr, 0}};
         sz_string_view_t const empties[2] = {{nullptr, 0}, {nullptr, 0}};
         sz_size_t length = length_before;
-        verify(backend.join(&column, 1, 4, halves, {nullptr, 0}, nullptr, &length, nullptr) == sz_bad_alloc_k);
-        verify(backend.join(&column, 1, 4, quarters, {nullptr, 0}, nullptr, &length, nullptr) == sz_bad_alloc_k);
-        verify(backend.join(&column, 1, 4, empties, {nullptr, half}, nullptr, &length, nullptr) == sz_bad_alloc_k);
-        verify(length == length_before);
+        expect_equal(backend.join(&column, 1, 4, halves, {nullptr, 0}, nullptr, &length, nullptr), sz_bad_alloc_k);
+        expect_equal(backend.join(&column, 1, 4, quarters, {nullptr, 0}, nullptr, &length, nullptr), sz_bad_alloc_k);
+        expect_equal(backend.join(&column, 1, 4, empties, {nullptr, half}, nullptr, &length, nullptr), sz_bad_alloc_k);
+        expect_equal(length, length_before);
     }
-    verify(heap.mismatches == 0 && heap.blocks.empty());
+    expect_true(heap.mismatches == 0 && heap.blocks.empty());
 }
 
 /** Demands that one backend split random texts and join random columns as the oracles do: texts of
  *  dense delimiters, of sparse ones in long words, and of every line break, short and long lines,
  *  CR LF and ill-formed bytes among them, into every kind of span, and columns of any layouts and
  *  frames across the blocks of 64 rows. */
-inline void check_strings_split_equivalence_(test_context_t &context, strings_backend_t const &candidate) {
-    std::mt19937 &generator = context.generator;
+inline void check_strings_split_equivalence_(split_mix_generator_t &generator, strings_backend_t const &candidate) {
     std::vector<std::string> const dense = alphabet_characters("ab ,;\t\n\r\xff");
     std::vector<std::string> sparse(40, "x");
     for (char const *rare : {" ", ",", "\n", "\xff"}) sparse.push_back(rare);
@@ -734,7 +735,7 @@ inline void check_strings_split_equivalence_(test_context_t &context, strings_ba
     std::vector<std::string> const *const alphabets[] = {&dense, &sparse, &breaks};
     std::vector<split_verb_t> const verbs = split_verbs_();
     std::uniform_int_distribution<std::size_t> length_distribution(0, 300);
-    for (std::size_t iteration = 0; iteration != context.iterations(20); ++iteration)
+    for (std::size_t iteration = 0; iteration != scaled_iterations(20); ++iteration)
         for (std::vector<std::string> const *characters : alphabets) {
             std::size_t const length = length_distribution(generator);
             std::string const text = random_string(generator, length == 300 ? 3000 : length, *characters);
@@ -744,7 +745,7 @@ inline void check_strings_split_equivalence_(test_context_t &context, strings_ba
     std::vector<std::string> const cells = alphabet_characters("ab,\"\n \xC3\xA9");
     std::uniform_int_distribution<std::size_t> columns_distribution(0, 3), rows_distribution(0, 150),
         cell_distribution(0, 12), frame_distribution(0, 3), layout_distribution(0, 3);
-    for (std::size_t iteration = 0; iteration != context.iterations(30); ++iteration) {
+    for (std::size_t iteration = 0; iteration != scaled_iterations(30); ++iteration) {
         // The widest draws take 17 columns and frames, past the slots a backend keeps in registers.
         std::size_t const drawn_columns = columns_distribution(generator), rows = rows_distribution(generator);
         std::size_t const columns_count = drawn_columns == 3 ? 17 : drawn_columns;
@@ -786,8 +787,8 @@ inline void check_strings_split_safety_(strings_backend_t const &backend) {
             std::vector<std::string> const expected = split_oracle_(verb, text);
             sized_heap_t heap;
             sz_strings_span_t tape {};
-            verify(split_outcome_(backend, verb, exact.data(), exact.size(), &heap.allocator, tape).strings ==
-                   expected);
+            expect_equal(split_outcome_(backend, verb, exact.data(), exact.size(), &heap.allocator, tape).strings,
+                         expected);
             sz_strings_span_free(&tape, &heap.allocator, nullptr);
 
             std::size_t payload_bytes = 0;
@@ -837,7 +838,7 @@ inline void check_strings_split_safety_(strings_backend_t const &backend) {
         for (bool const reallocates : {true, false})
             for (std::vector<std::string> const *start : starts)
                 for (std::size_t growths = 0;; ++growths) {
-                    verify(growths != 16 && "A split must succeed once the allocator grants it enough");
+                    expect_true(growths != 16, "A split must succeed once the allocator grants it enough");
                     sized_heap_t rationed;
                     if (!reallocates) rationed.allocator.reallocate = nullptr;
                     sz_strings_span_t tape {};
@@ -850,7 +851,7 @@ inline void check_strings_split_safety_(strings_backend_t const &backend) {
                     if (rationed.mismatches != 0 || !rationed.blocks.empty())
                         fail_backend_(backend.name, "a refused split left a span its blocks do not match");
                     if (outcome.status == sz_bad_alloc_k) continue;
-                    verify(outcome.status == sz_success_k && outcome.strings == expected);
+                    expect_true(outcome.status == sz_success_k && outcome.strings == expected);
                     break;
                 }
     }
@@ -873,7 +874,7 @@ inline void check_strings_unit_(strings_backend_t const &backend) {
     };
     auto const decoded = [&](sz_escape_kind_t kind, strings_t const &strings) {
         strings_outcome_t const outcome = unescaped(kind, strings);
-        verify(outcome.status == sz_success_k);
+        expect_equal(outcome.status, sz_success_k);
         return outcome.strings;
     };
     auto const escaped = [&](sz_escape_kind_t kind, strings_t const &strings) {
@@ -883,7 +884,7 @@ inline void check_strings_unit_(strings_backend_t const &backend) {
                                                            layouts.u32_tape(), nullptr, strings.size(), &heap.allocator,
                                                            tape);
         sz_strings_span_free(&tape, &heap.allocator, nullptr);
-        verify(outcome.status == sz_success_k);
+        expect_equal(outcome.status, sz_success_k);
         return outcome.strings;
     };
     auto const normalized = [&](sz_normal_form_t form, strings_t const &strings) {
@@ -893,87 +894,90 @@ inline void check_strings_unit_(strings_backend_t const &backend) {
                                                            layouts.u32_tape(), nullptr, strings.size(), &heap.allocator,
                                                            tape);
         sz_strings_span_free(&tape, &heap.allocator, nullptr);
-        verify(outcome.status == sz_success_k);
+        expect_equal(outcome.status, sz_success_k);
         return outcome.strings;
     };
 
     // RFC 8259: two-character escapes where they exist, lowercase `\u00XX` for the other controls,
     // every other byte verbatim, DEL and UTF-8 included. Decoding takes `\/`, either hex case and
     // surrogate pairs, refusing lone or reversed surrogates, unknown letters and short escapes.
-    verify(escaped(sz_escape_json_k, {"a\"b\\c\n\x1f", "\b\f\r\t", std::string(1, '\0'), "/\x7f\xC3\xA9", ""}) ==
-           strings_t({R"(a\"b\\c\n\u001f)", R"(\b\f\r\t)", R"(\u0000)", "/\x7f\xC3\xA9", ""}));
-    verify(decoded(sz_escape_json_k, {R"(a\"b\\c\/\n\u001F)", "\\u00e9\\u00E9", "\\ud83d\\ude00", "\xC3\xA9"}) ==
-           strings_t({"a\"b\\c/\n\x1f", "\xC3\xA9\xC3\xA9", "\xF0\x9F\x98\x80", "\xC3\xA9"}));
+    expect_equal(escaped(sz_escape_json_k, {"a\"b\\c\n\x1f", "\b\f\r\t", std::string(1, '\0'), "/\x7f\xC3\xA9", ""}),
+                 strings_t({R"(a\"b\\c\n\u001f)", R"(\b\f\r\t)", R"(\u0000)", "/\x7f\xC3\xA9", ""}));
+    expect_equal(decoded(sz_escape_json_k, {R"(a\"b\\c\/\n\u001F)", "\\u00e9\\u00E9", "\\ud83d\\ude00", "\xC3\xA9"}),
+                 strings_t({"a\"b\\c/\n\x1f", "\xC3\xA9\xC3\xA9", "\xF0\x9F\x98\x80", "\xC3\xA9"}));
     for (char const *text :
          {R"(\ud83d)", "\\ud83d\\u0041", R"(\ude00\ud83d)", R"(\q)", R"(\u12)", R"(\u12g4)", R"(abc\)"})
-        verify(unescaped(sz_escape_json_k, {text}) == malformed_at(0));
+        expect_equal(unescaped(sz_escape_json_k, {text}), malformed_at(0));
 
     // Python's `json.dumps` default: non-ASCII codepoints as `\uXXXX`, a surrogate pair past the
     // Basic Multilingual Plane, and a U+FFFD escape per byte that starts no well-formed sequence.
-    verify(escaped(sz_escape_json_ascii_k, {"\xC3\xA9\xF0\x9F\x98\x80", "\xE2\x82\xAC\"\x1f"}) ==
-           strings_t({"\\u00e9\\ud83d\\ude00", "\\u20ac\\\"\\u001f"}));
+    expect_equal(escaped(sz_escape_json_ascii_k, {"\xC3\xA9\xF0\x9F\x98\x80", "\xE2\x82\xAC\"\x1f"}),
+                 strings_t({"\\u00e9\\ud83d\\ude00", "\\u20ac\\\"\\u001f"}));
 
     // DEL as well, since Python escapes every character outside printable ASCII, while plain JSON
     // keeps it as it is, like Python's `ensure_ascii=False`, as the RFC 8259 case above shows.
-    verify(escaped(sz_escape_json_ascii_k, {"\x7f", "a\x7fz"}) == strings_t({"\\u007f", "a\\u007fz"}));
-    verify(decoded(sz_escape_json_ascii_k, {"\\u007f"}) == strings_t {"\x7f"});
-    verify(escaped(sz_escape_json_ascii_k, {"a\xFFz", "\xC0\x80", "\xED\xA0\x80", "\xF0\x9F\x98"}) ==
-           strings_t({"a\\ufffdz", "\\ufffd\\ufffd", "\\ufffd\\ufffd\\ufffd", "\\ufffd\\ufffd\\ufffd"}));
-    verify(decoded(sz_escape_json_ascii_k, {"\\u00e9\\ud83d\\ude00"}) == strings_t {"\xC3\xA9\xF0\x9F\x98\x80"});
-    verify(unescaped(sz_escape_json_ascii_k, {R"(\ud83d)"}) == malformed_at(0));
+    expect_equal(escaped(sz_escape_json_ascii_k, {"\x7f", "a\x7fz"}), strings_t({"\\u007f", "a\\u007fz"}));
+    expect_equal(decoded(sz_escape_json_ascii_k, {"\\u007f"}), strings_t {"\x7f"});
+    expect_equal(escaped(sz_escape_json_ascii_k, {"a\xFFz", "\xC0\x80", "\xED\xA0\x80", "\xF0\x9F\x98"}),
+                 strings_t({"a\\ufffdz", "\\ufffd\\ufffd", "\\ufffd\\ufffd\\ufffd", "\\ufffd\\ufffd\\ufffd"}));
+    expect_equal(decoded(sz_escape_json_ascii_k, {"\\u00e9\\ud83d\\ude00"}), strings_t {"\xC3\xA9\xF0\x9F\x98\x80"});
+    expect_equal(unescaped(sz_escape_json_ascii_k, {R"(\ud83d)"}), malformed_at(0));
 
     // Two lowercase digits per byte out, either case in, and nothing but whole digit pairs.
     std::string const bytes("\x00\xffZz", 4);
-    verify(escaped(sz_escape_hex_k, {bytes, ""}) == strings_t({"00ff5a7a", ""}));
-    verify(decoded(sz_escape_hex_k, {"00FF5A7A", "00ff5a7a"}) == strings_t({bytes, bytes}));
-    for (char const *text : {"abc", "0g"}) verify(unescaped(sz_escape_hex_k, {text}) == malformed_at(0));
+    expect_equal(escaped(sz_escape_hex_k, {bytes, ""}), strings_t({"00ff5a7a", ""}));
+    expect_equal(decoded(sz_escape_hex_k, {"00FF5A7A", "00ff5a7a"}), strings_t({bytes, bytes}));
+    for (char const *text : {"abc", "0g"}) expect_equal(unescaped(sz_escape_hex_k, {text}), malformed_at(0));
 
     // The five markup characters out; the five entities, `&apos;` and numeric references in, with
     // U+FFFD for zero, surrogates and anything past U+10FFFF, and every other `&` kept as it is.
-    verify(escaped(sz_escape_html_k, {R"(<a href="x">'&'</a>)"}) ==
-           strings_t {"&lt;a href=&quot;x&quot;&gt;&#39;&amp;&#39;&lt;/a&gt;"});
-    verify(decoded(sz_escape_html_k, {"&amp;&lt;&gt;&quot;&apos;&#39;", "&#x1F600;&#X1f600;&#128512;",
-                                      "&#0;&#xD800;&#x110000;&#4294967361;", "AT&T &nope; &#; &#x; &#65"}) ==
-           strings_t({R"(&<>"'')", "\xF0\x9F\x98\x80\xF0\x9F\x98\x80\xF0\x9F\x98\x80",
-                      "\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD", "AT&T &nope; &#; &#x; &#65"}));
+    expect_equal(escaped(sz_escape_html_k, {R"(<a href="x">'&'</a>)"}),
+                 strings_t {"&lt;a href=&quot;x&quot;&gt;&#39;&amp;&#39;&lt;/a&gt;"});
+    expect_equal(decoded(sz_escape_html_k, {"&amp;&lt;&gt;&quot;&apos;&#39;", "&#x1F600;&#X1f600;&#128512;",
+                                            "&#0;&#xD800;&#x110000;&#4294967361;", "AT&T &nope; &#; &#x; &#65"}),
+                 strings_t({R"(&<>"'')", "\xF0\x9F\x98\x80\xF0\x9F\x98\x80\xF0\x9F\x98\x80",
+                            "\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD", "AT&T &nope; &#; &#x; &#65"}));
 
     // RFC 3986: everything but `A-Z a-z 0-9 - . _ ~` as uppercase `%XX`, either case in, `+` kept.
-    verify(escaped(sz_escape_url_k, {"a b/c~d-e.f_g", "\xC3\xA9"}) == strings_t({"a%20b%2Fc~d-e.f_g", "%C3%A9"}));
-    verify(decoded(sz_escape_url_k, {"%2f%2F", "a+b", "%C3%a9"}) == strings_t({"//", "a+b", "\xC3\xA9"}));
-    for (char const *text : {"%", "%2", "%zz", "a%2"}) verify(unescaped(sz_escape_url_k, {text}) == malformed_at(0));
+    expect_equal(escaped(sz_escape_url_k, {"a b/c~d-e.f_g", "\xC3\xA9"}), strings_t({"a%20b%2Fc~d-e.f_g", "%C3%A9"}));
+    expect_equal(decoded(sz_escape_url_k, {"%2f%2F", "a+b", "%C3%a9"}), strings_t({"//", "a+b", "\xC3\xA9"}));
+    for (char const *text : {"%", "%2", "%zz", "a%2"})
+        expect_equal(unescaped(sz_escape_url_k, {text}), malformed_at(0));
 
     // Terminals: three short forms, `\xHH` for other controls, DEL and ill-formed bytes, `\uXXXX`
     // for C1 controls and the bidirectional overrides of Trojan Source, U+202F and U+206A kept.
-    verify(escaped(sz_escape_console_k, {"\n\t\r\\\"", "\x1b[31m", "\x7f\x08", std::string(1, '\0'), "\xff\xC0\x80"}) ==
-           strings_t({R"(\n\t\r\\\")", R"(\x1b[31m)", R"(\x7f\x08)", R"(\x00)", R"(\xff\xc0\x80)"}));
-    verify(escaped(sz_escape_console_k, {"\xE2\x80\xAExyz", "\xE2\x81\xA6\xE2\x81\xA9", "\xC2\x80\xC2\x85\xC2\x9F",
-                                         "\xE2\x80\xAF\xE2\x81\xAA\xC2\xA0\xC3\xA9"}) ==
-           strings_t(
-               {"\\u202exyz", "\\u2066\\u2069", "\\u0080\\u0085\\u009f", "\xE2\x80\xAF\xE2\x81\xAA\xC2\xA0\xC3\xA9"}));
-    verify(decoded(sz_escape_console_k, {R"(\n\t\r\\\")", R"(\x1b[31m\xff)", "\\u202e\\u0085"}) ==
-           strings_t({"\n\t\r\\\"", "\x1b[31m\xff", "\xE2\x80\xAE\xC2\x85"}));
+    expect_equal(
+        escaped(sz_escape_console_k, {"\n\t\r\\\"", "\x1b[31m", "\x7f\x08", std::string(1, '\0'), "\xff\xC0\x80"}),
+        strings_t({R"(\n\t\r\\\")", R"(\x1b[31m)", R"(\x7f\x08)", R"(\x00)", R"(\xff\xc0\x80)"}));
+    expect_equal(escaped(sz_escape_console_k, {"\xE2\x80\xAExyz", "\xE2\x81\xA6\xE2\x81\xA9",
+                                               "\xC2\x80\xC2\x85\xC2\x9F", "\xE2\x80\xAF\xE2\x81\xAA\xC2\xA0\xC3\xA9"}),
+                 strings_t({"\\u202exyz", "\\u2066\\u2069", "\\u0080\\u0085\\u009f",
+                            "\xE2\x80\xAF\xE2\x81\xAA\xC2\xA0\xC3\xA9"}));
+    expect_equal(decoded(sz_escape_console_k, {R"(\n\t\r\\\")", R"(\x1b[31m\xff)", "\\u202e\\u0085"}),
+                 strings_t({"\n\t\r\\\"", "\x1b[31m\xff", "\xE2\x80\xAE\xC2\x85"}));
     for (char const *text : {R"(\q)", R"(\x4)", R"(\ud800)", R"(abc\)"})
-        verify(unescaped(sz_escape_console_k, {text}) == malformed_at(0));
+        expect_equal(unescaped(sz_escape_console_k, {text}), malformed_at(0));
 
     // RFC 4180: quoted only around a comma, a quote, CR or LF, with inner quotes doubled.
-    verify(escaped(sz_escape_csv_k, {"a,b", R"(a"b)", "a\nb", "a\rb", "plain", "", " x "}) ==
-           strings_t({R"("a,b")", R"("a""b")", "\"a\nb\"", "\"a\rb\"", "plain", "", " x "}));
-    verify(decoded(sz_escape_csv_k, {R"("a,b")", R"("a""b")", "plain", R"("")", R"(a"b)"}) ==
-           strings_t({"a,b", R"(a"b)", "plain", "", R"(a"b)"}));
+    expect_equal(escaped(sz_escape_csv_k, {"a,b", R"(a"b)", "a\nb", "a\rb", "plain", "", " x "}),
+                 strings_t({R"("a,b")", R"("a""b")", "\"a\nb\"", "\"a\rb\"", "plain", "", " x "}));
+    expect_equal(decoded(sz_escape_csv_k, {R"("a,b")", R"("a""b")", "plain", R"("")", R"(a"b)"}),
+                 strings_t({"a,b", R"(a"b)", "plain", "", R"(a"b)"}));
     for (char const *text : {R"(")", R"("open)", R"("a"b")"})
-        verify(unescaped(sz_escape_csv_k, {text}) == malformed_at(0));
+        expect_equal(unescaped(sz_escape_csv_k, {text}), malformed_at(0));
 
     // Unescaping writes nothing once any string is malformed, and names the first one by its place
     // in the output, which an order can move away from its place in the input.
-    verify(unescaped(sz_escape_json_k, {R"(ok\n)", "\\u00e9", R"(bad\q)", "never"}) == malformed_at(2));
-    verify(unescaped(sz_escape_hex_k, {"00", "0", "zz"}) == malformed_at(1));
+    expect_equal(unescaped(sz_escape_json_k, {R"(ok\n)", "\\u00e9", R"(bad\q)", "never"}), malformed_at(2));
+    expect_equal(unescaped(sz_escape_hex_k, {"00", "0", "zz"}), malformed_at(1));
     {
         strings_layouts_t const layouts({R"(\q)", "ok"});
         sz_size_t const order[] = {1, 1, 0, 1};
         sz_strings_span_t tape {};
-        verify(strings_outcome_(backend, {sz_kernel_strings_unescape_k, sz_escape_json_k}, layouts.u32_tape(), order, 4,
-                                &heap.allocator, tape) == malformed_at(2));
-        verify(tape.count == 0 && tape.data.u32_tape.offsets == nullptr);
+        expect_equal(strings_outcome_(backend, {sz_kernel_strings_unescape_k, sz_escape_json_k}, layouts.u32_tape(),
+                                      order, 4, &heap.allocator, tape),
+                     malformed_at(2));
+        expect_true(tape.count == 0 && tape.data.u32_tape.offsets == nullptr);
         sz_strings_span_free(&tape, &heap.allocator, nullptr);
     }
 
@@ -984,15 +988,18 @@ inline void check_strings_unit_(strings_backend_t const &backend) {
         sz_size_t const order[] = {3, 1, 3, 0};
         sz_strings_span_t tape {};
         for (named_strings_t const &layout : layouts.all()) {
-            verify(
+            expect_equal(
                 strings_outcome_(backend, {sz_kernel_strings_to_tape_k}, layout.view, nullptr, 4, &heap.allocator, tape)
-                    .strings == fruits);
-            verify(
+                    .strings,
+                fruits);
+            expect_equal(
                 strings_outcome_(backend, {sz_kernel_strings_to_tape_k}, layout.view, order, 4, &heap.allocator, tape)
-                    .strings == strings_t({"kiwi", "", "kiwi", "apple"}));
-            verify(
+                    .strings,
+                strings_t({"kiwi", "", "kiwi", "apple"}));
+            expect_equal(
                 strings_outcome_(backend, {sz_kernel_strings_to_tape_k}, layout.view, nullptr, 2, &heap.allocator, tape)
-                    .strings == strings_t({"apple", ""}));
+                    .strings,
+                strings_t({"apple", ""}));
         }
         sz_strings_span_free(&tape, &heap.allocator, nullptr);
     }
@@ -1005,13 +1012,13 @@ inline void check_strings_unit_(strings_backend_t const &backend) {
         sz_u32_t *const offsets = tape.data.u32_tape.offsets;
         sz_strings_view_t own;
         sz_strings_from_span(&tape, &own);
-        verify(
-            strings_outcome_(backend, {sz_kernel_strings_to_tape_k}, own, nullptr, 3, &heap.allocator, tape).strings ==
+        expect_equal(
+            strings_outcome_(backend, {sz_kernel_strings_to_tape_k}, own, nullptr, 3, &heap.allocator, tape).strings,
             words);
-        verify(tape.data.u32_tape.data == data && tape.data.u32_tape.offsets == offsets);
+        expect_true(tape.data.u32_tape.data == data && tape.data.u32_tape.offsets == offsets);
         sz_strings_from_span(&tape, &own);
-        verify(
-            strings_outcome_(backend, {sz_kernel_strings_to_tape_k}, own, nullptr, 2, &heap.allocator, tape).strings ==
+        expect_equal(
+            strings_outcome_(backend, {sz_kernel_strings_to_tape_k}, own, nullptr, 2, &heap.allocator, tape).strings,
             strings_t({"keep", "these"}));
         sz_strings_span_free(&tape, &heap.allocator, nullptr);
     }
@@ -1020,7 +1027,7 @@ inline void check_strings_unit_(strings_backend_t const &backend) {
     {
         alignas(64) char buffer[256];
         sz_allocator_t arena;
-        verify(sz_allocator_init_arena(&arena, buffer, sizeof(buffer), 8) == sz_success_k);
+        expect_equal(sz_allocator_init_arena(&arena, buffer, sizeof(buffer), 8), sz_success_k);
         sz_ptr_t const data = static_cast<sz_ptr_t>(arena.allocate(12, arena.handle, nullptr));
         sz_u32_t *const offsets = static_cast<sz_u32_t *>(arena.allocate(4 * sizeof(sz_u32_t), arena.handle, nullptr));
         std::memcpy(data, "dropkeepsake", 12);
@@ -1030,8 +1037,8 @@ inline void check_strings_unit_(strings_backend_t const &backend) {
         tape.data.u32_tape.data = data, tape.data.u32_tape.offsets = offsets + 1;
         sz_strings_view_t own;
         sz_strings_from_span(&tape, &own);
-        verify(strings_outcome_(backend, {sz_kernel_strings_to_tape_k}, own, nullptr, 2, &arena, tape).strings ==
-               strings_t({"keep", "sake"}));
+        expect_equal(strings_outcome_(backend, {sz_kernel_strings_to_tape_k}, own, nullptr, 2, &arena, tape).strings,
+                     strings_t({"keep", "sake"}));
     }
 
     // A span escapes into itself, growing, and unescapes back, shrinking.
@@ -1041,14 +1048,16 @@ inline void check_strings_unit_(strings_backend_t const &backend) {
         sz_strings_span_t tape = span_from_(plain, sz_strings_u32_tape_k, heap.allocator);
         sz_strings_view_t own;
         sz_strings_from_span(&tape, &own);
-        verify(strings_outcome_(backend, {sz_kernel_strings_escape_k, sz_escape_json_k}, own, nullptr, 3,
-                                &heap.allocator, tape)
-                   .strings == json);
+        expect_equal(strings_outcome_(backend, {sz_kernel_strings_escape_k, sz_escape_json_k}, own, nullptr, 3,
+                                      &heap.allocator, tape)
+                         .strings,
+                     json);
         sz_strings_from_span(&tape, &own);
-        let_verify(
+        {
             strings_outcome_t const outcome = strings_outcome_(
-                backend, {sz_kernel_strings_unescape_k, sz_escape_json_k}, own, nullptr, 3, &heap.allocator, tape),
-            outcome.status == sz_success_k && outcome.strings == plain);
+                backend, {sz_kernel_strings_unescape_k, sz_escape_json_k}, own, nullptr, 3, &heap.allocator, tape);
+            expect_true(outcome.status == sz_success_k && outcome.strings == plain);
+        }
         sz_strings_span_free(&tape, &heap.allocator, nullptr);
     }
 
@@ -1062,15 +1071,15 @@ inline void check_strings_unit_(strings_backend_t const &backend) {
             sz_strings_rows_t const rows {buffer, 6, 4};
             sz_size_t longest = 0;
             std::memset(buffer, '.', sizeof(buffer));
-            verify(backend.to_rows(&layout.view, nullptr, 3, &rows, &longest, nullptr) == sz_success_k);
-            verify(std::string_view(buffer, 18) == std::string_view("abc\0..abcd..\0\0\0\0..", 18));
-            verify(longest == 6);
+            expect_equal(backend.to_rows(&layout.view, nullptr, 3, &rows, &longest, nullptr), sz_success_k);
+            expect_equal(std::string_view(buffer, 18), std::string_view("abc\0..abcd..\0\0\0\0..", 18));
+            expect_equal(longest, 6);
             std::memset(buffer, '.', sizeof(buffer));
-            verify(backend.to_rows(&layout.view, order, 2, &rows, &longest, nullptr) == sz_success_k);
-            verify(std::string_view(buffer, 18) == std::string_view("\0\0\0\0..abc\0........", 18));
-            verify(longest == 3);
-            verify(backend.to_rows(&layout.view, nullptr, 0, &rows, &longest, nullptr) == sz_success_k);
-            verify(longest == 0);
+            expect_equal(backend.to_rows(&layout.view, order, 2, &rows, &longest, nullptr), sz_success_k);
+            expect_equal(std::string_view(buffer, 18), std::string_view("\0\0\0\0..abc\0........", 18));
+            expect_equal(longest, 3);
+            expect_equal(backend.to_rows(&layout.view, nullptr, 0, &rows, &longest, nullptr), sz_success_k);
+            expect_equal(longest, 0);
         }
     }
 
@@ -1088,9 +1097,9 @@ inline void check_strings_unit_(strings_backend_t const &backend) {
         strings_layouts_t const layouts(greeting);
         for (named_strings_t const &layout : layouts.all()) {
             sz_strings_span_t tape {};
-            verify(backend.lookup(&layout.view, nullptr, 4, upper_table, &heap.allocator, &tape, nullptr) ==
-                   sz_success_k);
-            verify(strings_in_(tape) == shouted);
+            expect_equal(backend.lookup(&layout.view, nullptr, 4, upper_table, &heap.allocator, &tape, nullptr),
+                         sz_success_k);
+            expect_equal(strings_in_(tape), shouted);
             sz_strings_span_free(&tape, &heap.allocator, nullptr);
         }
         sz_strings_span_t tape = span_from_(greeting, sz_strings_u32_tape_k, heap.allocator);
@@ -1098,9 +1107,9 @@ inline void check_strings_unit_(strings_backend_t const &backend) {
         sz_u32_t *const offsets = tape.data.u32_tape.offsets;
         sz_strings_view_t own;
         sz_strings_from_span(&tape, &own);
-        verify(backend.lookup(&own, nullptr, 4, upper_table, &heap.allocator, &tape, nullptr) == sz_success_k);
-        verify(tape.data.u32_tape.data == data && tape.data.u32_tape.offsets == offsets);
-        verify(strings_in_(tape) == shouted);
+        expect_equal(backend.lookup(&own, nullptr, 4, upper_table, &heap.allocator, &tape, nullptr), sz_success_k);
+        expect_true(tape.data.u32_tape.data == data && tape.data.u32_tape.offsets == offsets);
+        expect_equal(strings_in_(tape), shouted);
         sz_strings_span_free(&tape, &heap.allocator, nullptr);
 
         // One string at a time, as bindings map a buffer: in place, and into a borrowed span of its
@@ -1117,34 +1126,35 @@ inline void check_strings_unit_(strings_backend_t const &backend) {
             sz_strings_span_t borrowed {};
             borrowed.layout = sz_strings_u32_tape_k, borrowed.count = 1;
             borrowed.data.u32_tape.data = mapped.data(), borrowed.data.u32_tape.offsets = target_offsets;
-            verify(backend.lookup(&source, nullptr, 1, upper_table, nullptr, &borrowed, nullptr) == sz_success_k);
-            verify(mapped == expected && borrowed.data.u32_tape.data == mapped.data());
+            expect_equal(backend.lookup(&source, nullptr, 1, upper_table, nullptr, &borrowed, nullptr), sz_success_k);
+            expect_true(mapped == expected && borrowed.data.u32_tape.data == mapped.data());
             borrowed.data.u32_tape.data = text.data();
             sz_strings_from_span(&borrowed, &own);
-            verify(backend.lookup(&own, nullptr, 1, upper_table, nullptr, &borrowed, nullptr) == sz_success_k);
-            verify(text == expected);
+            expect_equal(backend.lookup(&own, nullptr, 1, upper_table, nullptr, &borrowed, nullptr), sz_success_k);
+            expect_equal(text, expected);
         }
     }
 
     // UAX #15: NFD and NFKD split precomposed letters and Hangul syllables, NFC and NFKC put them
     // back together, and only the compatibility forms rewrite ligatures and fractions.
-    verify(normalized(sz_normal_form_nfd_k, {"\xC3\xA9", "", "\xEA\xB0\x80", "\xEF\xAC\x81"}) ==
-           strings_t({"e\xCC\x81", "", "\xE1\x84\x80\xE1\x85\xA1", "\xEF\xAC\x81"}));
-    verify(normalized(sz_normal_form_nfc_k, {"e\xCC\x81", "\xE1\x84\x80\xE1\x85\xA1", "", "\xE2\x84\xAB"}) ==
-           strings_t({"\xC3\xA9", "\xEA\xB0\x80", "", "\xC3\x85"}));
-    verify(normalized(sz_normal_form_nfkd_k, {"\xEF\xAC\x81", "\xC2\xBD", ""}) ==
-           strings_t({"fi", "1\xE2\x81\x84\x32", ""}));
-    verify(normalized(sz_normal_form_nfkc_k, {"", "\xEF\xAC\x81\xC3\xA9", "\xC2\xBD"}) ==
-           strings_t({"", "fi\xC3\xA9", "1\xE2\x81\x84\x32"}));
+    expect_equal(normalized(sz_normal_form_nfd_k, {"\xC3\xA9", "", "\xEA\xB0\x80", "\xEF\xAC\x81"}),
+                 strings_t({"e\xCC\x81", "", "\xE1\x84\x80\xE1\x85\xA1", "\xEF\xAC\x81"}));
+    expect_equal(normalized(sz_normal_form_nfc_k, {"e\xCC\x81", "\xE1\x84\x80\xE1\x85\xA1", "", "\xE2\x84\xAB"}),
+                 strings_t({"\xC3\xA9", "\xEA\xB0\x80", "", "\xC3\x85"}));
+    expect_equal(normalized(sz_normal_form_nfkd_k, {"\xEF\xAC\x81", "\xC2\xBD", ""}),
+                 strings_t({"fi", "1\xE2\x81\x84\x32", ""}));
+    expect_equal(normalized(sz_normal_form_nfkc_k, {"", "\xEF\xAC\x81\xC3\xA9", "\xC2\xBD"}),
+                 strings_t({"", "fi\xC3\xA9", "1\xE2\x81\x84\x32"}));
 
     // NFKC_Casefold also folds case and drops default ignorables, the U+00AD between J and its
     // caron too, so the two still compose into U+01F0, and ignorables alone into nothing. Bytes
     // starting no codepoint stay barriers, keeping an ignorable whose loss would fuse them.
-    verify(normalized(sz_normal_form_nfkc_casefold_k,
-                      {"J\xC2\xAD\xCC\x8C", "\xC2\xAD\xE2\x80\x8B\xEF\xBB\xBF", "",
-                       "Gro\xC3\x9F \xEF\xAC\x81 \xE2\x84\xAB", "\xC3\xEF\xB8\x8F\x80", "\xE2\x82\xE2\x80\x8B\x80"}) ==
-           strings_t({"\xC7\xB0", "", "", "gross fi \xC3\xA5", "\xC3\xEF\xB8\x8F\x80", "\xE2\x82\xE2\x80\x8B\x80"}));
-    verify(normalized(sz_normal_form_nfkc_casefold_k, {"\xC2\xAD", "", "\xE2\x80\x8B"}) == strings_t({"", "", ""}));
+    expect_equal(
+        normalized(sz_normal_form_nfkc_casefold_k,
+                   {"J\xC2\xAD\xCC\x8C", "\xC2\xAD\xE2\x80\x8B\xEF\xBB\xBF", "",
+                    "Gro\xC3\x9F \xEF\xAC\x81 \xE2\x84\xAB", "\xC3\xEF\xB8\x8F\x80", "\xE2\x82\xE2\x80\x8B\x80"}),
+        strings_t({"\xC7\xB0", "", "", "gross fi \xC3\xA5", "\xC3\xEF\xB8\x8F\x80", "\xE2\x82\xE2\x80\x8B\x80"}));
+    expect_equal(normalized(sz_normal_form_nfkc_casefold_k, {"\xC2\xAD", "", "\xE2\x80\x8B"}), strings_t({"", "", ""}));
 
     // A span normalizes into itself, a string growing ahead of one that shrinks.
     {
@@ -1152,12 +1162,13 @@ inline void check_strings_unit_(strings_backend_t const &backend) {
         sz_strings_span_t tape = span_from_(mixed, sz_strings_u32_tape_k, heap.allocator);
         sz_strings_view_t own;
         sz_strings_from_span(&tape, &own);
-        verify(strings_outcome_(backend, {sz_kernel_strings_normalize_k, {}, sz_normal_form_nfkc_casefold_k}, own,
-                                nullptr, 4, &heap.allocator, tape)
-                   .strings == strings_t({"1\xE2\x81\x84\x32", "", "fi", "plain"}));
+        expect_equal(strings_outcome_(backend, {sz_kernel_strings_normalize_k, {}, sz_normal_form_nfkc_casefold_k}, own,
+                                      nullptr, 4, &heap.allocator, tape)
+                         .strings,
+                     strings_t({"1\xE2\x81\x84\x32", "", "fi", "plain"}));
         sz_strings_span_free(&tape, &heap.allocator, nullptr);
     }
-    verify(heap.mismatches == 0 && heap.blocks.empty());
+    expect_true(heap.mismatches == 0 && heap.blocks.empty());
     if (backend.split) check_strings_split_unit_(backend);
 }
 
@@ -1176,10 +1187,12 @@ inline void check_strings_rows_equivalence_(strings_backend_t const &candidate, 
                 sz_strings_rows_t const expected_rows {expected.data(), stride, width};
                 sz_strings_rows_t const written_rows {written.data(), stride, width};
                 sz_size_t expected_longest = 0, written_longest = 0;
-                verify(sz_strings_to_rows_serial(&layout.view, selection, count, &expected_rows, &expected_longest,
-                                                 nullptr) == sz_success_k);
-                verify(candidate.to_rows(&layout.view, selection, count, &written_rows, &written_longest, nullptr) ==
-                       sz_success_k);
+                expect_equal(sz_strings_to_rows_serial(&layout.view, selection, count, &expected_rows,
+                                                       &expected_longest, nullptr),
+                             sz_success_k);
+                expect_equal(
+                    candidate.to_rows(&layout.view, selection, count, &written_rows, &written_longest, nullptr),
+                    sz_success_k);
                 if (written != expected || written_longest != expected_longest)
                     fail_backend_(candidate.name, fmt::format("rows {} wide from {} {} differ from serial", width,
                                                               layout.name, selection ? "reordered" : "in order")
@@ -1263,7 +1276,8 @@ inline void check_strings_verb_equivalence_(strings_backend_t const &candidate, 
             demand(layout.name, "a borrowed span",
                    strings_outcome_(candidate, verb, layout.view, selection, count,
                                     normalizes ? &heap.allocator : nullptr, borrowed));
-            verify(borrowed.data.u32_tape.data == payload.data() && borrowed.data.u32_tape.offsets == offsets.data());
+            expect_true(borrowed.data.u32_tape.data == payload.data() &&
+                        borrowed.data.u32_tape.offsets == offsets.data());
         }
 
         sz_strings_span_t aliased = span_from_(strings, sz_strings_u32_tape_k, heap.allocator);
@@ -1273,7 +1287,7 @@ inline void check_strings_verb_equivalence_(strings_backend_t const &candidate, 
                strings_outcome_(candidate, verb, own, selection, count, &heap.allocator, aliased));
         sz_strings_span_free(&aliased, &heap.allocator, nullptr);
     }
-    verify(heap.mismatches == 0 && heap.blocks.empty());
+    expect_true(heap.mismatches == 0 && heap.blocks.empty());
 }
 
 /**
@@ -1284,8 +1298,7 @@ inline void check_strings_verb_equivalence_(strings_backend_t const &candidate, 
  *  does. Unescaping what the candidate escaped must give back the strings, unless JSON in ASCII
  *  replaced ill-formed bytes, and spoiling one escaped string must fail at that very string.
  */
-inline void check_strings_equivalence_(test_context_t &context, strings_backend_t const &candidate) {
-    std::mt19937 &generator = context.generator;
+inline void check_strings_equivalence_(split_mix_generator_t &generator, strings_backend_t const &candidate) {
     std::vector<std::string> text = alphabet_characters(
         "aZ09 ,;&#%+~-._/<>'\"\\\n\r\t\x01\x1f\x7f\xC3\xA9\xE2\x82\xAC\xF0\x9F\x98\x80\xC2\x85\xE2\x80\xAE");
     text.push_back(std::string(1, '\0'));
@@ -1335,7 +1348,7 @@ inline void check_strings_equivalence_(test_context_t &context, strings_backend_
         }
     };
 
-    for (std::size_t iteration = 0; iteration != context.iterations(3); ++iteration)
+    for (std::size_t iteration = 0; iteration != scaled_iterations(3); ++iteration)
         for (std::vector<std::string> const *characters : alphabets) {
             std::vector<std::string> const strings = random_strings(*characters);
             std::vector<sz_size_t> const order = random_order(strings.size());
@@ -1351,9 +1364,10 @@ inline void check_strings_equivalence_(test_context_t &context, strings_backend_
 
                 sized_heap_t heap;
                 sz_strings_span_t escaped {}, recovered {};
-                verify(strings_outcome_(candidate, {sz_kernel_strings_escape_k, kind}, layouts.u32_tape(), nullptr,
-                                        strings.size(), &heap.allocator, escaped)
-                           .status == sz_success_k);
+                expect_equal(strings_outcome_(candidate, {sz_kernel_strings_escape_k, kind}, layouts.u32_tape(),
+                                              nullptr, strings.size(), &heap.allocator, escaped)
+                                 .status,
+                             sz_success_k);
                 sz_strings_view_t escaped_view;
                 sz_strings_from_span(&escaped, &escaped_view);
                 strings_outcome_t const round_trip = strings_outcome_(candidate, {sz_kernel_strings_unescape_k, kind},
@@ -1369,7 +1383,7 @@ inline void check_strings_equivalence_(test_context_t &context, strings_backend_
                 std::vector<std::string> spoiled = strings_in_(escaped);
                 sz_strings_span_free(&escaped, &heap.allocator, nullptr);
                 sz_strings_span_free(&recovered, &heap.allocator, nullptr);
-                verify(heap.mismatches == 0 && heap.blocks.empty());
+                expect_true(heap.mismatches == 0 && heap.blocks.empty());
                 if (spoiled.empty()) continue;
                 std::size_t const spoiled_index = std::uniform_int_distribution<std::size_t>(
                     0, spoiled.size() - 1)(generator);
@@ -1390,14 +1404,15 @@ inline void check_strings_equivalence_(test_context_t &context, strings_backend_
         check_strings_verb_equivalence_(candidate, {sz_kernel_strings_escape_k, kind}, edges, edges_order);
         sized_heap_t heap;
         sz_strings_span_t escaped {};
-        verify(strings_outcome_(candidate, {sz_kernel_strings_escape_k, kind}, edges_layouts.u32_tape(), nullptr,
-                                edges.size(), &heap.allocator, escaped)
-                   .status == sz_success_k);
+        expect_equal(strings_outcome_(candidate, {sz_kernel_strings_escape_k, kind}, edges_layouts.u32_tape(), nullptr,
+                                      edges.size(), &heap.allocator, escaped)
+                         .status,
+                     sz_success_k);
         check_strings_verb_equivalence_(candidate, {sz_kernel_strings_unescape_k, kind}, strings_in_(escaped),
                                         edges_order);
         sz_strings_span_free(&escaped, &heap.allocator, nullptr);
     }
-    if (candidate.split) check_strings_split_equivalence_(context, candidate);
+    if (candidate.split) check_strings_split_equivalence_(generator, candidate);
 }
 
 /** What @p verb reads: @p strings themselves, or those escaped for its kind by @p backend when it
@@ -1408,9 +1423,10 @@ inline std::vector<std::string> strings_input_for_(strings_backend_t const &back
     sized_heap_t heap;
     strings_layouts_t const layouts(strings);
     sz_strings_span_t escaped {};
-    verify(strings_outcome_(backend, {sz_kernel_strings_escape_k, verb.kind}, layouts.u32_tape(), nullptr,
-                            strings.size(), &heap.allocator, escaped)
-               .status == sz_success_k);
+    expect_equal(strings_outcome_(backend, {sz_kernel_strings_escape_k, verb.kind}, layouts.u32_tape(), nullptr,
+                                  strings.size(), &heap.allocator, escaped)
+                     .status,
+                 sz_success_k);
     std::vector<std::string> input = strings_in_(escaped);
     sz_strings_span_free(&escaped, &heap.allocator, nullptr);
     return input;
@@ -1425,12 +1441,12 @@ inline void check_strings_empty_(strings_backend_t const &backend) {
         for (strings_verb_t const verb : strings_verbs_())
             for (named_strings_t const &layout : layouts.all()) {
                 sz_strings_span_t tape {};
-                verify(strings_outcome_(backend, verb, layout.view, nullptr, count, &heap.allocator, tape).status ==
-                       sz_success_k);
+                expect_equal(strings_outcome_(backend, verb, layout.view, nullptr, count, &heap.allocator, tape).status,
+                             sz_success_k);
                 sz_strings_span_free(&tape, &heap.allocator, nullptr);
             }
     }
-    verify(heap.mismatches == 0 && heap.blocks.empty());
+    expect_true(heap.mismatches == 0 && heap.blocks.empty());
 }
 
 /** Converts @p text with @p verb from every input alignment into borrowed blocks of exactly the
@@ -1440,8 +1456,8 @@ inline void check_strings_borrowed_exactly_(strings_backend_t const &backend, st
     std::string const input = strings_input_for_(backend, verb, {text}).front();
     strings_layouts_t const layouts({input});
     sz_strings_span_t sizing {};
-    verify(strings_outcome_(backend, verb, layouts.u32_tape(), nullptr, 1, &heap.allocator, sizing).status ==
-           sz_success_k);
+    expect_equal(strings_outcome_(backend, verb, layouts.u32_tape(), nullptr, 1, &heap.allocator, sizing).status,
+                 sz_success_k);
     sz_u32_t const payload_bytes = sizing.data.u32_tape.offsets[1];
     sz_strings_span_free(&sizing, &heap.allocator, nullptr);
     sz_allocator_t *const allocator = verb.kernel == sz_kernel_strings_normalize_k ? &heap.allocator : nullptr;
@@ -1450,7 +1466,7 @@ inline void check_strings_borrowed_exactly_(strings_backend_t const &backend, st
         std::memcpy(data, input.data(), input.size());
         with_guarded_span_(1, payload_bytes, [&](sz_strings_span_t &borrowed) {
             sz_strings_view_t const source = strings_tape_over_(data, input_offsets);
-            verify(strings_outcome_(backend, verb, source, nullptr, 1, allocator, borrowed).status == sz_success_k);
+            expect_equal(strings_outcome_(backend, verb, source, nullptr, 1, allocator, borrowed).status, sz_success_k);
         });
     });
 }
@@ -1472,11 +1488,11 @@ inline void check_strings_lookup_in_place_(strings_backend_t const &backend) {
                 span.data.u32_tape.data = data, span.data.u32_tape.offsets = offsets;
                 sz_strings_view_t own;
                 sz_strings_from_span(&span, &own);
-                verify(backend.lookup(&own, nullptr, 1, table, nullptr, &span, nullptr) == sz_success_k);
+                expect_equal(backend.lookup(&own, nullptr, 1, table, nullptr, &span, nullptr), sz_success_k);
                 for (sz_size_t index = 0; index != usable_length; ++index)
-                    verify(buffer[index] == (index < alignment || index >= alignment + length
-                                                 ? '#'
-                                                 : table[static_cast<sz_u8_t>((index - alignment) * 7)]));
+                    expect_equal(buffer[index], index < alignment || index >= alignment + length
+                                                    ? '#'
+                                                    : table[static_cast<sz_u8_t>((index - alignment) * 7)]);
             }
         });
 }
@@ -1492,8 +1508,8 @@ inline void check_strings_rows_gaps_(strings_backend_t const &backend) {
                 std::memset(rows_data, '#', usable_length);
                 sz_strings_rows_t const rows {rows_data, width + 5, width};
                 sz_size_t longest = 0;
-                verify(backend.to_rows(&view, nullptr, 2, &rows, &longest, nullptr) == sz_success_k);
-                for (sz_size_t gap = width; gap != width + 5; ++gap) verify(rows_data[gap] == '#');
+                expect_equal(backend.to_rows(&view, nullptr, 2, &rows, &longest, nullptr), sz_success_k);
+                for (sz_size_t gap = width; gap != width + 5; ++gap) expect_equal(rows_data[gap], '#');
             });
     }
 }
@@ -1507,20 +1523,21 @@ inline void check_strings_arena_refusals_(strings_backend_t const &backend) {
         strings_layouts_t const fitting_layouts(fitting), overflowing_layouts(overflowing);
         alignas(64) char buffer[512];
         sz_allocator_t arena;
-        verify(sz_allocator_init_arena(&arena, buffer, sizeof(buffer), 8) == sz_success_k);
+        expect_equal(sz_allocator_init_arena(&arena, buffer, sizeof(buffer), 8), sz_success_k);
         sz_strings_span_t tape {};
-        verify(strings_outcome_(backend, verb, fitting_layouts.u32_tape(), nullptr, 1, &arena, tape).status ==
-               sz_success_k);
+        expect_equal(strings_outcome_(backend, verb, fitting_layouts.u32_tape(), nullptr, 1, &arena, tape).status,
+                     sz_success_k);
         std::vector<std::string> const kept = strings_in_(tape);
         strings_outcome_t const refused = strings_outcome_(backend, verb, overflowing_layouts.u32_tape(), nullptr, 1,
                                                            &arena, tape);
-        verify(refused.status == sz_bad_alloc_k && refused.strings == kept);
+        expect_true(refused.status == sz_bad_alloc_k && refused.strings == kept);
 
-        sz_allocator_t refusing = refusing_allocator_();
+        sz_allocator_t refusing = refusing_c_allocator();
         sz_strings_span_t untouched {};
-        verify(strings_outcome_(backend, verb, fitting_layouts.u32_tape(), nullptr, 1, &refusing, untouched).status ==
-               sz_bad_alloc_k);
-        verify(untouched.count == 0);
+        expect_equal(
+            strings_outcome_(backend, verb, fitting_layouts.u32_tape(), nullptr, 1, &refusing, untouched).status,
+            sz_bad_alloc_k);
+        expect_equal(untouched.count, 0);
     }
 }
 
@@ -1577,7 +1594,7 @@ inline void check_strings_rationed_growths_(strings_backend_t const &backend) {
         for (std::vector<std::string> const *start : starts)
             for (std::size_t const shrinks : {(std::numeric_limits<std::size_t>::max)(), std::size_t {0}})
                 for (rationed_growth_t const growth : {rationed_growth_t::reallocating_k, rationed_growth_t::moving_k})
-                    verify(strings_first_granted_(backend, verb, strings, start, shrinks, growth) == expected);
+                    expect_equal(strings_first_granted_(backend, verb, strings, start, shrinks, growth), expected);
     }
 }
 
@@ -1606,16 +1623,18 @@ inline void check_strings_long_normalization_(strings_backend_t const &backend) 
         with_guarded_span_(3, payload_bytes, [&](sz_strings_span_t &borrowed) {
             sz_strings_span_t const lent = borrowed;
             heap.growths_left = 0;
-            verify(strings_outcome_(backend, verb, layouts.u32_tape(), nullptr, 3, &heap.allocator, borrowed).status ==
-                   sz_bad_alloc_k);
+            expect_equal(
+                strings_outcome_(backend, verb, layouts.u32_tape(), nullptr, 3, &heap.allocator, borrowed).status,
+                sz_bad_alloc_k);
             heap.growths_left = (std::numeric_limits<std::size_t>::max)();
-            verify(strings_outcome_(backend, verb, layouts.u32_tape(), nullptr, 3, &heap.allocator, borrowed).strings ==
-                   expected);
-            verify(borrowed.data.u32_tape.data == lent.data.u32_tape.data &&
-                   borrowed.data.u32_tape.offsets == lent.data.u32_tape.offsets);
+            expect_equal(
+                strings_outcome_(backend, verb, layouts.u32_tape(), nullptr, 3, &heap.allocator, borrowed).strings,
+                expected);
+            expect_true(borrowed.data.u32_tape.data == lent.data.u32_tape.data &&
+                        borrowed.data.u32_tape.offsets == lent.data.u32_tape.offsets);
         });
     }
-    verify(heap.mismatches == 0 && heap.blocks.empty());
+    expect_true(heap.mismatches == 0 && heap.blocks.empty());
 }
 
 /** Unescapes an escape cut short at the end of its string, after a string that is not and before
@@ -1651,10 +1670,10 @@ inline void check_strings_cut_short_escapes_(strings_backend_t const &backend) {
             sz_strings_span_t tape {};
             strings_outcome_t const outcome = strings_outcome_(backend, {sz_kernel_strings_unescape_k, malformed.kind},
                                                                layouts.u32_tape(), nullptr, 3, &heap.allocator, tape);
-            verify(outcome.status == sz_invalid_utf8_k && outcome.malformed_index == 1);
+            expect_true(outcome.status == sz_invalid_utf8_k && outcome.malformed_index == 1);
             sz_strings_span_free(&tape, &heap.allocator, nullptr);
         }
-    verify(heap.mismatches == 0 && heap.blocks.empty());
+    expect_true(heap.mismatches == 0 && heap.blocks.empty());
 }
 
 /** Feeds one strings backend empty collections, borrowed blocks flanked by canaries at every input
@@ -1669,7 +1688,7 @@ inline void check_strings_safety_(strings_backend_t const &backend) {
         for (std::size_t index = 0; index != length; ++index) text.push_back(pattern[index % pattern.size()]);
         for (strings_verb_t const verb : strings_verbs_()) check_strings_borrowed_exactly_(backend, verb, text, heap);
     }
-    verify(heap.mismatches == 0 && heap.blocks.empty());
+    expect_true(heap.mismatches == 0 && heap.blocks.empty());
     check_strings_empty_(backend);
     check_strings_lookup_in_place_(backend);
     check_strings_rows_gaps_(backend);
@@ -1702,8 +1721,9 @@ inline std::vector<sz_size_t> found_in_strings_(sz_kernel_find_strings_t find_st
                                                 std::vector<sz_size_t> const *order, std::string_view needle) {
     sz_size_t const count = order ? order->size() : view.count;
     std::vector<sz_size_t> positions(count, 42);
-    verify(find_strings(&view, order ? order->data() : nullptr, count, needle.data(), needle.size(), positions.data(),
-                        nullptr) == sz_success_k);
+    expect_equal(find_strings(&view, order ? order->data() : nullptr, count, needle.data(), needle.size(),
+                              positions.data(), nullptr),
+                 sz_success_k);
     return positions;
 }
 
@@ -1730,11 +1750,11 @@ inline void check_find_strings_unit_(sz_kernel_find_strings_t find_strings) {
         return found_in_strings_(find_strings, layouts.u32_tape(), order, needle);
     };
     // A match crossing into the next string counts for neither, and an empty string holds none.
-    verify(found({"ab", "cd", "", "xabcd"}, "bc") == std::vector<sz_size_t>({none, none, none, 2}));
-    verify(found({"hello", "world", "ll"}, "ll") == std::vector<sz_size_t>({2, none, 0}));
-    verify(found({"a", "", "b"}, "") == std::vector<sz_size_t>({0, 0, 0}));
+    expect_equal(found({"ab", "cd", "", "xabcd"}, "bc"), std::vector<sz_size_t>({none, none, none, 2}));
+    expect_equal(found({"hello", "world", "ll"}, "ll"), std::vector<sz_size_t>({2, none, 0}));
+    expect_equal(found({"a", "", "b"}, ""), std::vector<sz_size_t>({0, 0, 0}));
     std::vector<sz_size_t> const order {1, 1, 0};
-    verify(found({"x", "needle", "y"}, "needle", &order) == std::vector<sz_size_t>({0, 0, none}));
+    expect_equal(found({"x", "needle", "y"}, "needle", &order), std::vector<sz_size_t>({0, 0, none}));
 }
 
 /** Searches two strings whose payload ends where its allocation does, at every ladder length, for a
@@ -1750,24 +1770,25 @@ inline void check_find_strings_safety_(sz_kernel_find_strings_t find_strings) {
             sz_u32_t const offsets[3] = {0, static_cast<sz_u32_t>(second_start), static_cast<sz_u32_t>(length)};
             sz_strings_view_t const view = strings_tape_over_(payload.data(), offsets);
             sz_size_t positions[2] = {0, 0};
-            verify(find_strings(&view, nullptr, 2, needle.data(), needle_length, positions, nullptr) == sz_success_k);
-            verify(positions[0] == STRINGZILLA_SIZE_MAX && positions[1] == length - needle_length - second_start);
-            verify(find_strings(&view, nullptr, 2, needle.data(), needle.size(), positions, nullptr) == sz_success_k);
-            verify(positions[0] == STRINGZILLA_SIZE_MAX && positions[1] == STRINGZILLA_SIZE_MAX);
+            expect_equal(find_strings(&view, nullptr, 2, needle.data(), needle_length, positions, nullptr),
+                         sz_success_k);
+            expect_true(positions[0] == STRINGZILLA_SIZE_MAX && positions[1] == length - needle_length - second_start);
+            expect_equal(find_strings(&view, nullptr, 2, needle.data(), needle.size(), positions, nullptr),
+                         sz_success_k);
+            expect_true(positions[0] == STRINGZILLA_SIZE_MAX && positions[1] == STRINGZILLA_SIZE_MAX);
         }
 }
 
 /** Holds a column search to its strings searched one at a time, over every layout, in order and
  *  through repeating orders, with needles shorter and longer than a 64-byte block planted in no
  *  string, some, or every one, inside it, across its end, or in the last bytes of the payload. */
-inline void check_find_strings_equivalence_(test_context_t &context, char const *name,
+inline void check_find_strings_equivalence_(split_mix_generator_t &generator, char const *name,
                                             sz_kernel_find_strings_t find_strings) {
-    std::mt19937 &generator = context.generator;
     std::vector<std::string> const characters = alphabet_characters("abc");
     static constexpr std::size_t needle_lengths[] = {0, 1, 2, 3, 4, 16, 63, 64, 65, 200};
     std::uniform_int_distribution<std::size_t> count_distribution(0, 150), empty_distribution(0, 7),
         needle_distribution(0, std::size(needle_lengths) - 1), density_distribution(0, 2);
-    for (std::size_t iteration = 0; iteration != context.iterations(60); ++iteration) {
+    for (std::size_t iteration = 0; iteration != scaled_iterations(60); ++iteration) {
         std::string const needle = random_string(generator, needle_lengths[needle_distribution(generator)], characters);
         std::uniform_int_distribution<std::size_t> length_distribution(0, 2 * needle.size() + 24);
         std::vector<std::size_t> starts {0};
@@ -1819,10 +1840,10 @@ inline void check_find_byte_ladder_(find_backend_t const &backend) {
     std::string haystack;
     for (sz_size_t const length : span_over(backend_ladder_lengths_)) {
         haystack.assign((std::size_t)length, 'a');
-        verify(kernel_result<sz_cptr_t>(backend.find_byte, haystack.data(), length, "z") == STRINGZILLA_NULL_CHAR &&
-               "Forward byte scan must miss an absent byte");
-        verify(kernel_result<sz_cptr_t>(backend.rfind_byte, haystack.data(), length, "z") == STRINGZILLA_NULL_CHAR &&
-               "Reverse byte scan must miss an absent byte");
+        expect_equal(kernel_result<sz_cptr_t>(backend.find_byte, haystack.data(), length, "z"), STRINGZILLA_NULL_CHAR,
+                     "Forward byte scan must miss an absent byte");
+        expect_equal(kernel_result<sz_cptr_t>(backend.rfind_byte, haystack.data(), length, "z"), STRINGZILLA_NULL_CHAR,
+                     "Reverse byte scan must miss an absent byte");
 
         sz_size_t const positions[] = {0, length / 2, length - 1};
         for (sz_size_t const position : span_over(positions)) {
@@ -1832,23 +1853,22 @@ inline void check_find_byte_ladder_(find_backend_t const &backend) {
             if (kernel_result<sz_cptr_t>(backend.find_byte, haystack.data(), length, "z") != expected) {
                 fmt::println(stderr, "{}: find_byte missed the byte at {} of {}", backend.name, (std::size_t)position,
                              (std::size_t)length);
-                verify(false && "Forward byte scan must find a lone match at every ladder length");
+                expect_true(false, "Forward byte scan must find a lone match at every ladder length");
             }
             if (kernel_result<sz_cptr_t>(backend.rfind_byte, haystack.data(), length, "z") != expected) {
                 fmt::println(stderr, "{}: rfind_byte missed the byte at {} of {}", backend.name, (std::size_t)position,
                              (std::size_t)length);
-                verify(false && "Reverse byte scan must find a lone match at every ladder length");
+                expect_true(false, "Reverse byte scan must find a lone match at every ladder length");
             }
         }
 
         // Both ends occupied, so forward and reverse must disagree about which one they report.
         haystack.assign((std::size_t)length, 'a');
         haystack[0] = 'z', haystack[(std::size_t)length - 1] = 'z';
-        verify(kernel_result<sz_cptr_t>(backend.find_byte, haystack.data(), length, "z") == haystack.data() &&
-               "Forward byte scan must report the first of two matches");
-        verify(kernel_result<sz_cptr_t>(backend.rfind_byte, haystack.data(), length, "z") ==
-                   haystack.data() + length - 1 &&
-               "Reverse byte scan must report the last of two matches");
+        expect_equal(kernel_result<sz_cptr_t>(backend.find_byte, haystack.data(), length, "z"), haystack.data(),
+                     "Forward byte scan must report the first of two matches");
+        expect_equal(kernel_result<sz_cptr_t>(backend.rfind_byte, haystack.data(), length, "z"),
+                     haystack.data() + length - 1, "Reverse byte scan must report the last of two matches");
     }
 }
 
@@ -1864,21 +1884,21 @@ inline void check_find_unit_(find_backend_t const &backend) {
     sz_size_t const hello_length = (sz_size_t)std::strlen(hello); // 11 bytes
 
     if (backend.find) {
-        verify(kernel_result<sz_cptr_t>(backend.find, hello, hello_length, "o", 1) == hello + 4);
-        verify(kernel_result<sz_cptr_t>(backend.find, hello, hello_length, "wor", 3) == hello + 6);
-        verify(kernel_result<sz_cptr_t>(backend.find, hello, hello_length, "xyz", 3) == STRINGZILLA_NULL_CHAR);
+        expect_equal(kernel_result<sz_cptr_t>(backend.find, hello, hello_length, "o", 1), hello + 4);
+        expect_equal(kernel_result<sz_cptr_t>(backend.find, hello, hello_length, "wor", 3), hello + 6);
+        expect_equal(kernel_result<sz_cptr_t>(backend.find, hello, hello_length, "xyz", 3), STRINGZILLA_NULL_CHAR);
     }
     if (backend.rfind) {
-        verify(kernel_result<sz_cptr_t>(backend.rfind, hello, hello_length, "o", 1) == hello + 7);
-        verify(kernel_result<sz_cptr_t>(backend.rfind, hello, hello_length, "wor", 3) == hello + 6);
-        verify(kernel_result<sz_cptr_t>(backend.rfind, hello, hello_length, "xyz", 3) == STRINGZILLA_NULL_CHAR);
+        expect_equal(kernel_result<sz_cptr_t>(backend.rfind, hello, hello_length, "o", 1), hello + 7);
+        expect_equal(kernel_result<sz_cptr_t>(backend.rfind, hello, hello_length, "wor", 3), hello + 6);
+        expect_equal(kernel_result<sz_cptr_t>(backend.rfind, hello, hello_length, "xyz", 3), STRINGZILLA_NULL_CHAR);
     }
     if (backend.find_strings) check_find_strings_unit_(backend.find_strings);
     if (backend.find_byte && backend.rfind_byte) {
-        verify(kernel_result<sz_cptr_t>(backend.find_byte, hello, hello_length, "l") == hello + 2);
-        verify(kernel_result<sz_cptr_t>(backend.rfind_byte, hello, hello_length, "l") == hello + 9);
-        verify(kernel_result<sz_cptr_t>(backend.find_byte, hello, hello_length, "z") == STRINGZILLA_NULL_CHAR);
-        verify(kernel_result<sz_cptr_t>(backend.rfind_byte, hello, hello_length, "z") == STRINGZILLA_NULL_CHAR);
+        expect_equal(kernel_result<sz_cptr_t>(backend.find_byte, hello, hello_length, "l"), hello + 2);
+        expect_equal(kernel_result<sz_cptr_t>(backend.rfind_byte, hello, hello_length, "l"), hello + 9);
+        expect_equal(kernel_result<sz_cptr_t>(backend.find_byte, hello, hello_length, "z"), STRINGZILLA_NULL_CHAR);
+        expect_equal(kernel_result<sz_cptr_t>(backend.rfind_byte, hello, hello_length, "z"), STRINGZILLA_NULL_CHAR);
         check_find_byte_ladder_(backend);
     }
 
@@ -1889,12 +1909,14 @@ inline void check_find_unit_(find_backend_t const &backend) {
     sz_byteset_add(&digits, '0');
     sz_byteset_add(&digits, '9');
     if (backend.find_byteset) {
-        verify(kernel_result<sz_cptr_t>(backend.find_byteset, hello, hello_length, &vowels) == hello + 1);
-        verify(kernel_result<sz_cptr_t>(backend.find_byteset, hello, hello_length, &digits) == STRINGZILLA_NULL_CHAR);
+        expect_equal(kernel_result<sz_cptr_t>(backend.find_byteset, hello, hello_length, &vowels), hello + 1);
+        expect_equal(kernel_result<sz_cptr_t>(backend.find_byteset, hello, hello_length, &digits),
+                     STRINGZILLA_NULL_CHAR);
     }
     if (backend.rfind_byteset) {
-        verify(kernel_result<sz_cptr_t>(backend.rfind_byteset, hello, hello_length, &vowels) == hello + 7);
-        verify(kernel_result<sz_cptr_t>(backend.rfind_byteset, hello, hello_length, &digits) == STRINGZILLA_NULL_CHAR);
+        expect_equal(kernel_result<sz_cptr_t>(backend.rfind_byteset, hello, hello_length, &vowels), hello + 7);
+        expect_equal(kernel_result<sz_cptr_t>(backend.rfind_byteset, hello, hello_length, &digits),
+                     STRINGZILLA_NULL_CHAR);
     }
 }
 
@@ -1906,28 +1928,28 @@ inline void check_find_unit_(find_backend_t const &backend) {
  *  both must return @c STRINGZILLA_NULL. Each haystack is replayed at every sub-cacheline alignment
  *  via @c for_each_cacheline_offset_, so a needle straddling a 64-byte boundary is exercised.
  */
-inline void check_find_search_equivalence_(test_context_t &context, char const *name, sz_kernel_find_t reference,
-                                           sz_kernel_find_t candidate) {
+inline void check_find_search_equivalence_(split_mix_generator_t &generator, char const *name,
+                                           sz_kernel_find_t reference, sz_kernel_find_t candidate) {
 
     // Replays one haystack/needle pair at every intra-cacheline alignment and compares the kernels.
     auto compare_on = [&](std::string const &haystack_pattern, std::string const &needle) {
-        for_each_cacheline_offset_(
-            haystack_pattern.size(), [&](sz_ptr_t haystack, [[maybe_unused]] std::size_t offset) {
-                std::memcpy(haystack, haystack_pattern.data(), haystack_pattern.size());
-                sz_size_t const haystack_length = (sz_size_t)haystack_pattern.size();
-                sz_size_t const needle_length = (sz_size_t)needle.size();
+        for_each_cacheline_offset_(haystack_pattern.size(), [&](sz_ptr_t haystack,
+                                                                [[maybe_unused]] std::size_t offset) {
+            std::memcpy(haystack, haystack_pattern.data(), haystack_pattern.size());
+            sz_size_t const haystack_length = (sz_size_t)haystack_pattern.size();
+            sz_size_t const needle_length = (sz_size_t)needle.size();
 
-                sz_cptr_t const result_reference = kernel_result<sz_cptr_t>(reference, haystack, haystack_length,
-                                                                            needle.data(), needle_length);
-                sz_cptr_t const result_candidate = kernel_result<sz_cptr_t>(candidate, haystack, haystack_length,
-                                                                            needle.data(), needle_length);
-                if (result_reference != result_candidate) {
-                    fmt::println(stderr,
-                                 "serial vs {}: substring search disagreed on a {}-byte needle in a {}-byte haystack",
-                                 name, (std::size_t)needle_length, (std::size_t)haystack_length);
-                    verify(false && "Candidate backend must resolve every needle to the same offset as the reference");
-                }
-            });
+            sz_cptr_t const result_reference = kernel_result<sz_cptr_t>(reference, haystack, haystack_length,
+                                                                        needle.data(), needle_length);
+            sz_cptr_t const result_candidate = kernel_result<sz_cptr_t>(candidate, haystack, haystack_length,
+                                                                        needle.data(), needle_length);
+            if (result_reference != result_candidate) {
+                fmt::println(stderr,
+                             "serial vs {}: substring search disagreed on a {}-byte needle in a {}-byte haystack", name,
+                             (std::size_t)needle_length, (std::size_t)haystack_length);
+                expect_true(false, "Candidate backend must resolve every needle to the same offset as the reference");
+            }
+        });
     };
 
     // Hand-picked edge cases: empty needle, not-found, needle at start, needle at end, needle equal
@@ -1941,13 +1963,12 @@ inline void check_find_search_equivalence_(test_context_t &context, char const *
     compare_on(std::string("a\0bc\0a", 6), std::string("\0a", 2)); // Embedded NUL byte
 
     // Random haystacks and needles of assorted lengths.
-    for (sz_size_t iteration = 0; iteration != context.iterations(200); ++iteration) {
-        std::size_t const haystack_length = std::uniform_int_distribution<std::size_t>(0, 200)(context.generator);
-        std::size_t const needle_length = std::uniform_int_distribution<std::size_t>(
-            0, haystack_length + 4)(context.generator);
+    for (sz_size_t iteration = 0; iteration != scaled_iterations(200); ++iteration) {
+        std::size_t const haystack_length = std::uniform_int_distribution<std::size_t>(0, 200)(generator);
+        std::size_t const needle_length = std::uniform_int_distribution<std::size_t>(0, haystack_length + 4)(generator);
         // A small alphabet makes spurious and overlapping matches likely, stressing the kernels.
-        std::string const haystack = random_string(context.generator, haystack_length, "abc");
-        std::string const needle = random_string(context.generator, needle_length, "abc");
+        std::string const haystack = random_string(generator, haystack_length, "abc");
+        std::string const needle = random_string(generator, needle_length, "abc");
         compare_on(haystack, needle);
     }
 }
@@ -1960,8 +1981,8 @@ inline void check_find_search_equivalence_(test_context_t &context, char const *
  *  both must return @c STRINGZILLA_NULL. Each haystack is replayed at every sub-cacheline alignment
  *  via @c for_each_cacheline_offset_, so a match straddling a 64-byte boundary is always exercised.
  */
-inline void check_byteset_equivalence_(test_context_t &context, char const *name, sz_kernel_find_byteset_t reference,
-                                       sz_kernel_find_byteset_t candidate) {
+inline void check_byteset_equivalence_(split_mix_generator_t &generator, char const *name,
+                                       sz_kernel_find_byteset_t reference, sz_kernel_find_byteset_t candidate) {
 
     // The byteset of ASCII vowels, used for the hand-picked structured cases.
     sz_byteset_t vowels;
@@ -1980,7 +2001,7 @@ inline void check_byteset_equivalence_(test_context_t &context, char const *name
             if (result_reference != result_candidate) {
                 fmt::println(stderr, "serial vs {}: byteset search disagreed on a {}-byte haystack", name,
                              (std::size_t)haystack_length);
-                verify(false && "Candidate backend must resolve every byteset to the same offset as the reference");
+                expect_true(false, "Candidate backend must resolve every byteset to the same offset as the reference");
             }
         });
     };
@@ -1996,29 +2017,29 @@ inline void check_byteset_equivalence_(test_context_t &context, char const *name
     compare_on(std::string("x\0aey\0", 6), vowels); // Embedded NUL byte
 
     // Random haystacks of assorted lengths against a random byteset.
-    for (sz_size_t iteration = 0; iteration != context.iterations(200); ++iteration) {
+    for (sz_size_t iteration = 0; iteration != scaled_iterations(200); ++iteration) {
         sz_byteset_t random_byteset;
         sz_byteset_init(&random_byteset);
-        std::size_t const members = std::uniform_int_distribution<std::size_t>(0, 16)(context.generator);
+        std::size_t const members = std::uniform_int_distribution<std::size_t>(0, 16)(generator);
         for (std::size_t member = 0; member != members; ++member)
-            sz_byteset_add(&random_byteset, (sz_u8_t)std::uniform_int_distribution<int>(0, 255)(context.generator));
+            sz_byteset_add(&random_byteset, (sz_u8_t)std::uniform_int_distribution<int>(0, 255)(generator));
 
-        std::size_t const haystack_length = std::uniform_int_distribution<std::size_t>(0, 200)(context.generator);
+        std::size_t const haystack_length = std::uniform_int_distribution<std::size_t>(0, 200)(generator);
         std::string haystack(haystack_length, '\0');
-        randomize_string(context.generator, haystack);
+        randomize_string(generator, haystack);
         compare_on(haystack, random_byteset);
     }
 }
 
 /** Holds every search kernel of the @p candidate backend to the serial kernel of the same verb. */
-inline void check_find_equivalence_(test_context_t &context, find_backend_t const &candidate) {
-    if (candidate.find) check_find_search_equivalence_(context, candidate.name, sz_find_serial, candidate.find);
-    if (candidate.rfind) check_find_search_equivalence_(context, candidate.name, sz_rfind_serial, candidate.rfind);
+inline void check_find_equivalence_(split_mix_generator_t &generator, find_backend_t const &candidate) {
+    if (candidate.find) check_find_search_equivalence_(generator, candidate.name, sz_find_serial, candidate.find);
+    if (candidate.rfind) check_find_search_equivalence_(generator, candidate.name, sz_rfind_serial, candidate.rfind);
     if (candidate.find_byteset)
-        check_byteset_equivalence_(context, candidate.name, sz_find_byteset_serial, candidate.find_byteset);
+        check_byteset_equivalence_(generator, candidate.name, sz_find_byteset_serial, candidate.find_byteset);
     if (candidate.rfind_byteset)
-        check_byteset_equivalence_(context, candidate.name, sz_rfind_byteset_serial, candidate.rfind_byteset);
-    if (candidate.find_strings) check_find_strings_equivalence_(context, candidate.name, candidate.find_strings);
+        check_byteset_equivalence_(generator, candidate.name, sz_rfind_byteset_serial, candidate.rfind_byteset);
+    if (candidate.find_strings) check_find_strings_equivalence_(generator, candidate.name, candidate.find_strings);
 }
 
 /**
@@ -2036,20 +2057,20 @@ inline void check_find_safety_(find_backend_t const &backend) {
     if (backend.find_byte && backend.rfind_byte) {
         if (kernel_result<sz_cptr_t>(backend.find_byte, body, 0, "a") != STRINGZILLA_NULL_CHAR) {
             fmt::println(stderr, "{}: find_byte reported a match in a zero-length haystack", backend.name);
-            verify(false && "A zero-length haystack holds no byte to find");
+            expect_true(false, "A zero-length haystack holds no byte to find");
         }
         if (kernel_result<sz_cptr_t>(backend.rfind_byte, body, 0, "a") != STRINGZILLA_NULL_CHAR) {
             fmt::println(stderr, "{}: rfind_byte reported a match in a zero-length haystack", backend.name);
-            verify(false && "A zero-length haystack holds no byte to find");
+            expect_true(false, "A zero-length haystack holds no byte to find");
         }
     }
     if (backend.find) {
-        verify(kernel_result<sz_cptr_t>(backend.find, body, 0, "a", 1) == STRINGZILLA_NULL_CHAR);
-        verify(kernel_result<sz_cptr_t>(backend.find, body, 3, body, body_length) == STRINGZILLA_NULL_CHAR);
+        expect_equal(kernel_result<sz_cptr_t>(backend.find, body, 0, "a", 1), STRINGZILLA_NULL_CHAR);
+        expect_equal(kernel_result<sz_cptr_t>(backend.find, body, 3, body, body_length), STRINGZILLA_NULL_CHAR);
     }
     if (backend.rfind) {
-        verify(kernel_result<sz_cptr_t>(backend.rfind, body, 0, "a", 1) == STRINGZILLA_NULL_CHAR);
-        verify(kernel_result<sz_cptr_t>(backend.rfind, body, 3, body, body_length) == STRINGZILLA_NULL_CHAR);
+        expect_equal(kernel_result<sz_cptr_t>(backend.rfind, body, 0, "a", 1), STRINGZILLA_NULL_CHAR);
+        expect_equal(kernel_result<sz_cptr_t>(backend.rfind, body, 3, body, body_length), STRINGZILLA_NULL_CHAR);
     }
     if (backend.find_strings) check_find_strings_safety_(backend.find_strings);
 
@@ -2059,13 +2080,16 @@ inline void check_find_safety_(find_backend_t const &backend) {
     sz_byteset_init(&full_set);
     for (int byte_value = 0; byte_value != 256; ++byte_value) sz_byteset_add_u8(&full_set, (sz_u8_t)byte_value);
     if (backend.find_byteset) {
-        verify(kernel_result<sz_cptr_t>(backend.find_byteset, body, body_length, &empty_set) == STRINGZILLA_NULL_CHAR);
-        verify(kernel_result<sz_cptr_t>(backend.find_byteset, body, body_length, &full_set) == body);
-        verify(kernel_result<sz_cptr_t>(backend.find_byteset, body, 0, &full_set) == STRINGZILLA_NULL_CHAR);
+        expect_equal(kernel_result<sz_cptr_t>(backend.find_byteset, body, body_length, &empty_set),
+                     STRINGZILLA_NULL_CHAR);
+        expect_equal(kernel_result<sz_cptr_t>(backend.find_byteset, body, body_length, &full_set), body);
+        expect_equal(kernel_result<sz_cptr_t>(backend.find_byteset, body, 0, &full_set), STRINGZILLA_NULL_CHAR);
     }
     if (backend.rfind_byteset) {
-        verify(kernel_result<sz_cptr_t>(backend.rfind_byteset, body, body_length, &empty_set) == STRINGZILLA_NULL_CHAR);
-        verify(kernel_result<sz_cptr_t>(backend.rfind_byteset, body, body_length, &full_set) == body + body_length - 1);
+        expect_equal(kernel_result<sz_cptr_t>(backend.rfind_byteset, body, body_length, &empty_set),
+                     STRINGZILLA_NULL_CHAR);
+        expect_equal(kernel_result<sz_cptr_t>(backend.rfind_byteset, body, body_length, &full_set),
+                     body + body_length - 1);
     }
 
     // Every scanner at every sub-cache-line alignment, over a buffer without a match, then with one
@@ -2074,16 +2098,16 @@ inline void check_find_safety_(find_backend_t const &backend) {
         for_each_cacheline_offset_((std::size_t)length, [&](sz_ptr_t buffer, std::size_t) {
             std::memset(buffer, 'a', (std::size_t)length);
             if (backend.find_byte)
-                verify(kernel_result<sz_cptr_t>(backend.find_byte, buffer, length, "z") == STRINGZILLA_NULL_CHAR);
+                expect_equal(kernel_result<sz_cptr_t>(backend.find_byte, buffer, length, "z"), STRINGZILLA_NULL_CHAR);
             if (backend.rfind_byte)
-                verify(kernel_result<sz_cptr_t>(backend.rfind_byte, buffer, length, "z") == STRINGZILLA_NULL_CHAR);
+                expect_equal(kernel_result<sz_cptr_t>(backend.rfind_byte, buffer, length, "z"), STRINGZILLA_NULL_CHAR);
             if (backend.find)
-                verify(kernel_result<sz_cptr_t>(backend.find, buffer, length, "zz", 2) == STRINGZILLA_NULL_CHAR);
+                expect_equal(kernel_result<sz_cptr_t>(backend.find, buffer, length, "zz", 2), STRINGZILLA_NULL_CHAR);
             buffer[length - 1] = 'z';
             if (backend.find_byte)
-                verify(kernel_result<sz_cptr_t>(backend.find_byte, buffer, length, "z") == buffer + length - 1);
+                expect_equal(kernel_result<sz_cptr_t>(backend.find_byte, buffer, length, "z"), buffer + length - 1);
             if (backend.rfind_byte)
-                verify(kernel_result<sz_cptr_t>(backend.rfind_byte, buffer, length, "z") == buffer + length - 1);
+                expect_equal(kernel_result<sz_cptr_t>(backend.rfind_byte, buffer, length, "z"), buffer + length - 1);
         });
     }
 }
@@ -2132,10 +2156,10 @@ struct hash_backend_t {
         return kernel_result<sz_u64_t>(hash_kernel, text, length, seed);
     }
     void init(sz_hash_state_t *state, sz_u64_t seed) const {
-        verify(init_kernel(state, seed, nullptr) == sz_success_k);
+        expect_equal(init_kernel(state, seed, nullptr), sz_success_k);
     }
     void update(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) const {
-        verify(update_kernel(state, text, length, nullptr) == sz_success_k);
+        expect_equal(update_kernel(state, text, length, nullptr), sz_success_k);
     }
     sz_u64_t digest(sz_hash_state_t const *state) const { return kernel_result<sz_u64_t>(digest_kernel, state); }
 };
@@ -2147,7 +2171,7 @@ struct hash_multiseed_backend_t {
 
     void multiseed(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds, sz_size_t seed_count,
                    sz_u64_t *output) const {
-        verify(multiseed_kernel(text, length, seeds, seed_count, output, nullptr) == sz_success_k);
+        expect_equal(multiseed_kernel(text, length, seeds, seed_count, output, nullptr), sz_success_k);
     }
     sz_u64_t hash_one(sz_cptr_t text, sz_size_t length, sz_u64_t seed) const {
         return kernel_result<sz_u64_t>(hash_kernel, text, length, seed);
@@ -2160,12 +2184,12 @@ struct sha256_backend_t {
     sz_kernel_sha256_state_update_t update_kernel;
     sz_kernel_sha256_state_digest_t digest_kernel;
 
-    void init(sz_sha256_state_t *state) const { verify(init_kernel(state, nullptr) == sz_success_k); }
+    void init(sz_sha256_state_t *state) const { expect_equal(init_kernel(state, nullptr), sz_success_k); }
     void update(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length) const {
-        verify(update_kernel(state, text, length, nullptr) == sz_success_k);
+        expect_equal(update_kernel(state, text, length, nullptr), sz_success_k);
     }
     void digest(sz_sha256_state_t *state, sz_u8_t *output) const {
-        verify(digest_kernel(state, output, nullptr) == sz_success_k);
+        expect_equal(digest_kernel(state, output, nullptr), sz_success_k);
     }
 };
 
@@ -2175,10 +2199,10 @@ struct sha256_multistate_backend_t {
     sz_kernel_sha256_multistate_digest_t digest_kernel;
 
     void update(sz_sha256_state_t *states, sz_strings_view_t const *texts) const {
-        verify(update_kernel(states, texts, nullptr) == sz_success_k);
+        expect_equal(update_kernel(states, texts, nullptr), sz_success_k);
     }
     void digest(sz_sha256_state_t const *states, sz_size_t states_count, sz_u8_t *digests) const {
-        verify(digest_kernel(states, states_count, digests, nullptr) == sz_success_k);
+        expect_equal(digest_kernel(states, states_count, digests, nullptr), sz_success_k);
     }
 };
 
@@ -2196,7 +2220,7 @@ inline void check_sha256_digest_(sha256_backend_t const &backend, std::string co
     backend.init(&state);
     backend.update(&state, message.data(), (sz_size_t)message.size());
     backend.digest(&state, produced);
-    verify(std::memcmp(produced, expected, STRINGZILLA_SHA256_DIGEST_LENGTH) == 0);
+    expect_equal(std::memcmp(produced, expected, STRINGZILLA_SHA256_DIGEST_LENGTH), 0);
 }
 
 /** Holds one SHA256 backend to the FIPS 180-4 vectors and to every byte of @c interior_nul_. */
@@ -2216,7 +2240,7 @@ inline void check_sha256_multistate_unit_(sha256_multistate_backend_t const &bac
     std::vector<sz_string_view_t> messages(vectors_count);
     sz_u8_t expected[STRINGZILLA_SHA256_DIGEST_LENGTH];
     for (std::size_t lane_index = 0; lane_index != vectors_count; ++lane_index) {
-        verify(sz_sha256_state_init_serial(&states[lane_index], nullptr) == sz_success_k);
+        expect_equal(sz_sha256_state_init_serial(&states[lane_index], nullptr), sz_success_k);
         messages[lane_index].start = known_sha256_vectors_[lane_index].message;
         messages[lane_index].length = (sz_size_t)std::strlen(known_sha256_vectors_[lane_index].message);
     }
@@ -2226,27 +2250,28 @@ inline void check_sha256_multistate_unit_(sha256_multistate_backend_t const &bac
     backend.digest(states.data(), (sz_size_t)vectors_count, produced.data());
     for (std::size_t lane_index = 0; lane_index != vectors_count; ++lane_index) {
         sha256_digest_from_hex_(known_sha256_vectors_[lane_index].digest_hex, expected);
-        verify(std::memcmp(&produced[lane_index * STRINGZILLA_SHA256_DIGEST_LENGTH], expected,
-                           STRINGZILLA_SHA256_DIGEST_LENGTH) == 0 &&
-               "Multi-state digest disagreed with the known-answer digest for this lane");
+        expect_equal(std::memcmp(&produced[lane_index * STRINGZILLA_SHA256_DIGEST_LENGTH], expected,
+                                 STRINGZILLA_SHA256_DIGEST_LENGTH),
+                     0, "Multi-state digest disagreed with the known-answer digest for this lane");
     }
 }
 
 /** Holds one byte sum to known totals: "abc" sums to 0x126, an interior NUL is read past, and the
  *  empty input sums to zero. */
 inline void check_bytesum_unit_(sz_kernel_bytesum_t bytesum) {
-    verify(kernel_result<sz_u64_t>(bytesum, "abc", 3) == 0x126u);
-    verify(kernel_result<sz_u64_t>(bytesum, interior_nul_, 7) == 0x255u);
-    verify(kernel_result<sz_u64_t>(bytesum, "", 0) == 0);
+    expect_equal(kernel_result<sz_u64_t>(bytesum, "abc", 3), 0x126u);
+    expect_equal(kernel_result<sz_u64_t>(bytesum, interior_nul_, 7), 0x255u);
+    expect_equal(kernel_result<sz_u64_t>(bytesum, "", 0), 0);
 }
 
 /** Holds one hash to what a dropped seed or a short read would break: the seed reaches it at a
  *  short and a multi-word length, it reads past an interior NUL, and empty input hashes stably. */
 inline void check_hash_unit_(sz_kernel_hash_t hash) {
-    verify(kernel_result<sz_u64_t>(hash, "abc", 3, 100) != kernel_result<sz_u64_t>(hash, "abc", 3, 200));
-    verify(kernel_result<sz_u64_t>(hash, "abcdefgh", 8, 0) != kernel_result<sz_u64_t>(hash, "abcdefgh", 8, 7));
-    verify(kernel_result<sz_u64_t>(hash, interior_nul_, 7, 0) != kernel_result<sz_u64_t>(hash, interior_nul_, 3, 0));
-    verify(kernel_result<sz_u64_t>(hash, "", 0, 0) == kernel_result<sz_u64_t>(hash, "", 0, 0));
+    expect_true(kernel_result<sz_u64_t>(hash, "abc", 3, 100) != kernel_result<sz_u64_t>(hash, "abc", 3, 200));
+    expect_true(kernel_result<sz_u64_t>(hash, "abcdefgh", 8, 0) != kernel_result<sz_u64_t>(hash, "abcdefgh", 8, 7));
+    expect_true(kernel_result<sz_u64_t>(hash, interior_nul_, 7, 0) !=
+                kernel_result<sz_u64_t>(hash, interior_nul_, 3, 0));
+    expect_equal(kernel_result<sz_u64_t>(hash, "", 0, 0), kernel_result<sz_u64_t>(hash, "", 0, 0));
 }
 
 /**
@@ -2257,9 +2282,8 @@ inline void check_hash_unit_(sz_kernel_hash_t hash) {
  *  additionally switch to non-temporal loads and bidirectional traversal past a megabyte, which
  *  only one oversized input reaches.
  */
-inline void check_bytesum_equivalence_(test_context_t &context, sz_kernel_bytesum_t candidate) {
-    std::mt19937 &generator = context.generator;
-    sz_size_t const inputs = (sz_size_t)context.iterations_quadratic(200);
+inline void check_bytesum_equivalence_(split_mix_generator_t &generator, sz_kernel_bytesum_t candidate) {
+    sz_size_t const inputs = (sz_size_t)iterations_quadratic(200);
     auto reference_sum = [](sz_cptr_t text, sz_size_t length) {
         return kernel_result<sz_u64_t>(sz_bytesum_serial, text, length);
     };
@@ -2272,9 +2296,9 @@ inline void check_bytesum_equivalence_(test_context_t &context, sz_kernel_bytesu
     std::vector<std::size_t> const uniform_lengths = {0, 1, 63, 64, 65, 4096};
     for (auto length : uniform_lengths) {
         std::string const uniform(length, static_cast<char>(0xA5));
-        verify(candidate_sum(uniform.data(), static_cast<sz_size_t>(length)) ==
-                   static_cast<sz_u64_t>(length) * 0xA5ull &&
-               "Byte sum of a uniform buffer must equal length times the repeated byte");
+        expect_equal(candidate_sum(uniform.data(), static_cast<sz_size_t>(length)),
+                     static_cast<sz_u64_t>(length) * 0xA5ull,
+                     "Byte sum of a uniform buffer must equal length times the repeated byte");
     }
 
     // The fixed ladder covers the sub-register, register, cache-line, and multi-block tiers; each
@@ -2283,9 +2307,9 @@ inline void check_bytesum_equivalence_(test_context_t &context, sz_kernel_bytesu
     for (auto length : lengths)
         for_each_cacheline_offset_(length, [&](sz_ptr_t pointer, [[maybe_unused]] std::size_t offset) {
             randomize_string(generator, {pointer, length});
-            verify(reference_sum(pointer, static_cast<sz_size_t>(length)) ==
-                       candidate_sum(pointer, static_cast<sz_size_t>(length)) &&
-                   "Byte sum backend disagreed with the reference at this length and cache-line offset");
+            expect_equal(reference_sum(pointer, static_cast<sz_size_t>(length)),
+                         candidate_sum(pointer, static_cast<sz_size_t>(length)),
+                         "Byte sum backend disagreed with the reference at this length and cache-line offset");
         });
 
     // Beyond the ladder, fuzz a contiguous run of random lengths at a single alignment.
@@ -2293,8 +2317,8 @@ inline void check_bytesum_equivalence_(test_context_t &context, sz_kernel_bytesu
     for (sz_size_t length = 0; length != inputs; ++length) {
         text.resize(length);
         randomize_string(generator, text);
-        verify(reference_sum(text.data(), length) == candidate_sum(text.data(), length) &&
-               "Byte sum backend disagreed with the reference at this fuzzed length");
+        expect_equal(reference_sum(text.data(), length), candidate_sum(text.data(), length),
+                     "Byte sum backend disagreed with the reference at this fuzzed length");
     }
 
     // One oversized input, since the Skylake and Ice Lake kernels take a different branch past a
@@ -2302,8 +2326,8 @@ inline void check_bytesum_equivalence_(test_context_t &context, sz_kernel_bytesu
     // have work to do.
     std::string huge(1024ull * 1024ull + 129ull, '\0');
     randomize_string(generator, huge);
-    verify(reference_sum(huge.data(), (sz_size_t)huge.size()) == candidate_sum(huge.data(), (sz_size_t)huge.size()) &&
-           "Byte sum backend disagreed with the reference on the oversized, past-a-megabyte input");
+    expect_equal(reference_sum(huge.data(), (sz_size_t)huge.size()), candidate_sum(huge.data(), (sz_size_t)huge.size()),
+                 "Byte sum backend disagreed with the reference on the oversized, past-a-megabyte input");
 }
 
 /** Each hash of `strings[order[i]]`, or of every string without an order, as @p hash_strings
@@ -2312,7 +2336,8 @@ inline std::vector<sz_u64_t> hashed_in_strings_(sz_kernel_hash_strings_t hash_st
                                                 std::vector<sz_size_t> const *order, sz_u64_t seed) {
     sz_size_t const count = order ? order->size() : view.count;
     std::vector<sz_u64_t> hashes(count, 0);
-    verify(hash_strings(&view, order ? order->data() : nullptr, count, seed, hashes.data(), nullptr) == sz_success_k);
+    expect_equal(hash_strings(&view, order ? order->data() : nullptr, count, seed, hashes.data(), nullptr),
+                 sz_success_k);
     return hashes;
 }
 
@@ -2335,10 +2360,9 @@ inline constexpr std::size_t hash_strings_key_lengths_[] = {0, 1, 15, 16, 17, 31
 /** Holds a column hash to @c sz_hash_serial key by key: over every layout, in order and through a
  *  repeating order, at every count past the widest window a backend hashes at once, with keys
  *  around every 16-byte block and past the 64 bytes a window reads. */
-inline void check_hash_strings_equivalence_(test_context_t &context, char const *name,
+inline void check_hash_strings_equivalence_(split_mix_generator_t &generator, char const *name,
                                             sz_kernel_hash_strings_t hash_strings) {
-    std::mt19937 &generator = context.generator;
-    for (std::size_t iteration = 0; iteration != context.iterations(40); ++iteration) {
+    for (std::size_t iteration = 0; iteration != scaled_iterations(40); ++iteration) {
         // Odd iterations keep every key within 64 bytes, so whole columns hash in windows.
         std::uniform_int_distribution<std::size_t> length_index_distribution(0, iteration % 2 ? 12 : 14);
         std::vector<std::string> strings(iteration);
@@ -2390,8 +2414,8 @@ inline void check_hash_strings_safety_(sz_kernel_hash_strings_t hash_strings) {
         for (sz_strings_view_t const &view :
              {strings_tape_over_(payload.data(), u32_offsets), strings_tape_over_(payload.data(), u64_offsets)})
             for (std::vector<sz_size_t> const *selection : selections)
-                verify(hashed_in_strings_(hash_strings, view, selection, 42) == hashed_alone_(keys, selection, 42) &&
-                       "A column hash disagreed with hashing each string at the end of its payload");
+                expect_equal(hashed_in_strings_(hash_strings, view, selection, 42), hashed_alone_(keys, selection, 42),
+                             "A column hash disagreed with hashing each string at the end of its payload");
     }
 }
 
@@ -2402,31 +2426,30 @@ inline void check_hash_strings_safety_(sz_kernel_hash_strings_t hash_strings) {
  *  The test covers increasingly long and complex strings, starting with "abcabc..." repetitions and
  *  progressing towards corner cases like empty strings, all-zero inputs, zero seeds, and so on.
  */
-inline void check_hash_equivalence_(test_context_t &context, hash_backend_t const &candidate) {
-    std::mt19937 &generator = context.generator;
-    sz_size_t const inputs = (sz_size_t)context.iterations_quadratic(200);
+inline void check_hash_equivalence_(split_mix_generator_t &generator, hash_backend_t const &candidate) {
+    sz_size_t const inputs = (sz_size_t)iterations_quadratic(200);
     hash_backend_t const reference = hash_serial_backend_();
 
     auto test_on_seed = [&](std::string const &text, sz_u64_t seed) {
         // Compute the entire hash at once, expecting the same output
         sz_u64_t result_base = reference(text.data(), text.size(), seed);
         sz_u64_t result_simd = candidate(text.data(), text.size(), seed);
-        verify(result_base == result_simd && "Hash backend disagreed with the reference on the one-shot digest");
+        expect_equal(result_base, result_simd, "Hash backend disagreed with the reference on the one-shot digest");
 
         // Compare incremental hashing across platforms
         sz_hash_state_t state_base, state_simd;
         reference.init(&state_base, seed);
         candidate.init(&state_simd, seed);
-        verify(sz_hash_state_equal(&state_base, &state_base) == sz_true_k); // Self-equality
-        verify(sz_hash_state_equal(&state_simd, &state_simd) == sz_true_k); // Self-equality
-        verify(sz_hash_state_equal(&state_base, &state_simd) == sz_true_k); // Same across platforms
+        expect_equal(sz_hash_state_equal(&state_base, &state_base), sz_true_k); // Self-equality
+        expect_equal(sz_hash_state_equal(&state_simd, &state_simd), sz_true_k); // Self-equality
+        expect_equal(sz_hash_state_equal(&state_base, &state_simd), sz_true_k); // Same across platforms
 
         // Let's also create an intentionally misaligned version of the state,
         // assuming some of the SIMD instructions may require alignment.
         sz_align_(64) char state_misaligned_buffer[sizeof(sz_hash_state_t) + 1];
         sz_hash_state_t &state_misaligned = *reinterpret_cast<sz_hash_state_t *>(state_misaligned_buffer + 1);
         candidate.init(&state_misaligned, seed);
-        verify(sz_hash_state_equal(&state_base, &state_misaligned) == sz_true_k);
+        expect_equal(sz_hash_state_equal(&state_base, &state_misaligned), sz_true_k);
 
         // Try breaking those strings into arbitrary chunks, expecting the same output in the
         // streaming mode. The length of each chunk and the number of chunks will be determined with
@@ -2434,16 +2457,16 @@ inline void check_hash_equivalence_(test_context_t &context, hash_backend_t cons
         iterate_in_random_slices(generator, text, [&](std::string slice) {
             reference.update(&state_base, slice.data(), slice.size());
             candidate.update(&state_simd, slice.data(), slice.size());
-            verify(sz_hash_state_equal(&state_base, &state_simd) == sz_true_k);
+            expect_equal(sz_hash_state_equal(&state_base, &state_simd), sz_true_k);
 
             candidate.update(&state_misaligned, slice.data(), slice.size());
-            verify(sz_hash_state_equal(&state_base, &state_misaligned) == sz_true_k);
+            expect_equal(sz_hash_state_equal(&state_base, &state_misaligned), sz_true_k);
 
             result_base = reference.digest(&state_base);
             result_simd = candidate.digest(&state_simd);
-            verify(result_base == result_simd && "Hash backend disagreed with the reference after a streamed slice");
+            expect_equal(result_base, result_simd, "Hash backend disagreed with the reference after a streamed slice");
             sz_u64_t result_misaligned = candidate.digest(&state_misaligned);
-            verify(result_base == result_misaligned && "Misaligned hash state disagreed with the aligned digest");
+            expect_equal(result_base, result_misaligned, "Misaligned hash state disagreed with the aligned digest");
         });
     };
 
@@ -2470,7 +2493,7 @@ inline void check_hash_equivalence_(test_context_t &context, hash_backend_t cons
         });
     }
     if (!candidate.strings_kernel) return;
-    check_hash_strings_equivalence_(context, "hash_strings", candidate.strings_kernel);
+    check_hash_strings_equivalence_(generator, "hash_strings", candidate.strings_kernel);
     check_hash_strings_safety_(candidate.strings_kernel);
 }
 
@@ -2483,9 +2506,9 @@ inline void check_hash_equivalence_(test_context_t &context, hash_backend_t cons
  *  the per-seed reduction rather than a sibling backend. Every length is hashed by every seeded
  *  kernel, so the length count is the whole budget.
  */
-inline void check_hash_multiseed_equivalence_(test_context_t &context, hash_multiseed_backend_t const &candidate) {
-    std::mt19937 &generator = context.generator;
-    sz_size_t const inputs = (sz_size_t)context.iterations_quadratic(512);
+inline void check_hash_multiseed_equivalence_(split_mix_generator_t &generator,
+                                              hash_multiseed_backend_t const &candidate) {
+    sz_size_t const inputs = (sz_size_t)iterations_quadratic(512);
 
     // Enough seeds to exercise full 4-wide groups plus every 1..3-seed tail remainder.
     std::vector<sz_u64_t> seeds = {0u,
@@ -2512,9 +2535,9 @@ inline void check_hash_multiseed_equivalence_(test_context_t &context, hash_mult
             std::vector<sz_u64_t> output(seed_count + 1, 0xDEADBEEFDEADBEEFull);
             candidate.multiseed(text.data(), text.size(), seeds.data(), seed_count, output.data());
             for (std::size_t index = 0; index < seed_count; ++index)
-                verify(output[index] == candidate.hash_one(text.data(), text.size(), seeds[index]) &&
-                       "Multi-seed output disagreed with the single-seed hash at this seed index");
-            verify(output[seed_count] == 0xDEADBEEFDEADBEEFull); // No overwrite past `seed_count`
+                expect_equal(output[index], candidate.hash_one(text.data(), text.size(), seeds[index]),
+                             "Multi-seed output disagreed with the single-seed hash at this seed index");
+            expect_equal(output[seed_count], 0xDEADBEEFDEADBEEFull); // No overwrite past `seed_count`
         }
     };
 
@@ -2529,15 +2552,16 @@ inline void check_hash_multiseed_equivalence_(test_context_t &context, hash_mult
 
 /** Tests a Pseudo-Random Number Generator (PRNG), ensuring that the same nonce produces exactly the
  *  same output from the candidate as from serial. */
-inline void check_fill_random_equivalence_(test_context_t &context, sz_kernel_fill_random_t candidate) {
-    sz_size_t const inputs = (sz_size_t)context.iterations_quadratic(200);
+inline void check_fill_random_equivalence_(sz_kernel_fill_random_t candidate) {
+    sz_size_t const inputs = (sz_size_t)iterations_quadratic(200);
 
     auto test_on_nonce = [&](std::size_t length, sz_u64_t nonce) {
         std::string text_base(length, '\0');
         std::string text_simd(length, '\0');
-        verify(sz_fill_random_serial(&text_base[0], static_cast<sz_size_t>(length), nonce, nullptr) == sz_success_k);
-        verify(candidate(&text_simd[0], static_cast<sz_size_t>(length), nonce, nullptr) == sz_success_k);
-        verify(text_base == text_simd && "PRNG backend disagreed with the reference for this nonce and length");
+        expect_equal(sz_fill_random_serial(&text_base[0], static_cast<sz_size_t>(length), nonce, nullptr),
+                     sz_success_k);
+        expect_equal(candidate(&text_simd[0], static_cast<sz_size_t>(length), nonce, nullptr), sz_success_k);
+        expect_equal(text_base, text_simd, "PRNG backend disagreed with the reference for this nonce and length");
     };
 
     // Boundary nonces are always exercised, including the 0 and max extremes:
@@ -2563,9 +2587,8 @@ inline void check_fill_random_equivalence_(test_context_t &context, sz_kernel_fi
 
 /** Cross-checks a SHA256 backend against serial on random inputs, one-shot and incremental. The
  *  known-answer FIPS 180-4 vectors live in @c check_sha256_unit_. */
-inline void check_sha256_equivalence_(test_context_t &context, sha256_backend_t const &candidate) {
-    std::mt19937 &generator = context.generator;
-    sz_size_t const inputs = (sz_size_t)context.iterations_quadratic(256);
+inline void check_sha256_equivalence_(split_mix_generator_t &generator, sha256_backend_t const &candidate) {
+    sz_size_t const inputs = (sz_size_t)iterations_quadratic(256);
     sha256_backend_t const reference {sz_sha256_state_init_serial, sz_sha256_state_update_serial,
                                       sz_sha256_state_digest_serial};
 
@@ -2585,8 +2608,8 @@ inline void check_sha256_equivalence_(test_context_t &context, sha256_backend_t 
         candidate.update(&state_simd, random_text.data(), length);
         reference.digest(&state_base, digest_base_result);
         candidate.digest(&state_simd, digest_simd_result);
-        verify(std::memcmp(digest_base_result, digest_simd_result, STRINGZILLA_SHA256_DIGEST_LENGTH) == 0 &&
-               "SHA256 backend disagreed with the reference on the one-shot digest at this length");
+        expect_equal(std::memcmp(digest_base_result, digest_simd_result, STRINGZILLA_SHA256_DIGEST_LENGTH), 0,
+                     "SHA256 backend disagreed with the reference on the one-shot digest at this length");
 
         // Incremental hashing with random chunks
         reference.init(&state_base);
@@ -2597,8 +2620,8 @@ inline void check_sha256_equivalence_(test_context_t &context, sha256_backend_t 
         });
         reference.digest(&state_base, digest_base_result);
         candidate.digest(&state_simd, digest_simd_result);
-        verify(std::memcmp(digest_base_result, digest_simd_result, STRINGZILLA_SHA256_DIGEST_LENGTH) == 0 &&
-               "SHA256 backend disagreed with the reference on the incrementally streamed digest");
+        expect_equal(std::memcmp(digest_base_result, digest_simd_result, STRINGZILLA_SHA256_DIGEST_LENGTH), 0,
+                     "SHA256 backend disagreed with the reference on the incrementally streamed digest");
     }
 }
 
@@ -2617,10 +2640,9 @@ inline void check_sha256_equivalence_(test_context_t &context, sha256_backend_t 
  *  cursor on its last full block. Each batch carries one message per lane, so the work is quadratic
  *  in the bound.
  */
-inline void check_sha256_multistate_equivalence_(test_context_t &context,
+inline void check_sha256_multistate_equivalence_(split_mix_generator_t &generator,
                                                  sha256_multistate_backend_t const &candidate) {
-    std::mt19937 &generator = context.generator;
-    sz_size_t const inputs = (sz_size_t)context.iterations_quadratic(64);
+    sz_size_t const inputs = (sz_size_t)iterations_quadratic(64);
     sha256_multistate_backend_t const reference {sz_sha256_multistate_update_serial,
                                                  sz_sha256_multistate_digest_serial};
 
@@ -2638,8 +2660,8 @@ inline void check_sha256_multistate_equivalence_(test_context_t &context,
         std::vector<sz_u8_t> candidate_digests((lanes_count + 1) * STRINGZILLA_SHA256_DIGEST_LENGTH, 0xA5);
         auto init_lanes = [&] {
             for (std::size_t lane_index = 0; lane_index != messages.size(); ++lane_index) {
-                verify(sz_sha256_state_init_serial(&reference_states[lane_index], nullptr) == sz_success_k);
-                verify(sz_sha256_state_init_serial(&candidate_states[lane_index], nullptr) == sz_success_k);
+                expect_equal(sz_sha256_state_init_serial(&reference_states[lane_index], nullptr), sz_success_k);
+                expect_equal(sz_sha256_state_init_serial(&candidate_states[lane_index], nullptr), sz_success_k);
             }
         };
         init_lanes();
@@ -2650,9 +2672,9 @@ inline void check_sha256_multistate_equivalence_(test_context_t &context,
         candidate.update(candidate_states.data(), &texts);
         reference.digest(reference_states.data(), lanes_count, reference_digests.data());
         candidate.digest(candidate_states.data(), lanes_count, candidate_digests.data());
-        verify(std::memcmp(reference_digests.data(), candidate_digests.data(),
-                           lanes_count * STRINGZILLA_SHA256_DIGEST_LENGTH) == 0 &&
-               "Multi-state backend disagreed with the reference on the one-shot batch digest");
+        expect_equal(std::memcmp(reference_digests.data(), candidate_digests.data(),
+                                 lanes_count * STRINGZILLA_SHA256_DIGEST_LENGTH),
+                     0, "Multi-state backend disagreed with the reference on the one-shot batch digest");
 
         // Incremental: the same messages, cut into random per-lane slices across several calls
         init_lanes();
@@ -2679,13 +2701,13 @@ inline void check_sha256_multistate_equivalence_(test_context_t &context,
         }
         reference.digest(reference_states.data(), lanes_count, reference_digests.data());
         candidate.digest(candidate_states.data(), lanes_count, candidate_digests.data());
-        verify(std::memcmp(reference_digests.data(), candidate_digests.data(),
-                           lanes_count * STRINGZILLA_SHA256_DIGEST_LENGTH) == 0 &&
-               "Multi-state backend disagreed with the reference on the incrementally sliced batch digest");
+        expect_equal(std::memcmp(reference_digests.data(), candidate_digests.data(),
+                                 lanes_count * STRINGZILLA_SHA256_DIGEST_LENGTH),
+                     0, "Multi-state backend disagreed with the reference on the incrementally sliced batch digest");
 
         for (std::size_t guard_index = 0; guard_index != STRINGZILLA_SHA256_DIGEST_LENGTH;
              ++guard_index) // No overwrite past the last lane
-            verify(candidate_digests[lanes_count * STRINGZILLA_SHA256_DIGEST_LENGTH + guard_index] == 0xA5);
+            expect_equal(candidate_digests[lanes_count * STRINGZILLA_SHA256_DIGEST_LENGTH + guard_index], 0xA5);
 
         // Buffered head: each lane parks a different partial block, then the next call completes
         // some of them and not others. Random slicing reaches this only by luck, but it is the one
@@ -2708,9 +2730,9 @@ inline void check_sha256_multistate_equivalence_(test_context_t &context,
         }
         reference.digest(reference_states.data(), lanes_count, reference_digests.data());
         candidate.digest(candidate_states.data(), lanes_count, candidate_digests.data());
-        verify(std::memcmp(reference_digests.data(), candidate_digests.data(),
-                           lanes_count * STRINGZILLA_SHA256_DIGEST_LENGTH) == 0 &&
-               "Multi-state backend disagreed with the reference on the buffered-head batch digest");
+        expect_equal(std::memcmp(reference_digests.data(), candidate_digests.data(),
+                                 lanes_count * STRINGZILLA_SHA256_DIGEST_LENGTH),
+                     0, "Multi-state backend disagreed with the reference on the buffered-head batch digest");
     }
 }
 
@@ -2866,15 +2888,17 @@ inline void check_ctr_unit_(ctr_backend_t const &backend, known_ctr_t const &vec
     bytes_from_hex_(vector.ciphertext_hex, expected.data());
 
     sz_aes256_key_t key;
-    verify(backend.key_init(&key, secret, nullptr) == sz_success_k);
-    verify(backend.xor_bytes(&key, nonce, vector.byte_offset, (sz_cptr_t)plaintext.data(), (sz_size_t)length,
-                             (sz_ptr_t)produced.data(), nullptr) == sz_success_k);
+    expect_equal(backend.key_init(&key, secret, nullptr), sz_success_k);
+    expect_equal(backend.xor_bytes(&key, nonce, vector.byte_offset, (sz_cptr_t)plaintext.data(), (sz_size_t)length,
+                                   (sz_ptr_t)produced.data(), nullptr),
+                 sz_success_k);
     if (std::memcmp(produced.data(), expected.data(), length) != 0)
         fail_backend_(backend.name, "counter mode ciphertext differs from NIST SP 800-38A F.5.5");
 
     // Counter mode is its own inverse, so the same call must walk the vector back.
-    verify(backend.xor_bytes(&key, nonce, vector.byte_offset, (sz_cptr_t)produced.data(), (sz_size_t)length,
-                             (sz_ptr_t)recovered.data(), nullptr) == sz_success_k);
+    expect_equal(backend.xor_bytes(&key, nonce, vector.byte_offset, (sz_cptr_t)produced.data(), (sz_size_t)length,
+                                   (sz_ptr_t)recovered.data(), nullptr),
+                 sz_success_k);
     if (std::memcmp(recovered.data(), plaintext.data(), length) != 0)
         fail_backend_(backend.name, "counter mode did not recover its own plaintext");
 }
@@ -2891,10 +2915,11 @@ inline void check_gcm_unit_(gcm_backend_t const &backend, known_gcm_t const &vec
     bytes_from_hex_(vector.tag_hex, expected_tag);
 
     sz_aes256_gcm_key_t key;
-    verify(backend.key_init(&key, secret, nullptr) == sz_success_k);
-    verify(backend.encrypt(&key, nonce, (sz_cptr_t)associated, (sz_size_t)associated_length,
-                           (sz_cptr_t)plaintext.data(), (sz_size_t)length, (sz_ptr_t)produced.data(), produced_tag,
-                           nullptr) == sz_success_k);
+    expect_equal(backend.key_init(&key, secret, nullptr), sz_success_k);
+    expect_equal(
+        backend.encrypt(&key, nonce, (sz_cptr_t)associated, (sz_size_t)associated_length, (sz_cptr_t)plaintext.data(),
+                        (sz_size_t)length, (sz_ptr_t)produced.data(), produced_tag, nullptr),
+        sz_success_k);
     if (std::memcmp(produced.data(), expected.data(), length) != 0)
         fail_backend_(backend.name, "authenticated ciphertext differs from the published vector");
     if (std::memcmp(produced_tag, expected_tag, 16) != 0)
@@ -2936,15 +2961,15 @@ inline void check_cipher_unit_(ctr_backend_t const &ctr, gcm_backend_t const &gc
  *  Seeking is the whole reason counter mode is exposed separately, so every offset is compared
  *  against the same bytes taken from a from-zero encryption, not just the reference backend.
  */
-inline void check_ctr_equivalence_(std::mt19937 &generator, ctr_backend_t const &reference,
+inline void check_ctr_equivalence_(split_mix_generator_t &generator, ctr_backend_t const &reference,
                                    ctr_backend_t const &candidate, sz_size_t inputs) {
     sz_u8_t secret[32], nonce[12];
     for (std::size_t index = 0; index != 32; ++index) secret[index] = (sz_u8_t)(index * 7 + 1);
     for (std::size_t index = 0; index != 12; ++index) nonce[index] = (sz_u8_t)(index * 5 + 2);
 
     sz_aes256_key_t reference_key, candidate_key;
-    verify(reference.key_init(&reference_key, secret, nullptr) == sz_success_k);
-    verify(candidate.key_init(&candidate_key, secret, nullptr) == sz_success_k);
+    expect_equal(reference.key_init(&reference_key, secret, nullptr), sz_success_k);
+    expect_equal(candidate.key_init(&candidate_key, secret, nullptr), sz_success_k);
     if (std::memcmp(&reference_key, &candidate_key, sizeof(reference_key)) != 0)
         fail_backend_(candidate.name, "expanded a different round-key schedule than serial");
 
@@ -2952,10 +2977,10 @@ inline void check_ctr_equivalence_(std::mt19937 &generator, ctr_backend_t const 
     for (sz_size_t length = 0; length <= inputs; ++length) {
         text.resize(length), from_reference.resize(length), from_candidate.resize(length);
         randomize_string(generator, text);
-        verify(reference.xor_bytes(&reference_key, nonce, 0, text.data(), length, &from_reference[0], nullptr) ==
-               sz_success_k);
-        verify(candidate.xor_bytes(&candidate_key, nonce, 0, text.data(), length, &from_candidate[0], nullptr) ==
-               sz_success_k);
+        expect_equal(reference.xor_bytes(&reference_key, nonce, 0, text.data(), length, &from_reference[0], nullptr),
+                     sz_success_k);
+        expect_equal(candidate.xor_bytes(&candidate_key, nonce, 0, text.data(), length, &from_candidate[0], nullptr),
+                     sz_success_k);
         if (from_reference != from_candidate) fail_backend_(candidate.name, "counter mode disagreed with serial");
     }
 
@@ -2964,11 +2989,13 @@ inline void check_ctr_equivalence_(std::mt19937 &generator, ctr_backend_t const 
     std::string whole(span, '\0'), sliced;
     randomize_string(generator, whole);
     std::string whole_out(span, '\0');
-    verify(reference.xor_bytes(&reference_key, nonce, 0, whole.data(), span, &whole_out[0], nullptr) == sz_success_k);
+    expect_equal(reference.xor_bytes(&reference_key, nonce, 0, whole.data(), span, &whole_out[0], nullptr),
+                 sz_success_k);
     for (std::size_t offset = 0; offset <= 200; ++offset) {
         sliced.assign(span - offset, '\0');
-        verify(candidate.xor_bytes(&candidate_key, nonce, offset, whole.data() + offset, span - offset, &sliced[0],
-                                   nullptr) == sz_success_k);
+        expect_equal(candidate.xor_bytes(&candidate_key, nonce, offset, whole.data() + offset, span - offset,
+                                         &sliced[0], nullptr),
+                     sz_success_k);
         if (std::memcmp(sliced.data(), whole_out.data() + offset, span - offset) != 0)
             fail_backend_(candidate.name, "seeking into the keystream landed on different bytes");
 
@@ -2976,8 +3003,9 @@ inline void check_ctr_equivalence_(std::mt19937 &generator, ctr_backend_t const 
         // copy. The seeked entry is the interesting one: its head block is the byte the kernel is
         // likeliest to overwrite before it has finished reading.
         std::string aliased(whole, offset, span - offset);
-        verify(candidate.xor_bytes(&candidate_key, nonce, offset, aliased.data(), span - offset, &aliased[0],
-                                   nullptr) == sz_success_k);
+        expect_equal(
+            candidate.xor_bytes(&candidate_key, nonce, offset, aliased.data(), span - offset, &aliased[0], nullptr),
+            sz_success_k);
         if (std::memcmp(aliased.data(), whole_out.data() + offset, span - offset) != 0)
             fail_backend_(candidate.name, "counter mode in place differs from out-of-place");
     }
@@ -2991,15 +3019,15 @@ inline void check_ctr_equivalence_(std::mt19937 &generator, ctr_backend_t const 
  *  reference: passing one pointer for both sides reaches the bytes and the tag two pointers would,
  *  and a rejected tag still clears the buffer it was handed.
  */
-inline void check_gcm_equivalence_(std::mt19937 &generator, gcm_backend_t const &reference,
+inline void check_gcm_equivalence_(split_mix_generator_t &generator, gcm_backend_t const &reference,
                                    gcm_backend_t const &candidate, sz_size_t inputs) {
     sz_u8_t secret[32], nonce[12], reference_tag[16], candidate_tag[16];
     for (std::size_t index = 0; index != 32; ++index) secret[index] = (sz_u8_t)(index * 3 + 5);
     for (std::size_t index = 0; index != 12; ++index) nonce[index] = (sz_u8_t)(index + 9);
 
     sz_aes256_gcm_key_t reference_key, candidate_key;
-    verify(reference.key_init(&reference_key, secret, nullptr) == sz_success_k);
-    verify(candidate.key_init(&candidate_key, secret, nullptr) == sz_success_k);
+    expect_equal(reference.key_init(&reference_key, secret, nullptr), sz_success_k);
+    expect_equal(candidate.key_init(&candidate_key, secret, nullptr), sz_success_k);
     if (std::memcmp(&reference_key, &candidate_key, sizeof(reference_key)) != 0)
         fail_backend_(candidate.name, "expanded a different schedule or different subkey powers than serial");
 
@@ -3013,10 +3041,12 @@ inline void check_gcm_equivalence_(std::mt19937 &generator, gcm_backend_t const 
         associated.resize(associated_length);
         randomize_string(generator, associated);
 
-        verify(reference.encrypt(&reference_key, nonce, associated.data(), (sz_size_t)associated_length, text.data(),
-                                 length, &from_reference[0], reference_tag, nullptr) == sz_success_k);
-        verify(candidate.encrypt(&candidate_key, nonce, associated.data(), (sz_size_t)associated_length, text.data(),
-                                 length, &from_candidate[0], candidate_tag, nullptr) == sz_success_k);
+        expect_equal(reference.encrypt(&reference_key, nonce, associated.data(), (sz_size_t)associated_length,
+                                       text.data(), length, &from_reference[0], reference_tag, nullptr),
+                     sz_success_k);
+        expect_equal(candidate.encrypt(&candidate_key, nonce, associated.data(), (sz_size_t)associated_length,
+                                       text.data(), length, &from_candidate[0], candidate_tag, nullptr),
+                     sz_success_k);
         if (from_reference != from_candidate) fail_backend_(candidate.name, "ciphertext disagreed with serial");
         if (std::memcmp(reference_tag, candidate_tag, 16) != 0)
             fail_backend_(candidate.name, "authentication tag disagreed with serial");
@@ -3032,8 +3062,9 @@ inline void check_gcm_equivalence_(std::mt19937 &generator, gcm_backend_t const 
         // copy per message, so one pointer for both sides must reach the bytes two pointers would.
         std::string aliased = text;
         sz_u8_t aliased_tag[16];
-        verify(candidate.encrypt(&candidate_key, nonce, associated.data(), (sz_size_t)associated_length, aliased.data(),
-                                 length, &aliased[0], aliased_tag, nullptr) == sz_success_k);
+        expect_equal(candidate.encrypt(&candidate_key, nonce, associated.data(), (sz_size_t)associated_length,
+                                       aliased.data(), length, &aliased[0], aliased_tag, nullptr),
+                     sz_success_k);
         if (aliased != from_candidate) fail_backend_(candidate.name, "in-place sealing differs from out-of-place");
         if (std::memcmp(aliased_tag, candidate_tag, 16) != 0)
             fail_backend_(candidate.name, "in-place sealing produced a different tag than out-of-place");
@@ -3063,24 +3094,26 @@ inline void check_gcm_equivalence_(std::mt19937 &generator, gcm_backend_t const 
     associated.resize(streamed_associated_length);
     randomize_string(generator, associated);
     from_reference.assign(streamed_length, '\0');
-    verify(reference.encrypt(&reference_key, nonce, associated.data(), (sz_size_t)streamed_associated_length,
-                             text.data(), streamed_length, &from_reference[0], reference_tag, nullptr) == sz_success_k);
+    expect_equal(reference.encrypt(&reference_key, nonce, associated.data(), (sz_size_t)streamed_associated_length,
+                                   text.data(), streamed_length, &from_reference[0], reference_tag, nullptr),
+                 sz_success_k);
     for (std::size_t chunk = 1; chunk <= 40; ++chunk) {
         std::string streamed(streamed_length, '\0');
         sz_aes256_gcm_encryptor_t encryptor;
-        verify(candidate.sealer_init(&encryptor, &candidate_key, nonce, nullptr) == sz_success_k);
+        expect_equal(candidate.sealer_init(&encryptor, &candidate_key, nonce, nullptr), sz_success_k);
         for (std::size_t offset = 0; offset < streamed_associated_length; offset += chunk) {
             std::size_t const taken = streamed_associated_length - offset < chunk ? streamed_associated_length - offset
                                                                                   : chunk;
-            verify(candidate.sealer_associate(&encryptor, associated.data() + offset, (sz_size_t)taken, nullptr) ==
-                   sz_success_k);
+            expect_equal(candidate.sealer_associate(&encryptor, associated.data() + offset, (sz_size_t)taken, nullptr),
+                         sz_success_k);
         }
         for (std::size_t offset = 0; offset < streamed_length; offset += chunk) {
             std::size_t const taken = streamed_length - offset < chunk ? streamed_length - offset : chunk;
-            verify(candidate.sealer_update(&encryptor, text.data() + offset, (sz_size_t)taken, &streamed[offset],
-                                           nullptr) == sz_success_k);
+            expect_equal(
+                candidate.sealer_update(&encryptor, text.data() + offset, (sz_size_t)taken, &streamed[offset], nullptr),
+                sz_success_k);
         }
-        verify(candidate.sealer_digest(&encryptor, candidate_tag, nullptr) == sz_success_k);
+        expect_equal(candidate.sealer_digest(&encryptor, candidate_tag, nullptr), sz_success_k);
         if (streamed != from_reference) fail_backend_(candidate.name, "chunked sealing differs from one-shot");
         if (std::memcmp(reference_tag, candidate_tag, 16) != 0)
             fail_backend_(candidate.name, "chunked sealing produced a different tag than one-shot");
@@ -3088,17 +3121,18 @@ inline void check_gcm_equivalence_(std::mt19937 &generator, gcm_backend_t const 
         // The opposite direction is a separate type, so it needs its own pass over the chunking.
         std::string reopened(streamed_length, '\0');
         sz_aes256_gcm_decryptor_t decryptor;
-        verify(candidate.opener_init(&decryptor, &candidate_key, nonce, nullptr) == sz_success_k);
+        expect_equal(candidate.opener_init(&decryptor, &candidate_key, nonce, nullptr), sz_success_k);
         for (std::size_t offset = 0; offset < streamed_associated_length; offset += chunk) {
             std::size_t const taken = streamed_associated_length - offset < chunk ? streamed_associated_length - offset
                                                                                   : chunk;
-            verify(candidate.opener_associate(&decryptor, associated.data() + offset, (sz_size_t)taken, nullptr) ==
-                   sz_success_k);
+            expect_equal(candidate.opener_associate(&decryptor, associated.data() + offset, (sz_size_t)taken, nullptr),
+                         sz_success_k);
         }
         for (std::size_t offset = 0; offset < streamed_length; offset += chunk) {
             std::size_t const taken = streamed_length - offset < chunk ? streamed_length - offset : chunk;
-            verify(candidate.opener_update(&decryptor, from_reference.data() + offset, (sz_size_t)taken,
-                                           &reopened[offset], nullptr) == sz_success_k);
+            expect_equal(candidate.opener_update(&decryptor, from_reference.data() + offset, (sz_size_t)taken,
+                                                 &reopened[offset], nullptr),
+                         sz_success_k);
         }
         if (reopened != text) fail_backend_(candidate.name, "chunked opening did not recover the plaintext");
         if (candidate.opener_verify(&decryptor, reference_tag, nullptr) != sz_success_k)
@@ -3108,27 +3142,31 @@ inline void check_gcm_equivalence_(std::mt19937 &generator, gcm_backend_t const 
         // is where a kernel is likeliest to read a byte it has already overwritten.
         std::string aliased = text;
         sz_aes256_gcm_encryptor_t aliasing_encryptor;
-        verify(candidate.sealer_init(&aliasing_encryptor, &candidate_key, nonce, nullptr) == sz_success_k);
-        verify(candidate.sealer_associate(&aliasing_encryptor, associated.data(), (sz_size_t)streamed_associated_length,
-                                          nullptr) == sz_success_k);
+        expect_equal(candidate.sealer_init(&aliasing_encryptor, &candidate_key, nonce, nullptr), sz_success_k);
+        expect_equal(candidate.sealer_associate(&aliasing_encryptor, associated.data(),
+                                                (sz_size_t)streamed_associated_length, nullptr),
+                     sz_success_k);
         for (std::size_t offset = 0; offset < streamed_length; offset += chunk) {
             std::size_t const taken = streamed_length - offset < chunk ? streamed_length - offset : chunk;
-            verify(candidate.sealer_update(&aliasing_encryptor, aliased.data() + offset, (sz_size_t)taken,
-                                           &aliased[offset], nullptr) == sz_success_k);
+            expect_equal(candidate.sealer_update(&aliasing_encryptor, aliased.data() + offset, (sz_size_t)taken,
+                                                 &aliased[offset], nullptr),
+                         sz_success_k);
         }
-        verify(candidate.sealer_digest(&aliasing_encryptor, candidate_tag, nullptr) == sz_success_k);
+        expect_equal(candidate.sealer_digest(&aliasing_encryptor, candidate_tag, nullptr), sz_success_k);
         if (aliased != from_reference) fail_backend_(candidate.name, "chunked sealing in place differs from one-shot");
         if (std::memcmp(reference_tag, candidate_tag, 16) != 0)
             fail_backend_(candidate.name, "chunked sealing in place produced a different tag");
 
         sz_aes256_gcm_decryptor_t aliasing_decryptor;
-        verify(candidate.opener_init(&aliasing_decryptor, &candidate_key, nonce, nullptr) == sz_success_k);
-        verify(candidate.opener_associate(&aliasing_decryptor, associated.data(), (sz_size_t)streamed_associated_length,
-                                          nullptr) == sz_success_k);
+        expect_equal(candidate.opener_init(&aliasing_decryptor, &candidate_key, nonce, nullptr), sz_success_k);
+        expect_equal(candidate.opener_associate(&aliasing_decryptor, associated.data(),
+                                                (sz_size_t)streamed_associated_length, nullptr),
+                     sz_success_k);
         for (std::size_t offset = 0; offset < streamed_length; offset += chunk) {
             std::size_t const taken = streamed_length - offset < chunk ? streamed_length - offset : chunk;
-            verify(candidate.opener_update(&aliasing_decryptor, aliased.data() + offset, (sz_size_t)taken,
-                                           &aliased[offset], nullptr) == sz_success_k);
+            expect_equal(candidate.opener_update(&aliasing_decryptor, aliased.data() + offset, (sz_size_t)taken,
+                                                 &aliased[offset], nullptr),
+                         sz_success_k);
         }
         if (aliased != text) fail_backend_(candidate.name, "chunked opening in place did not recover the plaintext");
         if (candidate.opener_verify(&aliasing_decryptor, reference_tag, nullptr) != sz_success_k)
@@ -3143,10 +3181,11 @@ inline void check_gcm_equivalence_(std::mt19937 &generator, gcm_backend_t const 
  *  streaming path that disagrees with its own one-shot kernel. Each length sweeps a fresh buffer,
  *  so the work grows with the square of the count.
  */
-inline void check_cipher_equivalence_(test_context_t &context, ctr_backend_t const &ctr, gcm_backend_t const &gcm) {
-    sz_size_t const inputs = (sz_size_t)context.iterations_quadratic(160);
-    check_ctr_equivalence_(context.generator, ctr_serial_backend_(), ctr, inputs);
-    check_gcm_equivalence_(context.generator, gcm_serial_backend_(), gcm, inputs);
+inline void check_cipher_equivalence_(split_mix_generator_t &generator, ctr_backend_t const &ctr,
+                                      gcm_backend_t const &gcm) {
+    sz_size_t const inputs = (sz_size_t)iterations_quadratic(160);
+    check_ctr_equivalence_(generator, ctr_serial_backend_(), ctr, inputs);
+    check_gcm_equivalence_(generator, gcm_serial_backend_(), gcm, inputs);
 }
 
 #pragma endregion Cipher
@@ -3165,10 +3204,10 @@ inline void check_argsort_order_(sz_kernel_sort_order_t argsort, sz_strings_view
                                  std::vector<sz_size_t> const &expected) {
     std::vector<sz_size_t> order(expected.size());
     handle_checked_heap_t heap;
-    verify(argsort(strings, 0, sz_false_k, &heap.allocator, order.data(), nullptr) == sz_success_k &&
-           "Kernel call failed");
-    verify(heap.live_allocations == 0);
-    verify(order == expected);
+    expect_equal(argsort(strings, 0, sz_false_k, &heap.allocator, order.data(), nullptr), sz_success_k,
+                 "Kernel call failed");
+    expect_equal(heap.live_allocations, 0);
+    expect_equal(order, expected);
 }
 
 /** Holds one backend to known orders: {"banana","apple","cherry"} sorts bytewise to {1, 0, 2}, and
@@ -3202,16 +3241,16 @@ inline void check_sort_safety_(sort_backend_t const &backend) {
         sz_strings_view_t const strings = strings_from_(input);
         std::vector<sz_size_t> order(input.size());
         handle_checked_heap_t heap;
-        verify(argsort(&strings, 0, sz_false_k, &heap.allocator, order.data(), nullptr) == sz_success_k &&
-               "Kernel call failed");
-        verify(heap.live_allocations == 0);
+        expect_equal(argsort(&strings, 0, sz_false_k, &heap.allocator, order.data(), nullptr), sz_success_k,
+                     "Kernel call failed");
+        expect_equal(heap.live_allocations, 0);
         std::vector<bool> seen(input.size(), false);
         for (sz_size_t const index : order) {
             if ((std::size_t)index >= input.size() || seen[(std::size_t)index]) {
                 fmt::println(stderr, "{}: argsort produced {} for a {}-element input", backend.name,
                              (std::size_t)index >= input.size() ? "an out-of-range index" : "a repeated index",
                              input.size());
-                verify(false && "A sort's output must be a permutation of the input indices");
+                expect_true(false, "A sort's output must be a permutation of the input indices");
             }
             seen[(std::size_t)index] = true;
         }
@@ -3242,12 +3281,11 @@ inline void check_sort_safety_(sort_backend_t const &backend) {
  *  the candidate and reference @c order arrays must match exactly across the ascending, descending,
  *  and top-K modes. Four repetitions at scale 1.0, one per top-K mode.
  */
-inline void check_sort_equivalence_(test_context_t &context, sort_backend_t const &candidate) {
-    std::size_t const repetition_count = context.iterations(4);
+inline void check_sort_equivalence_(split_mix_generator_t &generator, sort_backend_t const &candidate) {
+    std::size_t const repetition_count = scaled_iterations(4);
     sort_backend_t const reference {"serial", sz_sort_order_serial, sz_sort_uncased_order_serial};
 
     using strs_t = std::vector<std::string>;
-    std::mt19937 &generator = context.generator;
     handle_checked_heap_t heap;
 
     // Each repetition draws fresh random datasets and covers one top-K mode, so a larger count
@@ -3301,24 +3339,28 @@ inline void check_sort_equivalence_(test_context_t &context, sort_backend_t cons
                 std::size_t const head = (top != 0 && top < count) ? top : count;
 
                 // Byte arg-sort is stable, so the permutations must match exactly over the prefix.
-                verify(reference.argsort(&accessed, top, reverse, &heap.allocator, order_reference.data(), nullptr) ==
-                       sz_success_k);
-                verify(candidate.argsort(&strings, top, reverse, &heap.allocator, order_candidate.data(), nullptr) ==
-                       sz_success_k);
+                expect_equal(
+                    reference.argsort(&accessed, top, reverse, &heap.allocator, order_reference.data(), nullptr),
+                    sz_success_k);
+                expect_equal(
+                    candidate.argsort(&strings, top, reverse, &heap.allocator, order_candidate.data(), nullptr),
+                    sz_success_k);
                 for (std::size_t i = 0; i < head; ++i)
-                    verify(order_reference[i] == order_candidate[i] && "SIMD byte arg-sort disagrees with serial");
+                    expect_equal(order_reference[i], order_candidate[i], "SIMD byte arg-sort disagrees with serial");
 
                 // Uncased arg-sort: also stable, same exact-match requirement.
-                verify(reference.argsort_uncased(&accessed, top, reverse, &heap.allocator, order_reference.data(),
-                                                 nullptr) == sz_success_k);
-                verify(candidate.argsort_uncased(&strings, top, reverse, &heap.allocator, order_candidate.data(),
-                                                 nullptr) == sz_success_k);
+                expect_equal(reference.argsort_uncased(&accessed, top, reverse, &heap.allocator, order_reference.data(),
+                                                       nullptr),
+                             sz_success_k);
+                expect_equal(
+                    candidate.argsort_uncased(&strings, top, reverse, &heap.allocator, order_candidate.data(), nullptr),
+                    sz_success_k);
                 for (std::size_t i = 0; i < head; ++i)
-                    verify(order_reference[i] == order_candidate[i] && "SIMD uncased arg-sort disagrees with serial");
+                    expect_equal(order_reference[i], order_candidate[i], "SIMD uncased arg-sort disagrees with serial");
             }
         }
     }
-    verify(heap.live_allocations == 0);
+    expect_equal(heap.live_allocations, 0);
 }
 
 #pragma endregion Sort
@@ -3353,15 +3395,15 @@ inline void check_intersect_pairs_(sz_kernel_intersect_t intersect, std::vector<
         std::vector<sz_size_t> first_positions(capacity), second_positions(capacity);
         sz_size_t intersection_count = 0;
         handle_checked_heap_t heap;
-        verify(intersect(&first_strings, &second_strings, &heap.allocator, 0u, &intersection_count, //
-                         first_positions.data(), second_positions.data(), nullptr) == sz_success_k &&
-               "Kernel call failed");
-        verify(heap.live_allocations == 0);
-        verify(intersection_count == expected_pairs.size() && "Kernel reported the wrong intersection size");
+        expect_equal(intersect(&first_strings, &second_strings, &heap.allocator, 0u, &intersection_count, //
+                               first_positions.data(), second_positions.data(), nullptr),
+                     sz_success_k, "Kernel call failed");
+        expect_equal(heap.live_allocations, 0);
+        expect_equal(intersection_count, expected_pairs.size(), "Kernel reported the wrong intersection size");
         std::set<intersect_match_t> produced;
         for (sz_size_t index = 0; index != intersection_count; ++index)
             produced.insert({(std::size_t)first_positions[index], (std::size_t)second_positions[index]});
-        verify(produced == expected_pairs);
+        expect_equal(produced, expected_pairs);
     }
 }
 
@@ -3462,7 +3504,7 @@ struct levenshtein_engine_t {
     }
     ~levenshtein_engine_t() {
         sz_levenshtein_engine_free(&engine, nullptr);
-        verify(heap.live_allocations == 0);
+        expect_equal(heap.live_allocations, 0);
     }
     levenshtein_engine_t(levenshtein_engine_t const &) = delete;
     levenshtein_engine_t &operator=(levenshtein_engine_t const &) = delete;
@@ -3630,7 +3672,7 @@ inline void check_levenshtein_safety_(levenshtein_backend_t const &backend) {
                 fail_backend_(backend.name, "a refused round still wrote the distances");
     }
 
-    sz_allocator_t refusing = refusing_allocator_();
+    sz_allocator_t refusing = refusing_c_allocator();
     std::vector<std::string> const refused_queries = {"kitten", "sitting"};
     sz_strings_view_t const refused_strings = strings_from_(refused_queries);
     for (sz_levenshtein_symbol_t const symbol : {sz_levenshtein_bytes_k, sz_levenshtein_runes_k}) {
@@ -3648,11 +3690,10 @@ inline void check_levenshtein_safety_(levenshtein_backend_t const &backend) {
  *  register-resident word tiers, on a two-letter alphabet that forces matches, on a multi-byte rune
  *  alphabet, and on full bytes. Serial is the reference for everything, itself included.
  */
-inline void check_levenshtein_equivalence_(test_context_t &context, levenshtein_backend_t const &backend) {
+inline void check_levenshtein_equivalence_(split_mix_generator_t &generator, levenshtein_backend_t const &backend) {
     std::size_t const lengths[] = {0, 1, 2, 5, 63, 64, 65, 127, 128, 129, 255, 256, 257, 300, 511, 512, 513, 640, 1000};
     char const binary_alphabet[] = "ab";
     std::vector<std::string> const rune_alphabet = {"a", "é", "日", "€", "𝄞"};
-    std::mt19937 &generator = context.generator;
     for (std::size_t query_length : lengths) {
         std::vector<std::string> candidates;
         for (std::size_t candidate_length : lengths)
@@ -3702,7 +3743,7 @@ inline void check_levenshtein_equivalence_(test_context_t &context, levenshtein_
                                  query.substr(distinct)});
     }
     check_levenshtein_case_(backend, {"abc"}, {});
-    for (std::size_t round = 0; round != context.iterations(8); ++round) {
+    for (std::size_t round = 0; round != scaled_iterations(8); ++round) {
         std::vector<std::string> queries;
         for (std::size_t index = 0; index != 3; ++index) {
             std::size_t const query_length = std::uniform_int_distribution<std::size_t>(1, 700)(generator);
@@ -3722,7 +3763,7 @@ inline void check_levenshtein_equivalence_(test_context_t &context, levenshtein_
     // two-letter and a multi-byte rune alphabet, with several queries in flight to cover that axis.
     std::vector<std::string> candidates, queries;
     std::vector<sz_size_t> from_reference, from_candidate;
-    for (std::size_t round = 0; round != context.iterations(8); ++round)
+    for (std::size_t round = 0; round != scaled_iterations(8); ++round)
         for (char const *alphabet : {"ab", "aé日€𝄞"}) {
             randomize_strings(generator, fuzzy_config_t(alphabet, 16, 0, 900), candidates);
             queries.clear();
@@ -3737,9 +3778,10 @@ inline void check_levenshtein_equivalence_(test_context_t &context, levenshtein_
             for (sz_levenshtein_symbol_t const symbol : {sz_levenshtein_bytes_k, sz_levenshtein_runes_k}) {
                 levenshtein_engine_t prepared(backend, query_strings, symbol);
                 from_reference.assign(cells, STRINGZILLA_SIZE_MAX), from_candidate.assign(cells, STRINGZILLA_SIZE_MAX);
-                verify(sz_levenshtein_distances_serial(&prepared.engine, &candidate_strings, nullptr, nullptr,
-                                                       STRINGZILLA_SIZE_MAX, from_reference.data(), candidates.size(),
-                                                       nullptr) == sz_success_k);
+                expect_equal(sz_levenshtein_distances_serial(&prepared.engine, &candidate_strings, nullptr, nullptr,
+                                                             STRINGZILLA_SIZE_MAX, from_reference.data(),
+                                                             candidates.size(), nullptr),
+                             sz_success_k);
                 if (backend.distances(&prepared.engine, &candidate_strings, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
                                       from_candidate.data(), candidates.size(), nullptr) != sz_success_k)
                     fail_backend_(backend.name, "a batch serial accepted was refused");
@@ -3804,7 +3846,7 @@ inline std::vector<sz_u32_t> overlap_tensor_(overlap_backend_t const &backend, s
                        widths.size(), nullptr) != sz_success_k)
         fail_backend_(backend.name, "the engine refused a well-formed batch of candidates");
     sz_overlap_engine_free(&engine, nullptr);
-    verify(heap.live_allocations == 0);
+    expect_equal(heap.live_allocations, 0);
     return matches;
 }
 
@@ -3880,10 +3922,9 @@ inline void check_overlap_bounds_(overlap_backend_t const &backend, std::vector<
  *  One engine over every query must also match one engine per query, since batched and lone rows
  *  walk different forests. Serial is the reference for everything, itself included.
  */
-inline void check_overlap_equivalence_(test_context_t &context, overlap_backend_t const &backend) {
-    std::mt19937 &generator = context.generator;
+inline void check_overlap_equivalence_(split_mix_generator_t &generator, overlap_backend_t const &backend) {
     std::vector<std::size_t> const widths = {1, 3, 4, 6, 8, 11, 32};
-    for (std::size_t round = 0; round != context.iterations(8); ++round) {
+    for (std::size_t round = 0; round != scaled_iterations(8); ++round) {
         std::size_t const query_length = std::uniform_int_distribution<std::size_t>(0, 700)(generator);
         std::string query(query_length, '\0');
         randomize_string(generator, query);
@@ -3910,7 +3951,7 @@ inline void check_overlap_equivalence_(test_context_t &context, overlap_backend_
 
     overlap_backend_t const reference {"serial", sz_overlap_engine_init_serial, sz_overlap_scores_serial};
     std::vector<std::string> candidates;
-    for (std::size_t round = 0; round != context.iterations(8); ++round) {
+    for (std::size_t round = 0; round != scaled_iterations(8); ++round) {
         std::string query(std::uniform_int_distribution<std::size_t>(0, 700)(generator), '\0');
         randomize_string(generator, query);
         randomize_strings(generator, fuzzy_config_t("ab", 12, 0, 900), candidates);
@@ -3931,7 +3972,7 @@ inline void check_overlap_equivalence_(test_context_t &context, overlap_backend_
  *  answers at three radii. */
 inline void check_overlap_safety_(overlap_backend_t const &backend) {
     handle_checked_heap_t heap;
-    sz_allocator_t refusing = refusing_allocator_();
+    sz_allocator_t refusing = refusing_c_allocator();
     std::vector<std::string> const words = {"sitting", "kitten"};
     std::vector<std::string> const kitten = {"kitten"};
     std::vector<std::string> const empty = {""};
@@ -3978,22 +4019,25 @@ inline void check_overlap_safety_(overlap_backend_t const &backend) {
     // four of five, and "kitten" misses none of its four; no text holds a window of eight.
     sz_f32_t const four_fifths = 0.8f;
     sz_u32_t bounded[4] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
-    verify(backend.scores(&engine, &words_strings, 0.0f, bounded, words.size() * widths.size(), widths.size(),
-                          nullptr) == sz_success_k);
+    expect_equal(
+        backend.scores(&engine, &words_strings, 0.0f, bounded, words.size() * widths.size(), widths.size(), nullptr),
+        sz_success_k);
     if (bounded[0] != 0 || bounded[1] != 0 || bounded[2] != 4 || bounded[3] != 0)
         fail_backend_(backend.name, "a zero radius kept a pair past it or dropped an identical one");
-    verify(backend.scores(&engine, &words_strings, std::nextafter(four_fifths, 0.0f), bounded,
-                          words.size() * widths.size(), widths.size(), nullptr) == sz_success_k);
+    expect_equal(backend.scores(&engine, &words_strings, std::nextafter(four_fifths, 0.0f), bounded,
+                                words.size() * widths.size(), widths.size(), nullptr),
+                 sz_success_k);
     if (bounded[0] != 0 || bounded[1] != 0 || bounded[2] != 4 || bounded[3] != 0)
         fail_backend_(backend.name, "a radius just short of four fifths kept a pair missing four of five");
-    verify(backend.scores(&engine, &words_strings, four_fifths, bounded, words.size() * widths.size(), widths.size(),
-                          nullptr) == sz_success_k);
+    expect_equal(backend.scores(&engine, &words_strings, four_fifths, bounded, words.size() * widths.size(),
+                                widths.size(), nullptr),
+                 sz_success_k);
     if (bounded[0] != 1 || bounded[1] != 0 || bounded[2] != 4 || bounded[3] != 0)
         fail_backend_(backend.name, "a radius of four fifths dropped a pair missing four of five");
     for (sz_u32_t const untouched : refused)
         if (untouched != 0xFFFFFFFFu) fail_backend_(backend.name, "a refused call still wrote a count");
     sz_overlap_engine_free(&engine, nullptr);
-    verify(heap.live_allocations == 0);
+    expect_equal(heap.live_allocations, 0);
 }
 
 #pragma endregion Overlap
@@ -4102,7 +4146,7 @@ inline std::vector<substrings_case_t> oracle_overlapping_(std::vector<std::strin
         // which is the repeat the walk collapses, so the oracle collapses it here as well.
         std::string const folded_haystack = folded_(haystack);
         folded_origins_t const origins = folded_origins_(haystack);
-        verify(origins.starts.size() == folded_haystack.size());
+        expect_equal(origins.starts.size(), folded_haystack.size());
         for (std::size_t needle_index = 0; needle_index != needles.size(); ++needle_index) {
             std::string const folded_needle = folded_(needles[needle_index]);
             if (folded_needle.empty() || folded_needle.size() > folded_haystack.size()) continue;
@@ -4220,10 +4264,11 @@ inline void check_bm25_(substrings_tier_t const &tier, sz_substrings_engine_t *e
             std::vector<double> const expected = oracle_bm25_(overlapping, haystacks, needles_count, lengths,
                                                               parameters, weights);
             std::vector<sz_f32_t> scores(haystacks.size(), -1);
-            verify(tier.bm25_scores(engine, haystack_strings, lengths.empty() ? nullptr : lengths.data(), &parameters,
-                                    weights.data(), scores.data(), 1, nullptr) == sz_success_k);
+            expect_equal(tier.bm25_scores(engine, haystack_strings, lengths.empty() ? nullptr : lengths.data(),
+                                          &parameters, weights.data(), scores.data(), 1, nullptr),
+                         sz_success_k);
             for (std::size_t index = 0; index != haystacks.size(); ++index)
-                verify(std::fabs(scores[index] - expected[index]) <= 1e-5 * max_of(1.0, std::fabs(expected[index])));
+                expect_near(scores[index], expected[index], 1e-5 * max_of(1.0, std::fabs(expected[index])));
         }
     }
 }
@@ -4232,14 +4277,14 @@ inline void check_bm25_(substrings_tier_t const &tier, sz_substrings_engine_t *e
 inline std::vector<substrings_case_t> backend_find_(substrings_tier_t const &tier, sz_substrings_engine_t *engine,
                                                     sz_strings_view_t const *haystacks) {
     std::vector<sz_size_t> offsets(haystacks->count + 1, 0);
-    verify(tier.find(engine, haystacks, nullptr, 0, offsets.data(), nullptr) == sz_success_k);
+    expect_equal(tier.find(engine, haystacks, nullptr, 0, offsets.data(), nullptr), sz_success_k);
     sz_size_t const total = engine->report->matches_emitted;
-    verify(offsets[haystacks->count] == total);
-    verify(engine->report->shortfall == total);
+    expect_equal(offsets[haystacks->count], total);
+    expect_equal(engine->report->shortfall, total);
 
     std::vector<sz_match_t> matches(total);
-    verify(tier.find(engine, haystacks, matches.data(), matches.size(), offsets.data(), nullptr) == sz_success_k);
-    verify(engine->report->matches_stored == total && engine->report->shortfall == 0);
+    expect_equal(tier.find(engine, haystacks, matches.data(), matches.size(), offsets.data(), nullptr), sz_success_k);
+    expect_true(engine->report->matches_stored == total && engine->report->shortfall == 0);
 
     std::vector<substrings_case_t> reported(total);
     for (std::size_t index = 0; index != total; ++index)
@@ -4261,10 +4306,10 @@ inline void check_corpus_(substrings_tier_t const &tier, std::vector<std::string
     sz_strings_view_t const needle_strings = strings_over_(needles, needle_views);
 
     sz_substrings_engine_t engine;
-    verify(tier.init(&engine, &needle_strings, sensitivity, policy, hot_states, 0, 0, &heap.allocator, nullptr) ==
-           sz_success_k);
-    verify(engine.needles_count == needles.size());
-    verify(engine.root == 0);
+    expect_equal(tier.init(&engine, &needle_strings, sensitivity, policy, hot_states, 0, 0, &heap.allocator, nullptr),
+                 sz_success_k);
+    expect_equal(engine.needles_count, needles.size());
+    expect_equal(engine.root, 0);
 
     std::vector<substrings_case_t> const overlapping = oracle_overlapping_(haystacks, needles, sensitivity);
     std::vector<substrings_case_t> const expected = policy == sz_substrings_overlapping_k
@@ -4273,16 +4318,16 @@ inline void check_corpus_(substrings_tier_t const &tier, std::vector<std::string
 
     // Every match, located the same way the oracle locates it.
     std::vector<substrings_case_t> const reported = backend_find_(tier, &engine, &haystack_strings);
-    verify(reported.size() == expected.size());
-    for (std::size_t index = 0; index != reported.size(); ++index) verify(reported[index] == expected[index]);
+    if (expect_equal(reported.size(), expected.size()))
+        for (std::size_t index = 0; index != reported.size(); ++index) expect_equal(reported[index], expected[index]);
 
     // The per-haystack counts, which a separate walk answers and so can disagree with the matches.
     std::vector<sz_size_t> counts(haystacks.size(), 0);
-    verify(tier.counts(&engine, &haystack_strings, counts.data(), 1, nullptr) == sz_success_k);
+    expect_equal(tier.counts(&engine, &haystack_strings, counts.data(), 1, nullptr), sz_success_k);
     for (std::size_t haystack_index = 0; haystack_index != haystacks.size(); ++haystack_index) {
         std::size_t owned = 0;
         for (substrings_case_t const &match : expected) owned += match.haystack_index == haystack_index;
-        verify(counts[haystack_index] == owned);
+        expect_equal(counts[haystack_index], owned);
     }
 
     // BM25 reads raw overlapping frequencies, so it is checked once per corpus, not per policy.
@@ -4296,25 +4341,27 @@ inline void check_corpus_(substrings_tier_t const &tier, std::vector<std::string
         sz_strings_view_t const replacement_strings = strings_over_(replacements, replacement_views);
 
         std::vector<sz_size_t> offsets(haystacks.size() + 1, 0);
-        verify(tier.replace(&engine, &haystack_strings, &replacement_strings, nullptr, 0, offsets.data(), nullptr) ==
-               sz_success_k);
-        verify(engine.report->target_length == offsets[haystacks.size()]);
+        expect_equal(
+            tier.replace(&engine, &haystack_strings, &replacement_strings, nullptr, 0, offsets.data(), nullptr),
+            sz_success_k);
+        expect_equal(engine.report->target_length, offsets[haystacks.size()]);
 
         std::vector<char> tape(offsets[haystacks.size()]);
-        verify(tier.replace(&engine, &haystack_strings, &replacement_strings, tape.empty() ? nullptr : tape.data(),
-                            tape.size(), offsets.data(), nullptr) == sz_success_k);
-        verify(engine.report->shortfall == 0);
+        expect_equal(tier.replace(&engine, &haystack_strings, &replacement_strings,
+                                  tape.empty() ? nullptr : tape.data(), tape.size(), offsets.data(), nullptr),
+                     sz_success_k);
+        expect_equal(engine.report->shortfall, 0);
         for (std::size_t haystack_index = 0; haystack_index != haystacks.size(); ++haystack_index) {
             std::string const rewritten = oracle_rewrite_(haystacks[haystack_index], haystack_index, expected,
                                                           replacements);
             std::size_t const first = offsets[haystack_index], last = offsets[haystack_index + 1];
-            verify(last - first == rewritten.size());
-            verify(rewritten.empty() || std::memcmp(tape.data() + first, rewritten.data(), rewritten.size()) == 0);
+            expect_equal(last - first, rewritten.size());
+            expect_true(rewritten.empty() || std::memcmp(tape.data() + first, rewritten.data(), rewritten.size()) == 0);
         }
     }
 
     sz_substrings_engine_free(&engine, nullptr);
-    verify(heap.live_allocations == 0);
+    expect_equal(heap.live_allocations, 0);
 }
 
 /** The same corpus under every policy, so one call covers a vocabulary's whole behaviour. */
@@ -4406,18 +4453,18 @@ inline void check_substrings_unit_(substrings_tier_t const &tier) {
     std::vector<sz_string_view_t> views;
     sz_strings_view_t const needle_strings = strings_over_(needles, views);
     sz_substrings_engine_t engine;
-    verify(tier.init(&engine, &needle_strings, sz_cased_k, sz_substrings_overlapping_k, 0, 0, 0, &heap.allocator,
-                     nullptr) == sz_success_k);
-    verify(engine.hot_count == 0);
+    expect_equal(
+        tier.init(&engine, &needle_strings, sz_cased_k, sz_substrings_overlapping_k, 0, 0, 0, &heap.allocator, nullptr),
+        sz_success_k);
+    expect_equal(engine.hot_count, 0);
     sz_substrings_engine_free(&engine, nullptr);
-    verify(heap.live_allocations == 0);
+    expect_equal(heap.live_allocations, 0);
 }
 
 /** Random vocabularies over random corpora, which reach the packing search's fallbacks. */
-inline void check_substrings_equivalence_(test_context_t &context, substrings_tier_t const &tier) {
-    std::mt19937 &generator = context.generator;
+inline void check_substrings_equivalence_(split_mix_generator_t &generator, substrings_tier_t const &tier) {
     char const *const alphabets[] = {"ab", "abcdefgh", "abcdefghijklmnopqrstuvwxyz"};
-    std::size_t const rounds = context.iterations(24);
+    std::size_t const rounds = scaled_iterations(24);
 
     for (std::size_t round = 0; round != rounds; ++round) {
         char const *const alphabet = alphabets[round % 3];
@@ -4442,7 +4489,7 @@ inline void check_substrings_equivalence_(test_context_t &context, substrings_ti
 
     // Haystacks spanning several ordered rounds, so leftmost covers stitch windows and rounds
     // together, and folded vocabularies meet single-byte and multi-byte text alike.
-    for (std::size_t round = 0; round != context.iterations(6); ++round) {
+    for (std::size_t round = 0; round != scaled_iterations(6); ++round) {
         char const *const alphabet = alphabets[round % 3];
         std::vector<std::string> needles, haystacks;
         for (std::size_t index = 0; index != 1 + (round * 5) % 17; ++index)
@@ -4463,7 +4510,7 @@ inline void check_substrings_equivalence_(test_context_t &context, substrings_ti
 
     // Needles opening on letters the text rarely holds, so fewer than one byte in eight leaves the
     // root and the tiers skip between live bytes rather than stepping every one.
-    for (std::size_t round = 0; round != context.iterations(4); ++round) {
+    for (std::size_t round = 0; round != scaled_iterations(4); ++round) {
         std::vector<std::string> const needles {"zebra", "quartz", "qu", "zz", "quiz", "z"};
         std::vector<std::string> haystacks;
         for (std::size_t index = 0; index != 4; ++index) {
@@ -4481,7 +4528,7 @@ inline void check_substrings_equivalence_(test_context_t &context, substrings_ti
 
     // Small alphabets, where hot rows are only a few classes wide: nucleotides with bytes no needle
     // spells mixed in, a two-letter alphabet, and every tier split over them.
-    for (std::size_t round = 0; round != context.iterations(4); ++round) {
+    for (std::size_t round = 0; round != scaled_iterations(4); ++round) {
         std::vector<std::string> nucleotides, bits, haystacks, binary_haystacks;
         for (std::size_t index = 0; index != 20 + round * 30; ++index)
             nucleotides.push_back(random_string(generator, 3 + (index + round) % 14, "ACGT"));
@@ -4573,17 +4620,17 @@ inline std::vector<substrings_case_t> regex_matches_(regex_tier_t const &tier, s
     std::vector<sz_string_view_t> views;
     sz_strings_view_t const strings = strings_over_(haystacks, views);
     std::vector<sz_size_t> offsets(haystacks.size() + 1, STRINGZILLA_SIZE_MAX);
-    verify(tier.find(engine, &strings, nullptr, 0, offsets.data(), nullptr) == sz_success_k);
+    expect_equal(tier.find(engine, &strings, nullptr, 0, offsets.data(), nullptr), sz_success_k);
     std::vector<sz_match_t> matches(offsets.back());
-    verify(tier.find(engine, &strings, matches.data(), matches.size(), offsets.data(), nullptr) == sz_success_k);
-    verify(offsets.back() == matches.size());
+    expect_equal(tier.find(engine, &strings, matches.data(), matches.size(), offsets.data(), nullptr), sz_success_k);
+    expect_equal(offsets.back(), matches.size());
 
     // A stride of two must leave every other entry alone.
     std::vector<sz_size_t> counts(haystacks.size() * 2, STRINGZILLA_SIZE_MAX);
-    verify(tier.counts(engine, &strings, counts.data(), 2, nullptr) == sz_success_k);
+    expect_equal(tier.counts(engine, &strings, counts.data(), 2, nullptr), sz_success_k);
     for (std::size_t index = 0; index != haystacks.size(); ++index) {
-        verify(counts[index * 2] == offsets[index + 1] - offsets[index]);
-        verify(counts[index * 2 + 1] == STRINGZILLA_SIZE_MAX);
+        expect_equal(counts[index * 2], offsets[index + 1] - offsets[index]);
+        expect_equal(counts[index * 2 + 1], STRINGZILLA_SIZE_MAX);
     }
 
     std::vector<substrings_case_t> found(matches.size());
@@ -4602,15 +4649,16 @@ inline std::vector<std::string> regex_replaced_(sz_kernel_regex_replace_t replac
     sz_strings_view_t const haystack_strings = strings_over_(haystacks, haystack_views);
     sz_strings_view_t const replacement_strings = strings_over_(replacements, replacement_views);
     std::vector<sz_size_t> offsets(haystacks.size() + 1, STRINGZILLA_SIZE_MAX), short_offsets = offsets;
-    verify(replace(engine, &haystack_strings, &replacement_strings, nullptr, 0, offsets.data(), nullptr) ==
-           sz_success_k);
+    expect_equal(replace(engine, &haystack_strings, &replacement_strings, nullptr, 0, offsets.data(), nullptr),
+                 sz_success_k);
     sz_size_t const total = offsets.back();
     std::string target(total + 1, '\0');
-    verify(replace(engine, &haystack_strings, &replacement_strings, &target[0], total ? total - 1 : 0,
-                   short_offsets.data(), nullptr) == sz_success_k);
-    verify(short_offsets == offsets);
-    verify(replace(engine, &haystack_strings, &replacement_strings, &target[0], total, offsets.data(), nullptr) ==
-           sz_success_k);
+    expect_equal(replace(engine, &haystack_strings, &replacement_strings, &target[0], total ? total - 1 : 0,
+                         short_offsets.data(), nullptr),
+                 sz_success_k);
+    expect_equal(short_offsets, offsets);
+    expect_equal(replace(engine, &haystack_strings, &replacement_strings, &target[0], total, offsets.data(), nullptr),
+                 sz_success_k);
     std::vector<std::string> rewritten(haystacks.size());
     for (std::size_t index = 0; index != haystacks.size(); ++index)
         rewritten[index] = target.substr(offsets[index], offsets[index + 1] - offsets[index]);
@@ -4632,22 +4680,24 @@ inline void check_regex_known_(regex_tier_t const &tier, regex_known_t const &kn
     std::vector<sz_string_view_t> views;
     sz_strings_view_t const patterns = strings_over_(known.patterns, views);
     sz_regex_engine_t engine;
-    verify(tier.init(&engine, &patterns, sensitivity, nullptr, &heap.allocator, nullptr) == sz_success_k);
-    verify(regex_matches_(tier, &engine, known.haystacks) == known.expected);
+    expect_equal(tier.init(&engine, &patterns, sensitivity, nullptr, &heap.allocator, nullptr), sz_success_k);
+    expect_equal(regex_matches_(tier, &engine, known.haystacks), known.expected);
     // A monoversioned table holds only the kernel its init picked, so forced engines record it too.
     sz_capability_t const capability = engine.capability;
     sz_regex_engine_free(&engine, nullptr);
-    verify(regex_compile_(known.patterns, sensitivity, 0, sz_regex_forward_budget_k, &heap.allocator, &engine,
-                          capability) == sz_success_k);
-    verify(engine.positions_words != 0);
-    verify(regex_matches_(tier, &engine, known.haystacks) == known.expected);
+    expect_equal(
+        regex_compile_(known.patterns, sensitivity, 0, sz_regex_forward_budget_k, &heap.allocator, &engine, capability),
+        sz_success_k);
+    expect_true(engine.positions_words != 0);
+    expect_equal(regex_matches_(tier, &engine, known.haystacks), known.expected);
     sz_regex_engine_free(&engine, nullptr);
-    verify(regex_compile_(known.patterns, sensitivity, sz_regex_reverse_budget_k, 0, &heap.allocator, &engine,
-                          capability) == sz_success_k);
-    verify(engine.forward_rows == nullptr);
-    verify(regex_matches_(tier, &engine, known.haystacks) == known.expected);
+    expect_equal(
+        regex_compile_(known.patterns, sensitivity, sz_regex_reverse_budget_k, 0, &heap.allocator, &engine, capability),
+        sz_success_k);
+    expect_equal(engine.forward_rows, nullptr);
+    expect_equal(regex_matches_(tier, &engine, known.haystacks), known.expected);
     sz_regex_engine_free(&engine, nullptr);
-    verify(heap.live_allocations == 0);
+    expect_equal(heap.live_allocations, 0);
 }
 
 /** Checks the rewrite of @p haystacks through @p tier's own init and with the PikeVM forced. */
@@ -4659,14 +4709,14 @@ inline void check_regex_replace_(regex_tier_t const &tier, sz_kernel_regex_repla
     std::vector<sz_string_view_t> views;
     sz_strings_view_t const strings = strings_over_(patterns, views);
     sz_regex_engine_t engine;
-    verify(tier.init(&engine, &strings, sensitivity, nullptr, &heap.allocator, nullptr) == sz_success_k);
-    verify(regex_replaced_(replace, &engine, haystacks, replacements) == expected);
+    expect_equal(tier.init(&engine, &strings, sensitivity, nullptr, &heap.allocator, nullptr), sz_success_k);
+    expect_equal(regex_replaced_(replace, &engine, haystacks, replacements), expected);
     sz_capability_t const capability = engine.capability;
     sz_regex_engine_free(&engine, nullptr);
-    verify(regex_compile_(patterns, sensitivity, 0, 0, &heap.allocator, &engine, capability) == sz_success_k);
-    verify(regex_replaced_(replace, &engine, haystacks, replacements) == expected);
+    expect_equal(regex_compile_(patterns, sensitivity, 0, 0, &heap.allocator, &engine, capability), sz_success_k);
+    expect_equal(regex_replaced_(replace, &engine, haystacks, replacements), expected);
     sz_regex_engine_free(&engine, nullptr);
-    verify(heap.live_allocations == 0);
+    expect_equal(heap.live_allocations, 0);
 }
 
 /** Every row @p extract locates for @p pattern, sized by one call and written by a second; a
@@ -4676,20 +4726,20 @@ inline std::vector<substrings_case_t> regex_extracted_(sz_kernel_regex_extract_t
     std::vector<sz_string_view_t> views;
     sz_strings_view_t const strings = strings_over_(haystacks, views);
     std::vector<sz_size_t> offsets(haystacks.size() + 1, STRINGZILLA_SIZE_MAX), short_offsets = offsets;
-    verify(extract(engine, &strings, pattern, nullptr, 0, offsets.data(), nullptr) == sz_success_k);
+    expect_equal(extract(engine, &strings, pattern, nullptr, 0, offsets.data(), nullptr), sz_success_k);
     sz_size_t const total = offsets.back(), short_capacity = total ? total - 1 : 0;
     std::vector<sz_match_t> rows(total + 1);
     rows[short_capacity].haystack_index = 12345;
-    verify(extract(engine, &strings, pattern, rows.data(), short_capacity, short_offsets.data(), nullptr) ==
-           sz_success_k);
-    verify(short_offsets == offsets && rows[short_capacity].haystack_index == 12345);
-    verify(extract(engine, &strings, pattern, rows.data(), total, offsets.data(), nullptr) == sz_success_k);
-    verify(offsets == short_offsets);
+    expect_equal(extract(engine, &strings, pattern, rows.data(), short_capacity, short_offsets.data(), nullptr),
+                 sz_success_k);
+    expect_true(short_offsets == offsets && rows[short_capacity].haystack_index == 12345);
+    expect_equal(extract(engine, &strings, pattern, rows.data(), total, offsets.data(), nullptr), sz_success_k);
+    expect_equal(offsets, short_offsets);
     std::vector<substrings_case_t> found(total);
     for (std::size_t index = 0; index != total; ++index) {
         found[index] = {rows[index].haystack_index, rows[index].needle_index, rows[index].byte_offset,
                         rows[index].byte_length};
-        verify(offsets[found[index].haystack_index] <= index && index < offsets[found[index].haystack_index + 1]);
+        expect_true(offsets[found[index].haystack_index] <= index && index < offsets[found[index].haystack_index + 1]);
     }
     return found;
 }
@@ -4705,14 +4755,14 @@ inline void check_regex_extract_(regex_tier_t const &tier, sz_kernel_regex_extra
     std::vector<sz_string_view_t> views;
     sz_strings_view_t const strings = strings_over_(patterns, views);
     sz_regex_engine_t engine;
-    verify(tier.init(&engine, &strings, sensitivity, nullptr, &heap.allocator, nullptr) == sz_success_k);
-    verify(regex_extracted_(extract, &engine, pattern, haystacks) == expected);
+    expect_equal(tier.init(&engine, &strings, sensitivity, nullptr, &heap.allocator, nullptr), sz_success_k);
+    expect_equal(regex_extracted_(extract, &engine, pattern, haystacks), expected);
     sz_capability_t const capability = engine.capability;
     sz_regex_engine_free(&engine, nullptr);
-    verify(regex_compile_(patterns, sensitivity, 0, 0, &heap.allocator, &engine, capability) == sz_success_k);
-    verify(regex_extracted_(extract, &engine, pattern, haystacks) == expected);
+    expect_equal(regex_compile_(patterns, sensitivity, 0, 0, &heap.allocator, &engine, capability), sz_success_k);
+    expect_equal(regex_extracted_(extract, &engine, pattern, haystacks), expected);
     sz_regex_engine_free(&engine, nullptr);
-    verify(heap.live_allocations == 0);
+    expect_equal(heap.live_allocations, 0);
 }
 
 /** The same vocabulary through @p tier and through the serial tier compiled with the given budgets,
@@ -4725,21 +4775,22 @@ inline void check_regex_against_serial_(regex_tier_t const &tier, regex_rewritin
     std::vector<sz_string_view_t> views;
     sz_strings_view_t const strings = strings_over_(patterns, views);
     sz_regex_engine_t engine, reference;
-    verify(tier.init(&engine, &strings, sensitivity, nullptr, &heap.allocator, nullptr) == sz_success_k);
-    verify(regex_compile_(patterns, sensitivity, reverse_budget, forward_budget, &heap.allocator, &reference,
-                          sz_cap_serial_k) == sz_success_k);
-    verify(regex_matches_(tier, &engine, haystacks) == regex_matches_(regex_serial_, &reference, haystacks));
+    expect_equal(tier.init(&engine, &strings, sensitivity, nullptr, &heap.allocator, nullptr), sz_success_k);
+    expect_equal(regex_compile_(patterns, sensitivity, reverse_budget, forward_budget, &heap.allocator, &reference,
+                                sz_cap_serial_k),
+                 sz_success_k);
+    expect_equal(regex_matches_(tier, &engine, haystacks), regex_matches_(regex_serial_, &reference, haystacks));
     if (rewriting.replace) {
         std::vector<std::string> const replacements(patterns.size(), "<$1|$0>");
-        verify(regex_replaced_(rewriting.replace, &engine, haystacks, replacements) ==
-               regex_replaced_(regex_serial_rewriting_.replace, &reference, haystacks, replacements));
+        expect_equal(regex_replaced_(rewriting.replace, &engine, haystacks, replacements),
+                     regex_replaced_(regex_serial_rewriting_.replace, &reference, haystacks, replacements));
     }
     if (rewriting.extract)
-        verify(regex_extracted_(rewriting.extract, &engine, 0, haystacks) ==
-               regex_extracted_(regex_serial_rewriting_.extract, &reference, 0, haystacks));
+        expect_equal(regex_extracted_(rewriting.extract, &engine, 0, haystacks),
+                     regex_extracted_(regex_serial_rewriting_.extract, &reference, 0, haystacks));
     sz_regex_engine_free(&engine, nullptr);
     sz_regex_engine_free(&reference, nullptr);
-    verify(heap.live_allocations == 0);
+    expect_equal(heap.live_allocations, 0);
 }
 
 /** Known answers on leftmost-first priority, greed, anchors, boundaries, UTF-8, empty matches, case
@@ -4809,12 +4860,12 @@ inline void check_regex_unit_(regex_tier_t const &tier, regex_rewriting_t const 
         std::vector<sz_string_view_t> views;
         sz_strings_view_t const patterns = strings_over_(exploding, views);
         sz_regex_engine_t engine;
-        verify(tier.init(&engine, &patterns, sz_cased_k, nullptr, &heap.allocator, nullptr) == sz_success_k);
-        verify(engine.forward_rows == nullptr);
-        verify(regex_matches_(tier, &engine, {"abc abc ab\na", "b c a", "    a\n", "xyz"}) ==
-               cases_t({{0, 0, 0, 12}, {1, 0, 0, 5}, {2, 0, 0, 5}}));
+        expect_equal(tier.init(&engine, &patterns, sz_cased_k, nullptr, &heap.allocator, nullptr), sz_success_k);
+        expect_equal(engine.forward_rows, nullptr);
+        expect_equal(regex_matches_(tier, &engine, {"abc abc ab\na", "b c a", "    a\n", "xyz"}),
+                     cases_t({{0, 0, 0, 12}, {1, 0, 0, 5}, {2, 0, 0, 5}}));
         sz_regex_engine_free(&engine, nullptr);
-        verify(heap.live_allocations == 0);
+        expect_equal(heap.live_allocations, 0);
     }
 
     // Case folding: `ß` folds to `ss`, the Kelvin sign to `k`, and a match inside one codepoint's
@@ -4961,11 +5012,11 @@ inline void check_regex_unit_(regex_tier_t const &tier, regex_rewriting_t const 
             sz_strings_view_t const patterns = strings_over_(refusal.patterns, views);
             sz_regex_engine_t engine;
             sz_size_t malformed = STRINGZILLA_SIZE_MAX;
-            verify(tier.init(&engine, &patterns, sz_cased_k, &malformed, &heap.allocator, nullptr) ==
-                   sz_invalid_syntax_k);
-            verify(malformed == refusal.index);
+            expect_equal(tier.init(&engine, &patterns, sz_cased_k, &malformed, &heap.allocator, nullptr),
+                         sz_invalid_syntax_k);
+            expect_equal(malformed, refusal.index);
         }
-        verify(heap.live_allocations == 0);
+        expect_equal(heap.live_allocations, 0);
     }
 
     // Capacities: offsets stay true whatever fits, and nothing is written past the capacity.
@@ -4977,25 +5028,26 @@ inline void check_regex_unit_(regex_tier_t const &tier, regex_rewriting_t const 
         sz_strings_view_t const pattern_strings = strings_over_(patterns, pattern_views);
         sz_strings_view_t const haystack_strings = strings_over_(haystacks, haystack_views);
         sz_regex_engine_t engine;
-        verify(tier.init(&engine, &pattern_strings, sz_cased_k, nullptr, &heap.allocator, nullptr) == sz_success_k);
+        expect_equal(tier.init(&engine, &pattern_strings, sz_cased_k, nullptr, &heap.allocator, nullptr), sz_success_k);
         std::vector<substrings_case_t> const all = regex_matches_(tier, &engine, haystacks);
-        verify(all.size() == 82);
+        expect_equal(all.size(), 82);
         for (std::size_t capacity : {std::size_t(0), std::size_t(1), std::size_t(3), std::size_t(16), std::size_t(63),
                                      std::size_t(65), all.size() + 64}) {
             std::vector<sz_match_t> output(capacity + 1);
             for (sz_match_t &match : output) match.haystack_index = 12345;
             std::vector<sz_size_t> offsets(haystacks.size() + 1, 777);
-            verify(tier.find(&engine, &haystack_strings, capacity ? output.data() : nullptr, capacity, offsets.data(),
-                             nullptr) == sz_success_k);
-            verify(offsets == std::vector<sz_size_t>({0, 50, 50, 51, 82}));
+            expect_equal(tier.find(&engine, &haystack_strings, capacity ? output.data() : nullptr, capacity,
+                                   offsets.data(), nullptr),
+                         sz_success_k);
+            expect_equal(offsets, std::vector<sz_size_t>({0, 50, 50, 51, 82}));
             for (std::size_t index = 0; index != min_of(capacity, all.size()); ++index)
-                verify(output[index].byte_offset == all[index].byte_offset &&
-                       output[index].haystack_index == all[index].haystack_index);
+                expect_true(output[index].byte_offset == all[index].byte_offset &&
+                            output[index].haystack_index == all[index].haystack_index);
             for (std::size_t index = min_of(capacity, all.size()); index <= capacity; ++index)
-                verify(output[index].haystack_index == 12345);
+                expect_equal(output[index].haystack_index, 12345);
         }
         sz_regex_engine_free(&engine, nullptr);
-        verify(heap.live_allocations == 0);
+        expect_equal(heap.live_allocations, 0);
     }
 
     if (rewriting.replace) {
@@ -5044,7 +5096,7 @@ inline void check_regex_unit_(regex_tier_t const &tier, regex_rewriting_t const 
  *  Groups take only unbounded quantifiers, since counted repetitions of groups grow automata
  *  exponentially, which tests their size rather than their meaning.
  */
-inline std::string random_regex_(std::mt19937 &generator, std::size_t depth) {
+inline std::string random_regex_(split_mix_generator_t &generator, std::size_t depth) {
     static char const *const atoms[] = {"a",
                                         "b",
                                         "c",
@@ -5091,13 +5143,12 @@ inline std::string random_regex_(std::mt19937 &generator, std::size_t depth) {
  *  and folding letters, through @p tier against the serial tier, whose start pass is forced
  *  bit-parallel every other round and whose end walks run the PikeVM every other pair; every third
  *  vocabulary is uncased. Rewrites are compared too where @p rewriting has them. */
-inline void check_regex_equivalence_(test_context_t &context, regex_tier_t const &tier,
+inline void check_regex_equivalence_(split_mix_generator_t &generator, regex_tier_t const &tier,
                                      regex_rewriting_t const &rewriting = {}) {
-    std::mt19937 &generator = context.generator;
     std::vector<std::string> const characters {
         "a",    "b",    "c", "0",        "_",           "\x20", "\n", "\xC3\xA9", "\xE2\x82\xAC", "\xF0\x9F\x98\x80",
         "\x80", "\xC3", "S", "\xC3\x9F", "\xE2\x84\xAA"};
-    for (std::size_t round = 0; round != context.iterations(24); ++round) {
+    for (std::size_t round = 0; round != scaled_iterations(24); ++round) {
         std::vector<std::string> patterns, haystacks;
         for (std::size_t index = 0; index != 1 + round % 4; ++index) patterns.push_back(random_regex_(generator, 0));
         for (std::size_t index = 0; index != 1 + (round * 5) % 9; ++index)
@@ -5154,12 +5205,14 @@ inline subdocuments_found_t subdocuments_find_(subdocuments_tier_t const &tier, 
     std::vector<sz_size_t> const sized = found.offsets;
     std::vector<sz_size_t> counts(documents.size(), 0);
     found.matches.resize(sized.back());
-    verify(tier.find(engine, &document_strings, found.matches.data(), found.matches.size(), found.offsets.data(),
-                     &found.malformed_index, nullptr) == sz_success_k);
-    verify(found.offsets == sized);
-    verify(tier.counts(engine, &document_strings, counts.data(), 1, &found.malformed_index, nullptr) == sz_success_k);
+    expect_equal(tier.find(engine, &document_strings, found.matches.data(), found.matches.size(), found.offsets.data(),
+                           &found.malformed_index, nullptr),
+                 sz_success_k);
+    expect_equal(found.offsets, sized);
+    expect_equal(tier.counts(engine, &document_strings, counts.data(), 1, &found.malformed_index, nullptr),
+                 sz_success_k);
     for (std::size_t index = 0; index != documents.size(); ++index)
-        verify(counts[index] == sized[index + 1] - sized[index]);
+        expect_equal(counts[index], sized[index + 1] - sized[index]);
     return found;
 }
 
@@ -5171,7 +5224,7 @@ inline sz_status_t subdocuments_compile_status_(subdocuments_tier_t const &tier,
     sz_subdocuments_engine_t engine;
     sz_status_t const status = subdocuments_compile_(tier, &engine, paths, format, &malformed_index, &heap.allocator);
     if (status == sz_success_k) sz_subdocuments_engine_free(&engine, nullptr);
-    verify(heap.live_allocations == 0);
+    expect_equal(heap.live_allocations, 0);
     return status;
 }
 
@@ -5181,7 +5234,7 @@ inline sz_status_t subdocuments_walk_status_(subdocuments_tier_t const &tier, st
                                              std::vector<std::string> const &documents, sz_subdocuments_format_t format,
                                              sz_size_t &malformed_index) {
     sz_subdocuments_engine_t engine;
-    verify(subdocuments_compile_(tier, &engine, {path}, format, &malformed_index, nullptr) == sz_success_k);
+    expect_equal(subdocuments_compile_(tier, &engine, {path}, format, &malformed_index, nullptr), sz_success_k);
     subdocuments_found_t const found = subdocuments_find_(tier, &engine, documents);
     sz_subdocuments_engine_free(&engine, nullptr);
     malformed_index = found.malformed_index;
@@ -5198,15 +5251,15 @@ inline void check_subdocuments_values_(subdocuments_tier_t const &tier, std::str
     sz_status_t const status = subdocuments_compile_(tier, &engine, paths, format, &malformed_index, &heap.allocator);
     // A header-only build links no regex dispatch, so `match()` and `search()` need the library.
     if (STRINGZILLA_HEADER_ONLY && status == sz_missing_library_k) return;
-    verify(status == sz_success_k);
+    expect_equal(status, sz_success_k);
     subdocuments_found_t const found = subdocuments_find_(tier, &engine, {document});
-    verify(found.status == sz_success_k);
+    expect_equal(found.status, sz_success_k);
     std::vector<std::string> values;
     for (sz_match_t const &match : found.matches)
         values.push_back(document.substr(match.byte_offset, match.byte_length));
-    verify(values == expected);
+    expect_equal(values, expected);
     sz_subdocuments_engine_free(&engine, nullptr);
-    verify(heap.live_allocations == 0);
+    expect_equal(heap.live_allocations, 0);
 }
 
 /** RFC 9535's bookstore and examples, XPath over an XML bookstore, refused paths, and capacities
@@ -5357,20 +5410,20 @@ inline void check_subdocuments_unit_(subdocuments_tier_t const &tier) {
     for (char const *path : {"$[0,]", "$[?@.a == @.b]", "$[?$.a]", "$[?count(@.a)]", "$..", "$[01]", "$ ", "$[- 1]",
                              R"($["\x"])", R"($['\ud800'])", "", "$[9007199254740992]", "$[1:2:-0]", "$..[-0]",
                              "$[?((((((((((((((((((((((((((((((((@.a))))))))))))))))))))))))))))))))]"}) {
-        verify(subdocuments_compile_status_(tier, {"$.fine", "$[0]", path, "$.too"}, json, malformed_index) ==
-               sz_invalid_syntax_k);
-        verify(malformed_index == 2);
+        expect_equal(subdocuments_compile_status_(tier, {"$.fine", "$[0]", path, "$.too"}, json, malformed_index),
+                     sz_invalid_syntax_k);
+        expect_equal(malformed_index, 2);
     }
     for (char const *path : {"$", "/", "//", "/a/", "/a[-1]", "/a[x]", "/a/..", "/child::a", "/a[1][2]", "/a|/b"}) {
-        verify(subdocuments_compile_status_(tier, {"/fine", path}, xml, malformed_index) == sz_invalid_syntax_k);
-        verify(malformed_index == 1);
+        expect_equal(subdocuments_compile_status_(tier, {"/fine", path}, xml, malformed_index), sz_invalid_syntax_k);
+        expect_equal(malformed_index, 1);
     }
     for (char const *path :
          {"$[9007199254740991]", "$ .a", "$[::]", "$..[*]", "$['']", "$[-1]", "$[ 0 , 'a' , * , 1:2: , -2 ]",
           "$[?@.a, ?@.b]", "$..[?@.x[?@.y > -1.5e+3]]", "$[?@ == true || @ == null || @ != \"x\"]"})
-        verify(subdocuments_compile_status_(tier, {path}, json, malformed_index) == sz_success_k);
+        expect_equal(subdocuments_compile_status_(tier, {path}, json, malformed_index), sz_success_k);
     for (char const *path : {"/a/text", "/p:a//q:b[3]", "//\xC3\xA9", "/a-b.c_d", "/a[0]"})
-        verify(subdocuments_compile_status_(tier, {path}, xml, malformed_index) == sz_success_k);
+        expect_equal(subdocuments_compile_status_(tier, {path}, xml, malformed_index), sz_success_k);
 
     // A capacity cuts the matches anywhere, leaving offsets true and the array past it untouched.
     auto const check_capacities = [&](std::vector<std::string> const &documents, std::vector<std::string> const &paths,
@@ -5378,25 +5431,27 @@ inline void check_subdocuments_unit_(subdocuments_tier_t const &tier) {
         std::vector<sz_string_view_t> views;
         sz_strings_view_t const document_strings = strings_over_(documents, views);
         sz_subdocuments_engine_t engine;
-        verify(subdocuments_compile_(tier, &engine, paths, format, &malformed_index, nullptr) == sz_success_k);
+        expect_equal(subdocuments_compile_(tier, &engine, paths, format, &malformed_index, nullptr), sz_success_k);
         subdocuments_found_t const full = subdocuments_find_(tier, &engine, documents);
         sz_size_t const total = full.offsets.back();
         for (sz_size_t capacity : {sz_size_t(1), sz_size_t(63), sz_size_t(65), total - 1, total}) {
             sz_match_t const sentinel {111, 222, 333, 444};
             std::vector<sz_match_t> matches(capacity + 1, sentinel);
             std::vector<sz_size_t> offsets(documents.size() + 1, 999);
-            verify(tier.find(&engine, &document_strings, matches.data(), capacity, offsets.data(), &malformed_index,
-                             nullptr) == sz_success_k);
-            verify(offsets == full.offsets);
-            verify(std::memcmp(matches.data(), full.matches.data(), capacity * sizeof(sz_match_t)) == 0);
-            verify(std::memcmp(&matches[capacity], &sentinel, sizeof(sz_match_t)) == 0);
+            expect_equal(tier.find(&engine, &document_strings, matches.data(), capacity, offsets.data(),
+                                   &malformed_index, nullptr),
+                         sz_success_k);
+            expect_equal(offsets, full.offsets);
+            expect_equal(std::memcmp(matches.data(), full.matches.data(), capacity * sizeof(sz_match_t)), 0);
+            expect_equal(std::memcmp(&matches[capacity], &sentinel, sizeof(sz_match_t)), 0);
         }
         // A strided count leaves the entries between its own alone.
         std::vector<sz_size_t> counts(documents.size() * 2, 7);
-        verify(tier.counts(&engine, &document_strings, counts.data(), 2, &malformed_index, nullptr) == sz_success_k);
+        expect_equal(tier.counts(&engine, &document_strings, counts.data(), 2, &malformed_index, nullptr),
+                     sz_success_k);
         for (std::size_t index = 0; index != documents.size(); ++index) {
-            verify(counts[index * 2] == full.offsets[index + 1] - full.offsets[index]);
-            verify(counts[index * 2 + 1] == 7);
+            expect_equal(counts[index * 2], full.offsets[index + 1] - full.offsets[index]);
+            expect_equal(counts[index * 2 + 1], 7);
         }
         sz_subdocuments_engine_free(&engine, nullptr);
     };
@@ -5419,26 +5474,28 @@ inline void check_subdocuments_safety_(subdocuments_tier_t const &tier) {
          {R"({"a":1)", "{\"a\":\"b}", "[1,2]]", R"({"a" 1})", R"({"a":1,})", "[1 2]", R"({"a":tru})", R"({"a":01})",
           R"({"a":1}x)", "", "[}", R"(["\"])", "[1.]", R"({"a":1}{})"})
         for (char const *path : {"$..*", "$..[-1]", "$..[?@]"}) {
-            verify(subdocuments_walk_status_(tier, path, {"[0]", document}, json, malformed_index) ==
-                   sz_invalid_syntax_k);
-            verify(malformed_index == 1);
+            expect_equal(subdocuments_walk_status_(tier, path, {"[0]", document}, json, malformed_index),
+                         sz_invalid_syntax_k);
+            expect_equal(malformed_index, 1);
         }
     for (char const *document :
          {"<a>", "<a></b>", "<a>x</a></a>", "<a b=\"x>", "<a><!-- x</a>", "<a><![CDATA[x</a>", "<a><?pi</a>",
           "<a/><b/>", "text<a/>", "", "<a x=1/>", "<a><b></a></b>", "<!DOCTYPE a [<!ENTITY e \"x\">]><a/>"})
         for (char const *path : {"//*", "//@*", "//text()", "/z"}) {
-            verify(subdocuments_walk_status_(tier, path, {"<a/>", document}, xml, malformed_index) ==
-                   sz_invalid_syntax_k);
-            verify(malformed_index == 1);
+            expect_equal(subdocuments_walk_status_(tier, path, {"<a/>", document}, xml, malformed_index),
+                         sz_invalid_syntax_k);
+            expect_equal(malformed_index, 1);
         }
 
     // What no path enters is skipped by its nesting alone, so it goes unvalidated.
-    verify(subdocuments_walk_status_(tier, "$.b", {R"({"a":{"x":tru},"b":1})"}, json, malformed_index) == sz_success_k);
-    verify(subdocuments_walk_status_(tier, "$..*", {R"({"a":{"x":tru},"b":1})"}, json, malformed_index) ==
-           sz_invalid_syntax_k);
-    verify(subdocuments_walk_status_(tier, "/a/z", {"<a><b><c></d></b></a>"}, xml, malformed_index) == sz_success_k);
-    verify(subdocuments_walk_status_(tier, "//*", {"<a><b><c></d></b></a>"}, xml, malformed_index) ==
-           sz_invalid_syntax_k);
+    expect_equal(subdocuments_walk_status_(tier, "$.b", {R"({"a":{"x":tru},"b":1})"}, json, malformed_index),
+                 sz_success_k);
+    expect_equal(subdocuments_walk_status_(tier, "$..*", {R"({"a":{"x":tru},"b":1})"}, json, malformed_index),
+                 sz_invalid_syntax_k);
+    expect_equal(subdocuments_walk_status_(tier, "/a/z", {"<a><b><c></d></b></a>"}, xml, malformed_index),
+                 sz_success_k);
+    expect_equal(subdocuments_walk_status_(tier, "//*", {"<a><b><c></d></b></a>"}, xml, malformed_index),
+                 sz_invalid_syntax_k);
 
     // But a `/` outside strings, which starts every comment, fails a JSON document wherever it
     // lies: in the block a skip starts in, a block it skims whole, the block it ends in, or the
@@ -5447,18 +5504,18 @@ inline void check_subdocuments_safety_(subdocuments_tier_t const &tier) {
          {R"({"a":{"x":1 /* } */},"b":1})", "{\"a\":[1, // ]\n 2],\"b\":1}", R"({"a":{"x":"/"} /**/,"b":1})",
           "// c\n{\"b\":1}", R"({"b":1} //)", R"({"a":[\/],"b":1})", R"({"b":1/2})"})
         for (char const *path : {"$.b", "$..*", "$..[-1]"}) {
-            verify(subdocuments_walk_status_(tier, path, {"[0]", document}, json, malformed_index) ==
-                   sz_invalid_syntax_k);
-            verify(malformed_index == 1);
+            expect_equal(subdocuments_walk_status_(tier, path, {"[0]", document}, json, malformed_index),
+                         sz_invalid_syntax_k);
+            expect_equal(malformed_index, 1);
         }
     for (std::size_t offset = 0; offset != 200; ++offset) {
         std::string const before(offset, 'f'), after(200 - offset, 'f');
         std::string const strict = "{\"a\":[\"" + before + "\",\"/\",\"" + after + "\"],\"b\":1}";
         std::string const commented = "{\"a\":[\"" + before + "\",/**/\"" + after + "\"],\"b\":1}";
-        verify(subdocuments_walk_status_(tier, "$.b", {strict}, json, malformed_index) == sz_success_k);
-        verify(subdocuments_walk_status_(tier, "$.b", {"[0]", commented}, json, malformed_index) ==
-               sz_invalid_syntax_k);
-        verify(malformed_index == 1);
+        expect_equal(subdocuments_walk_status_(tier, "$.b", {strict}, json, malformed_index), sz_success_k);
+        expect_equal(subdocuments_walk_status_(tier, "$.b", {"[0]", commented}, json, malformed_index),
+                     sz_invalid_syntax_k);
+        expect_equal(malformed_index, 1);
     }
 
     // Every proper prefix of a document spanning several blocks is malformed, walked or skipped.
@@ -5470,29 +5527,31 @@ inline void check_subdocuments_safety_(subdocuments_tier_t const &tier) {
         R"(<?xml version="1.0"?><!-- c --><store xmlns:b="u"><book id='1' b:k="x>y">)" R"(<title>A &amp; B</title><![CDATA[<x>]]><?pi d?></book><b:book/>)" R"(<price>8.95</price></store>)";
     for (std::size_t length = 0; length != json_document.size(); ++length)
         for (char const *path : {"$..*", "$.x", "$..[-1]", "$..[?@.price > 1]"}) {
-            verify(subdocuments_walk_status_(tier, path, {json_document, json_document.substr(0, length)}, json,
-                                             malformed_index) == sz_invalid_syntax_k);
-            verify(malformed_index == 1);
+            expect_equal(subdocuments_walk_status_(tier, path, {json_document, json_document.substr(0, length)}, json,
+                                                   malformed_index),
+                         sz_invalid_syntax_k);
+            expect_equal(malformed_index, 1);
         }
     for (std::size_t length = 0; length != xml_document.size(); ++length)
         for (char const *path : {"//*", "/z", "//text()"}) {
-            verify(subdocuments_walk_status_(tier, path, {xml_document, xml_document.substr(0, length)}, xml,
-                                             malformed_index) == sz_invalid_syntax_k);
-            verify(malformed_index == 1);
+            expect_equal(subdocuments_walk_status_(tier, path, {xml_document, xml_document.substr(0, length)}, xml,
+                                                   malformed_index),
+                         sz_invalid_syntax_k);
+            expect_equal(malformed_index, 1);
         }
 
     // An empty vocabulary compiles nothing; a zero stride cannot address one count per document.
-    verify(subdocuments_compile_status_(tier, {}, json, malformed_index) == sz_unexpected_dimensions_k);
+    expect_equal(subdocuments_compile_status_(tier, {}, json, malformed_index), sz_unexpected_dimensions_k);
     {
         std::vector<std::string> const documents {"1"};
         std::vector<sz_string_view_t> views;
         sz_strings_view_t const document_strings = strings_over_(documents, views);
         sz_subdocuments_engine_t engine;
         sz_size_t count = 7;
-        verify(subdocuments_compile_(tier, &engine, {"$"}, json, &malformed_index, nullptr) == sz_success_k);
-        verify(tier.counts(&engine, &document_strings, &count, 0, &malformed_index, nullptr) ==
-               sz_unexpected_dimensions_k);
-        verify(count == 7);
+        expect_equal(subdocuments_compile_(tier, &engine, {"$"}, json, &malformed_index, nullptr), sz_success_k);
+        expect_equal(tier.counts(&engine, &document_strings, &count, 0, &malformed_index, nullptr),
+                     sz_unexpected_dimensions_k);
+        expect_equal(count, 7);
         sz_subdocuments_engine_free(&engine, nullptr);
     }
 
@@ -5501,7 +5560,7 @@ inline void check_subdocuments_safety_(subdocuments_tier_t const &tier) {
     auto const check_refusals = [&](std::vector<std::string> const &paths, std::vector<std::string> const &documents,
                                     sz_subdocuments_format_t format) {
         for (std::size_t growths = 0;; ++growths) {
-            verify(growths != 64 && "A walk must succeed once the allocator grants it enough");
+            expect_true(growths != 64, "A walk must succeed once the allocator grants it enough");
             sized_heap_t heap;
             heap.growths_left = growths;
             sz_subdocuments_engine_t engine;
@@ -5510,10 +5569,10 @@ inline void check_subdocuments_safety_(subdocuments_tier_t const &tier) {
                 status = subdocuments_find_(tier, &engine, documents).status;
                 sz_subdocuments_engine_free(&engine, nullptr);
             }
-            verify(heap.blocks.empty());
-            verify(heap.mismatches == 0);
+            expect_true(heap.blocks.empty());
+            expect_equal(heap.mismatches, 0);
             if (status == sz_success_k) break;
-            verify(status == sz_bad_alloc_k);
+            expect_equal(status, sz_bad_alloc_k);
         }
     };
     std::vector<std::string> json_paths {"$..a", "$['c']..d", "$..[-1]", "$..[?@.a > 0]"};
@@ -5528,31 +5587,33 @@ inline void check_subdocuments_safety_(subdocuments_tier_t const &tier) {
     // so a hundred thousand levels walk like one.
     std::size_t const levels = 100000;
     sz_subdocuments_engine_t engine;
-    verify(subdocuments_compile_(tier, &engine, {"$..*", "$[0][0][0][0][0]..[0]", "$..[-1]", "$..[?@]"}, json,
-                                 &malformed_index, nullptr) == sz_success_k);
+    expect_equal(subdocuments_compile_(tier, &engine, {"$..*", "$[0][0][0][0][0]..[0]", "$..[-1]", "$..[?@]"}, json,
+                                       &malformed_index, nullptr),
+                 sz_success_k);
     subdocuments_found_t const nested = subdocuments_find_(tier, &engine,
                                                            {std::string(levels, '[') + "7" + std::string(levels, ']')});
-    verify(nested.status == sz_success_k);
-    verify(nested.offsets.back() == levels + (levels - 5) + levels + levels);
+    expect_equal(nested.status, sz_success_k);
+    expect_equal(nested.offsets.back(), levels + (levels - 5) + levels + levels);
     sz_subdocuments_engine_free(&engine, nullptr);
     for (char const *path : {"$..*", "$.x"})
-        verify(subdocuments_walk_status_(tier, path, {std::string(levels, '[') + std::string(levels - 1, ']')}, json,
-                                         malformed_index) == sz_invalid_syntax_k);
+        expect_equal(subdocuments_walk_status_(tier, path, {std::string(levels, '[') + std::string(levels - 1, ']')},
+                                               json, malformed_index),
+                     sz_invalid_syntax_k);
     deep_markup.clear();
     for (std::size_t level = 0; level != levels; ++level) deep_markup += "<a>";
     for (std::size_t level = 0; level != levels; ++level) deep_markup += "</a>";
-    verify(subdocuments_compile_(tier, &engine, {"//a", "/a/a/a//a[1]", "/z"}, xml, &malformed_index, nullptr) ==
-           sz_success_k);
+    expect_equal(subdocuments_compile_(tier, &engine, {"//a", "/a/a/a//a[1]", "/z"}, xml, &malformed_index, nullptr),
+                 sz_success_k);
     subdocuments_found_t const nested_markup = subdocuments_find_(tier, &engine, {deep_markup});
-    verify(nested_markup.status == sz_success_k);
-    verify(nested_markup.offsets.back() == levels + (levels - 3));
+    expect_equal(nested_markup.status, sz_success_k);
+    expect_equal(nested_markup.offsets.back(), levels + (levels - 3));
     sz_subdocuments_engine_free(&engine, nullptr);
 }
 
 /** A random JSON value at most @p depth containers deep, over a few keys, one of them spelled with
  *  an escape, so random paths reach into it, and strings holding brackets, escapes and runs long
  *  enough to cross a block. */
-inline void random_json_(std::mt19937 &generator, std::size_t depth, std::string &json) {
+inline void random_json_(split_mix_generator_t &generator, std::size_t depth, std::string &json) {
     static char const *const keys[] = {"a", "b", "name", "n\\u0061me", "x\\\"y"};
     static char const *const scalars[] = {"0", "-1.5e+3", "7", "true", "false", "null"};
     static char const *const pieces[] = {"a", "{", "]", ":", ",", "\x20", "\\\"", "\\\\", "\\n", "\xC3\xA9"};
@@ -5583,7 +5644,7 @@ inline void random_json_(std::mt19937 &generator, std::size_t depth, std::string
 
 /** A random XML element at most @p depth levels deep, with prefixed names, both quotes, entities,
  *  and CDATA, comments and processing instructions mixed into its content. */
-inline void random_xml_(std::mt19937 &generator, std::size_t depth, std::string &xml) {
+inline void random_xml_(split_mix_generator_t &generator, std::size_t depth, std::string &xml) {
     static char const *const names[] = {"a", "b", "p:a"};
     static char const *const attributes[] = {" k=\"1\"", " p:k='x>\"y'", " j = \"&amp;\"", " xmlns:p=\"u\""};
     static char const *const contents[] = {"x", " &lt;y ", "<![CDATA[<a>]]>", "<!-- <a> -->", "<?pi d?>", "\n  "};
@@ -5603,7 +5664,7 @@ inline void random_xml_(std::mt19937 &generator, std::size_t depth, std::string 
 
 /** Random paths over random JSON and XML documents, every tier reporting exactly
  *  what the serial one reports. */
-inline void check_subdocuments_equivalence_(test_context_t &context, subdocuments_tier_t const &tier) {
+inline void check_subdocuments_equivalence_(split_mix_generator_t &generator, subdocuments_tier_t const &tier) {
     static char const *const segments[] = {".a",
                                            ".b",
                                            "..a",
@@ -5625,27 +5686,26 @@ inline void check_subdocuments_equivalence_(test_context_t &context, subdocument
     static char const *const ends[] = {"", "", "/text()", "//text()", "/@k", "//@*", "/@p:k"};
     subdocuments_tier_t const serial {sz_subdocuments_engine_init_serial, sz_subdocuments_counts_serial,
                                       sz_subdocuments_find_serial};
-    std::mt19937 &generator = context.generator;
 
     auto const check_batch = [&](std::vector<std::string> const &paths, std::vector<std::string> const &documents,
                                  sz_subdocuments_format_t format) {
         sz_subdocuments_engine_t expected_engine, engine;
         sz_size_t malformed_index = 0;
-        verify(subdocuments_compile_(serial, &expected_engine, paths, format, &malformed_index, nullptr) ==
-               sz_success_k);
-        verify(subdocuments_compile_(tier, &engine, paths, format, &malformed_index, nullptr) == sz_success_k);
+        expect_equal(subdocuments_compile_(serial, &expected_engine, paths, format, &malformed_index, nullptr),
+                     sz_success_k);
+        expect_equal(subdocuments_compile_(tier, &engine, paths, format, &malformed_index, nullptr), sz_success_k);
         subdocuments_found_t const expected = subdocuments_find_(serial, &expected_engine, documents);
         subdocuments_found_t const found = subdocuments_find_(tier, &engine, documents);
-        verify(expected.status == sz_success_k);
-        verify(found.status == sz_success_k);
-        verify(found.offsets == expected.offsets);
-        verify(found.matches.empty() || std::memcmp(found.matches.data(), expected.matches.data(),
-                                                    found.matches.size() * sizeof(sz_match_t)) == 0);
+        expect_equal(expected.status, sz_success_k);
+        expect_equal(found.status, sz_success_k);
+        expect_equal(found.offsets, expected.offsets);
+        expect_true(found.matches.empty() || std::memcmp(found.matches.data(), expected.matches.data(),
+                                                         found.matches.size() * sizeof(sz_match_t)) == 0);
         sz_subdocuments_engine_free(&expected_engine, nullptr);
         sz_subdocuments_engine_free(&engine, nullptr);
     };
 
-    for (std::size_t round = 0; round != context.iterations(24); ++round) {
+    for (std::size_t round = 0; round != scaled_iterations(24); ++round) {
         bool const markup = round % 3 == 2;
         std::vector<std::string> paths, documents;
         for (std::size_t index = 0; index != 1 + round % 8; ++index) {
@@ -5663,7 +5723,7 @@ inline void check_subdocuments_equivalence_(test_context_t &context, subdocument
     }
 
     // Hundreds of values side by side, so pending runs, skips and text runs cross many blocks.
-    for (std::size_t round = 0; round != context.iterations(4); ++round) {
+    for (std::size_t round = 0; round != scaled_iterations(4); ++round) {
         std::vector<std::string> documents(3, "["), markup {"<r>"};
         for (std::string &document : documents) {
             for (std::size_t index = 0; index != 200 + round * 50; ++index) {
@@ -5704,18 +5764,18 @@ inline std::string uniform_utf8_run_(char const *encoded_rune, std::size_t repea
 inline void collect_unpacked_runes_(sz_kernel_utf8_decode_t unpack, sz_cptr_t text, sz_size_t length,
                                     sz_size_t chunk_capacity, std::vector<sz_rune_t> &out) {
     out.clear();
-    verify(chunk_capacity <= 64u); // The stack buffer below
+    expect_true(chunk_capacity <= 64u); // The stack buffer below
     sz_size_t offset = 0;
     while (offset < length) {
         sz_rune_t chunk_runes[64];
         sz_size_t chunk_count = 0;
         sz_size_t const consumed = kernel_result<sz_size_t>(unpack, text + offset, length - offset, chunk_runes,
                                                             chunk_capacity, &chunk_count);
-        verify(consumed > 0); // Must advance, otherwise the streaming loop would never terminate
+        expect_true(consumed > 0); // Must advance, otherwise the streaming loop would never terminate
         offset += consumed;
         // Fill-or-drain: a call that stops short of the end must have filled the capacity, so an
         // iterator decodes once per buffer whatever the script width, never once per register.
-        verify((offset == length || chunk_count == chunk_capacity) && "Unpack stopped before filling capacity");
+        expect_true((offset == length || chunk_count == chunk_capacity), "Unpack stopped before filling capacity");
         for (sz_size_t index = 0; index != chunk_count; ++index) out.push_back(chunk_runes[index]);
     }
 }
@@ -5748,8 +5808,8 @@ inline counted_strings_t counted_strings_(sz_kernel_utf8_count_strings_t count_s
     counted.status = count_strings(&view, indices, count, counted.runes.data(), &counted.malformed_index, nullptr);
     if (counted.malformed_index < count) counted.runes.resize(counted.malformed_index);
     sz_size_t malformed_alone = 42;
-    verify(count_strings(&view, indices, count, nullptr, &malformed_alone, nullptr) == counted.status);
-    verify(malformed_alone == counted.malformed_index);
+    expect_equal(count_strings(&view, indices, count, nullptr, &malformed_alone, nullptr), counted.status);
+    expect_equal(malformed_alone, counted.malformed_index);
     return counted;
 }
 
@@ -5774,14 +5834,14 @@ inline void check_utf8_count_strings_unit_(sz_kernel_utf8_count_strings_t count_
     auto const expect = [&](std::vector<std::string> strings, counted_strings_t expected,
                             std::vector<sz_size_t> const *order = nullptr) {
         strings_layouts_t const layouts(strings);
-        verify(counted_strings_(count_strings, layouts.u32_tape(), order) == expected);
+        expect_equal(counted_strings_(count_strings, layouts.u32_tape(), order), expected);
         if (order) return;
         // Again behind a block of ASCII, so a SIMD pass judges the bytes, not a short-input path.
         strings.insert(strings.begin(), std::string(64, '.'));
         expected.runes.insert(expected.runes.begin(), 64);
         ++expected.malformed_index;
         strings_layouts_t const padded(strings);
-        verify(counted_strings_(count_strings, padded.u32_tape(), nullptr) == expected);
+        expect_equal(counted_strings_(count_strings, padded.u32_tape(), nullptr), expected);
     };
     // `a`, then U+00DF and U+4E2D, nothing, then U+1F600 and `x`.
     expect({"a", "\xC3\x9F\xE4\xB8\xAD", "", "\xF0\x9F\x98\x80x"}, {sz_success_k, 4, {1, 2, 0, 2}});
@@ -5831,13 +5891,12 @@ inline void check_utf8_count_strings_unit_(sz_kernel_utf8_count_strings_t count_
 
 /** Holds a column count to each string checked alone, over every layout, in order and in repeating
  *  orders, with ill-formed classes, runes cut between strings, and strings spanning chunks. */
-inline void check_utf8_count_strings_equivalence_(test_context_t &context, char const *name,
+inline void check_utf8_count_strings_equivalence_(split_mix_generator_t &generator, char const *name,
                                                   sz_kernel_utf8_count_strings_t count_strings) {
-    std::mt19937 &generator = context.generator;
     std::span<char const *const> const malformed = malformed_classes_();
     std::uniform_int_distribution<std::size_t> count_distribution(0, 60), runes_distribution(0, 40), damage(0, 3),
         malformed_distribution(0, malformed.size() - 1);
-    for (std::size_t iteration = 0; iteration != context.iterations(100); ++iteration) {
+    for (std::size_t iteration = 0; iteration != scaled_iterations(100); ++iteration) {
         std::vector<std::string> strings(count_distribution(generator));
         for (std::string &string : strings) string = random_valid_utf8_(runes_distribution(generator), generator);
         std::vector<sz_size_t> order;
@@ -5891,9 +5950,9 @@ inline void check_utf8_count_strings_safety_(sz_kernel_utf8_count_strings_t coun
             std::vector<std::string> strings;
             for (std::size_t row = 0; row != 3; ++row)
                 strings.emplace_back(storage.data() + offset + offsets[row], offsets[row + 1] - offsets[row]);
-            verify(counted_strings_(count_strings, strings_tape_over_(storage.data() + offset, offsets), nullptr) ==
-                       counted_alone_(strings, nullptr) &&
-                   "A column count ending at its allocation's end disagreed with counting each string");
+            expect_equal(counted_strings_(count_strings, strings_tape_over_(storage.data() + offset, offsets), nullptr),
+                         counted_alone_(strings, nullptr),
+                         "A column count ending at its allocation's end disagreed with counting each string");
         }
 }
 
@@ -5912,18 +5971,18 @@ inline void check_utf8_runes_unit_(utf8_runes_backend_t const &backend) {
     sz_size_t const expected_count = 3u;
 
     // Codepoint count is the external ground truth - not derived from a sibling kernel.
-    verify(kernel_result<sz_size_t>(backend.count, text, length) == expected_count);
+    expect_equal(kernel_result<sz_size_t>(backend.count, text, length), expected_count);
 
     // `sz_utf8_seek_best`: codepoint starts land at the byte offset of each rune; the
     // one-past-the-end index returns the NUL sentinel.
     sz_size_t byte_offset = 0;
     for (sz_size_t rune_index = 0; rune_index != expected_count; ++rune_index) {
-        verify(kernel_result<sz_cptr_t>(backend.seek, text, length, rune_index) == text + byte_offset);
+        expect_equal(kernel_result<sz_cptr_t>(backend.seek, text, length, rune_index), text + byte_offset);
         sz_u8_t bytes[4];
         byte_offset += (sz_size_t)sz_rune_encode(expected_runes[rune_index], bytes);
     }
-    verify(kernel_result<sz_cptr_t>(backend.seek, text, length, expected_count) ==
-           STRINGZILLA_NULL_CHAR); // Beyond the last codepoint
+    expect_equal(kernel_result<sz_cptr_t>(backend.seek, text, length, expected_count),
+                 STRINGZILLA_NULL_CHAR); // Beyond the last codepoint
 
     if (backend.count_strings) check_utf8_count_strings_unit_(backend.count_strings);
 
@@ -5934,15 +5993,16 @@ inline void check_utf8_runes_unit_(utf8_runes_backend_t const &backend) {
     // The end of the text ends the input, so a truncated final sequence decodes to one U+FFFD.
     sz_rune_t tail_runes[4];
     sz_size_t tail_count = 0;
-    verify(kernel_result<sz_size_t>(backend.decode, "a\xE2\x82", 3, tail_runes, 4, &tail_count) == 3u);
-    verify(tail_count == 2 && tail_runes[0] == 'a' && tail_runes[1] == 0xFFFDu);
+    expect_equal(kernel_result<sz_size_t>(backend.decode, "a\xE2\x82", 3, tail_runes, 4, &tail_count), 3u);
+    expect_true(tail_count == 2 && tail_runes[0] == 'a' && tail_runes[1] == 0xFFFDu);
 
     sz_size_t const capacities[] = {1u, 2u, 3u, 16u, 64u};
     std::vector<sz_rune_t> decoded;
     for (sz_size_t capacity : capacities) {
         collect_unpacked_runes_(backend.decode, text, length, capacity, decoded);
-        verify(decoded.size() == expected_count);
-        for (sz_size_t index = 0; index != expected_count; ++index) verify(decoded[index] == expected_runes[index]);
+        if (expect_equal(decoded.size(), expected_count))
+            for (sz_size_t index = 0; index != expected_count; ++index)
+                expect_equal(decoded[index], expected_runes[index]);
     }
 }
 
@@ -5954,8 +6014,7 @@ inline void check_utf8_runes_unit_(utf8_runes_backend_t const &backend) {
  *  coverage that exercises the SIMD decode and seek kernels beyond it. Each input is checked at
  *  every sub-cache-line offset, over five decoder capacities.
  */
-inline void check_utf8_runes_equivalence_(test_context_t &context, utf8_runes_backend_t const &candidate) {
-    std::mt19937 &generator = context.generator;
+inline void check_utf8_runes_equivalence_(split_mix_generator_t &generator, utf8_runes_backend_t const &candidate) {
     std::vector<sz_rune_t> runes_serial, runes_candidate;
     std::vector<sz_cptr_t> offsets_serial;
 
@@ -5968,11 +6027,12 @@ inline void check_utf8_runes_equivalence_(test_context_t &context, utf8_runes_ba
             offsets_serial.push_back(kernel_result<sz_cptr_t>(sz_utf8_seek_serial, data, length, rune_index));
 
         collect_unpacked_runes_(sz_utf8_decode_serial, data, length, 64u, runes_serial);
-        verify(runes_serial.size() == count_reference);
+        expect_equal(runes_serial.size(), count_reference);
 
-        verify(kernel_result<sz_size_t>(candidate.count, data, length) == count_reference);
+        expect_equal(kernel_result<sz_size_t>(candidate.count, data, length), count_reference);
         for (sz_size_t rune_index = 0; rune_index <= count_reference + 2u; ++rune_index)
-            verify(kernel_result<sz_cptr_t>(candidate.seek, data, length, rune_index) == offsets_serial[rune_index]);
+            expect_equal(kernel_result<sz_cptr_t>(candidate.seek, data, length, rune_index),
+                         offsets_serial[rune_index]);
         if (!candidate.decode) return;
 
         // `sz_utf8_decode_best`: streaming both backends must decode identical runes, and the
@@ -5981,7 +6041,7 @@ inline void check_utf8_runes_equivalence_(test_context_t &context, utf8_runes_ba
         sz_size_t const capacities[] = {1u, 2u, 3u, 17u, 64u};
         for (sz_size_t capacity : capacities) {
             collect_unpacked_runes_(candidate.decode, data, length, capacity, runes_candidate);
-            verify(runes_candidate == runes_serial);
+            expect_equal(runes_candidate, runes_serial);
         }
     };
     auto check_text_ = [&](std::string const &text) { check(text.data(), (sz_size_t)text.size()); };
@@ -6005,7 +6065,7 @@ inline void check_utf8_runes_equivalence_(test_context_t &context, utf8_runes_ba
     // Fuzzed inputs of random codepoint counts, each placed at every sub-cache-line offset, so
     // serial-vs-ISA agreement is checked across all alignments the SIMD kernels may hit.
     std::uniform_int_distribution<std::size_t> codepoint_distribution(0, 96);
-    std::size_t const inputs = context.iterations(1000);
+    std::size_t const inputs = scaled_iterations(1000);
     for (std::size_t iteration = 0; iteration != inputs; ++iteration) {
         std::string const text = random_valid_utf8_(codepoint_distribution(generator), generator);
         for_each_cacheline_offset_(text.size(), [&](sz_ptr_t buffer, std::size_t /*offset*/) {
@@ -6015,7 +6075,7 @@ inline void check_utf8_runes_equivalence_(test_context_t &context, utf8_runes_ba
     }
 
     if (candidate.count_strings)
-        check_utf8_count_strings_equivalence_(context, candidate.name, candidate.count_strings);
+        check_utf8_count_strings_equivalence_(generator, candidate.name, candidate.count_strings);
 }
 
 /**
@@ -6026,8 +6086,8 @@ inline void check_utf8_runes_equivalence_(test_context_t &context, utf8_runes_ba
  *  must merely survive; decoding substitutes U+FFFD for ill-formed input, and each call must report
  *  no more runes than the destination holds and never consume past the input.
  */
-inline void check_utf8_runes_safety_(test_context_t &context, utf8_runes_backend_t const &backend) {
-    std::size_t const random_inputs = context.iterations(4000);
+inline void check_utf8_runes_safety_(split_mix_generator_t &generator, utf8_runes_backend_t const &backend) {
+    std::size_t const random_inputs = scaled_iterations(4000);
     if (backend.count_strings) check_utf8_count_strings_safety_(backend.count_strings);
 
     std::size_t const max_input_length = utf8_unit_capacity_k;
@@ -6036,7 +6096,7 @@ inline void check_utf8_runes_safety_(test_context_t &context, utf8_runes_backend
     auto check = [&](char const *input, std::size_t input_length) {
         // Counting must survive any bytes and never report more runes than the input holds bytes.
         sz_size_t const counted = kernel_result<sz_size_t>(backend.count, input, (sz_size_t)input_length);
-        verify(counted <= input_length && "Count reported more runes than the input holds bytes");
+        expect_true(counted <= input_length, "Count reported more runes than the input holds bytes");
 
         // The column count over the bytes cut in two must name the first of the halves that the
         // serial validator rejects.
@@ -6045,9 +6105,9 @@ inline void check_utf8_runes_safety_(test_context_t &context, utf8_runes_backend
             std::vector<std::string> const halves = {
                 std::string(input, input_length / 2),
                 std::string(input + input_length / 2, input_length - input_length / 2)};
-            verify(counted_strings_(backend.count_strings, strings_tape_over_(input, offsets), nullptr) ==
-                       counted_alone_(halves, nullptr) &&
-                   "A column count over ill-formed bytes disagreed with the serial validator");
+            expect_equal(counted_strings_(backend.count_strings, strings_tape_over_(input, offsets), nullptr),
+                         counted_alone_(halves, nullptr),
+                         "A column count over ill-formed bytes disagreed with the serial validator");
         }
 
         // Every emitted rune must be a valid Unicode scalar value (no surrogate, none beyond
@@ -6065,22 +6125,21 @@ inline void check_utf8_runes_safety_(test_context_t &context, utf8_runes_backend
                 sz_size_t const consumed = kernel_result<sz_size_t>(
                     backend.decode, input + offset, (sz_size_t)(input_length - offset), rune_destination.data(),
                     (sz_size_t)rune_capacity, &produced);
-                verify(produced <= rune_capacity && "Unpack reported more runes than the destination holds");
-                verify(consumed != 0 && consumed <= input_length - offset && "Unpack must advance within the input");
-                verify((produced == rune_capacity || consumed == input_length - offset) &&
-                       "Unpack stopped short of the end without filling its output");
+                expect_true(produced <= rune_capacity, "Unpack reported more runes than the destination holds");
+                expect_true(consumed != 0 && consumed <= input_length - offset, "Unpack must advance within the input");
+                expect_true((produced == rune_capacity || consumed == input_length - offset),
+                            "Unpack stopped short of the end without filling its output");
                 for (sz_size_t rune_index = 0; rune_index != produced; ++rune_index) {
                     sz_rune_t const rune = rune_destination[rune_index];
-                    verify(rune <= 0x10FFFFu && !(rune >= 0xD800u && rune <= 0xDFFFu) &&
-                           "Unpack emitted a non-scalar value (surrogate or out of range)");
+                    expect_true(rune <= 0x10FFFFu && !(rune >= 0xD800u && rune <= 0xDFFFu),
+                                "Unpack emitted a non-scalar value (surrogate or out of range)");
                 }
                 offset += consumed;
             }
         }
     };
 
-    std::mt19937 &generator = context.generator;
-    for_each_adversarial_utf8_input_(context, random_inputs, check);
+    for_each_adversarial_utf8_input_(generator, random_inputs, check);
 
     // Valid text with a few bytes overwritten: damage surrounded by long well-formed runs, which
     // neither the battery's uniform garbage nor the well-formed equivalence corpus produces.
@@ -6123,11 +6182,12 @@ void drain_matches_(matcher_type_ &&matcher, sz_cptr_t text, sz_size_t length, s
     sz_size_t position = 0;
     while (position < length) {
         sz_size_t emitted = 0, consumed = 0;
-        verify(matcher(text + position, length - position, offset_batch.data(), length_batch.data(), capacity, &emitted,
-                       &consumed, nullptr) == sz_success_k);
+        expect_equal(matcher(text + position, length - position, offset_batch.data(), length_batch.data(), capacity,
+                             &emitted, &consumed, nullptr),
+                     sz_success_k);
         sz_size_t const last_end = emitted ? offset_batch[emitted - 1] + length_batch[emitted - 1] : 0;
-        verify(consumed == (emitted == capacity ? last_end : length - position) &&
-               "A full batch must resume right after its last match, any other one at the end of the input");
+        expect_equal(consumed, emitted == capacity ? last_end : length - position,
+                     "A full batch must resume right after its last match, any other one at the end of the input");
         for (sz_size_t index = 0; index != emitted; ++index)
             offsets.push_back(position + offset_batch[index]), lengths.push_back(length_batch[index]);
         if (consumed == 0) break; // No forward progress: stop rather than spin.
@@ -6154,9 +6214,10 @@ void reconstruct_segments_(matcher_type_ &&matcher, sz_cptr_t text, sz_size_t le
     for (;;) {
         sz_size_t const region = length - suffix;
         sz_size_t emitted = 0, consumed = 0;
-        verify(matcher(text + suffix, region, offset_batch.data(), length_batch.data(), capacity, &emitted, &consumed,
-                       nullptr) == sz_success_k);
-        verify(consumed <= region && "Segmenter consumed past the input");
+        expect_equal(matcher(text + suffix, region, offset_batch.data(), length_batch.data(), capacity, &emitted,
+                             &consumed, nullptr),
+                     sz_success_k);
+        expect_true(consumed <= region, "Segmenter consumed past the input");
         sz_size_t previous_end = 0;
         for (sz_size_t index = 0; index != emitted; ++index) {
             offsets.push_back(suffix + previous_end), lengths.push_back(offset_batch[index] - previous_end);
@@ -6206,17 +6267,17 @@ struct utf8_delimiters_backend_t {
 inline void check_utf8_tokens_unit_(utf8_tokens_backend_t const &backend) {
     // "aß中" is `a` (1 byte) + `ß` U+00DF (2 bytes) + `中` U+4E2D (3 bytes): 6 bytes, 3 codepoints.
     char const mixed[] = "a\xC3\x9F\xE4\xB8\xAD";
-    verify(kernel_result<sz_size_t>(backend.count, mixed, (sz_size_t)(sizeof(mixed) - 1)) == 3u);
+    expect_equal(kernel_result<sz_size_t>(backend.count, mixed, (sz_size_t)(sizeof(mixed) - 1)), 3u);
 
     auto check_boundaries_ = [](sz_kernel_utf8_tokenizer_t finder, sz_cptr_t text, sz_size_t length,
                                 std::initializer_list<boundary_span_t> expected) {
         sz_size_t found_offsets[16], found_lengths[16], found = 0, consumed = 0;
-        verify(finder(text, length, found_offsets, found_lengths, 16u, &found, &consumed, nullptr) == sz_success_k);
-        verify(found == expected.size());
+        expect_equal(finder(text, length, found_offsets, found_lengths, 16u, &found, &consumed, nullptr), sz_success_k);
+        expect_equal(found, expected.size());
         sz_size_t index = 0;
         for (boundary_span_t const &span : expected) {
-            verify(found_offsets[index] == span.offset);
-            verify(found_lengths[index] == span.length);
+            expect_equal(found_offsets[index], span.offset);
+            expect_equal(found_lengths[index], span.length);
             ++index;
         }
     };
@@ -6251,14 +6312,13 @@ inline void check_utf8_tokens_unit_(utf8_tokens_backend_t const &backend) {
  *  For each generated string, compares the codepoint count and the newline and whitespace
  *  matches (position and matched length), as match lists and as reconstructed segments.
  */
-inline void check_utf8_tokens_equivalence_(test_context_t &context, utf8_tokens_backend_t const &candidate) {
-    std::mt19937 &generator = context.generator;
+inline void check_utf8_tokens_equivalence_(split_mix_generator_t &generator, utf8_tokens_backend_t const &candidate) {
     utf8_tokens_backend_t const reference {"serial", sz_utf8_count_serial, sz_utf8_newlines_serial,
                                            sz_utf8_whitespaces_serial};
 
     auto check = [&](sz_cptr_t data, sz_size_t length) {
-        verify(kernel_result<sz_size_t>(reference.count, data, length) ==
-               kernel_result<sz_size_t>(candidate.count, data, length));
+        expect_equal(kernel_result<sz_size_t>(reference.count, data, length),
+                     kernel_result<sz_size_t>(candidate.count, data, length));
 
         // Sweep capacities: one huge (one-shot), the awkward 65/63 straddling the 64-byte AVX-512
         // window, the binding default 16, and tiny 3/1 - stressing the per-window / mid-window
@@ -6268,23 +6328,23 @@ inline void check_utf8_tokens_equivalence_(test_context_t &context, utf8_tokens_
         for (sz_size_t capacity : capacities) {
             drain_matches_(reference.newlines, data, length, capacity, reference_offsets, reference_lengths);
             drain_matches_(candidate.newlines, data, length, capacity, candidate_offsets, candidate_lengths);
-            verify(reference_offsets == candidate_offsets && "Mismatch in newline offsets");
-            verify(reference_lengths == candidate_lengths && "Mismatch in newline lengths");
+            expect_equal(reference_offsets, candidate_offsets, "Mismatch in newline offsets");
+            expect_equal(reference_lengths, candidate_lengths, "Mismatch in newline lengths");
 
             drain_matches_(reference.whitespaces, data, length, capacity, reference_offsets, reference_lengths);
             drain_matches_(candidate.whitespaces, data, length, capacity, candidate_offsets, candidate_lengths);
-            verify(reference_offsets == candidate_offsets && "Mismatch in whitespace offsets");
-            verify(reference_lengths == candidate_lengths && "Mismatch in whitespace lengths");
+            expect_equal(reference_offsets, candidate_offsets, "Mismatch in whitespace offsets");
+            expect_equal(reference_lengths, candidate_lengths, "Mismatch in whitespace lengths");
 
             // Iterator segments catch a `bytes_consumed` overshoot at a window-aligned fill.
             reconstruct_segments_(reference.newlines, data, length, capacity, reference_offsets, reference_lengths);
             reconstruct_segments_(candidate.newlines, data, length, capacity, candidate_offsets, candidate_lengths);
-            verify(reference_offsets == candidate_offsets && reference_lengths == candidate_lengths &&
-                   "Mismatch in newline segments");
+            expect_true(reference_offsets == candidate_offsets && reference_lengths == candidate_lengths,
+                        "Mismatch in newline segments");
             reconstruct_segments_(reference.whitespaces, data, length, capacity, reference_offsets, reference_lengths);
             reconstruct_segments_(candidate.whitespaces, data, length, capacity, candidate_offsets, candidate_lengths);
-            verify(reference_offsets == candidate_offsets && reference_lengths == candidate_lengths &&
-                   "Mismatch in whitespace segments");
+            expect_true(reference_offsets == candidate_offsets && reference_lengths == candidate_lengths,
+                        "Mismatch in whitespace segments");
         }
     };
 
@@ -6364,7 +6424,7 @@ inline void check_utf8_tokens_equivalence_(test_context_t &context, utf8_tokens_
     // Random strings of at least 4 KB each, drained through six capacities down to 1, re-entering
     // the kernel once per match. The iteration count is this family's share of the suite budget,
     // sized against its siblings.
-    std::size_t const min_text_length = 4000, iterations = context.iterations(250);
+    std::size_t const min_text_length = 4000, iterations = scaled_iterations(250);
     for (std::size_t iteration = 0; iteration < iterations; ++iteration) {
         std::string text;
 
@@ -6412,28 +6472,29 @@ inline void check_utf8_tokens_equivalence_(test_context_t &context, utf8_tokens_
  *  adversarial shapes, all 256 single bytes, all 65,536 byte pairs, and random garbage at every
  *  sub-cache-line alignment), asserting they survive, stay in bounds, and never report a
  *  @c bytes_consumed past the input. */
-inline void check_utf8_tokens_safety_(test_context_t &context, utf8_tokens_backend_t const &backend) {
+inline void check_utf8_tokens_safety_(split_mix_generator_t &generator, utf8_tokens_backend_t const &backend) {
     static constexpr std::size_t max_input_length = utf8_unit_capacity_k;
     auto check = [&](char const *input, std::size_t input_length) {
         sz_size_t boundary_offsets[max_input_length + 1], boundary_lengths[max_input_length + 1];
         auto check_boundaries_ = [&](sz_kernel_utf8_tokenizer_t finder, char const *finder_name) {
             sz_size_t found = 0, bytes_consumed = 0;
-            verify(finder(input, (sz_size_t)input_length, boundary_offsets, boundary_lengths,
-                          (sz_size_t)(max_input_length + 1), &found, &bytes_consumed, nullptr) == sz_success_k);
-            verify(bytes_consumed <= input_length && "Boundary finder consumed past the input");
+            expect_equal(finder(input, (sz_size_t)input_length, boundary_offsets, boundary_lengths,
+                                (sz_size_t)(max_input_length + 1), &found, &bytes_consumed, nullptr),
+                         sz_success_k);
+            expect_true(bytes_consumed <= input_length, "Boundary finder consumed past the input");
             for (sz_size_t index = 0; index != found; ++index) {
                 if (boundary_offsets[index] + boundary_lengths[index] <= input_length) continue;
                 fmt::println(stderr, "{} {} emitted out-of-bounds boundary (offset={} len={}, input={})", backend.name,
                              finder_name, (std::size_t)boundary_offsets[index], (std::size_t)boundary_lengths[index],
                              input_length);
                 print_utf8_test_bytes_("input", {input, input_length});
-                verify(false && "Boundary finder emitted a span outside the input");
+                expect_true(false, "Boundary finder emitted a span outside the input");
             }
         };
         check_boundaries_(backend.newlines, "newline finder");
         check_boundaries_(backend.whitespaces, "whitespace finder");
     };
-    for_each_adversarial_utf8_input_(context, context.iterations(10000), check);
+    for_each_adversarial_utf8_input_(generator, scaled_iterations(10000), check);
 }
 
 /** Known-answer checks of one UTF-8 delimiter segmenter on simple, hand-verifiable inputs, and on
@@ -6496,10 +6557,9 @@ inline void check_utf8_delimiters_unit_(utf8_delimiters_backend_t const &backend
     std::vector<sz_size_t> offsets, lengths;
     for (auto const &one : cases) {
         drain_matches_(backend.finder, one.text, one.length, one.length + 1, offsets, lengths);
-        verify(offsets.size() == one.expected_count && "Delimiter count mismatch");
-        if (one.expected_count) {
-            verify(offsets[0] == one.expected_offset && "Delimiter offset mismatch");
-            verify(lengths[0] == one.expected_length && "Delimiter length mismatch");
+        if (expect_equal(offsets.size(), one.expected_count, "Delimiter count mismatch") && one.expected_count) {
+            expect_equal(offsets[0], one.expected_offset, "Delimiter offset mismatch");
+            expect_equal(lengths[0], one.expected_length, "Delimiter length mismatch");
         }
     }
     // A multi-byte delimiter straddling every vector window edge up to 128 bytes is found whole.
@@ -6509,27 +6569,28 @@ inline void check_utf8_delimiters_unit_(utf8_delimiters_backend_t const &backend
             text += delimiter + "b";
             drain_matches_(backend.finder, text.data(), (sz_size_t)text.size(), (sz_size_t)text.size() + 1, offsets,
                            lengths);
-            verify(offsets.size() == 1 && offsets[0] == prefix && lengths[0] == delimiter.size() &&
-                   "Delimiter straddling a window edge was missed or split");
+            expect_true(offsets.size() == 1 && offsets[0] == prefix && lengths[0] == delimiter.size(),
+                        "Delimiter straddling a window edge was missed or split");
         }
     for (resume_case_t const &one : resume_cases) {
         sz_size_t batch_offsets[4], batch_lengths[4], emitted = 0, consumed = 0;
-        verify(one.capacity <= 4 && "Resume probe capacity outgrew its output buffers");
-        verify(backend.finder(one.text.data(), (sz_size_t)one.text.size(), batch_offsets, batch_lengths, one.capacity,
-                              &emitted, &consumed, nullptr) == sz_success_k);
-        verify(emitted == one.capacity && "Capacity-limited batch should fill the output");
-        verify(batch_offsets[emitted - 1] + batch_lengths[emitted - 1] == one.expected_consumed &&
-               "Last emitted delimiter ends elsewhere than the probe expects");
-        verify(consumed == one.expected_consumed &&
-               "Resume offset must be the end of the last emitted delimiter, not the vector window's edge");
+        expect_true(one.capacity <= 4, "Resume probe capacity outgrew its output buffers");
+        expect_equal(backend.finder(one.text.data(), (sz_size_t)one.text.size(), batch_offsets, batch_lengths,
+                                    one.capacity, &emitted, &consumed, nullptr),
+                     sz_success_k);
+        expect_equal(emitted, one.capacity, "Capacity-limited batch should fill the output");
+        expect_equal(batch_offsets[emitted - 1] + batch_lengths[emitted - 1], one.expected_consumed,
+                     "Last emitted delimiter ends elsewhere than the probe expects");
+        expect_equal(consumed, one.expected_consumed,
+                     "Resume offset must be the end of the last emitted delimiter, not the vector window's edge");
     }
 }
 
 /** Cross-checks one UTF-8 delimiter segmenter against serial on random, well-formed inputs: the
  *  full (offset, length) match list must agree, both in one shot and when a tiny capacity drains
  *  the candidate through its @c bytes_consumed resume path. */
-inline void check_utf8_delimiters_equivalence_(test_context_t &context, utf8_delimiters_backend_t const &candidate) {
-    std::mt19937 &generator = context.generator;
+inline void check_utf8_delimiters_equivalence_(split_mix_generator_t &generator,
+                                               utf8_delimiters_backend_t const &candidate) {
     sz_kernel_utf8_tokenizer_t const finder_serial = sz_utf8_delimiters_serial;
     std::vector<sz_size_t> serial_offsets, serial_lengths, candidate_offsets, candidate_lengths, resumed_offsets,
         resumed_lengths;
@@ -6537,12 +6598,12 @@ inline void check_utf8_delimiters_equivalence_(test_context_t &context, utf8_del
     auto check = [&](sz_cptr_t data, sz_size_t length) {
         drain_matches_(finder_serial, data, length, length + 1, serial_offsets, serial_lengths);
         drain_matches_(candidate.finder, data, length, length + 1, candidate_offsets, candidate_lengths);
-        verify(candidate_offsets == serial_offsets && "Mismatch in delimiter offsets");
-        verify(candidate_lengths == serial_lengths && "Mismatch in delimiter lengths");
+        expect_equal(candidate_offsets, serial_offsets, "Mismatch in delimiter offsets");
+        expect_equal(candidate_lengths, serial_lengths, "Mismatch in delimiter lengths");
         // Resume path: a capacity of 3 forces re-entry, and the accumulated list must still match.
         drain_matches_(candidate.finder, data, length, 3u, resumed_offsets, resumed_lengths);
-        verify(resumed_offsets == serial_offsets && "Resume-path delimiter offsets diverged");
-        verify(resumed_lengths == serial_lengths && "Resume-path delimiter lengths diverged");
+        expect_equal(resumed_offsets, serial_offsets, "Resume-path delimiter offsets diverged");
+        expect_equal(resumed_lengths, serial_lengths, "Resume-path delimiter lengths diverged");
 
         // Segment-level (iterator) equivalence, mirroring the newline/whitespace differential:
         // sweep the capacities that straddle the 64-byte vector window, so a batch filling exactly
@@ -6552,8 +6613,8 @@ inline void check_utf8_delimiters_equivalence_(test_context_t &context, utf8_del
         reconstruct_segments_(finder_serial, data, length, length + 64, serial_offsets, serial_lengths);
         for (sz_size_t capacity : capacities) {
             reconstruct_segments_(candidate.finder, data, length, capacity, candidate_offsets, candidate_lengths);
-            verify(candidate_offsets == serial_offsets && "Mismatch in delimiter segment offsets");
-            verify(candidate_lengths == serial_lengths && "Mismatch in delimiter segment lengths");
+            expect_equal(candidate_offsets, serial_offsets, "Mismatch in delimiter segment offsets");
+            expect_equal(candidate_lengths, serial_lengths, "Mismatch in delimiter segment lengths");
         }
     };
 
@@ -6580,7 +6641,7 @@ inline void check_utf8_delimiters_equivalence_(test_context_t &context, utf8_del
     for (std::string const &run : uniform_runs) check(run.data(), (sz_size_t)run.size());
 
     std::uniform_int_distribution<std::size_t> codepoint_distribution(0, 300);
-    std::size_t const inputs = context.iterations(700);
+    std::size_t const inputs = scaled_iterations(700);
     for (std::size_t iteration = 0; iteration != inputs; ++iteration) {
         std::string const text = random_valid_utf8_(codepoint_distribution(generator), generator);
         // The probe buffer itself is handed to the kernels: copying it back into a fresh
@@ -6594,7 +6655,7 @@ inline void check_utf8_delimiters_equivalence_(test_context_t &context, utf8_del
 }
 
 /** Feeds malformed UTF-8 to a delimiter segmenter, asserting in-bounds, ascending, valid spans. */
-inline void check_utf8_delimiters_safety_(test_context_t &context, utf8_delimiters_backend_t const &backend) {
+inline void check_utf8_delimiters_safety_(split_mix_generator_t &generator, utf8_delimiters_backend_t const &backend) {
     std::vector<sz_size_t> offsets, lengths;
 
     // Malformed bytes meet a capacity too small to hold the batch, so the resume path - not just
@@ -6605,15 +6666,16 @@ inline void check_utf8_delimiters_safety_(test_context_t &context, utf8_delimite
             drain_matches_(backend.finder, input, (sz_size_t)input_length, capacity, offsets, lengths);
             sz_size_t previous_end = 0;
             for (std::size_t index = 0; index != offsets.size(); ++index) {
-                verify(lengths[index] >= 1u && lengths[index] <= 4u && "Delimiter matched an impossible byte length");
-                verify(offsets[index] + lengths[index] <= input_length && "Delimiter match span outside the input");
-                verify(offsets[index] >= previous_end && "Delimiter matches must be ascending and non-overlapping");
+                expect_true(lengths[index] >= 1u && lengths[index] <= 4u,
+                            "Delimiter matched an impossible byte length");
+                expect_true(offsets[index] + lengths[index] <= input_length, "Delimiter match span outside the input");
+                expect_true(offsets[index] >= previous_end, "Delimiter matches must be ascending and non-overlapping");
                 previous_end = offsets[index] + lengths[index];
             }
         }
     };
 
-    for_each_adversarial_utf8_input_(context, context.iterations(2500), check);
+    for_each_adversarial_utf8_input_(generator, scaled_iterations(2500), check);
 }
 
 #pragma endregion UTF8 Tokens
@@ -6642,10 +6704,11 @@ inline void check_utf8_wordbreaks_lengths_(char const *label, sz_kernel_utf8_seg
     sz_size_t start = 0, length = 0;
     for (sz_size_t const expected : expected_lengths) {
         sz_bool_t const more = utf8_segment_cursor_next_(cursor, start, length);
-        verify(more && label && "deferred-mid golden emitted fewer segments than expected");
-        verify(length == expected && label && "deferred-mid golden segment mismatch");
+        expect_true(more && label, "deferred-mid golden emitted fewer segments than expected");
+        expect_true(length == expected && label, "deferred-mid golden segment mismatch");
     }
-    verify(!utf8_segment_cursor_next_(cursor, start, length) && label && "deferred-mid golden emitted extra segments");
+    expect_true(!utf8_segment_cursor_next_(cursor, start, length) && label,
+                "deferred-mid golden emitted extra segments");
 }
 
 /** WB6/WB7/WB11/WB12 deferred-mid goldens: a Mid* (`,` `:` `'` `"`) whose WB4-ignorable lookahead
@@ -6769,7 +6832,7 @@ inline void utf8_wordbreaks_dense_hebrew_quote_(std::string &out, std::size_t li
 
 /** Stream the word family's high-density homogeneous runs (each spans several 64-byte windows) to
  *  @p sink. */
-inline void utf8_wordbreaks_dense_runs_(std::mt19937 &generator, utf8_run_sink_t sink, void *context) {
+inline void utf8_wordbreaks_dense_runs_(split_mix_generator_t &generator, utf8_run_sink_t sink, void *context) {
     std::string scratch;
     std::size_t const wide_count = std::uniform_int_distribution<std::size_t>(60, 220)(generator);
     utf8_dense_regional_indicators_(scratch, generator, wide_count), sink(context, scratch.data(), scratch.size());
@@ -6780,7 +6843,8 @@ inline void utf8_wordbreaks_dense_runs_(std::mt19937 &generator, utf8_run_sink_t
 }
 
 /** Stream the word family's long-range straddling constructions for a given @p gap to @p sink. */
-inline void utf8_wordbreaks_straddles_(std::mt19937 &generator, std::size_t gap, utf8_run_sink_t sink, void *context) {
+inline void utf8_wordbreaks_straddles_(split_mix_generator_t &generator, std::size_t gap, utf8_run_sink_t sink,
+                                       void *context) {
     std::string scratch;
     utf8_dense_regional_indicators_(scratch, generator, gap);
     scratch.append("a"); // ASCII tail forces the WB15/16 parity decision after the long run
@@ -6870,13 +6934,14 @@ inline void check_utf8_wordbreaks_rules_(utf8_segment_backend_t const &backend) 
 }
 
 /** Malformed-input safety of one word segmenter. */
-inline void check_utf8_wordbreaks_safety_(test_context_t &context, utf8_segment_backend_t const &backend) {
+inline void check_utf8_wordbreaks_safety_(split_mix_generator_t &generator, utf8_segment_backend_t const &backend) {
     utf8_segment_backend_t const backends[] = {backend};
-    check_utf8_segment_safety_(context, "word", span_over(backends));
+    check_utf8_segment_safety_(generator, "word", span_over(backends));
 }
 
 /** Word differential of @p backend against serial over the dense, long-range and seam corpora. */
-inline void check_utf8_wordbreaks_equivalence_(test_context_t &context, utf8_segment_backend_t const &backend) {
+inline void check_utf8_wordbreaks_equivalence_(split_mix_generator_t &generator,
+                                               utf8_segment_backend_t const &backend) {
     utf8_segment_corpora_t const corpora = {"word",
                                             span_over(utf8_wordbreaks_motifs),
                                             &utf8_wordbreaks_dense_runs_,
@@ -6885,8 +6950,8 @@ inline void check_utf8_wordbreaks_equivalence_(test_context_t &context, utf8_seg
                                             &utf8_wordbreaks_alphabet};
     utf8_segment_backend_t const candidates[] = {backend};
     // The iteration count is this family's share of the suite budget, sized against its siblings.
-    check_utf8_segment_equivalence_(context, sz_utf8_wordbreaks_serial, span_over(candidates), corpora,
-                                    context.iterations(20));
+    check_utf8_segment_equivalence_(generator, sz_utf8_wordbreaks_serial, span_over(candidates), corpora,
+                                    scaled_iterations(20));
 }
 
 /** The serial word segmenter against its per-position WB1-WB16 rules, called nowhere else. */
@@ -6973,7 +7038,8 @@ inline void utf8_graphemes_dense_combining_marks_(std::string &out, std::size_t 
 }
 
 /** @p link_count emoji with skin-tone modifiers from @p generator (GB9 Extend), into @p out. */
-inline void utf8_graphemes_dense_skin_tone_run_(std::string &out, std::mt19937 &generator, std::size_t link_count) {
+inline void utf8_graphemes_dense_skin_tone_run_(std::string &out, split_mix_generator_t &generator,
+                                                std::size_t link_count) {
     out.clear();
     std::uniform_int_distribution<sz_rune_t> modifier(0x1F3FB, 0x1F3FF); // U+1F3FB..U+1F3FF
     for (std::size_t index = 0; index != link_count; ++index) {
@@ -7004,7 +7070,7 @@ inline void utf8_graphemes_dense_hangul_jamo_(std::string &out, std::size_t link
 
 /** Stream the grapheme family's high-density homogeneous runs, each spanning several 64-byte
  *  windows, to @p sink. */
-inline void utf8_graphemes_dense_runs_(std::mt19937 &generator, utf8_run_sink_t sink, void *context) {
+inline void utf8_graphemes_dense_runs_(split_mix_generator_t &generator, utf8_run_sink_t sink, void *context) {
     std::string scratch;
     std::uniform_int_distribution<std::size_t> wide(60, 220);
     std::uniform_int_distribution<std::size_t> chain(20, 80);
@@ -7019,7 +7085,8 @@ inline void utf8_graphemes_dense_runs_(std::mt19937 &generator, utf8_run_sink_t 
 }
 
 /** Stream the grapheme family's long-range straddling constructions for @p gap to @p sink. */
-inline void utf8_graphemes_straddles_(std::mt19937 &generator, std::size_t gap, utf8_run_sink_t sink, void *context) {
+inline void utf8_graphemes_straddles_(split_mix_generator_t &generator, std::size_t gap, utf8_run_sink_t sink,
+                                      void *context) {
     std::string scratch;
     utf8_dense_regional_indicators_(scratch, generator, gap);
     scratch.append("a"); // ASCII tail forces the GB12/13 parity decision after the long run
@@ -7104,13 +7171,13 @@ inline void check_utf8_graphemes_rules_(utf8_segment_backend_t const &backend) {
 }
 
 /** Malformed-input safety of one grapheme segmenter. */
-inline void check_utf8_graphemes_safety_(test_context_t &context, utf8_segment_backend_t const &backend) {
+inline void check_utf8_graphemes_safety_(split_mix_generator_t &generator, utf8_segment_backend_t const &backend) {
     utf8_segment_backend_t const backends[] = {backend};
-    check_utf8_segment_safety_(context, "grapheme", span_over(backends));
+    check_utf8_segment_safety_(generator, "grapheme", span_over(backends));
 }
 
 /** The grapheme differential of @p backend against serial over the dense and long-range corpora. */
-inline void check_utf8_graphemes_equivalence_(test_context_t &context, utf8_segment_backend_t const &backend) {
+inline void check_utf8_graphemes_equivalence_(split_mix_generator_t &generator, utf8_segment_backend_t const &backend) {
     utf8_segment_corpora_t const corpora = {
         "grapheme",
         span_over(utf8_graphemes_motifs),
@@ -7120,8 +7187,8 @@ inline void check_utf8_graphemes_equivalence_(test_context_t &context, utf8_segm
         &utf8_graphemes_alphabet,
     };
     utf8_segment_backend_t const candidates[] = {backend};
-    check_utf8_segment_equivalence_(context, sz_utf8_graphemes_serial, span_over(candidates), corpora,
-                                    context.iterations(8)); // This family's share of the suite budget
+    check_utf8_segment_equivalence_(generator, sz_utf8_graphemes_serial, span_over(candidates), corpora,
+                                    scaled_iterations(8)); // This family's share of the suite budget
 }
 
 /** The serial grapheme segmenter against its per-position GB1-GB999 rules, called nowhere else. */
@@ -7202,7 +7269,7 @@ inline void utf8_sentences_dense_cjk_term_(std::string &out, std::size_t link_co
 
 /** Stream the sentence family's high-density homogeneous runs (each spans several 64-byte windows)
  *  to @p sink. */
-inline void utf8_sentences_dense_runs_(std::mt19937 &generator, utf8_run_sink_t sink, void *context) {
+inline void utf8_sentences_dense_runs_(split_mix_generator_t &generator, utf8_run_sink_t sink, void *context) {
     std::string scratch;
     std::size_t const wide_count = std::uniform_int_distribution<std::size_t>(60, 220)(generator);
     utf8_sentences_dense_aterm_sp_lower_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
@@ -7230,7 +7297,7 @@ inline void utf8_sentences_straddle_sb11_upper_(std::string &out, std::size_t ga
 }
 
 /** Stream the sentence family's long-range straddling constructions for @p gap to @p sink. */
-inline void utf8_sentences_straddles_(std::mt19937 & /*generator*/, std::size_t gap, utf8_run_sink_t sink,
+inline void utf8_sentences_straddles_(split_mix_generator_t & /*generator*/, std::size_t gap, utf8_run_sink_t sink,
                                       void *context) {
     std::string scratch;
     utf8_sentences_straddle_sb8_lower_(scratch, gap), sink(context, scratch.data(), scratch.size());
@@ -7292,19 +7359,19 @@ inline void check_utf8_sentences_rules_(utf8_segment_backend_t const &backend) {
 }
 
 /** Malformed-input safety of one sentence segmenter. */
-inline void check_utf8_sentences_safety_(test_context_t &context, utf8_segment_backend_t const &backend) {
+inline void check_utf8_sentences_safety_(split_mix_generator_t &generator, utf8_segment_backend_t const &backend) {
     utf8_segment_backend_t const backends[] = {backend};
-    check_utf8_segment_safety_(context, "sentence", span_over(backends));
+    check_utf8_segment_safety_(generator, "sentence", span_over(backends));
 }
 
 /** The sentence differential of @p backend against serial over the dense and long-range corpora. */
-inline void check_utf8_sentences_equivalence_(test_context_t &context, utf8_segment_backend_t const &backend) {
+inline void check_utf8_sentences_equivalence_(split_mix_generator_t &generator, utf8_segment_backend_t const &backend) {
     utf8_segment_corpora_t const corpora = {
         "sentence", span_over(utf8_sentences_motifs), &utf8_sentences_dense_runs_, &utf8_sentences_straddles_,
         {},         &utf8_sentences_alphabet};
     utf8_segment_backend_t const candidates[] = {backend};
-    check_utf8_segment_equivalence_(context, sz_utf8_sentences_serial, span_over(candidates), corpora,
-                                    context.iterations(90)); // This family's share of the suite budget
+    check_utf8_segment_equivalence_(generator, sz_utf8_sentences_serial, span_over(candidates), corpora,
+                                    scaled_iterations(90)); // This family's share of the suite budget
 }
 
 #pragma endregion UTF8 Sentences
@@ -7380,7 +7447,7 @@ inline void utf8_linebreaks_dense_numeric_(std::string &out, std::size_t link_co
 
 /** Stream the linewrap family's high-density homogeneous runs (each spans several 64-byte windows)
  *  to @p sink. */
-inline void utf8_linebreaks_dense_runs_(std::mt19937 &generator, utf8_run_sink_t sink, void *context) {
+inline void utf8_linebreaks_dense_runs_(split_mix_generator_t &generator, utf8_run_sink_t sink, void *context) {
     std::string scratch;
     std::size_t const wide_count = std::uniform_int_distribution<std::size_t>(60, 220)(generator);
     utf8_linebreaks_dense_mandatory_breaks_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
@@ -7389,7 +7456,7 @@ inline void utf8_linebreaks_dense_runs_(std::mt19937 &generator, utf8_run_sink_t
 }
 
 /** Stream the linewrap family's long-range straddling constructions for @p gap to @p sink. */
-inline void utf8_linebreaks_straddles_(std::mt19937 & /*generator*/, std::size_t gap, utf8_run_sink_t sink,
+inline void utf8_linebreaks_straddles_(split_mix_generator_t & /*generator*/, std::size_t gap, utf8_run_sink_t sink,
                                        void *context) {
     std::string scratch;
     utf8_linebreaks_dense_mandatory_breaks_(scratch, gap), sink(context, scratch.data(), scratch.size());
@@ -7487,19 +7554,20 @@ inline void check_utf8_linebreaks_rules_(utf8_segment_backend_t const &backend) 
 }
 
 /** Malformed-input safety of one line segmenter. */
-inline void check_utf8_linebreaks_safety_(test_context_t &context, utf8_segment_backend_t const &backend) {
+inline void check_utf8_linebreaks_safety_(split_mix_generator_t &generator, utf8_segment_backend_t const &backend) {
     utf8_segment_backend_t const backends[] = {backend};
-    check_utf8_segment_safety_(context, "linewrap", span_over(backends));
+    check_utf8_segment_safety_(generator, "linewrap", span_over(backends));
 }
 
 /** The line differential of @p backend against serial over the dense and long-range corpora. */
-inline void check_utf8_linebreaks_equivalence_(test_context_t &context, utf8_segment_backend_t const &backend) {
+inline void check_utf8_linebreaks_equivalence_(split_mix_generator_t &generator,
+                                               utf8_segment_backend_t const &backend) {
     utf8_segment_corpora_t const corpora = {
         "linewrap", span_over(utf8_linebreaks_motifs), &utf8_linebreaks_dense_runs_, &utf8_linebreaks_straddles_,
         {},         &utf8_linebreaks_alphabet};
     utf8_segment_backend_t const candidates[] = {backend};
-    check_utf8_segment_equivalence_(context, sz_utf8_linebreaks_serial, span_over(candidates), corpora,
-                                    context.iterations(25)); // This family's share of the suite budget
+    check_utf8_segment_equivalence_(generator, sz_utf8_linebreaks_serial, span_over(candidates), corpora,
+                                    scaled_iterations(25)); // This family's share of the suite budget
 }
 
 #pragma endregion UTF8 Linebreaks
@@ -7521,18 +7589,18 @@ struct utf8_norm_kernels_t {
 inline void check_utf8_norm_unit_(utf8_norm_kernels_t kernels) {
     char const cafe_nfc[] = "caf\xC3\xA9"; // U+00E9 (precomposed é), 5 bytes
     sz_size_t const cafe_length = (sz_size_t)(sizeof(cafe_nfc) - 1);
-    verify(kernel_result<sz_cptr_t>(kernels.find_denormalized, cafe_nfc, cafe_length, sz_normal_form_nfc_k) ==
-           STRINGZILLA_NULL_CHAR);
-    verify(kernel_result<sz_cptr_t>(kernels.find_denormalized, cafe_nfc, cafe_length, sz_normal_form_nfd_k) !=
-           STRINGZILLA_NULL_CHAR);
+    expect_equal(kernel_result<sz_cptr_t>(kernels.find_denormalized, cafe_nfc, cafe_length, sz_normal_form_nfc_k),
+                 STRINGZILLA_NULL_CHAR);
+    expect_true(kernel_result<sz_cptr_t>(kernels.find_denormalized, cafe_nfc, cafe_length, sz_normal_form_nfd_k) !=
+                STRINGZILLA_NULL_CHAR);
 
     char norm_buffer[64];
     sz_size_t const nfc_length = kernel_result<sz_size_t>(kernels.norm, cafe_nfc, cafe_length, sz_normal_form_nfc_k,
                                                           norm_buffer);
-    verify(nfc_length == cafe_length && std::memcmp(norm_buffer, cafe_nfc, cafe_length) == 0);
+    expect_true(nfc_length == cafe_length && std::memcmp(norm_buffer, cafe_nfc, cafe_length) == 0);
     sz_size_t const nfd_length = kernel_result<sz_size_t>(kernels.norm, cafe_nfc, cafe_length, sz_normal_form_nfd_k,
                                                           norm_buffer);
-    verify(nfd_length == 6u); // "caf" + 'e' + U+0301 (2-byte combining acute)
+    expect_equal(nfd_length, 6u); // "caf" + 'e' + U+0301 (2-byte combining acute)
 }
 
 /**
@@ -7545,8 +7613,8 @@ inline void check_utf8_norm_unit_(utf8_norm_kernels_t kernels) {
  *  The normalizer may stage device buffers while retaining the same callable interface.
  */
 template <typename normalize_type_>
-inline void check_utf8_normalize_equivalence_(test_context_t &context, normalize_type_ const &normalize) {
-    std::size_t const codepoint_stride = context.sweep_stride(0x110000);
+inline void check_utf8_normalize_equivalence_(split_mix_generator_t &generator, normalize_type_ const &normalize) {
+    std::size_t const codepoint_stride = sweep_stride(test_run.settings.scale / 10);
     std::vector<sz_rune_t> all_runes;
     all_runes.reserve(0x110000 / codepoint_stride);
     for (sz_rune_t codepoint = 0; codepoint <= 0x10FFFF; codepoint += (sz_rune_t)codepoint_stride) {
@@ -7557,11 +7625,10 @@ inline void check_utf8_normalize_equivalence_(test_context_t &context, normalize
     std::vector<char> input_buffer(all_runes.size() * 4);
     std::vector<char> output_reference(input_buffer.size() * 4 + 64); // decomposition can expand
     std::vector<char> output_candidate(input_buffer.size() * 4 + 64);
-    std::mt19937 &generator = context.generator;
     static sz_normal_form_t const norm_forms[4] = {sz_normal_form_nfd_k, sz_normal_form_nfc_k, sz_normal_form_nfkd_k,
                                                    sz_normal_form_nfkc_k};
 
-    std::size_t const iterations = context.iterations(3);
+    std::size_t const iterations = scaled_iterations(3);
     for (std::size_t iteration = 0; iteration != iterations; ++iteration) {
         if (iteration > 0) std::shuffle(all_runes.begin(), all_runes.end(), generator);
         char *write_cursor = input_buffer.data();
@@ -7577,7 +7644,7 @@ inline void check_utf8_normalize_equivalence_(test_context_t &context, normalize
                 std::memcmp(output_reference.data(), output_candidate.data(), reference_length) != 0) {
                 fmt::println(stderr, "norm mismatch (form={}, iteration={}): reference_length={} candidate_length={}",
                              (int)normal_form, iteration, (size_t)reference_length, (size_t)candidate_length);
-                verify(false);
+                expect_true(false);
             }
         }
     }
@@ -7585,14 +7652,14 @@ inline void check_utf8_normalize_equivalence_(test_context_t &context, normalize
 
 /** Checks normalization and quick-check results on the same generated inputs. */
 template <typename kernels_type_>
-inline void check_utf8_norm_equivalence_(test_context_t &context, kernels_type_ const &candidate) {
-    check_utf8_normalize_equivalence_(context, [&](sz_cptr_t input, sz_size_t length, sz_normal_form_t form,
-                                                   sz_ptr_t output, sz_size_t *written, sz_stream_t stream) {
+inline void check_utf8_norm_equivalence_(split_mix_generator_t &generator, kernels_type_ const &candidate) {
+    check_utf8_normalize_equivalence_(generator, [&](sz_cptr_t input, sz_size_t length, sz_normal_form_t form,
+                                                     sz_ptr_t output, sz_size_t *written, sz_stream_t stream) {
         sz_cptr_t const reference = kernel_result<sz_cptr_t>(sz_utf8_find_denormalized_serial, input, length, form);
         sz_cptr_t const produced = kernel_result<sz_cptr_t>(candidate.find_denormalized, input, length, form);
         if (reference != produced) {
             fmt::println(stderr, "norm violation mismatch (form={})", (int)form);
-            verify(false);
+            expect_true(false);
         }
         return candidate.norm(input, length, form, output, written, stream);
     });
@@ -7609,7 +7676,7 @@ inline void check_utf8_norm_equivalence_(test_context_t &context, kernels_type_ 
  *  the documented 18× bound, and @c with_guarded_buffer_ brackets the destination with canaries and
  *  asserts they survive, like @c check_utf8_uncased_safety_.
  */
-inline void check_utf8_norm_safety_(test_context_t &context, utf8_norm_kernels_t kernels) {
+inline void check_utf8_norm_safety_(split_mix_generator_t &generator, utf8_norm_kernels_t kernels) {
 
     std::size_t const max_input_length = utf8_unit_capacity_k;
     // The normalizer's documented worst case is 18x the input for a single-codepoint compatibility
@@ -7630,7 +7697,7 @@ inline void check_utf8_norm_safety_(test_context_t &context, utf8_norm_kernels_t
             fmt::println(stderr, "norm violation returned out-of-bounds pointer (form={}, input={})", (int)normal_form,
                          input_length);
             print_utf8_test_bytes_("input", {input, input_length});
-            verify(false && "Normalization-violation finder returned a pointer outside the input");
+            expect_true(false, "Normalization-violation finder returned a pointer outside the input");
         }
 
         // The normalizer asserts internally on malformed bytes, so it only sees inputs that pass
@@ -7643,13 +7710,13 @@ inline void check_utf8_norm_safety_(test_context_t &context, utf8_norm_kernels_t
                     fmt::println(stderr, "Norm of invalid input returned {} bytes for {} input bytes (bound {})",
                                  (std::size_t)normalized, input_length, norm_bound);
                     print_utf8_test_bytes_("input", {input, input_length});
-                    verify(false && "Normalizer output must stay within the documented bound");
+                    expect_true(false, "Normalizer output must stay within the documented bound");
                 }
             });
         }
     };
 
-    for_each_adversarial_utf8_input_(context, context.iterations(10000), check);
+    for_each_adversarial_utf8_input_(generator, scaled_iterations(10000), check);
 }
 
 #pragma endregion UTF8 Norm
@@ -7667,7 +7734,7 @@ struct utf8_uncased_kernels_t {
 /** Prepares @p needle with the serial analysis, the one every uncased search backend consumes. */
 inline sz_utf8_uncased_needle_t uncased_needle_(char const *needle, sz_size_t needle_length) {
     sz_utf8_uncased_needle_t prepared;
-    verify(sz_utf8_uncased_needle_init_serial(needle, needle_length, &prepared, nullptr) == sz_success_k);
+    expect_equal(sz_utf8_uncased_needle_init_serial(needle, needle_length, &prepared, nullptr), sz_success_k);
     return prepared;
 }
 
@@ -7679,10 +7746,10 @@ inline void check_uncased_find_unit_(                                           
     sz_utf8_uncased_needle_t const prepared = uncased_needle_(needle, needle_length);
     sz_cptr_t match = STRINGZILLA_NULL_CHAR;
     sz_size_t match_length = 0;
-    verify(find(haystack, haystack_length, &prepared, &match, &match_length, nullptr) == sz_success_k);
-    verify(match != STRINGZILLA_NULL_CHAR);
-    verify((sz_size_t)(match - haystack) == expected_offset);
-    verify(match_length == expected_length);
+    expect_equal(find(haystack, haystack_length, &prepared, &match, &match_length, nullptr), sz_success_k);
+    expect_true(match != STRINGZILLA_NULL_CHAR);
+    expect_equal((sz_size_t)(match - haystack), expected_offset);
+    expect_equal(match_length, expected_length);
 }
 
 /** Runs one uncased-fold backend over @p input and asserts the folded bytes equal @p expected. */
@@ -7691,8 +7758,8 @@ inline void check_uncased_fold_unit_( //
     char produced[64];
     sz_size_t produced_length = kernel_result<sz_size_t>(fold, input, input_length, produced);
     sz_size_t const expected_length = (sz_size_t)std::strlen(expected);
-    verify(produced_length == expected_length);
-    verify(std::memcmp(produced, expected, expected_length) == 0);
+    expect_equal(produced_length, expected_length);
+    expect_equal(std::memcmp(produced, expected, expected_length), 0);
 }
 
 /**
@@ -7717,7 +7784,7 @@ inline sz_cptr_t reference_uncased_find_(char const *haystack, std::size_t hayst
         sz_rune_t rune;
         sz_rune_length_t rune_length = sz_rune_decode(cursor, end, &rune);
         if (rune_length == sz_rune_invalid_k) { // Malformed byte is its own 1-byte maximal subpart, copied unfolded
-            verify(needle_folded_count < 128 && "reference needle buffer overflow");
+            expect_true(needle_folded_count < 128, "reference needle buffer overflow");
             needle_folded[needle_folded_count++] = (sz_u8_t)*cursor;
             ++cursor;
             continue;
@@ -7725,7 +7792,7 @@ inline sz_cptr_t reference_uncased_find_(char const *haystack, std::size_t hayst
         sz_rune_t folded[3];
         sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded);
         for (sz_size_t index = 0; index < folded_count; ++index) {
-            verify(needle_folded_count < 128 && "reference needle buffer overflow");
+            expect_true(needle_folded_count < 128, "reference needle buffer overflow");
             needle_folded[needle_folded_count++] = folded[index];
         }
         cursor += rune_length;
@@ -7742,7 +7809,7 @@ inline sz_cptr_t reference_uncased_find_(char const *haystack, std::size_t hayst
         sz_rune_t rune;
         sz_rune_length_t rune_length = sz_rune_decode(cursor, end, &rune);
         if (rune_length == sz_rune_invalid_k) { // Malformed byte is its own 1-byte maximal subpart, copied unfolded
-            verify(haystack_folded_count < 512 && "reference haystack buffer overflow");
+            expect_true(haystack_folded_count < 512, "reference haystack buffer overflow");
             haystack_folded[haystack_folded_count] = (sz_u8_t)*cursor;
             source_begin[haystack_folded_count] = cursor;
             source_end[haystack_folded_count] = cursor + 1;
@@ -7753,7 +7820,7 @@ inline sz_cptr_t reference_uncased_find_(char const *haystack, std::size_t hayst
         sz_rune_t folded[3];
         sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded);
         for (sz_size_t index = 0; index < folded_count; ++index) {
-            verify(haystack_folded_count < 512 && "reference haystack buffer overflow");
+            expect_true(haystack_folded_count < 512, "reference haystack buffer overflow");
             haystack_folded[haystack_folded_count] = folded[index];
             source_begin[haystack_folded_count] = cursor;
             source_end[haystack_folded_count] = cursor + rune_length;
@@ -7794,8 +7861,8 @@ inline void check_uncased_find_three_way_(                                      
     sz_utf8_uncased_needle_t const prepared = uncased_needle_(needle, needle_length);
     sz_size_t base_matched = 0, simd_matched = 0;
     sz_cptr_t base_result = STRINGZILLA_NULL_CHAR, simd_result = STRINGZILLA_NULL_CHAR;
-    verify(find_base(haystack, haystack_length, &prepared, &base_result, &base_matched, nullptr) == sz_success_k);
-    verify(find_simd(haystack, haystack_length, &prepared, &simd_result, &simd_matched, nullptr) == sz_success_k);
+    expect_equal(find_base(haystack, haystack_length, &prepared, &base_result, &base_matched, nullptr), sz_success_k);
+    expect_equal(find_simd(haystack, haystack_length, &prepared, &simd_result, &simd_matched, nullptr), sz_success_k);
 
     std::size_t reference_matched = 0;
     sz_cptr_t reference_result = reference_uncased_find_(haystack, haystack_length, needle, needle_length,
@@ -7818,9 +7885,9 @@ inline void check_uncased_find_three_way_(                                      
                  prepared.script, reference_offset, (std::size_t)reference_matched);
     print_utf8_test_bytes_("needle  ", {needle, needle_length});
     print_utf8_test_bytes_("haystack", {haystack, haystack_length});
-    verify(base_matches_reference && "Uncased find base backend disagrees with the reference");
-    verify(simd_matches_reference && "Uncased find SIMD backend disagrees with the reference");
-    verify(base_matches_simd && "Uncased find backends disagree with each other");
+    expect_true(base_matches_reference, "Uncased find base backend disagrees with the reference");
+    expect_true(simd_matches_reference, "Uncased find SIMD backend disagrees with the reference");
+    expect_true(base_matches_simd, "Uncased find backends disagree with each other");
 }
 
 /**
@@ -7842,7 +7909,7 @@ inline void check_uncased_find_three_way_(                                      
  *  @param[in] max_needles_per_haystack Zero for exhaustive, or how many to sample per haystack.
  *  @param[in] total_queries Total needle searches to perform across all haystacks.
  */
-inline void check_uncased_find_fuzz_(std::mt19937 &generator, sz_kernel_utf8_uncased_search_t find_serial,
+inline void check_uncased_find_fuzz_(split_mix_generator_t &generator, sz_kernel_utf8_uncased_search_t find_serial,
                                      sz_kernel_utf8_uncased_search_t find_simd,
                                      sz_kernel_utf8_uncased_fold_t uncased_fold, sz_kernel_utf8_seek_t utf8_seek,
                                      sz_kernel_utf8_count_t utf8_count, std::size_t haystack_length,
@@ -8063,10 +8130,11 @@ inline void check_uncased_find_fuzz_(std::mt19937 &generator, sz_kernel_utf8_unc
             sz_cptr_t serial_result = STRINGZILLA_NULL_CHAR, simd_result = STRINGZILLA_NULL_CHAR;
             sz_utf8_uncased_needle_t const prepared = uncased_needle_(needle_start, needle_bytes);
 
-            verify(find_serial(haystack.data(), haystack.size(), &prepared, &serial_result, &serial_matched, nullptr) ==
-                   sz_success_k);
-            verify(find_simd(haystack.data(), haystack.size(), &prepared, &simd_result, &simd_matched, nullptr) ==
-                   sz_success_k);
+            expect_equal(
+                find_serial(haystack.data(), haystack.size(), &prepared, &serial_result, &serial_matched, nullptr),
+                sz_success_k);
+            expect_equal(find_simd(haystack.data(), haystack.size(), &prepared, &simd_result, &simd_matched, nullptr),
+                         sz_success_k);
 
             if (serial_result != simd_result || serial_matched != simd_matched) {
                 sz_size_t serial_off = serial_result ? (sz_size_t)(serial_result - haystack.data())
@@ -8096,8 +8164,8 @@ inline void check_uncased_find_fuzz_(std::mt19937 &generator, sz_kernel_utf8_unc
                            fmt::arg("unfolded_offset", prepared.offset_in_unfolded),
                            fmt::arg("unfolded_length", prepared.length_in_unfolded),
                            fmt::arg("shown_from", print_start), fmt::arg("haystack", hex_bytes(haystack_shown)));
-                verify(serial_result == simd_result && "Fuzz offset mismatch");
-                verify(serial_matched == simd_matched && "Fuzz length mismatch");
+                expect_equal(serial_result, simd_result, "Fuzz offset mismatch");
+                expect_equal(serial_matched, simd_matched, "Fuzz length mismatch");
             }
             return true;
         };
@@ -8171,7 +8239,7 @@ inline std::vector<uncased_fold_t> uncased_folds_() {
  *  built both with and without the mirroring "x" context, so the not-found path is exercised
  *  with the same adversarial shapes.
  */
-inline void check_uncased_find_preimages_(test_context_t &context, std::vector<uncased_fold_t> const &folds,
+inline void check_uncased_find_preimages_(std::vector<uncased_fold_t> const &folds,
                                           sz_kernel_utf8_uncased_search_t find_base,
                                           sz_kernel_utf8_uncased_search_t find_simd) {
     std::size_t const offsets[] = {0, 14, 15, 16, 17, 30, 31, 32, 33, 61, 62, 63, 64, 65};
@@ -8181,7 +8249,7 @@ inline void check_uncased_find_preimages_(test_context_t &context, std::vector<u
     char needle[16];   // Longest folded form is 9 bytes, plus one ASCII context byte
     char haystack[96]; // Largest offset 65, plus context, plus a 4-byte preimage, plus padding
 
-    std::size_t const preimage_stride = context.sweep_stride(folds.size());
+    std::size_t const preimage_stride = sweep_stride(test_run.settings.scale / 10);
 
     for (std::size_t fold_index = 0; fold_index < folds.size(); fold_index += preimage_stride) {
         uncased_fold_t const &fold = folds[fold_index];
@@ -8226,7 +8294,7 @@ inline void check_uncased_find_preimages_(test_context_t &context, std::vector<u
  *  from its own. Each lands within the last @c needle_window bytes (windows 4..16) of haystacks
  *  whose filler also sweeps the 64-byte SIMD chunk boundary.
  */
-inline void check_uncased_find_tails_(test_context_t &context, std::vector<uncased_fold_t> const &folds,
+inline void check_uncased_find_tails_(std::vector<uncased_fold_t> const &folds,
                                       sz_kernel_utf8_uncased_search_t find_base,
                                       sz_kernel_utf8_uncased_search_t find_simd) {
     std::vector<uncased_fold_t> expanding_preimages;
@@ -8241,7 +8309,7 @@ inline void check_uncased_find_tails_(test_context_t &context, std::vector<uncas
     char needle[32];    // Two folded forms of up to 12 bytes, or one with an ASCII context byte
     char haystack[128]; // Largest filler 65, plus context, plus two 4-byte preimages, plus tail padding
 
-    std::size_t const entry_stride = context.sweep_stride(expanding_preimages.size());
+    std::size_t const entry_stride = sweep_stride(test_run.settings.scale / 10);
     for (std::size_t entry_index = 0; entry_index < expanding_preimages.size(); entry_index += entry_stride) {
         uncased_fold_t const &entry = expanding_preimages[entry_index];
 
@@ -8292,7 +8360,7 @@ inline void check_uncased_find_tails_(test_context_t &context, std::vector<uncas
  *  join, and use that sub-run (as folded bytes) as the needle - swept across the 64-byte SIMD chunk
  *  boundary - validated against the fold-subset reference.
  */
-inline void check_uncased_find_crossing_(test_context_t &context, std::vector<uncased_fold_t> const &folds,
+inline void check_uncased_find_crossing_(std::vector<uncased_fold_t> const &folds,
                                          sz_kernel_utf8_uncased_search_t find_base,
                                          sz_kernel_utf8_uncased_search_t find_simd) {
     // Codepoints whose fold emits more than one rune, so a needle can slice through the middle of
@@ -8307,7 +8375,7 @@ inline void check_uncased_find_crossing_(test_context_t &context, std::vector<un
     char haystack[128];
     char needle[32];
 
-    std::size_t const first_stride = context.sweep_stride(expanders.size());
+    std::size_t const first_stride = sweep_stride(test_run.settings.scale / 10);
     for (std::size_t first_index = 0; first_index < expanders.size(); first_index += first_stride) {
         for (std::size_t second_index = 0; second_index < expanders.size(); ++second_index) {
             // Fold the adjacent pair into a flat rune stream, tagging which source codepoint (0 or
@@ -8420,17 +8488,17 @@ inline void check_uncased_find_long_crossing_fuzz_(sz_kernel_utf8_uncased_search
  *  Runs the fuzzers and the structured adversarial enumerators, fold preimages, expanding tails
  *  and cross-expansion needles, of @p find_simd against the serial baseline and the reference.
  */
-inline void check_uncased_find_battery_(test_context_t &context, sz_kernel_utf8_uncased_search_t find_simd) {
+inline void check_uncased_find_battery_(split_mix_generator_t &generator, sz_kernel_utf8_uncased_search_t find_simd) {
     sz_kernel_utf8_uncased_search_t const find_serial = sz_utf8_uncased_search_serial;
-    std::size_t const queries = context.iterations(8000);
+    std::size_t const queries = scaled_iterations(8000);
 
     // A miss must zero the length too, as callers read it without checking the match first.
     {
         sz_utf8_uncased_needle_t const prepared = uncased_needle_("zzz", 3);
         sz_cptr_t match = "";
         sz_size_t match_length = 7;
-        verify(find_simd("Hello, World!", 13, &prepared, &match, &match_length, nullptr) == sz_success_k &&
-               match == STRINGZILLA_NULL_CHAR && match_length == 0);
+        expect_true(find_simd("Hello, World!", 13, &prepared, &match, &match_length, nullptr) == sz_success_k &&
+                    match == STRINGZILLA_NULL_CHAR && match_length == 0);
     }
 
     // One prepared needle serves every haystack, as search only reads it, and an empty one matches
@@ -8441,34 +8509,34 @@ inline void check_uncased_find_battery_(test_context_t &context, sz_kernel_utf8_
         sz_size_t match_length = 0;
         char const first[] = "die Stra\xC3\x9F" //
                              "e";
-        verify(find_simd(first, 11, &prepared, &match, &match_length, nullptr) == sz_success_k && match == first + 4 &&
-               match_length == 7);
+        expect_true(find_simd(first, 11, &prepared, &match, &match_length, nullptr) == sz_success_k &&
+                    match == first + 4 && match_length == 7);
         char const second[] = "a strasse";
-        verify(find_simd(second, 9, &prepared, &match, &match_length, nullptr) == sz_success_k && match == second + 2 &&
-               match_length == 7);
+        expect_true(find_simd(second, 9, &prepared, &match, &match_length, nullptr) == sz_success_k &&
+                    match == second + 2 && match_length == 7);
         sz_utf8_uncased_needle_t const empty = uncased_needle_("", 0);
-        verify(find_simd(second, 9, &empty, &match, &match_length, nullptr) == sz_success_k && match == second &&
-               match_length == 0);
+        expect_true(find_simd(second, 9, &empty, &match, &match_length, nullptr) == sz_success_k && match == second &&
+                    match_length == 0);
     }
 
-    check_uncased_find_fuzz_(context.generator, find_serial, find_simd, sz_utf8_uncased_fold_serial,
-                             sz_utf8_seek_serial, sz_utf8_count_serial, 16, 0, queries);
-    check_uncased_find_fuzz_(context.generator, find_serial, find_simd, sz_utf8_uncased_fold_serial,
-                             sz_utf8_seek_serial, sz_utf8_count_serial, 32, 0, queries);
-    check_uncased_find_fuzz_(context.generator, find_serial, find_simd, sz_utf8_uncased_fold_serial,
-                             sz_utf8_seek_serial, sz_utf8_count_serial, 100, 100, queries);
-    check_uncased_find_fuzz_(context.generator, find_serial, find_simd, sz_utf8_uncased_fold_serial,
-                             sz_utf8_seek_serial, sz_utf8_count_serial, 200, 100, queries);
+    check_uncased_find_fuzz_(generator, find_serial, find_simd, sz_utf8_uncased_fold_serial, sz_utf8_seek_serial,
+                             sz_utf8_count_serial, 16, 0, queries);
+    check_uncased_find_fuzz_(generator, find_serial, find_simd, sz_utf8_uncased_fold_serial, sz_utf8_seek_serial,
+                             sz_utf8_count_serial, 32, 0, queries);
+    check_uncased_find_fuzz_(generator, find_serial, find_simd, sz_utf8_uncased_fold_serial, sz_utf8_seek_serial,
+                             sz_utf8_count_serial, 100, 100, queries);
+    check_uncased_find_fuzz_(generator, find_serial, find_simd, sz_utf8_uncased_fold_serial, sz_utf8_seek_serial,
+                             sz_utf8_count_serial, 200, 100, queries);
     std::vector<uncased_fold_t> const folds = uncased_folds_();
-    check_uncased_find_preimages_(context, folds, find_serial, find_simd);
-    check_uncased_find_tails_(context, folds, find_serial, find_simd);
-    check_uncased_find_crossing_(context, folds, find_serial, find_simd);
+    check_uncased_find_preimages_(folds, find_serial, find_simd);
+    check_uncased_find_tails_(folds, find_serial, find_simd);
+    check_uncased_find_crossing_(folds, find_serial, find_simd);
     check_uncased_find_long_crossing_fuzz_(find_serial, find_simd);
 
     // A long ASCII needle (well past the 32-rune ring buffer and the 3-rune short helpers) drives
     // the pure Rabin-Karp path inside a large random haystack, both where the needle was spliced in
     // (so a match exists) and where it was not (so the not-found path is exercised at scale).
-    std::mt19937 &random_generator = context.generator;
+    split_mix_generator_t &random_generator = generator;
     std::uniform_int_distribution<int> letter_distribution(0, 25);
     // The independent reference oracle caps its folded haystack at 512 runes, so the haystack
     // stays under that while the 48-rune needle, past the 32-rune ring buffer, drives Rabin-Karp.
@@ -8496,12 +8564,12 @@ inline void check_uncased_find_battery_(test_context_t &context, sz_kernel_utf8_
 /** Known-answer battery for one uncased-order backend: case-insensitive equality, ASCII less and
  *  greater, length-prefix ordering, and 2-byte accented folds (ö = C3 B6, é = C3 A9). */
 inline void check_uncased_order_(sz_kernel_utf8_uncased_order_t order) {
-    verify(kernel_result<sz_ordering_t>(order, "Hello", 5, "HELLO", 5) == sz_equal_k);
-    verify(kernel_result<sz_ordering_t>(order, "abc", 3, "abd", 3) == sz_less_k);
-    verify(kernel_result<sz_ordering_t>(order, "abd", 3, "abc", 3) == sz_greater_k);
-    verify(kernel_result<sz_ordering_t>(order, "ab", 2, "abc", 3) == sz_less_k);
-    verify(kernel_result<sz_ordering_t>(order, "sch\xC3\xB6ner", 8, "SCH\xC3\x96NER", 8) == sz_equal_k); // 'ö' fold
-    verify(kernel_result<sz_ordering_t>(order, "caf\xC3\xA9", 5, "CAF\xC3\x89", 5) == sz_equal_k);       // 'é' fold
+    expect_equal(kernel_result<sz_ordering_t>(order, "Hello", 5, "HELLO", 5), sz_equal_k);
+    expect_equal(kernel_result<sz_ordering_t>(order, "abc", 3, "abd", 3), sz_less_k);
+    expect_equal(kernel_result<sz_ordering_t>(order, "abd", 3, "abc", 3), sz_greater_k);
+    expect_equal(kernel_result<sz_ordering_t>(order, "ab", 2, "abc", 3), sz_less_k);
+    expect_equal(kernel_result<sz_ordering_t>(order, "sch\xC3\xB6ner", 8, "SCH\xC3\x96NER", 8), sz_equal_k); // 'ö' fold
+    expect_equal(kernel_result<sz_ordering_t>(order, "caf\xC3\xA9", 5, "CAF\xC3\x89", 5), sz_equal_k);       // 'é' fold
 }
 
 /** Compares the @p reference and @p candidate folds byte-by-byte over a fixed multi-script battery,
@@ -8509,7 +8577,7 @@ inline void check_uncased_order_(sz_kernel_utf8_uncased_order_t order) {
  *  sweep of every valid Unicode codepoint, both in order and shuffled. The candidate is a fold
  *  kernel or anything called like one, such as a device kernel behind staged buffers. */
 template <typename candidate_type_>
-inline void check_uncased_fold_equivalence_(test_context_t &context, sz_kernel_utf8_uncased_fold_t reference,
+inline void check_uncased_fold_equivalence_(split_mix_generator_t &generator, sz_kernel_utf8_uncased_fold_t reference,
                                             candidate_type_ const &candidate, sz_size_t min_text_length,
                                             sz_size_t min_iterations) {
 
@@ -8538,7 +8606,7 @@ inline void check_uncased_fold_equivalence_(test_context_t &context, sz_kernel_u
                     break;
                 }
             }
-            verify(base_length == simd_length && "Case fold length mismatch");
+            expect_equal(base_length, simd_length, "Case fold length mismatch");
         }
 
         for (sz_size_t i = 0; i < base_length; ++i) {
@@ -8552,7 +8620,7 @@ inline void check_uncased_fold_equivalence_(test_context_t &context, sz_kernel_u
                 std::string_view const simd_shown(output_simd.data() + start, end - start);
                 fmt::println(stderr, "Base output[{0}..{1}]: {2:02X}\nSIMD output[{0}..{1}]: {3:02X}", start, end,
                              hex_bytes(base_shown), hex_bytes(simd_shown));
-                verify(output_base[i] == output_simd[i] && "Case fold content mismatch");
+                expect_equal(output_base[i], output_simd[i], "Case fold content mismatch");
             }
         }
     };
@@ -8616,7 +8684,6 @@ inline void check_uncased_fold_equivalence_(test_context_t &context, sz_kernel_u
         "Hello \xF0\x9F\x8C\x8D World", // Hello 🌍 World
     };
 
-    std::mt19937 &generator = context.generator;
     std::size_t const content_count = span_over(utf8_content).size();
     std::uniform_int_distribution<std::size_t> content_dist(0, content_count - 1);
 
@@ -8637,7 +8704,7 @@ inline void check_uncased_fold_equivalence_(test_context_t &context, sz_kernel_u
 
     // Sweep the valid Unicode codepoints, first in order (0x0..0x10FFFF), then shuffled, so one
     // fold differential drives both the structured strings and the whole-codepoint enumeration.
-    std::size_t const codepoint_stride = context.sweep_stride(0x110000);
+    std::size_t const codepoint_stride = sweep_stride(test_run.settings.scale / 10);
     std::vector<sz_rune_t> all_runes;
     all_runes.reserve(0x110000 / codepoint_stride);
     for (sz_rune_t codepoint = 0; codepoint <= 0x10FFFF; codepoint += codepoint_stride) {
@@ -8646,7 +8713,7 @@ inline void check_uncased_fold_equivalence_(test_context_t &context, sz_kernel_u
     }
 
     std::vector<char> input_buffer(all_runes.size() * 4); // Max UTF-8 size is 4 bytes per rune
-    std::size_t const sweep_iterations = context.iterations(6);
+    std::size_t const sweep_iterations = scaled_iterations(6);
     for (std::size_t iteration = 0; iteration < sweep_iterations; ++iteration) {
         if (iteration > 0) std::shuffle(all_runes.begin(), all_runes.end(), generator);
 
@@ -8670,7 +8737,7 @@ inline void check_uncased_invariant_reference_() {
     for (uncased_fold_t const &fold : uncased_folds_()) {
         if (sz_rune_is_uncased_(fold.preimage) != sz_false_k) {
             fmt::println(stderr, "Fold preimage U+{:04X} is wrongly classified as case-invariant", fold.preimage);
-            verify(false && "Fold preimages must not be case-invariant");
+            expect_true(false, "Fold preimages must not be case-invariant");
         }
 
         for (sz_size_t index = 0; index < fold.folded_count; ++index) {
@@ -8678,7 +8745,7 @@ inline void check_uncased_invariant_reference_() {
                 fmt::println(stderr,
                              "Fold output U+{:04X} (from preimage U+{:04X}) is wrongly classified as case-invariant",
                              fold.folded_runes[index], fold.preimage);
-                verify(false && "Fold outputs must not be case-invariant");
+                expect_true(false, "Fold outputs must not be case-invariant");
             }
         }
     }
@@ -8709,10 +8776,10 @@ inline void check_utf8_uncased_unit_(utf8_uncased_kernels_t kernels) {
     // "价格 123" is caseless (CJK + digits + space), so no rune participates in case, while "123Abc"
     // has its first cased codepoint 'A' at byte offset 3.
     char const *caseless = "\xE4\xBB\xB7\xE6\xA0\xBC 123"; // "价格 123"
-    verify(kernel_result<sz_cptr_t>(kernels.find_cased, caseless, (sz_size_t)std::strlen(caseless)) ==
-           STRINGZILLA_NULL_CHAR);
+    expect_equal(kernel_result<sz_cptr_t>(kernels.find_cased, caseless, (sz_size_t)std::strlen(caseless)),
+                 STRINGZILLA_NULL_CHAR);
     char const *mixed = "123Abc";
-    verify(kernel_result<sz_cptr_t>(kernels.find_cased, mixed, (sz_size_t)std::strlen(mixed)) == mixed + 3);
+    expect_equal(kernel_result<sz_cptr_t>(kernels.find_cased, mixed, (sz_size_t)std::strlen(mixed)), mixed + 3);
 
     // A cased rune hiding behind a caseless prefix longer than any SIMD front's block: sixteen
     // emojis (64 bytes) then 'a'. Regression vector for the serial-bail call that rescanned the
@@ -8720,15 +8787,16 @@ inline void check_utf8_uncased_unit_(utf8_uncased_kernels_t kernels) {
     std::string deep_cased;
     for (std::size_t i = 0; i < 16; ++i) deep_cased += "\xF0\x9F\x98\x80"; // "😀"
     deep_cased += 'a';
-    verify(kernel_result<sz_cptr_t>(kernels.find_cased, deep_cased.data(), (sz_size_t)deep_cased.size()) ==
-           deep_cased.data() + 64);
+    expect_equal(kernel_result<sz_cptr_t>(kernels.find_cased, deep_cased.data(), (sz_size_t)deep_cased.size()),
+                 deep_cased.data() + 64);
 }
 
 /** Holds one uncased backend to the serial one: the fold differential and the full find battery,
  *  paired so their coverage stays in lockstep. */
-inline void check_utf8_uncased_equivalence_(test_context_t &context, utf8_uncased_kernels_t kernels) {
-    check_uncased_fold_equivalence_(context, sz_utf8_uncased_fold_serial, kernels.fold, 4000, context.iterations(1200));
-    check_uncased_find_battery_(context, kernels.search);
+inline void check_utf8_uncased_equivalence_(split_mix_generator_t &generator, utf8_uncased_kernels_t kernels) {
+    check_uncased_fold_equivalence_(generator, sz_utf8_uncased_fold_serial, kernels.fold, 4000,
+                                    scaled_iterations(1200));
+    check_uncased_find_battery_(generator, kernels.search);
 }
 
 /**
@@ -8739,7 +8807,7 @@ inline void check_utf8_uncased_equivalence_(test_context_t &context, utf8_uncase
  *  a truncated multi-byte tail can mis-decode into one rune of up to 4 bytes past the 3× expansion
  *  the contract documents.
  */
-inline void check_utf8_uncased_safety_(test_context_t &context, utf8_uncased_kernels_t kernels) {
+inline void check_utf8_uncased_safety_(split_mix_generator_t &generator, utf8_uncased_kernels_t kernels) {
     // Short valid needle: the folds of 'ﬅ' and 'ﬆ' collapse onto it
     sz_utf8_uncased_needle_t const prepared = uncased_needle_("st", 2);
 
@@ -8753,17 +8821,17 @@ inline void check_utf8_uncased_safety_(test_context_t &context, utf8_uncased_ker
                 fmt::println(stderr, "Fold of invalid input returned {} bytes for {} input bytes",
                              (std::size_t)folded_length, input_length);
                 print_utf8_test_bytes_("input", {input, input_length});
-                verify(false && "Fold output must stay within 3x the input length plus one mis-decoded rune");
+                expect_true(false, "Fold output must stay within 3x the input length plus one mis-decoded rune");
             }
         });
         // The classifier and the finder return arbitrary verdicts on garbage, and must only survive
         kernel_result<sz_cptr_t>(kernels.find_cased, input, input_length);
         sz_cptr_t match = STRINGZILLA_NULL_CHAR;
         sz_size_t match_length = 0;
-        verify(kernels.search(input, input_length, &prepared, &match, &match_length, nullptr) == sz_success_k);
+        expect_equal(kernels.search(input, input_length, &prepared, &match, &match_length, nullptr), sz_success_k);
     };
 
-    for_each_adversarial_utf8_input_(context, context.iterations(10000), check);
+    for_each_adversarial_utf8_input_(generator, scaled_iterations(10000), check);
 }
 
 #pragma endregion UTF8 Uncased

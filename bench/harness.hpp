@@ -28,30 +28,33 @@
  *
  *  4. Visualize results differently, with compact output for generic workloads and special cases.
  *
- *  Environment variables, read once by @c read_settings. The @b STRINGWARS_* ones mean the same in
- *  StringWars, and the @b STRINGZILLA_STRESS* ones only StringZilla has:
+ *  Settings, read once by @c read_bench_settings. The @b STRINGWARS_* ones mean the same in
+ *  StringWars, the @b STRINGZILLA_STRESS* ones only StringZilla has, and a flag overrides each,
+ *  as <tt>--time-limit 1s</tt>:
  *
  *  @verbatim
- *  Variable                       Default      Meaning
- *  STRINGWARS_DATASET             per corpus   Corpus file, instead of "leipzig1M.txt" or "xlsum.csv"
- *  STRINGWARS_TOKENS              per corpus   "file", "lines", "words", or an N-gram length like 64
- *  STRINGWARS_BYTES               whole file   Bytes read from the corpus, like 4096, 64KB or 1GB; UTF-8 families read 64MB
- *  STRINGWARS_UNIQUE              0            Sorts the tokens and drops duplicates first
- *  STRINGWARS_FILTER              none         ECMAScript regex over benchmark names, or a substring when it does not compile
- *  STRINGWARS_SEED                42           Seed for every random generator, or "random" to draw one, which a run prints
- *  STRINGWARS_WARMUP              1s           Untimed run before each benchmark, like 200ms or 1s
- *  STRINGWARS_TIME_LIMIT          10s          Timed run of each benchmark, like 200ms or 10s; 1s in debug builds
- *  STRINGWARS_BATCH_PER_CORE      per backend  Candidates per call per CPU core, CUDA or ROCm multiprocessor, or Metal GPU core
- *  STRINGZILLA_STRESS             1            Checks each backend against its baseline before timing
- *  STRINGZILLA_STRESS_TIME_LIMIT  time limit   Time of each stress check, like 200ms or 10s
- *  STRINGZILLA_STRESS_DIR         .tmp         Directory for stress-check failure logs
- *  STRINGZILLA_STRESS_LIMIT       2            The stress-check failure that stops the run, so 1 stops at the first
+ *  Variable                       Flag                 Default      Meaning
+ *  STRINGWARS_DEVICES             --devices            unset        Comma-separated devices, like cuda:0,rocm:1
+ *  STRINGWARS_DATASET             --dataset            per corpus   Corpus file, instead of "leipzig1M.txt" or "xlsum.csv"
+ *  STRINGWARS_TOKENS              --tokens             per corpus   "file", "lines", "words", or an N-gram length like 64
+ *  STRINGWARS_BYTES               --bytes              whole file   Bytes read from the corpus, like 4096, 64KB or 1GB; UTF-8 families read 64MB
+ *  STRINGWARS_UNIQUE              --unique             0            Sorts the tokens and drops duplicates first
+ *  STRINGWARS_FILTER              --filter             none         ECMAScript regex over benchmark names, or a substring when it does not compile
+ *  STRINGWARS_SEED                --seed               42           Seed for every random generator, or "random" to draw one, which a run prints
+ *  STRINGWARS_WARMUP              --warmup             1s           Untimed run before each benchmark, like 200ms or 1s
+ *  STRINGWARS_TIME_LIMIT          --time-limit         10s          Timed run of each benchmark, like 200ms or 10s; 1s in debug builds
+ *  STRINGWARS_BATCH_PER_CORE      --batch-per-core     per backend  Candidates per call per CPU core, CUDA or ROCm multiprocessor, or Metal GPU core
+ *  STRINGZILLA_STRESS             --stress             1            Checks each backend against its baseline before timing
+ *  STRINGZILLA_STRESS_TIME_LIMIT  --stress-time-limit  time limit   Time of each stress check, like 200ms or 10s
+ *  STRINGZILLA_STRESS_DIR         --stress-dir         .tmp         Directory for stress-check failure logs
+ *  STRINGZILLA_STRESS_LIMIT       --stress-limit       2            The stress-check failure that stops the run, so 1 stops at the first
  *  @endverbatim
  */
 #pragma once
 #include <cctype>  // `std::isalnum`
 #include <climits> // `INT_MAX`
 #include <clocale> // `std::setlocale`
+#include <cmath>   // `std::isfinite`
 #include <csignal> // `std::signal`, `std::raise`, `SIGSEGV`, `SIGABRT`
 #include <cstdio>  // `std::fopen`, `std::fclose`, `std::FILE`
 #include <cstdint> // `std::uint32_t`
@@ -109,10 +112,175 @@ namespace sz = ashvardanian::stringzilla;
 
 namespace ashvardanian::stringzilla::bench {
 
-/** A 32-bit generator seed, kept apart from counts so neither passes for the other. */
-struct seed_t {
-    std::uint32_t value = 0;
+#pragma region Shared Settings
+
+/** Exits with one line naming a setting that does not parse, so a bad value never runs anything. */
+[[noreturn]] inline void exit_unparsed(char const *variable, char const *text, char const *expected) noexcept {
+    std::fprintf(stderr, "%s=\"%s\" does not parse, expected %s\n", variable, text, expected);
+    std::exit(1);
+}
+
+/** The text of a setting: its @p flag when given, else its environment @p variable , else null. */
+inline char const *setting_text(int argc, char **argv, char const *variable, std::string_view flag) noexcept {
+    for (int index = 1; index < argc; ++index) {
+        std::string_view const argument {argv[index]};
+        if (argument == flag)
+            return index + 1 < argc && std::strncmp(argv[index + 1], "--", 2) != 0 ? argv[index + 1] : "1";
+        if (argument.size() > flag.size() && argument.starts_with(flag) && argument[flag.size()] == '=')
+            return argv[index] + flag.size() + 1;
+    }
+    char const *text = std::getenv(variable);
+    return text && *text ? text : nullptr;
+}
+
+/** A switch, @p fallback when unset: 0, false, off and no turn it off, anything else on. */
+inline bool read_flag_setting(int argc, char **argv, char const *variable, std::string_view flag,
+                              bool fallback = false) noexcept {
+    char const *text = setting_text(argc, argv, variable, flag);
+    if (!text) return fallback;
+    for (char const *off : {"0", "false", "off", "no"})
+        if (std::strcmp(text, off) == 0) return false;
+    return true;
+}
+
+/** A whole number, @p fallback when unset. */
+inline std::size_t read_count_setting(int argc, char **argv, char const *variable, std::string_view flag,
+                                      std::size_t fallback) noexcept {
+    char const *text = setting_text(argc, argv, variable, flag);
+    if (!text) return fallback;
+    std::string_view const spelled {text};
+    std::size_t count = 0;
+    auto const [end, error] = std::from_chars(spelled.data(), spelled.data() + spelled.size(), count);
+    if (error != std::errc {} || end != spelled.data() + spelled.size())
+        exit_unparsed(variable, text, "a whole number");
+    return count;
+}
+
+/** A positive real, @p fallback when unset. */
+inline double read_real_setting(int argc, char **argv, char const *variable, std::string_view flag,
+                                double fallback) noexcept {
+    char const *text = setting_text(argc, argv, variable, flag);
+    if (!text) return fallback;
+    char *end = nullptr;
+    double const value = std::strtod(text, &end);
+    if (*end != '\0' || !(value > 0) || !std::isfinite(value))
+        exit_unparsed(variable, text, "a positive number like 0.1 or 10");
+    return value;
+}
+
+/** A positive duration such as 200ms, 10s or 2m, @p fallback when unset. */
+inline std::chrono::milliseconds read_duration_setting(int argc, char **argv, char const *variable,
+                                                       std::string_view flag,
+                                                       std::chrono::milliseconds fallback) noexcept {
+    char const *text = setting_text(argc, argv, variable, flag);
+    if (!text) return fallback;
+    std::string_view const spelled {text};
+    std::uint32_t count = 0;
+    auto const [end, error] = std::from_chars(spelled.data(), spelled.data() + spelled.size(), count);
+    std::string_view const unit = spelled.substr(static_cast<std::size_t>(end - spelled.data()));
+    if (error == std::errc {} && count != 0) {
+        if (unit == "ms") return std::chrono::milliseconds(count);
+        if (unit == "s") return std::chrono::seconds(count);
+        if (unit == "m") return std::chrono::minutes(count);
+    }
+    exit_unparsed(variable, text, "a duration like 200ms, 10s or 2m");
+}
+
+/** The run's seed: 42 when unset, drawn afresh for @c random , else any unsigned 64-bit value. */
+inline std::uint64_t read_seed_setting(int argc, char **argv, char const *variable, std::string_view flag) noexcept {
+    char const *text = setting_text(argc, argv, variable, flag);
+    if (!text) return 42;
+    std::string_view const spelled {text};
+    if (spelled == "random") {
+        std::random_device device;
+        return (static_cast<std::uint64_t>(device()) << 32) ^ device();
+    }
+    std::uint64_t seed = 0;
+    auto const [end, error] = std::from_chars(spelled.data(), spelled.data() + spelled.size(), seed);
+    if (error != std::errc {} || end != spelled.data() + spelled.size())
+        exit_unparsed(variable, text, "an unsigned integer or random");
+    return seed;
+}
+
+/** Which labels a run selects: a regex search when the pattern compiles, else a substring. */
+struct filter_t {
+    std::string pattern;
+    std::optional<std::regex> regex;
+
+    bool selects(std::string_view label) const noexcept {
+        if (pattern.empty()) return true;
+        if (regex) return std::regex_search(label.begin(), label.end(), *regex);
+        return label.find(pattern) != std::string_view::npos;
+    }
 };
+
+/** The filter a setting spells, compiled once; empty, selecting everything, when unset. */
+inline filter_t read_filter_setting(int argc, char **argv, char const *variable, std::string_view flag) noexcept {
+    filter_t filter;
+    char const *text = setting_text(argc, argv, variable, flag);
+    if (!text) return filter;
+    filter.pattern = text;
+#if defined(__cpp_exceptions) && __cpp_exceptions
+    try {
+        filter.regex.emplace(filter.pattern);
+    }
+    catch (std::regex_error const &) {
+    }
+#else
+    filter.regex.emplace(filter.pattern);
+#endif
+    return filter;
+}
+
+/** What every suite and bench reads before its own settings; @c program starts the rerun lines. */
+struct common_settings_t {
+    std::uint64_t seed = 42;
+    filter_t filter;
+    char const *program = "";
+};
+
+/** SplitMix64's finalizer, a bijection that spreads every input bit over all 64 output bits. */
+constexpr std::uint64_t split_mix_bits(std::uint64_t value) noexcept {
+    value = (value ^ (value >> 30)) * 0xBF58476D1CE4E5B9ull;
+    value = (value ^ (value >> 27)) * 0x94D049BB133111EBull;
+    return value ^ (value >> 31);
+}
+
+/** The @p index -th stream of the family @p name under @p seed , identical in every language. */
+constexpr std::uint64_t stream_key(std::uint64_t seed, std::string_view name, std::uint64_t index = 0) noexcept {
+    std::uint64_t hashed = 0xCBF29CE484222325ull;
+    for (char const character : name) hashed = (hashed ^ static_cast<std::uint8_t>(character)) * 0x100000001B3ull;
+    return split_mix_bits(split_mix_bits(seed ^ hashed) + index);
+}
+
+/**
+ *  @brief SplitMix64 over one 64-bit state, seeded by a @ref stream_key , bit-identical to the
+ *      JavaScript generator NumKong ships.
+ *
+ *  Distributions are not specified to draw the same sequence on every standard library, so a
+ *  failure would stop reproducing from its seed when the toolchain changed; @ref below is the
+ *  portable bounded draw.
+ */
+struct split_mix_generator_t {
+    using result_type = std::uint64_t;
+    std::uint64_t state = 0;
+
+    explicit split_mix_generator_t(std::uint64_t key) noexcept : state(key) {}
+    static constexpr result_type(min)() noexcept { return 0; }
+    static constexpr result_type(max)() noexcept { return ~result_type {0}; }
+    result_type operator()() noexcept { return split_mix_bits(state += 0x9E3779B97F4A7C15ull); }
+
+    /** A uniform draw below @p bound , zero for an empty bound, without the bias of a modulo. */
+    std::uint64_t below(std::uint64_t bound) noexcept {
+        if (bound == 0) return 0;
+        std::uint64_t const rejection_floor = (0u - bound) % bound;
+        std::uint64_t draw = (*this)();
+        while (draw < rejection_floor) draw = (*this)();
+        return draw % bound;
+    }
+};
+
+#pragma endregion Shared Settings
 
 /** A positive thread count: "0" in the environment resolves to every core this process may use. */
 struct threads_t {
@@ -123,26 +291,6 @@ struct threads_t {
 struct bytes_t {
     std::size_t value = 0;
 };
-
-/** The text of the environment variable @p name, or nothing when it is unset or empty. */
-inline std::optional<std::string_view> env_text(char const *name) noexcept {
-    char const *const text = std::getenv(name);
-    if (!text || !*text) return std::nullopt;
-    return std::string_view(text);
-}
-
-/** Parses the environment variable @p name with @p parse, or returns @p fallback when it is unset
- *  or empty. Text that does not parse prints `NAME="text" does not parse, expected <expected>` and
- *  exits with status 1, which leaves crash handlers quiet. */
-template <typename value_type_, typename parse_type_>
-[[nodiscard]] value_type_ env_parsed(char const *name, value_type_ fallback, parse_type_ &&parse,
-                                     char const *expected) noexcept {
-    std::optional<std::string_view> const text = env_text(name);
-    if (!text) return fallback;
-    if (std::optional<value_type_> value = parse(*text)) return *std::move(value);
-    fmt::println(stderr, "{}=\"{}\" does not parse, expected {}", name, *text, expected);
-    std::exit(1);
-}
 
 /** A positive whole number, like "64". */
 inline std::optional<std::size_t> parse_count(std::string_view text) noexcept {
@@ -180,38 +328,16 @@ inline std::optional<bytes_t> parse_size(std::string_view text) noexcept {
     return std::nullopt;
 }
 
-/** A 32-bit seed, or "random" for a fresh draw from @c std::random_device. */
-inline std::optional<seed_t> parse_seed(std::string_view text) noexcept {
-    if (text == "random") return seed_t {static_cast<std::uint32_t>(std::random_device {}())};
-    std::uint32_t seed = 0;
-    auto const [end, error] = std::from_chars(text.data(), text.data() + text.size(), seed);
-    if (error != std::errc {} || end != text.data() + text.size()) return std::nullopt;
-    return seed_t {seed};
-}
-
-inline std::size_t env_count(char const *name, std::size_t fallback) noexcept {
-    return env_parsed(name, fallback, parse_count, "a positive count");
-}
-
-inline std::chrono::milliseconds env_duration(char const *name, std::chrono::milliseconds fallback) noexcept {
-    return env_parsed(name, fallback, parse_duration, "a duration like 200ms or 10s");
-}
-
-inline bytes_t env_size(char const *name, bytes_t fallback) noexcept {
-    return env_parsed(name, fallback, parse_size, "a size like 4096, 64KB or 1GB");
-}
-
-inline bool env_flag(char const *name, bool fallback) noexcept {
-    auto const parse_flag = [](std::string_view text) noexcept -> std::optional<bool> {
-        if (text == "1" || text == "true") return true;
-        if (text == "0" || text == "false") return false;
-        return std::nullopt;
-    };
-    return env_parsed(name, fallback, parse_flag, "0, 1, true or false");
-}
-
-inline seed_t env_seed(char const *name, seed_t fallback) noexcept {
-    return env_parsed(name, fallback, parse_seed, "an unsigned integer or random");
+/** Parses a stress setting, one StringWars does not share, with @p parse , or returns @p fallback
+ *  when unset; text that does not parse exits through @ref exit_unparsed . */
+template <typename value_type_, typename parse_type_>
+[[nodiscard]] value_type_ read_stress_setting(int argc, char **argv, char const *variable, std::string_view flag,
+                                              value_type_ fallback, parse_type_ &&parse,
+                                              char const *expected) noexcept {
+    char const *const text = setting_text(argc, argv, variable, flag);
+    if (!text) return fallback;
+    if (std::optional<value_type_> value = parse(std::string_view(text))) return *std::move(value);
+    exit_unparsed(variable, text, expected);
 }
 
 /** Spells @p duration as a user types it: whole seconds as "10s", anything else as "1500ms". */
@@ -821,9 +947,9 @@ inline std::optional<std::vector<device_selection_t>> parse_devices(std::string_
     return std::nullopt;
 }
 
-/** Every benchmark setting, its default as the initializer, filled once by @c read_settings. An
- *  unset optional leaves the choice to each corpus or backend. */
-struct settings_t {
+/** Every benchmark setting, its default as the initializer, filled once by @c read_bench_settings.
+ *  An unset optional leaves the choice to each corpus or backend. */
+struct bench_settings_t : common_settings_t {
     std::optional<std::vector<device_selection_t>> devices;
 
     /** Corpus file, instead of each corpus' own. */
@@ -840,13 +966,6 @@ struct settings_t {
 
     /** Whether duplicate tokens are kept or sorted out. */
     duplicates_t duplicates = duplicates_t::keep_k;
-
-    /** Benchmarks to run, by ECMAScript regex or else substring. */
-    std::string_view filter;
-    std::optional<std::regex> filter_regex;
-
-    /** Seed for every random generator. */
-    seed_t seed {42};
 
     /** Untimed run ahead of each benchmark. */
     std::chrono::milliseconds warmup = std::chrono::seconds(1);
@@ -868,66 +987,67 @@ struct settings_t {
 
     /** The stress-check failure that stops the run: 1 stops at the first. */
     std::size_t stress_failures_to_stop = 2;
-
-    /** Whether @p name passes the filter. */
-    bool selects(std::string_view name) const {
-        if (filter.empty()) return true;
-        if (filter_regex) return std::regex_search(name.begin(), name.end(), *filter_regex);
-        return name.find(filter) != std::string_view::npos;
-    }
 };
 
-/** Reads every @c settings_t variable; a stress time limit left unset follows the time limit. */
-inline settings_t read_settings() noexcept {
-    settings_t settings;
-    if (env_text("STRINGWARS_DEVICES"))
-        settings.devices = env_parsed("STRINGWARS_DEVICES", std::vector<device_selection_t> {}, parse_devices,
-                                      "comma-separated devices such as cuda:0,rocm:1");
-    auto const parse_tokens = [&](std::string_view text) noexcept -> std::optional<tokenization_t> {
-        if (std::optional<std::size_t> const length = parse_count(text))
-            return settings.ngram_bytes = *length, tokenization_t::ngrams_k;
-        std::optional<tokenization_t> const tokenization = parse_tokenization(text);
-        if (tokenization == tokenization_t::ngrams_k) return std::nullopt;
-        return tokenization;
-    };
-    settings.dataset = env_text("STRINGWARS_DATASET");
-    if (env_text("STRINGWARS_TOKENS"))
-        settings.tokenization = env_parsed("STRINGWARS_TOKENS", tokenization_t::words_k, parse_tokens,
-                                           "file, lines, words or an N-gram length");
-    if (env_text("STRINGWARS_BYTES")) settings.read_limit = env_size("STRINGWARS_BYTES", {});
-    settings.duplicates = duplicates_t(env_flag("STRINGWARS_UNIQUE", settings.duplicates == duplicates_t::drop_k));
-    settings.filter = env_text("STRINGWARS_FILTER").value_or("");
-    if (!settings.filter.empty()) {
-#if defined(__cpp_exceptions) && __cpp_exceptions
-        try {
-            settings.filter_regex.emplace(settings.filter.begin(), settings.filter.end());
-        }
-        catch (std::regex_error const &) {
-        }
-#else
-        settings.filter_regex.emplace(settings.filter.begin(), settings.filter.end());
-#endif
+/** Reads every @c bench_settings_t field; a stress time limit left unset follows the time limit. */
+inline bench_settings_t read_bench_settings(int argc, char **argv) noexcept {
+    bench_settings_t settings;
+    settings.seed = read_seed_setting(argc, argv, "STRINGWARS_SEED", "--seed");
+    settings.filter = read_filter_setting(argc, argv, "STRINGWARS_FILTER", "--filter");
+    settings.program = argc != 0 ? argv[0] : "";
+    if (char const *text = setting_text(argc, argv, "STRINGWARS_DEVICES", "--devices")) {
+        settings.devices = parse_devices(text);
+        if (!settings.devices)
+            exit_unparsed("STRINGWARS_DEVICES", text, "comma-separated devices such as cuda:0,rocm:1");
     }
-    settings.seed = env_seed("STRINGWARS_SEED", settings.seed);
-    settings.warmup = env_duration("STRINGWARS_WARMUP", settings.warmup);
-    settings.time_limit = env_duration("STRINGWARS_TIME_LIMIT", settings.time_limit);
-    if (env_text("STRINGWARS_BATCH_PER_CORE")) settings.candidates_per_core = env_count("STRINGWARS_BATCH_PER_CORE", 1);
-    settings.stress = stress_t(env_flag("STRINGZILLA_STRESS", settings.stress == stress_t::check_k));
-    settings.stress_time_limit = env_duration("STRINGZILLA_STRESS_TIME_LIMIT", settings.time_limit);
-    settings.stress_log_dir = env_text("STRINGZILLA_STRESS_DIR").value_or(settings.stress_log_dir);
-    settings.stress_failures_to_stop = env_count("STRINGZILLA_STRESS_LIMIT", settings.stress_failures_to_stop);
+    if (char const *text = setting_text(argc, argv, "STRINGWARS_DATASET", "--dataset")) settings.dataset = text;
+    if (char const *text = setting_text(argc, argv, "STRINGWARS_TOKENS", "--tokens")) {
+        std::optional<std::size_t> const length = parse_count(text);
+        settings.tokenization = length ? tokenization_t::ngrams_k : parse_tokenization(text);
+        if (length) settings.ngram_bytes = *length;
+        else if (!settings.tokenization || *settings.tokenization == tokenization_t::ngrams_k)
+            exit_unparsed("STRINGWARS_TOKENS", text, "file, lines, words or an N-gram length");
+    }
+    if (char const *text = setting_text(argc, argv, "STRINGWARS_BYTES", "--bytes")) {
+        settings.read_limit = parse_size(text);
+        if (!settings.read_limit) exit_unparsed("STRINGWARS_BYTES", text, "a size like 4096, 64KB or 1GB");
+    }
+    settings.duplicates = duplicates_t(read_flag_setting(argc, argv, "STRINGWARS_UNIQUE", "--unique"));
+    settings.warmup = read_duration_setting(argc, argv, "STRINGWARS_WARMUP", "--warmup", settings.warmup);
+    settings.time_limit = read_duration_setting(argc, argv, "STRINGWARS_TIME_LIMIT", "--time-limit",
+                                                settings.time_limit);
+    if (char const *text = setting_text(argc, argv, "STRINGWARS_BATCH_PER_CORE", "--batch-per-core")) {
+        settings.candidates_per_core = parse_count(text);
+        if (!settings.candidates_per_core) exit_unparsed("STRINGWARS_BATCH_PER_CORE", text, "a positive count");
+    }
+    auto const parse_switch = [](std::string_view text) noexcept -> std::optional<bool> {
+        if (text == "1" || text == "true") return true;
+        if (text == "0" || text == "false") return false;
+        return std::nullopt;
+    };
+    auto const parse_text = [](std::string_view text) noexcept { return std::optional<std::string_view>(text); };
+    settings.stress = stress_t(
+        read_stress_setting(argc, argv, "STRINGZILLA_STRESS", "--stress", true, parse_switch, "0, 1, true or false"));
+    settings.stress_time_limit = read_stress_setting(argc, argv, "STRINGZILLA_STRESS_TIME_LIMIT", "--stress-time-limit",
+                                                     settings.time_limit, parse_duration,
+                                                     "a duration like 200ms or 10s");
+    settings.stress_log_dir = read_stress_setting(argc, argv, "STRINGZILLA_STRESS_DIR", "--stress-dir",
+                                                  settings.stress_log_dir, parse_text, "a directory");
+    settings.stress_failures_to_stop = read_stress_setting(argc, argv, "STRINGZILLA_STRESS_LIMIT", "--stress-limit",
+                                                           settings.stress_failures_to_stop, parse_count,
+                                                           "a positive count");
     return settings;
 }
 
 /** Prints each setting as "- Name: value", in the grammar it parses from. */
-inline void print(settings_t const &settings) {
+inline void print(bench_settings_t const &settings) {
     if (settings.devices) {
         for (device_selection_t const &device : *settings.devices)
             fmt::println("- Device: {}:{}", device_name(device.backend), device.ordinal);
     }
     else fmt::println("- Devices: auto");
-    fmt::println("- Seed: {}", settings.seed.value);
-    fmt::println("- Filter: {}", settings.filter.empty() ? std::string_view("none") : settings.filter);
+    fmt::println("- Seed: {}", settings.seed);
+    fmt::println("- Filter: {}", settings.filter.pattern.empty() ? std::string_view("none") : settings.filter.pattern);
     fmt::println("- Warm-up: {}", spell_duration(settings.warmup));
     fmt::println("- Time limit: {}", spell_duration(settings.time_limit));
     fmt::println("- Bytes: {}", settings.read_limit ? spell_size(*settings.read_limit) : std::string("per corpus"));
@@ -978,7 +1098,7 @@ inline void print(machine_t const &machine) {
 
 /** Loads one corpus: @p default_dataset split by @p default_tokenization and cut at
  *  @p default_read_limit, or read whole without one, unless the @p settings override them. */
-inline corpus_t build_corpus(settings_t const &settings, char const *default_dataset,
+inline corpus_t build_corpus(bench_settings_t const &settings, char const *default_dataset,
                              tokenization_t default_tokenization,
                              std::optional<bytes_t> default_read_limit) noexcept(false) {
     corpus_t corpus {std::string(settings.dataset.value_or(default_dataset)),
@@ -1043,7 +1163,7 @@ inline corpus_t build_corpus(settings_t const &settings, char const *default_dat
  *  once per tokenization and limit rather than once per family.
  */
 class corpora_t {
-    settings_t const &settings_;
+    bench_settings_t const &settings_;
     std::optional<corpus_t> words_, lines_, multilingual_lines_, multilingual_slice_, documents_;
 
     corpus_t const &build_(std::optional<corpus_t> &corpus, char const *dataset, tokenization_t tokenization,
@@ -1053,7 +1173,7 @@ class corpora_t {
     }
 
   public:
-    explicit corpora_t(settings_t const &settings) noexcept : settings_(settings) {}
+    explicit corpora_t(bench_settings_t const &settings) noexcept : settings_(settings) {}
 
     /** English words of `leipzig1M.txt`: short tokens for search, sorting, and containers. */
     corpus_t const &words() { return build_(words_, "leipzig1M.txt", tokenization_t::words_k, std::nullopt); }
@@ -1081,14 +1201,14 @@ class corpora_t {
 /** Everything a benchmark reads, built once in @c main and passed down by reference. Not copyable,
  *  since @c corpora reads the @c settings beside it. */
 struct environment_t {
-    settings_t settings;
+    bench_settings_t settings;
     machine_t machine;
     corpora_t corpora {settings};
 
     /** The serial kernels' rows by name, which the other capabilities' kernels print against. */
     std::map<std::string, row_t, std::less<>> serial_rows {};
 
-    environment_t(settings_t settings, machine_t machine) noexcept
+    environment_t(bench_settings_t settings, machine_t machine) noexcept
         : settings(std::move(settings)), machine(std::move(machine)) {}
     environment_t(environment_t const &) = delete;
     environment_t &operator=(environment_t const &) = delete;
@@ -1136,7 +1256,7 @@ inline std::size_t resident_candidates_per_call(environment_t const &env, device
 /** Uses C-style file IO to save information about the most recent stress test failure. Files are
  *  written to @c STRINGZILLA_STRESS_DIR as `failed_<time>_<name>.txt`. */
 inline void log_failure(                                              //
-    settings_t const &settings, corpus_t const &corpus,               //
+    bench_settings_t const &settings, corpus_t const &corpus,         //
     std::string_view name,                                            //
     std::size_t expected_check_value, std::size_t actual_check_value, //
     std::optional<std::size_t> token_index) noexcept(false) {
@@ -1155,7 +1275,7 @@ inline void log_failure(                                              //
     if (!file) throw std::runtime_error("Failed to open file for writing: " + file_path);
 
     fmt::println(file, "Dataset path: {}\nTokenization mode: {}\nSeed: {}", corpus.path, corpus.tokenization,
-                 settings.seed.value);
+                 settings.seed);
     if (token_index)
         fmt::println(file, "Token index: {}\nToken Hex: {:02X}", *token_index,
                      fmt::join(std::as_bytes(std::span(corpus[*token_index])), " "));
@@ -1214,7 +1334,7 @@ std::optional<row_t> bench_nullary(                   //
     callable_type_ &&callable,                        //
     check_validator_type_ &&check_validator = check_validator_type_ {}) {
 
-    if (!env.settings.selects(name)) return std::nullopt;
+    if (!env.settings.filter.selects(name)) return std::nullopt;
     if constexpr (requires { baseline.preprocess(); }) baseline.preprocess();
     if constexpr (requires { callable.preprocess(); }) callable.preprocess();
     if constexpr (!is_same_type<baseline_type_, callable_no_op_t>::value)
@@ -1257,7 +1377,7 @@ std::optional<row_t> bench_unary(                     //
     callable_type_ &&callable,                        //
     check_validator_type_ &&check_validator = check_validator_type_ {}) {
 
-    if (!env.settings.selects(name)) return std::nullopt;
+    if (!env.settings.filter.selects(name)) return std::nullopt;
     if constexpr (requires { baseline.preprocess(); }) baseline.preprocess();
     if constexpr (requires { callable.preprocess(); }) callable.preprocess();
     if constexpr (!is_same_type<baseline_type_, callable_no_op_t>::value)
@@ -1298,11 +1418,11 @@ template <typename callable_type_>
 std::optional<double> bench_baseline(environment_t const &env, corpus_t const &corpus, std::string const &name,
                                      std::initializer_list<std::string_view> arms, callable_type_ &callable,
                                      std::optional<double> against = std::nullopt) {
-    bool const printed = env.settings.selects(name);
+    bool const printed = env.settings.filter.selects(name);
     std::string_view timed_as = name;
     if (!printed)
         for (std::string_view const arm : arms)
-            if (env.settings.selects(arm)) timed_as = arm;
+            if (env.settings.filter.selects(arm)) timed_as = arm;
     // ? Timed under a kept arm's name, so a filter naming only the arms still times their baseline
     std::optional<row_t> row = bench_unary(env, corpus, timed_as, callable);
     if (!row) return std::nullopt;

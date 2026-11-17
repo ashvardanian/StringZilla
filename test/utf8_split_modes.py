@@ -8,7 +8,7 @@ Covers: the separator-versus-split accessor pairing for whitespace, newlines, an
 with_separators round-trip reconstruction for delimiters and newlines, String method parity against the free
 functions, full UAX-29 tiling by utf8_wordbreaks, empty-input and skip_empty behavior, and the regression
 distinguishing zero-width format characters from hair-space whitespace.
-Compares against: round-trip self-consistency, concatenated segments reproduce the input, and cross-backend
+Baselines: round-trip self-consistency, concatenated segments reproduce the input, and cross-backend
 self-consistency across every capability_sweep() backend.
 
 Run:
@@ -124,7 +124,7 @@ SPLIT_MODE_REALISTIC_TEXTS = [
 @pytest.mark.parametrize(
     "text", SPLIT_MODE_REALISTIC_TEXTS + list(malformed_utf8_corpus()) + vector_width_bracketing_strings()
 )
-def test_utf8_split_modes_backend_differential(backend_results, text):
+def test_utf8_split_modes_agree_across_backends(backend_results, text):
     """utf8_split_whitespaces must split identically across every SIMD backend on realistic, malformed, and
     lane-straddling inputs, compared as raw segment bytes so malformed UTF-8 sweeps without raising."""
     results = backend_results(

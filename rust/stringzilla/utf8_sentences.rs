@@ -38,8 +38,7 @@ pub type Utf8Sentences<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> = Utf8S
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stringzilla::fixtures::*;
-    use crate::stringzilla::utf8_tokens::tests::assert_steps_invariant;
+    use crate::testing::*;
 
     // A CR-LF pair and a U+2028 line separator: both Sep, forcing sentence and line breaks; CR-LF
     // is one grapheme.
@@ -54,7 +53,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_sentence_utf8_splits_steps_invariance() {
+    fn sentences_split_alike_at_every_batch_size() {
         assert_steps_invariant::<Sentences>(b"Hi, world! A second sentence.");
     }
 }

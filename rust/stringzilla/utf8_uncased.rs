@@ -403,7 +403,7 @@ mod tests {
     }
 
     #[test]
-    fn utf8_uncased_search_crossing_expansions() {
+    fn utf8_uncased_search_matches_across_expansions() {
         // Curated cross-expansion cases where folding changes byte counts and matches can
         // straddle multiple expanding codepoints. Swept across prefix paddings so the match
         // lands at varied alignments relative to the SIMD window boundaries.
@@ -438,7 +438,7 @@ mod tests {
     }
 
     #[test]
-    fn utf8_uncased_matches_empty_needle() {
+    fn utf8_uncased_matches_of_an_empty_needle_land_on_codepoint_boundaries() {
         let matches: Vec<_> = Utf8UncasedMatches::new(b"abc", b"").collect();
         assert_eq!(matches.len(), 4);
         assert!(matches.iter().all(|span| span.length == 0));

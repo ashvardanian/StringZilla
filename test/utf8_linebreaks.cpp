@@ -5,7 +5,7 @@
  *  @brief UAX-14 line-break (linewrap) tests: known-answer goldens, malformed-input safety, and the
  *      serial-vs-dispatched differential over hardened corpora.
  */
-#undef NDEBUG // ! Enable all assertions for testing
+#undef NDEBUG // ! A test's oracle must stay live in every build
 
 #if defined(STRINGZILLA_DEBUG)
 #undef STRINGZILLA_DEBUG
@@ -33,15 +33,15 @@ void test_utf8_linebreaks_unit() {
     // C++ range wrapper known-answer: the view must faithfully expose the kernel's segments.
     std::vector<std::string> const wrapped =
         sz::string_view_t("a\nb").utf8_linebreaks().template to<std::vector<std::string>>();
-    verify(wrapped.size() == 2 && wrapped[0] == "a\n" && wrapped[1] == "b" && "C++ utf8_linebreaks range");
+    expect_true(wrapped.size() == 2 && wrapped[0] == "a\n" && wrapped[1] == "b", "C++ utf8_linebreaks range");
 
     // Line-break counts for the shared prose fixtures; per-fixture rationale lives in test/utf8.hpp.
     auto count_linebreaks = [](std::string_view text) {
         return sz::string_view_t(text).utf8_linebreaks().template to<std::vector<std::string>>().size();
     };
-    verify(count_linebreaks(utf8_prose_hotel_review()) == 45 && "hotel_review linebreaks");
-    verify(count_linebreaks(utf8_prose_science_abstract()) == 43 && "science_abstract linebreaks");
-    verify(count_linebreaks(utf8_prose_news_lede()) == 32 && "news_lede linebreaks");
+    expect_equal(count_linebreaks(utf8_prose_hotel_review()), 45, "hotel_review linebreaks");
+    expect_equal(count_linebreaks(utf8_prose_science_abstract()), 43, "science_abstract linebreaks");
+    expect_equal(count_linebreaks(utf8_prose_news_lede()), 32, "news_lede linebreaks");
 }
 
 #pragma endregion Unit
@@ -56,8 +56,9 @@ void test_utf8_linebreaks_rules() { check_utf8_linebreaks_rules_(utf8_linebreaks
 #pragma region Safety
 
 /** Malformed-input safety of the line-break dispatch point. */
-void test_utf8_linebreaks_safety(test_context_t &context) {
-    check_utf8_linebreaks_safety_(context, utf8_linebreaks_dispatched);
+void test_utf8_linebreaks_safety() {
+    split_mix_generator_t generator {case_stream_key()};
+    check_utf8_linebreaks_safety_(generator, utf8_linebreaks_dispatched);
 }
 
 #pragma endregion Safety
@@ -65,8 +66,9 @@ void test_utf8_linebreaks_safety(test_context_t &context) {
 #pragma region Drivers
 
 /** Serial-vs-dispatched line differential over the dense and long-range corpora. */
-void test_utf8_linebreaks_all(test_context_t &context) {
-    check_utf8_linebreaks_equivalence_(context, utf8_linebreaks_dispatched);
+void test_utf8_linebreaks_all() {
+    split_mix_generator_t generator {case_stream_key()};
+    check_utf8_linebreaks_equivalence_(generator, utf8_linebreaks_dispatched);
 }
 
 #pragma endregion Drivers

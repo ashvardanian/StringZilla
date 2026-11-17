@@ -5,7 +5,7 @@
  *  @brief Levenshtein edit-distance tests: known answers, a textbook DP oracle, and the dispatched
  *      entry points against it.
  */
-#undef NDEBUG // ! Enable all assertions for testing
+#undef NDEBUG // ! A test's oracle must stay live in every build
 
 #undef STRINGZILLA_DEBUG
 #define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
@@ -16,7 +16,7 @@
 #include <stringzilla/stringzilla.hpp> // C++ string class replacement
 
 #include "cross.hpp"   // `levenshtein_backend_t`, `check_levenshtein_unit_`, `check_levenshtein_equivalence_`
-#include "harness.hpp" // `test_context_t`
+#include "harness.hpp" // `case_stream_key`
 
 namespace ashvardanian::stringzilla::test {
 
@@ -39,34 +39,37 @@ static levenshtein_backend_t const levenshtein_dispatched {"dispatched", levensh
 /** Known answers: the classic pairs, empties on either side, identity, the 64-symbol word boundary,
  *  and multi-byte runes, through the dispatched entry points. */
 void test_levenshtein_unit() {
-    verify(sz_levenshtein_length_bucket_(0) == 0);
-    verify(sz_levenshtein_length_bucket_(1) == 1);
-    verify(sz_levenshtein_length_bucket_(16384) == 15);
-    verify(sz_levenshtein_length_bucket_(16385) == 16);
-    verify(sz_levenshtein_length_bucket_(STRINGZILLA_SIZE_MAX) == sz_levenshtein_length_buckets_k - 1);
-    verify(sz_levenshtein_query_words(STRINGZILLA_SIZE_MAX) == STRINGZILLA_SIZE_MAX / 64 + 1);
+    expect_equal(sz_levenshtein_length_bucket_(0), 0);
+    expect_equal(sz_levenshtein_length_bucket_(1), 1);
+    expect_equal(sz_levenshtein_length_bucket_(16384), 15);
+    expect_equal(sz_levenshtein_length_bucket_(16385), 16);
+    expect_equal(sz_levenshtein_length_bucket_(STRINGZILLA_SIZE_MAX), sz_levenshtein_length_buckets_k - 1);
+    expect_equal(sz_levenshtein_query_words(STRINGZILLA_SIZE_MAX), STRINGZILLA_SIZE_MAX / 64 + 1);
     sz_levenshtein_engine_shape_t shape {65, 3, 0};
     sz_levenshtein_engine_layout_t layout {};
     // Two words of an eight-class table on the host, 128 bytes of masks after the head.
-    verify(sz_levenshtein_engine_layout_(1, sz_levenshtein_bytes_k, sz_cap_serial_k, &shape, 1, &layout));
-    verify(layout.head_bytes == 64 && layout.masks_offset == 64 && layout.offsets_offset == 192 &&
-           layout.lengths_offset == 256 && layout.classes_offset == 320 && layout.total_bytes == 576);
-    verify(!sz_levenshtein_engine_layout_(1, sz_levenshtein_bytes_k, sz_cap_serial_k, &shape, STRINGZILLA_SIZE_MAX - 63,
-                                          &layout));
-    verify(!sz_levenshtein_engine_layout_(1, sz_levenshtein_bytes_k, sz_cap_serial_k, &shape, STRINGZILLA_SIZE_MAX - 62,
-                                          &layout));
+    expect_true(sz_levenshtein_engine_layout_(1, sz_levenshtein_bytes_k, sz_cap_serial_k, &shape, 1, &layout));
+    expect_true(layout.head_bytes == 64 && layout.masks_offset == 64 && layout.offsets_offset == 192 &&
+                layout.lengths_offset == 256 && layout.classes_offset == 320 && layout.total_bytes == 576);
+    expect_true(!sz_levenshtein_engine_layout_(1, sz_levenshtein_bytes_k, sz_cap_serial_k, &shape,
+                                               STRINGZILLA_SIZE_MAX - 63, &layout));
+    expect_true(!sz_levenshtein_engine_layout_(1, sz_levenshtein_bytes_k, sz_cap_serial_k, &shape,
+                                               STRINGZILLA_SIZE_MAX - 62, &layout));
     shape = {0xFFFFFFFFu, 256, 0};
-    verify(sz_levenshtein_engine_layout_(1, sz_levenshtein_bytes_k, sz_cap_serial_k, &shape, 0, &layout) ==
-           (sizeof(sz_size_t) > 4 ? sz_true_k : sz_false_k));
+    expect_equal(sz_levenshtein_engine_layout_(1, sz_levenshtein_bytes_k, sz_cap_serial_k, &shape, 0, &layout),
+                 sizeof(sz_size_t) > 4 ? sz_true_k : sz_false_k);
     check_levenshtein_unit_(levenshtein_dispatched);
 }
 
 /** Degenerate inputs for the edit-distance family, asserting survival and the stated refusals.
  *  Answers are not the subject here: empties are accepted, a refused allocation is reported, and no
  *  failure writes an output. */
-void test_levenshtein_safety(test_context_t &) { check_levenshtein_safety_(levenshtein_dispatched); }
+void test_levenshtein_safety() { check_levenshtein_safety_(levenshtein_dispatched); }
 
 /** Drives the oracle sweeps and the serial-versus-dispatched differential. */
-void test_levenshtein_all(test_context_t &context) { check_levenshtein_equivalence_(context, levenshtein_dispatched); }
+void test_levenshtein_all() {
+    split_mix_generator_t generator {case_stream_key()};
+    check_levenshtein_equivalence_(generator, levenshtein_dispatched);
+}
 
 } // namespace ashvardanian::stringzilla::test

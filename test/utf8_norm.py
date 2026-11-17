@@ -8,7 +8,7 @@ Covers: NFC/NFD/NFKC/NFKD/NFKC_Casefold normalization and denormalization-violat
 bytes input, ligature and combining-mark expansions, case folding and dropped default ignorables,
 idempotence, whole collections normalized in one call, and cross-backend agreement over
 precomposed/decomposed text, malformed UTF-8, and random ASCII corpora.
-Compares against: CPython's unicodedata.normalize, including an exhaustive sweep of the algorithmic
+Baselines: CPython's unicodedata.normalize, including an exhaustive sweep of the algorithmic
 Hangul syllable block and a rebuild of toNFKC_Casefold, ICU's Normalizer2 for an exhaustive
 all-codepoints sweep and random multi-codepoint sequences, the official UCD NormalizationTest.txt
 vectors, a canonical-combining-class ordering invariant checked directly against the CCC table, and
@@ -33,7 +33,7 @@ from base import (
     assert_backends_agree,
     get_random_string,
     malformed_utf8_corpus,
-    scale_iterations,
+    scaled_iterations,
     vector_width_bracketing_strings,
 )
 from utf8_helpers import combining_scrambles, icu_normalizer
@@ -43,7 +43,7 @@ import stringzilla as sz
 # region Unit
 
 
-def test_unit_utf8_norm():
+def test_utf8_norm_matches_unicodedata():
     """Normalizes ASCII unchanged, converts precomposed/decomposed café and ligatures like `ﬁ` between
     NFC/NFD/NFKC/NFKD, and is idempotent under repeated application.
     Matches `unicodedata.normalize` across several accented and ligature samples for every form."""
@@ -89,7 +89,7 @@ def test_unit_utf8_norm():
 
 
 @pytest.mark.parametrize(
-    "input_str, form, expected",
+    ("input_str", "form", "expected"),
     [
         ("ﬁ", "NFKD", b"fi"),  # fi ligature compatibility decomposition
         ("ﬁ", "NFKC", b"fi"),  # fi ligature compatibility composition
@@ -106,7 +106,7 @@ def test_utf8_norm_expansions(input_str, form, expected):
     assert sz.utf8_norm(input_str, form) == expected
 
 
-def test_unit_utf8_find_denormalized():
+def test_utf8_find_denormalized_locates_the_first_violation():
     """`utf8_find_denormalized` returns None for already-normalized ASCII and for text already matching
     the requested form, and a valid offset when a precomposed or decomposed café violates the other form."""
     # Pure ASCII is always normalized in every form
@@ -141,9 +141,7 @@ def test_unit_utf8_find_denormalized():
     assert sz.utf8_find_denormalized("fi", "NFKD") is None
 
     # ValueError on unknown form
-    import pytest as _pytest
-
-    with _pytest.raises(ValueError, match="unknown form"):
+    with pytest.raises(ValueError, match="unknown form"):
         sz.utf8_find_denormalized("hello", "XYZ")
 
 
@@ -241,7 +239,7 @@ def test_utf8_norm_canonical_ordering(rng: Random, combining_classes):
     """Independent canonical-ordering invariant: within each combining run, NFD output must order marks by
     non-decreasing Canonical_Combining_Class. Checked over random non-canonical combining scrambles, using the
     CCC table directly and needing no external normalizer."""
-    for text in combining_scrambles(combining_classes, rng, scale_iterations(300)):
+    for text in combining_scrambles(combining_classes, rng, scaled_iterations(300)):
         normalized = sz.utf8_norm(text, "NFD").decode("utf-8")
         previous_class = 0
         for character in normalized:
@@ -270,7 +268,7 @@ def test_utf8_norm_all_codepoints_icu(form: str):
     skipped via `Char.isdefined` rather than flagged as spurious mismatches. This is the version-pinned twin
     of the case-folding all-codepoints sweep, independent of the host Python's `unicodedata` version.
     """
-    icu = pytest.importorskip("icu", reason="PyICU not installed")
+    icu = pytest.importorskip("icu", reason="PyICU is not installed")
     normalize = icu_normalizer(form)
 
     mismatches = []
@@ -320,7 +318,7 @@ def test_utf8_norm_hangul_syllables(form: str):
 def test_utf8_norm_random_sequences_icu(form: str, rng: Random):
     """Multi-codepoint normalization vs ICU: random base-letter + combining-mark sequences exercise composition
     and canonical ordering across codepoint boundaries, which the exhaustive single-codepoint sweep cannot reach."""
-    icu = pytest.importorskip("icu", reason="PyICU not installed")  # noqa: F841
+    icu = pytest.importorskip("icu", reason="PyICU is not installed")  # noqa: F841
     normalize = icu_normalizer(form)
 
     # Bases + combining marks all predate Unicode 15.1, so StringZilla and any modern ICU agree on them.
@@ -329,7 +327,7 @@ def test_utf8_norm_random_sequences_icu(form: str, rng: Random):
     alphabet = list(bases) + combining
 
     mismatches = []
-    for _ in range(scale_iterations(500)):
+    for _ in range(scaled_iterations(500)):
         text = "".join(rng.choice(alphabet) for _ in range(rng.randint(1, 16)))
         expected = normalize(text).encode("utf-8")
         got = sz.utf8_norm(text, form)
@@ -341,7 +339,7 @@ def test_utf8_norm_random_sequences_icu(form: str, rng: Random):
     )
 
 
-def test_utf8_norm_prose():
+def test_utf8_prose_normalizes_like_icu():
     """Realistic paragraphs normalize bit-identically to ICU across all four forms; NFD content is detected."""
     from utf8_helpers import (
         PROSE_DEVANAGARI_TIP,
@@ -382,7 +380,7 @@ UTF8_NORM_BACKEND_DIFFERENTIAL_TEXTS = [
 
 @pytest.mark.parametrize("form", NORMALIZATION_FORMS)
 @pytest.mark.parametrize("text", UTF8_NORM_BACKEND_DIFFERENTIAL_TEXTS)
-def test_utf8_norm_backend_differential(backend_results, text, form):
+def test_utf8_norm_agrees_across_backends(backend_results, text, form):
     """utf8_norm must agree across every SIMD backend and match CPython's unicodedata.normalize under
     every config, for precomposed/decomposed forms, ligatures, combining-mark stacks, and inputs
     straddling the 16/32/64-byte SIMD lanes."""
@@ -393,14 +391,14 @@ def test_utf8_norm_backend_differential(backend_results, text, form):
 
 @pytest.mark.parametrize("form", NORMALIZATION_FORMS)
 @pytest.mark.parametrize("raw", malformed_utf8_corpus())
-def test_utf8_norm_backend_differential_malformed(backend_results, raw, form):
+def test_utf8_norm_agrees_across_backends_on_malformed_text(backend_results, raw, form):
     """Malformed UTF-8 must normalize identically and never crash across every SIMD backend."""
     results = backend_results(lambda capabilities: sz.utf8_norm(raw, form, capabilities=capabilities))
     assert_backends_agree(results, format_inputs=lambda: f"{raw.hex()} form={form}")
 
 
 @pytest.mark.parametrize("form", NORMALIZATION_FORMS)
-def test_utf8_norm_backend_differential_random(backend_results, rng: Random, form):
+def test_utf8_norm_agrees_across_backends_on_random_text(backend_results, rng: Random, form):
     """Random ASCII corpora must normalize identically across every SIMD backend."""
     text = get_random_string(rng)
     results = backend_results(lambda capabilities: sz.utf8_norm(text, form, capabilities=capabilities))
@@ -408,7 +406,7 @@ def test_utf8_norm_backend_differential_random(backend_results, rng: Random, for
 
 
 @pytest.mark.parametrize("form", NORMALIZATION_FORMS + ("NFKC_Casefold",))
-def test_strings_normalize_backend_differential(backend_results, form: str):
+def test_strings_normalize_agrees_across_backends(backend_results, form: str):
     """`Strings.normalize` brings a whole collection into `form` in one call, agreeing across every backend with
     `unicodedata.normalize`, or the rebuild of toNFKC_Casefold, over a tape and a slice whose offsets start
     past zero."""

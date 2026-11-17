@@ -388,7 +388,7 @@ impl<'a, Kernel: SegmenterKernel, const STEPS: usize> Iterator for Utf8Segments<
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     extern crate alloc;
     use alloc::format;
     use alloc::vec;
@@ -396,18 +396,8 @@ pub(crate) mod tests {
 
     use super::*;
 
-    /// Segments tile the input, so the yielded segments must match regardless of the batch
-    /// size `STEPS`; a tiny batch (STEPS == 1) exercises the refill seam on every boundary
-    /// the kernel reports.
-    pub(crate) fn assert_steps_invariant<Kernel: SegmenterKernel>(text: &[u8]) {
-        let forward: Vec<&[u8]> = Utf8Segments::<Kernel, ITERATORS_DEFAULT_STEPS>::new(text).collect();
-        assert_eq!(Utf8Segments::<Kernel, 1>::with_steps(text).collect::<Vec<_>>(), forward);
-        assert_eq!(Utf8Segments::<Kernel, 3>::with_steps(text).collect::<Vec<_>>(), forward);
-        assert_eq!(Utf8Segments::<Kernel, 65>::with_steps(text).collect::<Vec<_>>(), forward);
-    }
-
     #[test]
-    fn utf8_delimiters() {
+    fn utf8_split_delimiters_yields_the_text_between_delimiters() {
         // `split_delimiters` yields the content between ',', ' ', U+2014; skip_empty
         // drops the empties.
         let toks: Vec<&[u8]> = "Hi, world\u{2014}foo".as_bytes().sz_utf8_split_delimiters().skip_empty().collect();
@@ -418,7 +408,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn utf8_split_delimiters_sparse_batches() {
+    fn utf8_split_delimiters_keeps_letters_across_sparse_batches() {
         // Sparse delimiters with long undelimited runs: each batch fills on the last delimiter its
         // vector window holds, and the letters between that delimiter and the window edge must
         // survive into the next segment. Dense inputs cannot reach this path, since a filled batch
@@ -440,7 +430,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn utf8_split_modes() {
+    fn utf8_split_modes_yield_separators_or_the_text_between() {
         // Scheme C: the bare name yields the separators; `split_` yields the content between.
         let text = "a b  c".as_bytes();
         let between: Vec<&[u8]> = text.sz_utf8_split_whitespaces().collect();
@@ -480,21 +470,21 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn iter_newline_utf8_splits() {
+    fn utf8_split_newlines_yields_each_line() {
         let text = b"a\nb\r\nc\n\nd";
         let lines: Vec<_> = Utf8SplitNewlines::new(text).collect();
         assert_eq!(lines, vec![b"a", b"b", b"c", &b""[..], b"d"]);
     }
 
     #[test]
-    fn iter_newline_utf8_splits_unicode() {
+    fn utf8_split_newlines_breaks_at_unicode_separators() {
         let text = "Hello\u{2028}World".as_bytes(); // LINE SEPARATOR
         let lines: Vec<_> = Utf8SplitNewlines::new(text).collect();
         assert_eq!(lines, vec!["Hello".as_bytes(), "World".as_bytes()]);
     }
 
     #[test]
-    fn iter_whitespace_utf8_splits() {
+    fn utf8_split_whitespaces_yields_a_part_per_delimiter() {
         // KEEP (default): every one of the 8 whitespace delimiters yields a segment, so leading,
         // trailing, and inner runs all surface empties (str::split semantics, matching C++/Python).
         let text = b"  a \t b\n\nc  ";
@@ -509,7 +499,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn iter_whitespace_utf8_splits_keep_default() {
+    fn utf8_split_whitespaces_keeps_empty_parts_by_default() {
         // The simple example from the doc comment: KEEP yields the surrounding empties,
         // skip_empty drops them.
         let text = b"  hi  ";
@@ -520,7 +510,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn iter_whitespace_utf8_splits_unicode() {
+    fn utf8_split_whitespaces_breaks_at_unicode_spaces() {
         let text = "a\u{3000}b\u{2000}c".as_bytes(); // IDEOGRAPHIC SPACE, EN QUAD
         let segments: Vec<_> = Utf8SplitWhitespaces::new(text).collect();
         assert_eq!(segments, vec![b"a", b"b", b"c"]); // single delimiters between words: no empties
@@ -529,7 +519,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn iter_whitespace_utf8_splits_skip_empty_all_whitespace() {
+    fn utf8_split_whitespaces_of_only_whitespace_skips_to_nothing() {
         let text = b"   \t  ";
         let kept: Vec<_> = Utf8SplitWhitespaces::new(text).collect();
         assert_eq!(kept.len(), 7); // 6 delimiters → 7 (all empty) segments
@@ -539,7 +529,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn iter_newline_utf8_splits_skip_empty() {
+    fn utf8_split_newlines_skip_empty_drops_empty_lines() {
         let text = b"a\nb\r\nc\n\nd";
         // Default KEEP: the back-to-back "\n\n" yields an empty line.
         let kept: Vec<_> = Utf8SplitNewlines::new(text).collect();
@@ -550,7 +540,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn iter_newline_utf8_splits_steps_invariance() {
+    fn utf8_split_newlines_alike_at_every_batch_size() {
         // The yielded segments must be identical regardless of the batch size `STEPS`; a tiny batch
         // (STEPS == 1) exercises the refill/trailing-segment seam on every delimiter, while large
         // batches fit the whole input in one call.
@@ -571,7 +561,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn iter_whitespace_utf8_splits_steps_invariance() {
+    fn utf8_split_whitespaces_alike_at_every_batch_size() {
         let text = b"  a \t b\n\nc  ";
         let expected: Vec<&[u8]> = vec![b"", b"", b"a", b"", b"", b"b", b"", b"c", b"", b""];
         assert_eq!(Utf8SplitWhitespaces::<1>::with_steps(text).collect::<Vec<_>>(), expected);
@@ -582,7 +572,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn iter_newline_utf8_splits_trailing_newline() {
+    fn utf8_split_newlines_ends_with_an_empty_line_after_a_trailing_break() {
         // "\r\na\r\n\r\nb\r\n" should produce ["", "a", "", "b", ""]
         let text = b"\r\na\r\n\r\nb\r\n";
         let lines: Vec<&[u8]> = Utf8SplitNewlines::new(text).collect();
@@ -592,7 +582,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn iter_newline_utf8_splits_no_trailing() {
+    fn utf8_split_newlines_ends_at_the_last_line_without_a_trailing_break() {
         let text = b"a\nb\nc";
         let lines: Vec<&[u8]> = Utf8SplitNewlines::new(text).collect();
         assert_eq!(lines.len(), 3);
@@ -600,7 +590,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn iter_newline_utf8_splits_empty_string() {
+    fn utf8_split_newlines_of_nothing_yields_one_empty_line() {
         let text = b"";
         let lines: Vec<&[u8]> = Utf8SplitNewlines::new(text).collect();
         assert_eq!(lines.len(), 1);
@@ -608,7 +598,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn iter_newline_utf8_splits_single_newline() {
+    fn utf8_split_newlines_of_one_break_yields_two_empty_lines() {
         let text = b"\n";
         let lines: Vec<&[u8]> = Utf8SplitNewlines::new(text).collect();
         assert_eq!(lines.len(), 2);

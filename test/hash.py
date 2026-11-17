@@ -5,7 +5,7 @@ Mirrors the C++ test/hash.cpp translation unit.
 
 Covers: seeded hash and the incremental Hasher, multiseed tuples and output buffers, bytesum,
 one-shot and progressive SHA-256, and HMAC-SHA-256 including its keyword-argument surface.
-Compares against: Python hashlib and hmac, and self-consistency between the standalone
+Baselines: Python hashlib and hmac, and self-consistency between the standalone
 functions, the String methods, and the incremental engines.
 
 Run:
@@ -25,37 +25,32 @@ from array import array
 from random import Random
 
 import pytest
+from base import (
+    VECTOR_WIDTH_LENGTHS,
+    assert_backends_agree,
+    differential_bodies,
+    get_random_string,
+    numpy_available,
+)
 
 import stringzilla as sz
 from stringzilla import String
 
-# NumPy is optional; the naked `except` also catches PyPy, which fails this import with an error
-# other than `ImportError`.
-try:
+if numpy_available:
     import numpy as np
-except:  # noqa: E722
-    pass
-
-from base import (
-    VECTOR_WIDTH_LENGTHS,
-    StreamKey,
-    assert_backends_agree,
-    differential_bodies,
-    get_random_string,
-)
 
 # region Unit
 
 
 @pytest.mark.parametrize("body", ["", "hello", "world", "abcdefg", "a" * 32])
-def test_hash_basic_equivalence(body: str, seed: StreamKey):
+def test_hash_basic_equivalence(body: str, seed: int):
     """The standalone `sz.hash` and the `String.hash` method return the same seeded digest for the same body."""
     hash_seeded = sz.hash(body, seed=seed)
     hash_member = sz.String(body).hash(seed=seed)
     assert hash_seeded == hash_member
 
 
-def test_hasher_incremental_vs_one_shot(seed: StreamKey):
+def test_hasher_incremental_vs_one_shot(seed: int):
     """The incremental Hasher digest equals the one-shot sz.hash of the concatenated input."""
     data_full = b"hello world"
     data_prefix = b"hello "
@@ -71,7 +66,7 @@ def test_hasher_incremental_vs_one_shot(seed: StreamKey):
     assert streamed_hash == expected_hash
 
 
-def test_hasher_reset_and_hexdigest(seed: StreamKey):
+def test_hasher_reset_and_hexdigest(seed: int):
     """`Hasher.hexdigest()` matches `format(digest, "016x")`, and `reset()` followed by the same update
     reproduces the same digest."""
     data = b"some test payload"
@@ -79,7 +74,9 @@ def test_hasher_reset_and_hexdigest(seed: StreamKey):
     hasher.update(data)
     streamed_hash = hasher.digest()
     streamed_hex = hasher.hexdigest()
-    assert isinstance(streamed_hex, str) and len(streamed_hex) == 16 and streamed_hex == format(streamed_hash, "016x")
+    assert isinstance(streamed_hex, str)
+    assert len(streamed_hex) == 16
+    assert streamed_hex == format(streamed_hash, "016x")
 
     hasher.reset()
     hasher.update(data)
@@ -118,7 +115,7 @@ def test_hash_multiseed_errors():
         sz.hash_multiseed("x", [1, 2, 3])
     with pytest.raises(TypeError):  # Wrong item size (32-bit) is rejected
         sz.hash_multiseed("x", array("I", [1, 2, 3]))
-    with pytest.raises(ValueError):  # Output buffer too small for the seed count
+    with pytest.raises(ValueError, match="need 24 for 3 seeds"):
         sz.hash_multiseed("x", seeds, out=array("Q", [0]))
 
 
@@ -220,7 +217,7 @@ def test_sha256_lanes_strings(lanes_count: int, rng: Random):
         assert sz.Sha256s(lanes_count).update(texts).digest() == expected
 
 
-@pytest.mark.skipif("np" not in globals(), reason="NumPy is not installed")
+@pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
 @pytest.mark.parametrize("lanes_count", [0, 1, 8, 17])
 def test_sha256_digests_into_matrix(lanes_count: int):
     """Digests land in a caller's `(lanes, 32)` byte matrix, one row per lane, with no allocation."""
@@ -251,11 +248,11 @@ def test_sha256_lanes_recycling():
 def test_sha256_lanes_errors():
     """`sz.Sha256s` rejects mismatched lane counts and unusable output buffers."""
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="one chunk per lane"):
         sz.Sha256s(2).update([b"only-one-chunk"])
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="one chunk per lane"):
         sz.Sha256s(2).update(sz.Strings(["only-one-chunk"]))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="need 64 for 2 digests"):
         sz.Sha256s(2).digest(out=bytearray(63))
     with pytest.raises(TypeError):
         sz.Sha256s(2).digest(out=array("Q", [0] * 8))
@@ -314,7 +311,7 @@ def test_hmac_sha256_many(messages_count: int, key_length: int, rng: Random):
     assert sz.hmac_sha256(key, sz.Strings(messages)) == expected
 
 
-@pytest.mark.skipif("np" not in globals(), reason="NumPy is not installed")
+@pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
 def test_hmac_sha256_into_matrix():
     """Tags land in a caller's `(messages, 32)` byte matrix, one row per message."""
 
@@ -380,7 +377,7 @@ def test_hmac_sha256_kwargs():
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
-def test_unit_backend_differential_bytesum(backend_results, length: int, rng: Random):
+def test_bytesum_agrees_across_backends(backend_results, length: int, rng: Random):
     """`sz.bytesum` must agree across every backend and match a plain Python byte-sum oracle."""
     for body in differential_bodies(length, rng):
         oracle = sum(body.encode())
@@ -391,7 +388,7 @@ def test_unit_backend_differential_bytesum(backend_results, length: int, rng: Ra
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
-def test_unit_backend_differential_hash(backend_results, length: int, seed: StreamKey, rng: Random):
+def test_hash_agrees_across_backends(backend_results, length: int, seed: int, rng: Random):
     """`sz.hash` has no Python-native oracle, so every backend must at least agree with every other one,
     for the standalone function and the `String` method alike, across random/tiled/all-same-char bodies."""
     for body in differential_bodies(length, rng):
@@ -404,7 +401,7 @@ def test_unit_backend_differential_hash(backend_results, length: int, seed: Stre
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
-def test_unit_backend_differential_hash_multiseed(backend_results, length: int, rng: Random):
+def test_hash_multiseed_agrees_across_backends(backend_results, length: int, rng: Random):
     """`sz.hash_multiseed` (both the tuple-returning and output-buffer forms) must agree across every
     backend, for random/tiled/all-same-char bodies."""
     from array import array
@@ -426,21 +423,7 @@ def test_unit_backend_differential_hash_multiseed(backend_results, length: int, 
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
-@pytest.mark.parametrize("nonce", [0, 1, 42, 314159])
-def test_unit_backend_differential_fill_random(backend_results, length, nonce):
-    """`sz.fill_random` must produce identical bytes from every backend for a fixed nonce, there is no
-    Python oracle, so backend self-agreement is the only correctness signal."""
-
-    def fill(capabilities):
-        buffer = bytearray(length)
-        sz.fill_random(buffer, nonce=nonce, capabilities=capabilities)
-        return bytes(buffer)
-
-    assert_backends_agree(backend_results(fill))
-
-
-@pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
-def test_unit_backend_differential_sha256(capabilities, length: int, rng: Random):
+def test_sha256_matches_hashlib_on_every_backend(capabilities, length: int, rng: Random):
     """`sz.sha256` and the `String.sha256()` method must match `hashlib.sha256`, and so must the
     incremental `sz.Sha256` class under every individual backend config, not merely agree with each
     other, since SHA-256 has a fully independent, standard-library oracle."""
@@ -458,7 +441,7 @@ def test_unit_backend_differential_sha256(capabilities, length: int, rng: Random
 
 
 @pytest.mark.parametrize("length", [0, 1, 31, 32, 33, 64, 65, 128, 257, 1024])
-def test_unit_backend_differential_sha256_chunked(capabilities, length: int, rng: Random):
+def test_chunked_sha256_matches_hashlib_on_every_backend(capabilities, length: int, rng: Random):
     """Chunked `sz.Sha256.update()`, `.reset()`, and `.copy()` must reach the oracle digest under every
     backend config, exercising the streaming state machine rather than just the one-shot entry point."""
     text = get_random_string(rng, length=length)

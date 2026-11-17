@@ -966,14 +966,14 @@ mod tests {
     use crate as sz;
 
     #[test]
-    fn metadata() {
+    fn enabled_cpu_capabilities_name_serial() {
         let names = Capabilities::enabled_cpu().to_string();
         assert!(names.split(',').any(|name| name == "serial"), "{names}");
     }
 
     #[test]
     fn capability_names_match_the_c_table() {
-        let names: [&str; CAPABILITIES.len()] = [
+        let names = [
             "serial",
             "westmere",
             "goldmont",
@@ -1002,8 +1002,9 @@ mod tests {
             "cdna5",
             "metal",
         ];
+        assert_eq!(Capabilities::ANY.iter().count(), names.len());
         let mut previous = 0;
-        for (capability, name) in CAPABILITIES.into_iter().zip(names) {
+        for (capability, name) in Capabilities::ANY.iter().zip(names) {
             assert!(capability as u64 > previous && (capability as u64).is_power_of_two());
             assert_eq!(capability.to_string(), name);
             previous = capability as u64;
@@ -1098,7 +1099,7 @@ mod tests {
     }
 
     #[test]
-    fn const_apis() {
+    fn const_constructors_build_at_compile_time() {
         // Each constant is built at compile time, so dropping a `const fn` breaks the build,
         // not this run.
         const SPAN: sz::IndexSpan = sz::IndexSpan::new(6, 5);
@@ -1118,7 +1119,7 @@ mod tests {
 
     /// A zero-sized allocation still satisfies the requested alignment.
     #[test]
-    fn unified_allocator_empty_layout() {
+    fn unified_allocator_aligns_an_empty_layout() {
         use core::alloc::{Allocator, Layout};
 
         let cpu = Stream::default(Capabilities::enabled_cpu());
@@ -1175,7 +1176,7 @@ mod tests {
         use alloc::vec::Vec;
 
         let Ok(capabilities) = Capabilities::enabled_cuda(0) else {
-            return;
+            return crate::testing::skipped("no CUDA device");
         };
         let gpu = Stream::new(capabilities, 0).unwrap();
         let cpu = Stream::default(Capabilities::enabled_cpu());
