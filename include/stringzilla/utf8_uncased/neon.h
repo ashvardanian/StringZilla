@@ -420,7 +420,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_ascii_4probe_neon_( //
  *  excluding the caseless '×' C3 97), and 'ß' (U+00DF, C3 9F) → "ss" where both bytes of the
  *  pair become 's' so the folded image matches the needle's "ss".
  */
-STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_western_europe_fold_u8x16x2_neon_(uint8x16x2_t text_u8x16x2) {
+STRINGZILLA_OUTLINED uint8x16x2_t sz_utf8_uncased_search_western_europe_fold_u8x16x2_neon_(uint8x16x2_t text_u8x16x2) {
     uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_ascii_fold_u8x16x2_neon_(text_u8x16x2);
     uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_previous_bytes_u8x16x2_neon_(text_u8x16x2);
 
@@ -475,8 +475,8 @@ STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_western_europe_fold_u8
  *  Lake's k-masks, including the boundary behavior where a lead at lane 31 defers to the next
  *  chunk, which overlaps this one.
  */
-STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_western_europe_alarm_u8x16x2_neon_(uint8x16x2_t text_u8x16x2,
-                                                                                         sz_u32_t load_mask) {
+STRINGZILLA_OUTLINED sz_u32_t sz_utf8_uncased_search_western_europe_alarm_u8x16x2_neon_(uint8x16x2_t text_u8x16x2,
+                                                                                        sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_u8x16x2_t_` signature
 
     // The driver only tests the danger mask for non-emptiness, so the whole alarm stays in the
@@ -549,7 +549,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_western_europe_neon_( //
  *  In the C4 B9-BD sub-range, 'ĸ' (C4 B8) is caseless and 'Ŀ' (C4 BF) folds across leads to 'ŀ' (C5
  *  80), so it is routed through the alarm instead.
  */
-STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_central_europe_fold_u8x16x2_neon_(uint8x16x2_t text_u8x16x2) {
+STRINGZILLA_OUTLINED uint8x16x2_t sz_utf8_uncased_search_central_europe_fold_u8x16x2_neon_(uint8x16x2_t text_u8x16x2) {
     uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_ascii_fold_u8x16x2_neon_(text_u8x16x2);
     uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_previous_bytes_u8x16x2_neon_(text_u8x16x2);
     uint8x16x4_t const c4_deltas_lut_u8x16x4 = vld1q_u8_x4(sz_utf8_uncased_central_c4_deltas_lut_);
@@ -596,8 +596,8 @@ STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_central_europe_fold_u8
  *  - C5 B8: 'Ÿ' (U+0178) → 'ÿ' (C3 BF), crosses lead bytes
  *  - EF AC 80-86: Latin ligatures 'ﬀ'-'ﬆ' → ASCII pairs/triples
  */
-STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_central_europe_alarm_u8x16x2_neon_(uint8x16x2_t text_u8x16x2,
-                                                                                         sz_u32_t load_mask) {
+STRINGZILLA_OUTLINED sz_u32_t sz_utf8_uncased_search_central_europe_alarm_u8x16x2_neon_(uint8x16x2_t text_u8x16x2,
+                                                                                        sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_u8x16x2_t_` signature
 
     // Byte-mask danger detection anchored at the second byte; the lead comes from the `previous`
@@ -665,7 +665,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_central_europe_neon_( //
  *  Extended Cyrillic (D2/D3) needles are banned at classification time, so only the D0
  *  continuations need any folding.
  */
-STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_cyrillic_fold_u8x16x2_neon_(uint8x16x2_t text_u8x16x2) {
+STRINGZILLA_OUTLINED uint8x16x2_t sz_utf8_uncased_search_cyrillic_fold_u8x16x2_neon_(uint8x16x2_t text_u8x16x2) {
     uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_ascii_fold_u8x16x2_neon_(text_u8x16x2);
     uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_previous_bytes_u8x16x2_neon_(text_u8x16x2);
     uint8x16x2_t next_bytes_u8x16x2 = sz_utf8_uncased_next_bytes_u8x16x2_neon_(text_u8x16x2);
@@ -707,8 +707,8 @@ STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_cyrillic_fold_u8x16x2_
  *  through the serial danger-zone scanner. As the E1 B2 pair is absent from virtually all real
  *  Cyrillic text, the third-byte refinement hides behind a branch and the hot path is two compares.
  */
-STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_cyrillic_alarm_u8x16x2_neon_(uint8x16x2_t text_u8x16x2,
-                                                                                   sz_u32_t load_mask) {
+STRINGZILLA_OUTLINED sz_u32_t sz_utf8_uncased_search_cyrillic_alarm_u8x16x2_neon_(uint8x16x2_t text_u8x16x2,
+                                                                                  sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_u8x16x2_t_` signature
 
     // E1 B2 is dangerous only when the third (next) byte folds, i.e. lands in 80-88. Anchored at the
@@ -761,7 +761,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_cyrillic_neon_( //
  *  disjoint byte positions. The D4 range checks only the lower bound, mirroring the reference:
  *  valid continuation bytes never exceed BF.
  */
-STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_armenian_fold_u8x16x2_neon_(uint8x16x2_t text_u8x16x2) {
+STRINGZILLA_OUTLINED uint8x16x2_t sz_utf8_uncased_search_armenian_fold_u8x16x2_neon_(uint8x16x2_t text_u8x16x2) {
     uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_ascii_fold_u8x16x2_neon_(text_u8x16x2);
     uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_previous_bytes_u8x16x2_neon_(text_u8x16x2);
 
@@ -809,8 +809,8 @@ STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_armenian_fold_u8x16x2_
  *  EF AC neighbors are the Latin/Hebrew presentation forms, which never appear inside Armenian
  *  haystacks, so the coarser test costs nothing in practice.
  */
-STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_armenian_alarm_u8x16x2_neon_(uint8x16x2_t text_u8x16x2,
-                                                                                   sz_u32_t load_mask) {
+STRINGZILLA_OUTLINED sz_u32_t sz_utf8_uncased_search_armenian_alarm_u8x16x2_neon_(uint8x16x2_t text_u8x16x2,
+                                                                                  sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_u8x16x2_t_` signature
 
     // Two two-byte pairs anchored at their second byte; lead from `previous`, gated by `vmaxvq_u8`.
@@ -871,7 +871,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_armenian_neon_( //
  *  class masks are assembled per register first, then a single 32-byte @c next_bytes carries the
  *  high register's lane 0 to the low register's lane 15.
  */
-STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_greek_fold_u8x16x2_neon_(uint8x16x2_t text_u8x16x2) {
+STRINGZILLA_OUTLINED uint8x16x2_t sz_utf8_uncased_search_greek_fold_u8x16x2_neon_(uint8x16x2_t text_u8x16x2) {
     uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_ascii_fold_u8x16x2_neon_(text_u8x16x2);
     uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_previous_bytes_u8x16x2_neon_(text_u8x16x2);
 
@@ -937,8 +937,8 @@ STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_greek_fold_u8x16x2_neo
  *  never fire - but when they do, the driver's step−2 retreat keeps a 3-byte danger
  *  sequence straddling the chunk edge fully visible in the next chunk.
  */
-STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_greek_alarm_u8x16x2_neon_(uint8x16x2_t text_u8x16x2,
-                                                                                sz_u32_t load_mask) {
+STRINGZILLA_OUTLINED sz_u32_t sz_utf8_uncased_search_greek_alarm_u8x16x2_neon_(uint8x16x2_t text_u8x16x2,
+                                                                               sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_u8x16x2_t_` signature
 
     // Pair danger anchored at the second byte (lead from `previous`); the polytonic & archaic leads
@@ -1015,7 +1015,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_greek_neon_( //
  *  The third-byte rule needs the byte two lanes back, so a second @c previous_bytes pass
  *  materializes it; all rule masks flag disjoint positions and merge into one offset add.
  */
-STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_vietnamese_fold_u8x16x2_neon_(uint8x16x2_t text_u8x16x2) {
+STRINGZILLA_OUTLINED uint8x16x2_t sz_utf8_uncased_search_vietnamese_fold_u8x16x2_neon_(uint8x16x2_t text_u8x16x2) {
     uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_ascii_fold_u8x16x2_neon_(text_u8x16x2);
     uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_previous_bytes_u8x16x2_neon_(text_u8x16x2);
     uint8x16x2_t previous2_bytes_u8x16x2 = sz_utf8_uncased_previous_bytes_u8x16x2_neon_(previous_bytes_u8x16x2);
@@ -1088,8 +1088,8 @@ STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_vietnamese_fold_u8x16x
  *  compare is exactly as safe-negative on tail chunks. Unlike the other alarms, the result is
  *  shifted back to the sequence-start positions, mirroring the reference bit-for-bit.
  */
-STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_vietnamese_alarm_u8x16x2_neon_(uint8x16x2_t text_u8x16x2,
-                                                                                     sz_u32_t load_mask) {
+STRINGZILLA_OUTLINED sz_u32_t sz_utf8_uncased_search_vietnamese_alarm_u8x16x2_neon_(uint8x16x2_t text_u8x16x2,
+                                                                                    sz_u32_t load_mask) {
     sz_unused_(load_mask); // Padded loads zero absent bytes, so range compares are safe-negative
 
     // All hazards anchored at their second byte: lead from `previous`, the E1 BA expanding third
@@ -1155,8 +1155,8 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_vietnamese_neon_( //
  *  safe-negative. Like the reference, bit-for-bit, the result is shifted back to the sequence-start
  *  positions of each flagged sequence.
  */
-STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_georgian_alarm_u8x16x2_neon_(uint8x16x2_t text_u8x16x2,
-                                                                                   sz_u32_t load_mask) {
+STRINGZILLA_OUTLINED sz_u32_t sz_utf8_uncased_search_georgian_alarm_u8x16x2_neon_(uint8x16x2_t text_u8x16x2,
+                                                                                  sz_u32_t load_mask) {
     sz_unused_(load_mask); // Padded loads zero absent bytes, so range compares are safe-negative
 
     // E1 B2 = Mtavruli; E1 82 refines on the A0-E5 third (next) byte for Asomtavruli; E2 B4 =

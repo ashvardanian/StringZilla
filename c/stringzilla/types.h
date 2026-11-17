@@ -232,11 +232,11 @@
  *  STRINGZILLA_API           public function or kernel: once in the library, header-inline in header-only builds
  *  STRINGZILLA_CONSTEXPR     internal helper, compiler decides inlining
  *  STRINGZILLA_INLINE        internal helper forced inline, structural: devirtualizing driver loops
- *  STRINGZILLA_OUTLINED_     internal helper forced out-of-line
+ *  STRINGZILLA_OUTLINED     internal helper forced out-of-line
  *  STRINGZILLA_DEVICE        CUDA or HIP device helper forced inline
  *  @endverbatim
  *
- *  @c STRINGZILLA_OUTLINED_ omits @c inline, as GCC ignores @c noinline on an @c inline function.
+ *  @c STRINGZILLA_OUTLINED omits @c inline, as GCC ignores @c noinline on an @c inline function.
  */
 #define STRINGZILLA_C_INLINE_ inline static
 
@@ -248,16 +248,16 @@
 
 #if defined(_MSC_VER)
 #define STRINGZILLA_INLINE __forceinline static
-#define STRINGZILLA_OUTLINED_ __declspec(noinline) STRINGZILLA_C_INLINE_
+#define STRINGZILLA_OUTLINED __declspec(noinline) STRINGZILLA_C_INLINE_
 #elif defined(__clang__)
 #define STRINGZILLA_INLINE STRINGZILLA_MAYBE_UNUSED_ __attribute__((always_inline)) STRINGZILLA_C_INLINE_
-#define STRINGZILLA_OUTLINED_ STRINGZILLA_MAYBE_UNUSED_ static __attribute__((noinline))
+#define STRINGZILLA_OUTLINED STRINGZILLA_MAYBE_UNUSED_ static __attribute__((noinline))
 #else
 
 /** GCC checks @c always_inline at the call as written, so a generic caller outside a target region
  *  needs plain inline. */
 #define STRINGZILLA_INLINE STRINGZILLA_MAYBE_UNUSED_ STRINGZILLA_C_INLINE_
-#define STRINGZILLA_OUTLINED_ STRINGZILLA_MAYBE_UNUSED_ static __attribute__((noinline))
+#define STRINGZILLA_OUTLINED STRINGZILLA_MAYBE_UNUSED_ static __attribute__((noinline))
 #endif
 
 /** The C++ standard in effect, or zero in C. MSVC reports it in @c _MSVC_LANG and leaves
@@ -2114,7 +2114,7 @@ STRINGZILLA_DEVICE_NOINLINE void sz_assert_cuda_failure_(char const *condition, 
         if (!(condition)) { sz_assert_cuda_failure_(#condition, __FILE__, __LINE__); } \
     } while (0)
 #elif STRINGZILLA_DEBUG && STRINGZILLA_WITH_LIBC // ? CPU code with LibC, PIC included
-STRINGZILLA_OUTLINED_ void sz_assert_failure_(char const *condition, char const *file, int line) {
+STRINGZILLA_OUTLINED void sz_assert_failure_(char const *condition, char const *file, int line) {
     fprintf(stderr, "Assertion failed: %s, in file %s, line %d\n", condition, file, line);
     abort();
 }

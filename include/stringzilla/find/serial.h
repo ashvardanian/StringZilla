@@ -209,22 +209,22 @@ STRINGZILLA_INLINE sz_u64_vec_t sz_u64_each_2byte_equal_(sz_u64_vec_t a_vec, sz_
     return vec_vec;
 }
 
-STRINGZILLA_OUTLINED_ sz_cptr_t sz_find_1byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                      sz_size_t needle_length) {
+STRINGZILLA_OUTLINED sz_cptr_t sz_find_1byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                     sz_size_t needle_length) {
     sz_unused_(needle_length); //? We keep this argument only to share the signature of the other backends.
     return sz_find_byte_serial_(haystack, haystack_length, needle);
 }
 
-STRINGZILLA_OUTLINED_ sz_cptr_t sz_rfind_1byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                       sz_size_t needle_length) {
+STRINGZILLA_OUTLINED sz_cptr_t sz_rfind_1byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                      sz_size_t needle_length) {
     sz_unused_(needle_length); //? We keep this argument only to share the signature of the other backends.
     return sz_rfind_byte_serial_(haystack, haystack_length, needle);
 }
 
 /** Find the first occurrence of a @b two-character needle in an arbitrary length haystack, using a
  *  hardware-agnostic SWAR technique to process 8 possible offsets at a time. */
-STRINGZILLA_OUTLINED_ sz_cptr_t sz_find_2byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                      sz_size_t needle_length) {
+STRINGZILLA_OUTLINED sz_cptr_t sz_find_2byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                     sz_size_t needle_length) {
 
     // This is an internal method, and the haystack is guaranteed to be at least 2 bytes long.
     sz_assert_(haystack_length >= 2 && "The haystack is too short.");
@@ -284,8 +284,8 @@ STRINGZILLA_INLINE sz_u64_vec_t sz_u64_each_4byte_equal_(sz_u64_vec_t a_vec, sz_
 
 /** Find the first occurrence of a @b four-character needle in an arbitrary length haystack, using a
  *  hardware-agnostic SWAR technique to process 8 possible offsets at a time. */
-STRINGZILLA_OUTLINED_ sz_cptr_t sz_find_4byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                      sz_size_t needle_length) {
+STRINGZILLA_OUTLINED sz_cptr_t sz_find_4byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                     sz_size_t needle_length) {
 
     // This is an internal method, and the haystack is guaranteed to be at least 4 bytes long.
     sz_assert_(haystack_length >= 4 && "The haystack is too short.");
@@ -367,8 +367,8 @@ STRINGZILLA_INLINE sz_u64_vec_t sz_u64_each_3byte_equal_(sz_u64_vec_t a_vec, sz_
 
 /** Find the first occurrence of a @b three-character needle in an arbitrary length haystack, using
  *  a hardware-agnostic SWAR technique to process 8 possible offsets at a time. */
-STRINGZILLA_OUTLINED_ sz_cptr_t sz_find_3byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                      sz_size_t needle_length) {
+STRINGZILLA_OUTLINED sz_cptr_t sz_find_3byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                     sz_size_t needle_length) {
 
     // This is an internal method, and the haystack is guaranteed to be at least 4 bytes long.
     sz_assert_(haystack_length >= 3 && "The haystack is too short.");
@@ -431,8 +431,8 @@ STRINGZILLA_OUTLINED_ sz_cptr_t sz_find_3byte_serial_(sz_cptr_t haystack, sz_siz
 
 /** Find the last occurrence of a @b two-character needle in an arbitrary length haystack, using a
  *  hardware-agnostic SWAR technique to process 8 possible offsets at a time. */
-STRINGZILLA_OUTLINED_ sz_cptr_t sz_rfind_2byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                       sz_size_t needle_length) {
+STRINGZILLA_OUTLINED sz_cptr_t sz_rfind_2byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                      sz_size_t needle_length) {
 
     // This is an internal method, and the haystack is guaranteed to be at least 2 bytes long.
     sz_assert_(haystack_length >= 2 && "The haystack is too short.");
@@ -478,8 +478,8 @@ STRINGZILLA_OUTLINED_ sz_cptr_t sz_rfind_2byte_serial_(sz_cptr_t haystack, sz_si
 
 /** Find the last occurrence of a @b three-character needle in an arbitrary length haystack, using
  *  a hardware-agnostic SWAR technique to process 8 possible offsets at a time. */
-STRINGZILLA_OUTLINED_ sz_cptr_t sz_rfind_3byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                       sz_size_t needle_length) {
+STRINGZILLA_OUTLINED sz_cptr_t sz_rfind_3byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                      sz_size_t needle_length) {
 
     // This is an internal method, and the haystack is guaranteed to be at least 3 bytes long.
     sz_assert_(haystack_length >= 3 && "The haystack is too short.");
@@ -542,8 +542,8 @@ STRINGZILLA_OUTLINED_ sz_cptr_t sz_rfind_3byte_serial_(sz_cptr_t haystack, sz_si
 
 /** Find the last occurrence of a @b four-character needle in an arbitrary length haystack, using a
  *  hardware-agnostic SWAR technique to process 8 possible offsets at a time. */
-STRINGZILLA_OUTLINED_ sz_cptr_t sz_rfind_4byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                       sz_size_t needle_length) {
+STRINGZILLA_OUTLINED sz_cptr_t sz_rfind_4byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                      sz_size_t needle_length) {
 
     // This is an internal method, and the haystack is guaranteed to be at least 4 bytes long.
     sz_assert_(haystack_length >= 4 && "The haystack is too short.");
@@ -614,8 +614,8 @@ STRINGZILLA_OUTLINED_ sz_cptr_t sz_rfind_4byte_serial_(sz_cptr_t haystack, sz_si
  *  @param[in] needle_length Length of the needle in bytes (must be <= 256).
  *  @return Pointer to first match, or STRINGZILLA_NULL_CHAR if none.
  */
-STRINGZILLA_OUTLINED_ sz_cptr_t sz_find_horspool_upto_256bytes_serial_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                      //
+STRINGZILLA_OUTLINED sz_cptr_t sz_find_horspool_upto_256bytes_serial_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                     //
     sz_cptr_t needle, sz_size_t needle_length) {
     sz_assert_(needle_length >= 2 && needle_length <= 256 &&
                "A 1-byte needle never advances, and a longer than 256-byte one overflows the shifts");
@@ -680,8 +680,8 @@ STRINGZILLA_OUTLINED_ sz_cptr_t sz_find_horspool_upto_256bytes_serial_( //
  *  @param[in] needle_length Length of the needle in bytes (must be <= 256).
  *  @return Pointer to last match, or STRINGZILLA_NULL_CHAR if none.
  */
-STRINGZILLA_OUTLINED_ sz_cptr_t sz_rfind_horspool_upto_256bytes_serial_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                       //
+STRINGZILLA_OUTLINED sz_cptr_t sz_rfind_horspool_upto_256bytes_serial_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                      //
     sz_cptr_t needle, sz_size_t needle_length) {
     sz_assert_(needle_length >= 2 && needle_length <= 256 &&
                "A 1-byte needle never advances, and a longer than 256-byte one overflows the shifts");
@@ -805,18 +805,18 @@ STRINGZILLA_CONSTEXPR sz_cptr_t sz_rfind_with_suffix_(
     return STRINGZILLA_NULL_CHAR;
 }
 
-STRINGZILLA_OUTLINED_ sz_cptr_t sz_find_over_4bytes_serial_(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                            sz_cptr_t needle, sz_size_t needle_length) {
+STRINGZILLA_OUTLINED sz_cptr_t sz_find_over_4bytes_serial_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                           sz_cptr_t needle, sz_size_t needle_length) {
     return sz_find_with_prefix_(haystack, haystack_length, needle, needle_length, sz_find_4byte_serial_, 4);
 }
 
-STRINGZILLA_OUTLINED_ sz_cptr_t sz_find_horspool_over_256bytes_serial_( //
+STRINGZILLA_OUTLINED sz_cptr_t sz_find_horspool_over_256bytes_serial_( //
     sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length) {
     return sz_find_with_prefix_(haystack, haystack_length, needle, needle_length,
                                 sz_find_horspool_upto_256bytes_serial_, 256);
 }
 
-STRINGZILLA_OUTLINED_ sz_cptr_t sz_rfind_horspool_over_256bytes_serial_( //
+STRINGZILLA_OUTLINED sz_cptr_t sz_rfind_horspool_over_256bytes_serial_( //
     sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length) {
     return sz_rfind_with_suffix_(haystack, haystack_length, needle, needle_length,
                                  sz_rfind_horspool_upto_256bytes_serial_, 256);

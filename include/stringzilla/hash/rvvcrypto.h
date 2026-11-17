@@ -751,10 +751,10 @@ STRINGZILLA_INLINE void sz_sha256_multistate_stage_rvvcrypto_(sz_u8_t *stage_lan
  *  round sequence runs unchanged over every lane. Kept out of line: inlined into the block loop,
  *  the round-constant loads are hoisted out of it and spilled.
  */
-STRINGZILLA_OUTLINED_ void sz_sha256_multistate_compress_rvvcrypto_(vuint32m2_t *abef_u32m2, vuint32m2_t *cdgh_u32m2,
-                                                                    sz_u32_t const *stage,
-                                                                    sz_u32_t const *broadcast_round_constants,
-                                                                    vbool16_t active_b16, sz_size_t vector_length) {
+STRINGZILLA_OUTLINED void sz_sha256_multistate_compress_rvvcrypto_(vuint32m2_t *abef_u32m2, vuint32m2_t *cdgh_u32m2,
+                                                                   sz_u32_t const *stage,
+                                                                   sz_u32_t const *broadcast_round_constants,
+                                                                   vbool16_t active_b16, sz_size_t vector_length) {
     vuint32m2_t const word_u32m2 = __riscv_vand_vx_u32m2(__riscv_vid_v_u32m2(vector_length), 3, vector_length);
     vbool16_t const lane0_mask_b16 = __riscv_vmseq_vx_u32m2_b16(word_u32m2, 0, vector_length);
 

@@ -160,10 +160,10 @@ STRINGZILLA_INLINE void sz_sort_3way_partition_rvv_(sz_pgram_t *const initial_pg
  *  @param[in] end_in_strings One-past-the-last index of the range to sort.
  *  @param[in] top_count Global top-K cut-off forwarded to the partitioner; 0 fully sorts the range.
  */
-STRINGZILLA_OUTLINED_ void sz_sort_quicksort_pgrams_rvv_(sz_pgram_t *initial_pgrams, sz_size_t *initial_order,
-                                                         sz_pgram_t *temporary_pgrams, sz_size_t *temporary_order,
-                                                         sz_size_t const start_in_strings,
-                                                         sz_size_t const end_in_strings, sz_size_t const top_count) {
+STRINGZILLA_OUTLINED void sz_sort_quicksort_pgrams_rvv_(sz_pgram_t *initial_pgrams, sz_size_t *initial_order,
+                                                        sz_pgram_t *temporary_pgrams, sz_size_t *temporary_order,
+                                                        sz_size_t const start_in_strings,
+                                                        sz_size_t const end_in_strings, sz_size_t const top_count) {
     sz_size_t const count = end_in_strings - start_in_strings;
     if (count <= 32) {
         // For very small arrays use a simple stable insertion sort.
@@ -228,13 +228,13 @@ STRINGZILLA_INLINE sz_status_t sz_sort_pgrams_rvv_(sz_pgram_t *pgrams, sz_size_t
  *  @param[in] reverse Whether to export complemented keys for descending order.
  *  @param[in,out] frames Scratch stack of <tt>end_in_strings - start_in_strings</tt> pending windows.
  */
-STRINGZILLA_OUTLINED_ void sz_sort_byte_windows_rvv_(sz_strings_view_t const *const strings,
-                                                     sz_pgram_t *const global_pgrams, sz_size_t *const global_order,
-                                                     sz_pgram_t *const temporary_pgrams,
-                                                     sz_size_t *const temporary_order, sz_size_t const start_in_strings,
-                                                     sz_size_t const end_in_strings, sz_size_t const start_character,
-                                                     sz_size_t const top_count, sz_bool_t const reverse,
-                                                     sz_sort_window_t *const frames) {
+STRINGZILLA_OUTLINED void sz_sort_byte_windows_rvv_(sz_strings_view_t const *const strings,
+                                                    sz_pgram_t *const global_pgrams, sz_size_t *const global_order,
+                                                    sz_pgram_t *const temporary_pgrams,
+                                                    sz_size_t *const temporary_order, sz_size_t const start_in_strings,
+                                                    sz_size_t const end_in_strings, sz_size_t const start_character,
+                                                    sz_size_t const top_count, sz_bool_t const reverse,
+                                                    sz_sort_window_t *const frames) {
 
     sz_size_t const pgram_capacity = sizeof(sz_pgram_t) - 1;
     // Export and sort each window, then queue every group of identical pgrams one window deeper.
@@ -282,7 +282,7 @@ STRINGZILLA_OUTLINED_ void sz_sort_byte_windows_rvv_(sz_strings_view_t const *co
 /** Uncased twin of @c sz_sort_byte_windows_rvv_: the folded code-point export stays scalar and
  *  shared with the serial backend, while the pgrams it produces are sorted with the RVV partition,
  *  which is where RVV beats the fully serial uncased path. */
-STRINGZILLA_OUTLINED_ void sz_sort_casefold_windows_rvv_(
+STRINGZILLA_OUTLINED void sz_sort_casefold_windows_rvv_(
     sz_strings_view_t const *const strings, sz_pgram_t *const global_pgrams, sz_size_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_size_t *const temporary_order, sz_size_t const start_in_strings,
     sz_size_t const end_in_strings, sz_size_t const folded_skip_count, sz_size_t const top_count,

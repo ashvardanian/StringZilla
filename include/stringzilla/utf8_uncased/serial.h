@@ -876,7 +876,7 @@ STRINGZILLA_CONSTEXPR sz_bool_t sz_rune_is_uncased_(sz_rune_t rune) {
     return sz_true_k;
 }
 
-STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_find_cased_serial_(sz_cptr_t str, sz_size_t length) {
+STRINGZILLA_OUTLINED sz_cptr_t sz_utf8_find_cased_serial_(sz_cptr_t str, sz_size_t length) {
     sz_u8_t const *text_cursor = (sz_u8_t const *)str;
     sz_u8_t const *text_end = text_cursor + length;
 
@@ -1547,9 +1547,9 @@ STRINGZILLA_CONSTEXPR sz_cptr_t sz_utf8_uncased_search_3folded_serial_( //
     return STRINGZILLA_NULL_CHAR;
 }
 
-STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_uncased_search_serial_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,              //
-    sz_cptr_t needle, sz_size_t needle_length,                  //
+STRINGZILLA_OUTLINED sz_cptr_t sz_utf8_uncased_search_serial_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,             //
+    sz_cptr_t needle, sz_size_t needle_length,                 //
     sz_utf8_uncased_needle_t const *needle_metadata, sz_size_t *match_length) {
 
     if (needle_length == 0) {
@@ -2280,8 +2280,8 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_utf8_probe_diversity_score_(sz_u8_t const *da
  *  @param[in] needle_length Length in bytes.
  *  @param[out] refined The prepared needle, every field filled.
  */
-STRINGZILLA_OUTLINED_ void sz_utf8_uncased_needle_init_serial_(sz_cptr_t needle, sz_size_t needle_length, //
-                                                               sz_utf8_uncased_needle_t *refined) {
+STRINGZILLA_OUTLINED void sz_utf8_uncased_needle_init_serial_(sz_cptr_t needle, sz_size_t needle_length, //
+                                                              sz_utf8_uncased_needle_t *refined) {
 
     // Per-script window state during iteration
     typedef struct {

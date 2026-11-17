@@ -42,13 +42,6 @@ project(
     HOMEPAGE_URL "https://github.com/ashvardanian/StringZilla"
 )
 
-# Release compiles at -O2 rather than CMake's -O3, set here rather than per target so that presets and parent projects
-# can still lower RelWithDebInfo and Debug, which keep CMake's defaults.
-if (NOT MSVC)
-    set(CMAKE_C_FLAGS_RELEASE "-O2 -DNDEBUG")
-    set(CMAKE_CXX_FLAGS_RELEASE "-O2 -DNDEBUG")
-endif ()
-
 # Standards are floors each target declares, so a parent project's units and the fetched dependencies build at the
 # standard they pick for themselves.
 set(CMAKE_C_EXTENSIONS OFF)
@@ -196,7 +189,7 @@ if (STRINGZILLA_BUILD_TEST OR STRINGZILLA_BUILD_BENCH)
 endif ()
 
 # Native vendor sources remain separate objects so one C++ runner can link both CUDA and HIP.
-function (stringzilla_add_gpu_suite target_ language_ source_)
+function (stringzilla_add_gpu_suite target_ source_)
     add_library(${target_} OBJECT ${source_})
     stringzilla_set_compiler_flags(${target_} 20)
     set_target_properties(
@@ -205,7 +198,7 @@ function (stringzilla_add_gpu_suite target_ language_ source_)
                    HIP_ARCHITECTURES "${stringzilla_rocm_resolved_architectures_}"
                    HIP_STANDARD 20
     )
-    if (MSVC AND language_ STREQUAL "CUDA")
+    if (MSVC)
         target_compile_definitions(${target_} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:FMT_UNICODE=0>)
     endif ()
     target_link_libraries(
@@ -757,39 +750,31 @@ if (STRINGZILLA_BUILD_TEST)
 
 endif ()
 
+# The GPU rows of each suite: a vendor this build compiles takes its own language, otherwise its unit compiles away as
+# C++, as every `cross_*` family does off its platform.
+if (NOT STRINGZILLA_CUDA_ARCH)
+    set_source_files_properties(bench/cross_cuda.cu test/cross_cuda.cu PROPERTIES LANGUAGE CXX)
+endif ()
+if (NOT STRINGZILLA_ROCM_ARCH)
+    set_source_files_properties(bench/cross_rocm.hip test/cross_rocm.hip PROPERTIES LANGUAGE CXX)
+endif ()
 foreach (suite_ bench test)
     if (NOT TARGET stringzilla_${suite_})
         continue()
     endif ()
-    foreach (vendor_ cuda rocm metal)
-        set(language_ CXX)
-        if (vendor_ STREQUAL "cuda")
-            set(source_ "${suite_}/cross_cuda.cu")
-            if (STRINGZILLA_CUDA_ARCH)
-                set(language_ CUDA)
-            else ()
-                set_source_files_properties(${source_} PROPERTIES LANGUAGE CXX)
-            endif ()
-        elseif (vendor_ STREQUAL "rocm")
-            set(source_ "${suite_}/cross_rocm.hip")
-            if (STRINGZILLA_ROCM_ARCH)
-                set(language_ HIP)
-            else ()
-                set_source_files_properties(${source_} PROPERTIES LANGUAGE CXX)
-            endif ()
-        else ()
-            set(source_ "${suite_}/cross_metal.cpp")
-        endif ()
-        set(unit_ "stringzilla_${vendor_}_${suite_}_")
-        stringzilla_add_gpu_suite(${unit_} ${language_} ${source_})
-        if (vendor_ STREQUAL "metal" AND STRINGZILLA_METAL_ARCH)
-            target_compile_definitions(${unit_} PRIVATE STRINGZILLA_ARCH_METAL_=1)
-        endif ()
-        target_sources(stringzilla_${suite_} PRIVATE $<TARGET_OBJECTS:${unit_}>)
-        if (suite_ STREQUAL "test" AND TARGET stringzilla_shared_test)
-            target_sources(stringzilla_shared_test PRIVATE $<TARGET_OBJECTS:${unit_}>)
-        endif ()
-    endforeach ()
+    stringzilla_add_gpu_suite(stringzilla_cuda_${suite_}_ ${suite_}/cross_cuda.cu)
+    stringzilla_add_gpu_suite(stringzilla_rocm_${suite_}_ ${suite_}/cross_rocm.hip)
+    stringzilla_add_gpu_suite(stringzilla_metal_${suite_}_ ${suite_}/cross_metal.cpp)
+    if (STRINGZILLA_METAL_ARCH)
+        target_compile_definitions(stringzilla_metal_${suite_}_ PRIVATE STRINGZILLA_ARCH_METAL_=1)
+    endif ()
+    set(units_ $<TARGET_OBJECTS:stringzilla_cuda_${suite_}_> $<TARGET_OBJECTS:stringzilla_rocm_${suite_}_>
+               $<TARGET_OBJECTS:stringzilla_metal_${suite_}_>
+    )
+    target_sources(stringzilla_${suite_} PRIVATE ${units_})
+    if (suite_ STREQUAL "test" AND TARGET stringzilla_shared_test)
+        target_sources(stringzilla_shared_test PRIVATE ${units_})
+    endif ()
 endforeach ()
 
 include(cmake/stringzilla_install.cmake)

@@ -10,6 +10,10 @@
       "binaryDir": "${sourceDir}/build_${presetName}",
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_COMPILER_LAUNCHER": "$env{CMAKE_C_COMPILER_LAUNCHER}",
+        "CMAKE_CXX_COMPILER_LAUNCHER": "$env{CMAKE_CXX_COMPILER_LAUNCHER}",
+        "CMAKE_CUDA_COMPILER_LAUNCHER": "$env{CMAKE_CUDA_COMPILER_LAUNCHER}",
         "STRINGZILLA_BUILD_TEST": "ON",
         "STRINGZILLA_BUILD_BENCH": "ON",
         "STRINGZILLA_WERROR": "ON"
@@ -59,22 +63,19 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "CMAKE_C_FLAGS_RELWITHDEBINFO": "-O0 -g0 -DNDEBUG",
-        "CMAKE_CXX_FLAGS_RELWITHDEBINFO": "-O0 -g0 -DNDEBUG",
-        "STRINGZILLA_WERROR": "ON"
+        "CMAKE_CXX_FLAGS_RELWITHDEBINFO": "-O0 -g0 -DNDEBUG"
       }
     },
     {
       "name": "release",
       "inherits": ["base", "clang"],
-      "displayName": "Release, no CUDA",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+      "displayName": "Release, no CUDA"
     },
     {
       "name": "release_shared",
       "inherits": "base",
       "displayName": "Release, the libraries alone: static for the Go binding, shared for C#, Java and packaging",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
         "STRINGZILLA_BUILD_TEST": "OFF",
         "STRINGZILLA_BUILD_BENCH": "OFF",
         "STRINGZILLA_BUILD_SHARED": "ON"
@@ -85,7 +86,6 @@
       "inherits": "base",
       "displayName": "Release, the XCFramework or artifact bundle SwiftPM links",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
         "STRINGZILLA_BUILD_TEST": "OFF",
         "STRINGZILLA_BUILD_BENCH": "OFF",
         "STRINGZILLA_BUILD_SHARED": "OFF",
@@ -99,7 +99,6 @@
       "displayName": "Release with CUDA",
       "description": "NVCC over Clang, and Clang for the C and C++ sources too - the three must agree. Clang mangles a C++20 requires-clause into the symbol name and GCC does not, so a build that compiled .cpp with GCC and .cu with NVCC-over-Clang would give the tree's constrained engine entry points two different symbols and fail to link. GCC also miscompiles the engines' return-by-value in the large benchmark translation units, handing the caller the kernel timing where the status belongs, which is why measured numbers come from here. Each toolkit supports a range of Clang versions and parses that Clang's own headers, so the version that fits belongs in CMakeUserPresets.json; Clang additionally reads its standard library from the newest GCC installed, which -Xcompiler=--gcc-install-dir=<path> redirects when that one is ahead of the toolkit too.",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_CUDA_HOST_COMPILER": "clang++",
         "STRINGZILLA_CUDA_ARCH": "all"
       }
@@ -109,7 +108,6 @@
       "inherits": ["base", "linux"],
       "displayName": "Release with ROCm",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
         "STRINGZILLA_BUILD_BENCH": "OFF",
         "STRINGZILLA_ROCM_ARCH": "all"
       }
@@ -119,7 +117,6 @@
       "inherits": ["base", "darwin"],
       "displayName": "Release with Metal",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
         "STRINGZILLA_BUILD_BENCH": "OFF",
         "STRINGZILLA_METAL_ARCH": "all"
       }
@@ -165,7 +162,6 @@
       "description": "The minimal module: one thread, SIMD128. Emscripten's own toolchain reads the processor from EMSCRIPTEN_SYSTEM_PROCESSOR.",
       "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
         "EMSCRIPTEN_SYSTEM_PROCESSOR": "wasm32",
         "STRINGZILLA_MARCH": "v128",
         "STRINGZILLA_BUILD_TEST": "OFF",
@@ -192,7 +188,6 @@
       "description": "The NDK's own toolchain, from ANDROID_NDK_ROOT.",
       "toolchainFile": "$env{ANDROID_NDK_ROOT}/build/cmake/android.toolchain.cmake",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
         "ANDROID_ABI": "arm64-v8a",
         "ANDROID_PLATFORM": "android-28",
         "STRINGZILLA_BUILD_TEST": "OFF",
@@ -222,7 +217,6 @@
       "inherits": ["base", "linux", "clang"],
       "description": "Libraries for one machine: its CPU floor, every kernel-library capability spelled as 1 or 0, and its one GPU code.",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_CUDA_HOST_COMPILER": "clang++",
         "STRINGZILLA_BUILD_TEST": "OFF",
         "STRINGZILLA_BUILD_BENCH": "OFF",

@@ -44,7 +44,7 @@ extern "C" {
  *
  *  @return The first such byte, or NULL.
  */
-STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_norm_classify_sve2_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
+STRINGZILLA_OUTLINED sz_cptr_t sz_utf8_norm_classify_sve2_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     return sz_utf8_norm_classify_sve_(text, length, form);
 }
 

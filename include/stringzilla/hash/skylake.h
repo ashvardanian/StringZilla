@@ -446,8 +446,8 @@ STRINGZILLA_INLINE void sz_sha256_round_skylake_(                               
  *  for the CRT's @c __chkstk. One turn of sixteen rounds is far too much work for a call to show up
  *  against, and the window stays local either way.
  */
-STRINGZILLA_OUTLINED_ void sz_sha256_compress_skylake_(__m512i hashes_u32x16[8], sz_u8_t const *const *lane_blocks,
-                                                       __mmask16 active_m16) {
+STRINGZILLA_OUTLINED void sz_sha256_compress_skylake_(__m512i hashes_u32x16[8], sz_u8_t const *const *lane_blocks,
+                                                      __mmask16 active_m16) {
     sz_u32_t const *round_constants = (sz_u32_t const *)sz_x86_hide_pointer_origin_(sz_sha256_round_constants_());
     __m512i schedule_u32x16[16];
     sz_sha256_transpose_16x16_skylake_(lane_blocks, schedule_u32x16);

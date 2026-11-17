@@ -50,8 +50,8 @@ typedef __mmask64 (*sz_utf8_norm_lead_classify_avx512_t_)(__m512i, __mmask64, sz
 /** 64-entry lead lookup without AVX-512 VBMI: four per-128-lane @c vpshufb over the
  *  broadcast LUT quadrants, selected by the high two index bits, then <tt>families & flag</tt>
  *  picks out the requested form. */
-STRINGZILLA_OUTLINED_ __mmask64 sz_utf8_norm_lead_classify_shuffle_skylake_(__m512i bytes_u8x64, __mmask64 is_lead_m64,
-                                                                            sz_u8_t form_flag) {
+STRINGZILLA_OUTLINED __mmask64 sz_utf8_norm_lead_classify_shuffle_skylake_(__m512i bytes_u8x64, __mmask64 is_lead_m64,
+                                                                           sz_u8_t form_flag) {
     __m512i index_u8x64 = _mm512_and_si512(bytes_u8x64, _mm512_set1_epi8(0x3F));
     __m512i low_nibble_u8x64 = _mm512_and_si512(index_u8x64, _mm512_set1_epi8(0x0F));
     // `srli_epi16` leaks the neighbouring byte's low bits into bits 4..7; index is in [0,63] so the high
@@ -107,8 +107,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_norm_classify_avx512_(sz_cptr_t text, sz_si
 
 /** Skylake scan primitive: the first byte beginning a non-inert codepoint for
  *  @p form, else NULL. */
-STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_norm_classify_skylake_(sz_cptr_t text, sz_size_t length,
-                                                               sz_normal_form_t form) {
+STRINGZILLA_OUTLINED sz_cptr_t sz_utf8_norm_classify_skylake_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     return sz_utf8_norm_classify_avx512_(text, length, form, &sz_utf8_norm_lead_classify_shuffle_skylake_);
 }
 

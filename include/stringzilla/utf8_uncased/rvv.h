@@ -24,7 +24,7 @@ extern "C" {
 
 /*  The per-script fold and alarm strips are invoked through constant function pointers from the
  *  force-inlined driver; GCC 14 devirtualizes and inlines them and miscompiles the result, silently
- *  dropping matches, so they are @c STRINGZILLA_OUTLINED_ to keep their out-of-line shape.
+ *  dropping matches, so they are @c STRINGZILLA_OUTLINED to keep their out-of-line shape.
  *  Toolchain artifact: -O1 still drops matches even out-of-line; -O0, -O2, and -O3 are byte-exact
  *  with serial, and StringZilla ships -O2 or -O3. */
 #if defined(__clang__)
@@ -120,8 +120,8 @@ typedef long (*sz_utf8_uncased_alarm_strip_rvv_t_)(sz_u8_t const *source_ptr, sz
 
 /** ASCII: <tt>c + ((c - 'A' <= 25) * 0x20)</tt>. Pure ASCII never changes byte width, so this is also the
  *  Georgian-Mkhedruli fold, as Mkhedruli is caseless. */
-STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_ascii_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length,
-                                                                 sz_u8_t *destination_ptr) {
+STRINGZILLA_OUTLINED void sz_utf8_uncased_fold_ascii_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length,
+                                                                sz_u8_t *destination_ptr) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -135,9 +135,9 @@ STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_ascii_strip_rvv_(sz_u8_t const *
 /** Western Europe: ASCII A-Z, Latin-1 Supplement 'À'-'Þ' (C3 80-9E, excluding '×' 0x97) +0x20, and
  *  the in-place ß → "ss" where both bytes of C3 9F become 's'. Length-changing folds are routed to
  *  the alarm instead. */
-STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_western_europe_strip_rvv_(sz_u8_t const *source_ptr,
-                                                                          sz_size_t vector_length,
-                                                                          sz_u8_t *destination_ptr) {
+STRINGZILLA_OUTLINED void sz_utf8_uncased_fold_western_europe_strip_rvv_(sz_u8_t const *source_ptr,
+                                                                         sz_size_t vector_length,
+                                                                         sz_u8_t *destination_ptr) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -171,9 +171,9 @@ STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_western_europe_strip_rvv_(sz_u8_
 
 /** Central Europe: Latin-1 Supplement +0x20 (C3 80-9E, except '×' 0x97) and Latin Extended-A +1
  *  parity deltas from the C4/C5 LUTs. Irregulars ('İ', 'ŉ', 'Ŀ', 'Ÿ', 'ſ', …) are alarm-routed. */
-STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_central_europe_strip_rvv_(sz_u8_t const *source_ptr,
-                                                                          sz_size_t vector_length,
-                                                                          sz_u8_t *destination_ptr) {
+STRINGZILLA_OUTLINED void sz_utf8_uncased_fold_central_europe_strip_rvv_(sz_u8_t const *source_ptr,
+                                                                         sz_size_t vector_length,
+                                                                         sz_u8_t *destination_ptr) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -217,8 +217,8 @@ STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_central_europe_strip_rvv_(sz_u8_
 /** Cyrillic: basic D0/D1. Second-byte offset by high nibble after a D0 lead (8 → +0x10, 9 → +0x20,
  *  A → −0x20) plus the masked D0 → D1 (+1) lead rewrite. Extended Cyrillic needles are banned at
  *  needle-analysis time. */
-STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_cyrillic_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length,
-                                                                    sz_u8_t *destination_ptr) {
+STRINGZILLA_OUTLINED void sz_utf8_uncased_fold_cyrillic_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length,
+                                                                   sz_u8_t *destination_ptr) {
     static sz_u8_t const second_byte_offsets[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
@@ -255,8 +255,8 @@ STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_cyrillic_strip_rvv_(sz_u8_t cons
  *  table, one indexed load over the delta window; the CE → CF lead promotion comes from the same
  *  table's promote window carried one lane back; final sigma 'ς' (CF 82) gets +1, and 'µ' (C2 B5) →
  *  'μ' (CE BC). Accented 'ΐ'/'ΰ', symbols, polytonic and archaic letters are alarm-routed. */
-STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_greek_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length,
-                                                                 sz_u8_t *destination_ptr) {
+STRINGZILLA_OUTLINED void sz_utf8_uncased_fold_greek_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length,
+                                                                sz_u8_t *destination_ptr) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -309,8 +309,8 @@ STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_greek_strip_rvv_(sz_u8_t const *
 /** Armenian: D4/D5/D6. Disjoint second-byte offsets (D4 B1-BF and D5 90-96 fold −0x10, D5 80-8F
  *  folds +0x30) plus the lead +1 rewrites D4 → D5 (next B1-BF) and D5 → D6 (next 90-96). The 'և'
  *  ligature is alarm-routed. */
-STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_armenian_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length,
-                                                                    sz_u8_t *destination_ptr) {
+STRINGZILLA_OUTLINED void sz_utf8_uncased_fold_armenian_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length,
+                                                                   sz_u8_t *destination_ptr) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -355,9 +355,8 @@ STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_armenian_strip_rvv_(sz_u8_t cons
  *  Extended Additional (E1 B8-BB) even-third +1, all length-preserving, with expanding folds
  *  alarm-routed. Reuses the C4/C5/C6 delta LUTs from <tt>utf8_uncased_fold/rvv.h</tt>, masked to the +1
  *  bit of each entry. */
-STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_vietnamese_strip_rvv_(sz_u8_t const *source_ptr,
-                                                                      sz_size_t vector_length,
-                                                                      sz_u8_t *destination_ptr) {
+STRINGZILLA_OUTLINED void sz_utf8_uncased_fold_vietnamese_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length,
+                                                                     sz_u8_t *destination_ptr) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -445,8 +444,8 @@ STRINGZILLA_INLINE long sz_utf8_uncased_alarm_to_lead_(vuint8m8_t danger_at_seco
     return __riscv_vfirst_m_b1(__riscv_vmsne_vx_u8m8_b1(flag_at_lead_u8m8, 0, vector_length), vector_length);
 }
 
-STRINGZILLA_OUTLINED_ long sz_utf8_uncased_alarm_western_europe_strip_rvv_(sz_u8_t const *source_ptr,
-                                                                           sz_size_t vector_length) {
+STRINGZILLA_OUTLINED long sz_utf8_uncased_alarm_western_europe_strip_rvv_(sz_u8_t const *source_ptr,
+                                                                          sz_size_t vector_length) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -493,8 +492,8 @@ STRINGZILLA_OUTLINED_ long sz_utf8_uncased_alarm_western_europe_strip_rvv_(sz_u8
     return sz_utf8_uncased_alarm_to_lead_(danger_u8m8, vector_length);
 }
 
-STRINGZILLA_OUTLINED_ long sz_utf8_uncased_alarm_central_europe_strip_rvv_(sz_u8_t const *source_ptr,
-                                                                           sz_size_t vector_length) {
+STRINGZILLA_OUTLINED long sz_utf8_uncased_alarm_central_europe_strip_rvv_(sz_u8_t const *source_ptr,
+                                                                          sz_size_t vector_length) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -539,8 +538,8 @@ STRINGZILLA_OUTLINED_ long sz_utf8_uncased_alarm_central_europe_strip_rvv_(sz_u8
     return sz_utf8_uncased_alarm_to_lead_(danger_u8m8, vector_length);
 }
 
-STRINGZILLA_OUTLINED_ long sz_utf8_uncased_alarm_cyrillic_strip_rvv_(sz_u8_t const *source_ptr,
-                                                                     sz_size_t vector_length) {
+STRINGZILLA_OUTLINED long sz_utf8_uncased_alarm_cyrillic_strip_rvv_(sz_u8_t const *source_ptr,
+                                                                    sz_size_t vector_length) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -555,7 +554,7 @@ STRINGZILLA_OUTLINED_ long sz_utf8_uncased_alarm_cyrillic_strip_rvv_(sz_u8_t con
     return sz_utf8_uncased_alarm_to_lead_(danger_u8m8, vector_length);
 }
 
-STRINGZILLA_OUTLINED_ long sz_utf8_uncased_alarm_greek_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length) {
+STRINGZILLA_OUTLINED long sz_utf8_uncased_alarm_greek_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -607,8 +606,8 @@ STRINGZILLA_OUTLINED_ long sz_utf8_uncased_alarm_greek_strip_rvv_(sz_u8_t const 
     return lead_danger < blanket_danger ? lead_danger : blanket_danger;
 }
 
-STRINGZILLA_OUTLINED_ long sz_utf8_uncased_alarm_armenian_strip_rvv_(sz_u8_t const *source_ptr,
-                                                                     sz_size_t vector_length) {
+STRINGZILLA_OUTLINED long sz_utf8_uncased_alarm_armenian_strip_rvv_(sz_u8_t const *source_ptr,
+                                                                    sz_size_t vector_length) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -627,8 +626,8 @@ STRINGZILLA_OUTLINED_ long sz_utf8_uncased_alarm_armenian_strip_rvv_(sz_u8_t con
     return sz_utf8_uncased_alarm_to_lead_(danger_u8m8, vector_length);
 }
 
-STRINGZILLA_OUTLINED_ long sz_utf8_uncased_alarm_vietnamese_strip_rvv_(sz_u8_t const *source_ptr,
-                                                                       sz_size_t vector_length) {
+STRINGZILLA_OUTLINED long sz_utf8_uncased_alarm_vietnamese_strip_rvv_(sz_u8_t const *source_ptr,
+                                                                      sz_size_t vector_length) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -686,8 +685,8 @@ STRINGZILLA_OUTLINED_ long sz_utf8_uncased_alarm_vietnamese_strip_rvv_(sz_u8_t c
     return sz_utf8_uncased_alarm_to_lead_(danger_u8m8, vector_length);
 }
 
-STRINGZILLA_OUTLINED_ long sz_utf8_uncased_alarm_georgian_strip_rvv_(sz_u8_t const *source_ptr,
-                                                                     sz_size_t vector_length) {
+STRINGZILLA_OUTLINED long sz_utf8_uncased_alarm_georgian_strip_rvv_(sz_u8_t const *source_ptr,
+                                                                    sz_size_t vector_length) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
     vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);

@@ -23,36 +23,23 @@ if (STRINGZILLA_CUDA_ARCH)
     # runs on every later GPU: the CUDA baseline at `compute_75`, warp reductions and asynchronous copies at
     # `compute_80`, clusters at `compute_90`, and cluster launch control at `compute_100`. `native` maps each visible GPU to the code its capability rows need, family suffix included, where
     # CMake's own resolution would drop it. A native or named code compiles as SASS alone.
-    set(stringzilla_cuda_native_codes_
-        75-real=75-real
-        80-real=80-real
-        86-real=86-real
-        89-real=89-real
-        90-real=90a-real
-        100-real=100f-real
-        103-real=103f-real
-        110-real=110f-real
-        120-real=120f-real
-        121-real=121f-real
-    )
     if (STRINGZILLA_CUDA_ARCH STREQUAL "all")
         set(stringzilla_cuda_resolved_architectures_ 75-virtual 80-virtual 90-virtual 100-virtual)
     elseif (STRINGZILLA_CUDA_ARCH STREQUAL "native")
         set(stringzilla_cuda_resolved_architectures_)
         foreach (visible_ IN LISTS CMAKE_CUDA_ARCHITECTURES_NATIVE)
-            set(native_code_)
-            foreach (pair_ IN LISTS stringzilla_cuda_native_codes_)
-                if (pair_ MATCHES "^${visible_}=(.+)$")
-                    set(native_code_ ${CMAKE_MATCH_1})
-                endif ()
-            endforeach ()
-            if (NOT native_code_)
+            if (visible_ MATCHES "^(75|80|86|89)-real$")
+                list(APPEND stringzilla_cuda_resolved_architectures_ ${visible_})
+            elseif (visible_ STREQUAL "90-real")
+                list(APPEND stringzilla_cuda_resolved_architectures_ 90a-real)
+            elseif (visible_ MATCHES "^(100|103|110|120|121)-real$")
+                list(APPEND stringzilla_cuda_resolved_architectures_ ${CMAKE_MATCH_1}f-real)
+            else ()
                 message(
                     FATAL_ERROR
                         "STRINGZILLA_CUDA_ARCH=native has no code for the visible ${visible_} GPU; name its code instead"
                 )
             endif ()
-            list(APPEND stringzilla_cuda_resolved_architectures_ ${native_code_})
         endforeach ()
     elseif (STRINGZILLA_CUDA_ARCH MATCHES "^[0-9]+[af]?$")
         set(stringzilla_cuda_resolved_architectures_ ${STRINGZILLA_CUDA_ARCH}-real)
@@ -63,6 +50,14 @@ if (STRINGZILLA_CUDA_ARCH)
     endif ()
     if (CMAKE_VERSION VERSION_LESS 3.31 AND stringzilla_cuda_resolved_architectures_ MATCHES "1[0-9][0-9][af]")
         message(FATAL_ERROR "Three-digit \"a\" and \"f\" CUDA codes need CMake 3.31, found ${CMAKE_VERSION}")
+    endif ()
+    # A monoversioned build folds each GPU dispatch row to one capability, and sibling capabilities form no chain, so
+    # it takes one architecture per vendor.
+    list(LENGTH stringzilla_cuda_resolved_architectures_ stringzilla_cuda_count_)
+    if (NOT STRINGZILLA_MULTIVERSIONED AND stringzilla_cuda_count_ GREATER 1)
+        message(FATAL_ERROR "STRINGZILLA_MULTIVERSIONED=OFF takes one STRINGZILLA_CUDA_ARCH architecture, not "
+                            "`${stringzilla_cuda_resolved_architectures_}`"
+        )
     endif ()
     set(CMAKE_CUDA_ARCHITECTURES "${stringzilla_cuda_resolved_architectures_}")
     # NVCC's default leaves Turing and Ampere cubins uncompressed, ten times their compressed size.
@@ -173,6 +168,12 @@ if (STRINGZILLA_ROCM_ARCH)
         )
     endif ()
     set(stringzilla_rocm_resolved_architectures_ ${CMAKE_HIP_ARCHITECTURES})
+    list(LENGTH stringzilla_rocm_resolved_architectures_ stringzilla_rocm_count_)
+    if (NOT STRINGZILLA_MULTIVERSIONED AND stringzilla_rocm_count_ GREATER 1)
+        message(FATAL_ERROR "STRINGZILLA_MULTIVERSIONED=OFF takes one STRINGZILLA_ROCM_ARCH architecture, not "
+                            "`${stringzilla_rocm_resolved_architectures_}`"
+        )
+    endif ()
     if (NOT TARGET hip::host) # another library in the same project may have found HIP already
         find_package(hip REQUIRED GLOBAL)
     endif ()
@@ -182,21 +183,6 @@ if (STRINGZILLA_ROCM_ARCH)
     stringzilla_add_gpu_capability(cdna4 STRINGZILLA_TARGET_CDNA4 ROCM_ARCHITECTURES gfx950)
     # One-lane shifts through DPP row shifts bridged by permlanex16 on a 32-lane wavefront: MI450X, MI455X, MI430X.
     stringzilla_add_gpu_capability(cdna5 STRINGZILLA_TARGET_CDNA5 ROCM_ARCHITECTURES gfx1250 gfx1251)
-endif ()
-
-# A monoversioned build folds each GPU dispatch row to one capability, and sibling capabilities form no chain, so it
-# takes one architecture per vendor.
-if (NOT STRINGZILLA_MULTIVERSIONED)
-    foreach (vendor_ IN ITEMS cuda rocm)
-        list(LENGTH stringzilla_${vendor_}_resolved_architectures_ architectures_count_)
-        if (architectures_count_ GREATER 1)
-            string(TOUPPER "${vendor_}" vendor_option_)
-            message(
-                FATAL_ERROR
-                    "STRINGZILLA_MULTIVERSIONED=OFF takes one STRINGZILLA_${vendor_option_}_ARCH architecture, not `${stringzilla_${vendor_}_resolved_architectures_}`"
-            )
-        endif ()
-    endforeach ()
 endif ()
 
 # Metal compiles on the device, so the families only name the ones the unit serves.

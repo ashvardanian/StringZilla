@@ -191,10 +191,10 @@ STRINGZILLA_INLINE void sz_sort_3way_partition_neon_(                         //
     *last_pivot_offset = start_in_strings + count_smaller + count_equal - 1;
 }
 
-STRINGZILLA_OUTLINED_ void sz_sort_quicksort_pgrams_neon_(sz_pgram_t *initial_pgrams, sz_size_t *initial_order,
-                                                          sz_pgram_t *temporary_pgrams, sz_size_t *temporary_order,
-                                                          sz_size_t const start_in_strings,
-                                                          sz_size_t const end_in_strings, sz_size_t const top_count) {
+STRINGZILLA_OUTLINED void sz_sort_quicksort_pgrams_neon_(sz_pgram_t *initial_pgrams, sz_size_t *initial_order,
+                                                         sz_pgram_t *temporary_pgrams, sz_size_t *temporary_order,
+                                                         sz_size_t const start_in_strings,
+                                                         sz_size_t const end_in_strings, sz_size_t const top_count) {
     sz_size_t const count = end_in_strings - start_in_strings;
     if (count <= 32) { // Below the vectorization break-even, a stable insertion sort wins.
         sz_sort_pgrams_insertion_(initial_pgrams + start_in_strings, count, initial_order + start_in_strings);
@@ -236,13 +236,13 @@ STRINGZILLA_INLINE sz_status_t sz_sort_pgrams_neon_(sz_pgram_t *pgrams, sz_size_
     return sz_success_k;
 }
 
-STRINGZILLA_OUTLINED_ void sz_sort_byte_windows_neon_(sz_strings_view_t const *const strings,
-                                                      sz_pgram_t *const global_pgrams, sz_size_t *const global_order,
-                                                      sz_pgram_t *const temporary_pgrams,
-                                                      sz_size_t *const temporary_order,
-                                                      sz_size_t const start_in_strings, sz_size_t const end_in_strings,
-                                                      sz_size_t const start_character, sz_size_t const top_count,
-                                                      sz_bool_t const reverse, sz_sort_window_t *const frames) {
+STRINGZILLA_OUTLINED void sz_sort_byte_windows_neon_(sz_strings_view_t const *const strings,
+                                                     sz_pgram_t *const global_pgrams, sz_size_t *const global_order,
+                                                     sz_pgram_t *const temporary_pgrams,
+                                                     sz_size_t *const temporary_order, sz_size_t const start_in_strings,
+                                                     sz_size_t const end_in_strings, sz_size_t const start_character,
+                                                     sz_size_t const top_count, sz_bool_t const reverse,
+                                                     sz_sort_window_t *const frames) {
 
     sz_size_t const pgram_capacity = sizeof(sz_pgram_t) - 1;
     sz_size_t frames_count = 1;
@@ -319,7 +319,7 @@ STRINGZILLA_INLINE sz_status_t sz_sort_order_neon_(sz_strings_view_t const *stri
 /** Uncased twin of @c sz_sort_byte_windows_neon_: the folded code-point export stays scalar and
  *  shared with the serial backend, while the pgrams it produces are sorted with the NEON partition,
  *  which is where NEON beats the fully serial uncased path. */
-STRINGZILLA_OUTLINED_ void sz_sort_casefold_windows_neon_(
+STRINGZILLA_OUTLINED void sz_sort_casefold_windows_neon_(
     sz_strings_view_t const *const strings, sz_pgram_t *const global_pgrams, sz_size_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_size_t *const temporary_order, sz_size_t const start_in_strings,
     sz_size_t const end_in_strings, sz_size_t const folded_skip_count, sz_size_t const top_count,

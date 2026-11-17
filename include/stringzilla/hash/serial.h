@@ -548,8 +548,8 @@ STRINGZILLA_INLINE sz_u64_t sz_hash_state_finalize_serial_(sz_hash_state_aligned
     return mixed_in_register_vec.u64s[0];
 }
 
-STRINGZILLA_OUTLINED_ STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_serial_(sz_cptr_t text, sz_size_t length,
-                                                                               sz_u64_t seed) {
+STRINGZILLA_OUTLINED STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_serial_(sz_cptr_t text, sz_size_t length,
+                                                                              sz_u64_t seed) {
     if (length <= 16) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_state_aligned_for_short_t state;
@@ -875,8 +875,8 @@ STRINGZILLA_INLINE void sz_sha256_state_init_serial_(sz_sha256_state_t *state_pt
     state_ptr->block_length = 0, state_ptr->total_length = 0;
 }
 
-STRINGZILLA_OUTLINED_ void sz_sha256_state_update_serial_(sz_sha256_state_t *state_ptr, sz_cptr_t data,
-                                                          sz_size_t length) {
+STRINGZILLA_OUTLINED void sz_sha256_state_update_serial_(sz_sha256_state_t *state_ptr, sz_cptr_t data,
+                                                         sz_size_t length) {
     sz_u8_t const *input = (sz_u8_t const *)data;
     sz_size_t const current_block_index = state_ptr->block_length / STRINGZILLA_SHA256_BLOCK_LENGTH;
     sz_size_t const final_block_index = (state_ptr->block_length + length) / STRINGZILLA_SHA256_BLOCK_LENGTH;
@@ -929,7 +929,7 @@ STRINGZILLA_OUTLINED_ void sz_sha256_state_update_serial_(sz_sha256_state_t *sta
     state_ptr->hash[7] = hash[7];
 }
 
-STRINGZILLA_OUTLINED_ void sz_sha256_state_digest_serial_(
+STRINGZILLA_OUTLINED void sz_sha256_state_digest_serial_(
     sz_sha256_state_t const *state_ptr, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)]) {
     // Create a copy of the state for padding
     sz_sha256_state_t state = *state_ptr;

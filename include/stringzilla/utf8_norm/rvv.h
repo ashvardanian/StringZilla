@@ -54,7 +54,7 @@ extern "C" {
  *
  *  @return The first such byte, or NULL.
  */
-STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_norm_classify_rvv_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
+STRINGZILLA_OUTLINED sz_cptr_t sz_utf8_norm_classify_rvv_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     sz_u8_t const *position = (sz_u8_t const *)text;
     sz_u8_t const *const end = position + length;
     sz_u8_t previous_canonical_combining_class = 0;

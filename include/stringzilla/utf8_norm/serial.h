@@ -432,7 +432,7 @@ STRINGZILLA_INLINE sz_bool_t sz_utf8_norm_is_safe_boundary_(sz_rune_t codepoint,
  *  the scalar reference; the NEON backend replaces just this with a @c vqtbl4q lead-classify plus a
  *  64-byte gate. It reads the unified props trie and depends on no <tt>utf8_*</tt> segmentation module.
  */
-STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_norm_classify_serial_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
+STRINGZILLA_OUTLINED sz_cptr_t sz_utf8_norm_classify_serial_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     sz_u8_t const *ptr = (sz_u8_t const *)text;
     sz_u8_t const *end = ptr + length;
     while (ptr < end) {

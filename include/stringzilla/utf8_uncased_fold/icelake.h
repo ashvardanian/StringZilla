@@ -251,8 +251,8 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_latin_chunk_icelake_( //
     return fold_length;
 }
 
-STRINGZILLA_OUTLINED_ sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_size_t source_length,
-                                                              sz_ptr_t target) {
+STRINGZILLA_OUTLINED sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_size_t source_length,
+                                                             sz_ptr_t target) {
     // This algorithm exploits the idea, that most text in a single ZMM register is either:
     //
     // 1. All ASCII single-byte codepoints

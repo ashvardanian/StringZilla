@@ -144,7 +144,7 @@ STRINGZILLA_INLINE void sz_sort_3way_partition_skylake_(                      //
  *  @param[in] start_in_strings First index (inclusive) of the range to sort.
  *  @param[in] end_in_strings One-past-the-last index of the range to sort.
  */
-STRINGZILLA_OUTLINED_ void sz_sort_quicksort_pgrams_skylake_( //
+STRINGZILLA_OUTLINED void sz_sort_quicksort_pgrams_skylake_(  //
     sz_pgram_t *initial_pgrams, sz_size_t *initial_order,     //
     sz_pgram_t *temporary_pgrams, sz_size_t *temporary_order, //
     sz_size_t const start_in_strings, sz_size_t const end_in_strings, sz_size_t const top_count) {
@@ -224,7 +224,7 @@ STRINGZILLA_INLINE sz_status_t sz_sort_pgrams_skylake_(sz_pgram_t *pgrams, sz_si
  *  @param[in] reverse Whether to export complemented keys for descending order.
  *  @param[in,out] frames Scratch stack of <tt>end_in_strings - start_in_strings</tt> pending windows.
  */
-STRINGZILLA_OUTLINED_ void sz_sort_byte_windows_skylake_(                 //
+STRINGZILLA_OUTLINED void sz_sort_byte_windows_skylake_(                  //
     sz_strings_view_t const *const strings,                               //
     sz_pgram_t *const global_pgrams, sz_size_t *const global_order,       //
     sz_pgram_t *const temporary_pgrams, sz_size_t *const temporary_order, //
@@ -284,7 +284,7 @@ STRINGZILLA_OUTLINED_ void sz_sort_byte_windows_skylake_(                 //
 /** Uncased twin of @c sz_sort_byte_windows_skylake_: the folded code-point export stays scalar and
  *  shared with the serial backend, while the pgrams it produces are sorted with the AVX-512
  *  partition, which is where Skylake beats the fully serial uncased path. */
-STRINGZILLA_OUTLINED_ void sz_sort_casefold_windows_skylake_(
+STRINGZILLA_OUTLINED void sz_sort_casefold_windows_skylake_(
     sz_strings_view_t const *const strings, sz_pgram_t *const global_pgrams, sz_size_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_size_t *const temporary_order, sz_size_t const start_in_strings,
     sz_size_t const end_in_strings, sz_size_t const folded_skip_count, sz_size_t const top_count,

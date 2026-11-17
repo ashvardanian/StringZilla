@@ -60,10 +60,9 @@ STRINGZILLA_INLINE svuint8_t sz_utf8_uncased_search_ascii_fold_sve2_(svuint8_t t
 }
 
 /** View-signature ASCII fold: only the raw bytes matter. */
-STRINGZILLA_OUTLINED_ svuint8_t sz_utf8_uncased_search_ascii_fold_views_sve2_(svuint8_t text_u8x,
-                                                                              svuint8_t previous_u8x,
-                                                                              svuint8_t previous2_u8x,
-                                                                              svuint8_t next_u8x) {
+STRINGZILLA_OUTLINED svuint8_t sz_utf8_uncased_search_ascii_fold_views_sve2_(svuint8_t text_u8x, svuint8_t previous_u8x,
+                                                                             svuint8_t previous2_u8x,
+                                                                             svuint8_t next_u8x) {
     sz_unused_(previous_u8x);
     sz_unused_(previous2_u8x);
     sz_unused_(next_u8x);
@@ -285,10 +284,10 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_ascii_3probe_sve2_( //
 #pragma region Script Folds and Alarms
 
 /** Western European fold: ASCII, Latin-1 uppercase +0x20 (minus multiply sign), Eszett to "ss". */
-STRINGZILLA_OUTLINED_ svuint8_t sz_utf8_uncased_search_western_europe_fold_sve2_(svuint8_t text_u8x,
-                                                                                 svuint8_t previous_u8x,
-                                                                                 svuint8_t previous2_u8x,
-                                                                                 svuint8_t next_u8x) {
+STRINGZILLA_OUTLINED svuint8_t sz_utf8_uncased_search_western_europe_fold_sve2_(svuint8_t text_u8x,
+                                                                                svuint8_t previous_u8x,
+                                                                                svuint8_t previous2_u8x,
+                                                                                svuint8_t next_u8x) {
     sz_unused_(previous2_u8x);
     svbool_t const all_b8x = svptrue_b8();
     svuint8_t result_u8x = sz_utf8_uncased_search_ascii_fold_sve2_(text_u8x);
@@ -306,8 +305,8 @@ STRINGZILLA_OUTLINED_ svuint8_t sz_utf8_uncased_search_western_europe_fold_sve2_
 }
 
 /** Western European alarm: width-changing folds route to the serial danger-zone scanner. */
-STRINGZILLA_OUTLINED_ int sz_utf8_uncased_search_western_europe_alarm_sve2_(svuint8_t text_u8x, svuint8_t previous_u8x,
-                                                                            svuint8_t next_u8x, svbool_t loaded_b8x) {
+STRINGZILLA_OUTLINED int sz_utf8_uncased_search_western_europe_alarm_sve2_(svuint8_t text_u8x, svuint8_t previous_u8x,
+                                                                           svuint8_t next_u8x, svbool_t loaded_b8x) {
     svbool_t const all_b8x = svptrue_b8();
     svbool_t const after_c5_b8x = svcmpeq_n_u8(all_b8x, previous_u8x, 0xC5);
 
@@ -333,10 +332,10 @@ STRINGZILLA_OUTLINED_ int sz_utf8_uncased_search_western_europe_alarm_sve2_(svui
 }
 
 /** Central European fold: Latin-1 +0x20 and Latin Extended-A parity via the shared delta LUTs. */
-STRINGZILLA_OUTLINED_ svuint8_t sz_utf8_uncased_search_central_europe_fold_sve2_(svuint8_t text_u8x,
-                                                                                 svuint8_t previous_u8x,
-                                                                                 svuint8_t previous2_u8x,
-                                                                                 svuint8_t next_u8x) {
+STRINGZILLA_OUTLINED svuint8_t sz_utf8_uncased_search_central_europe_fold_sve2_(svuint8_t text_u8x,
+                                                                                svuint8_t previous_u8x,
+                                                                                svuint8_t previous2_u8x,
+                                                                                svuint8_t next_u8x) {
     sz_unused_(previous2_u8x);
     sz_unused_(next_u8x);
     svbool_t const all_b8x = svptrue_b8();
@@ -364,8 +363,8 @@ STRINGZILLA_OUTLINED_ svuint8_t sz_utf8_uncased_search_central_europe_fold_sve2_
 }
 
 /** Central European alarm: cross-block and width-changing folds. */
-STRINGZILLA_OUTLINED_ int sz_utf8_uncased_search_central_europe_alarm_sve2_(svuint8_t text_u8x, svuint8_t previous_u8x,
-                                                                            svuint8_t next_u8x, svbool_t loaded_b8x) {
+STRINGZILLA_OUTLINED int sz_utf8_uncased_search_central_europe_alarm_sve2_(svuint8_t text_u8x, svuint8_t previous_u8x,
+                                                                           svuint8_t next_u8x, svbool_t loaded_b8x) {
     sz_unused_(next_u8x);
     svbool_t const all_b8x = svptrue_b8();
     svbool_t const after_c4_b8x = svcmpeq_n_u8(all_b8x, previous_u8x, 0xC4);
@@ -391,9 +390,8 @@ STRINGZILLA_OUTLINED_ int sz_utf8_uncased_search_central_europe_alarm_sve2_(svui
 }
 
 /** Cyrillic fold: second-byte high-nibble offsets after D0 plus the D0 → D1 lead promotion. */
-STRINGZILLA_OUTLINED_ svuint8_t sz_utf8_uncased_search_cyrillic_fold_sve2_(svuint8_t text_u8x, svuint8_t previous_u8x,
-                                                                           svuint8_t previous2_u8x,
-                                                                           svuint8_t next_u8x) {
+STRINGZILLA_OUTLINED svuint8_t sz_utf8_uncased_search_cyrillic_fold_sve2_(svuint8_t text_u8x, svuint8_t previous_u8x,
+                                                                          svuint8_t previous2_u8x, svuint8_t next_u8x) {
     sz_unused_(previous2_u8x);
     static sz_u8_t const cyrillic_offset_lut[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
     svbool_t const all_b8x = svptrue_b8();
@@ -411,8 +409,8 @@ STRINGZILLA_OUTLINED_ svuint8_t sz_utf8_uncased_search_cyrillic_fold_sve2_(svuin
 }
 
 /** Cyrillic alarm: Cyrillic Extended-C (E1 B2 80-88) folds into basic 2-byte letters. */
-STRINGZILLA_OUTLINED_ int sz_utf8_uncased_search_cyrillic_alarm_sve2_(svuint8_t text_u8x, svuint8_t previous_u8x,
-                                                                      svuint8_t next_u8x, svbool_t loaded_b8x) {
+STRINGZILLA_OUTLINED int sz_utf8_uncased_search_cyrillic_alarm_sve2_(svuint8_t text_u8x, svuint8_t previous_u8x,
+                                                                     svuint8_t next_u8x, svbool_t loaded_b8x) {
     svbool_t const all_b8x = svptrue_b8();
     svbool_t const danger_b8x = svand_b_z(
         all_b8x, svand_b_z(all_b8x, svcmpeq_n_u8(all_b8x, text_u8x, 0xB2), svcmpeq_n_u8(all_b8x, previous_u8x, 0xE1)),
@@ -421,8 +419,8 @@ STRINGZILLA_OUTLINED_ int sz_utf8_uncased_search_cyrillic_alarm_sve2_(svuint8_t 
 }
 
 /** Greek fold: the shared CE delta / promotion LUTs, final sigma, and the micro sign join. */
-STRINGZILLA_OUTLINED_ svuint8_t sz_utf8_uncased_search_greek_fold_sve2_(svuint8_t text_u8x, svuint8_t previous_u8x,
-                                                                        svuint8_t previous2_u8x, svuint8_t next_u8x) {
+STRINGZILLA_OUTLINED svuint8_t sz_utf8_uncased_search_greek_fold_sve2_(svuint8_t text_u8x, svuint8_t previous_u8x,
+                                                                       svuint8_t previous2_u8x, svuint8_t next_u8x) {
     sz_unused_(previous2_u8x);
     svbool_t const all_b8x = svptrue_b8();
     svuint8_t result_u8x = sz_utf8_uncased_search_ascii_fold_sve2_(text_u8x);
@@ -459,8 +457,8 @@ STRINGZILLA_OUTLINED_ svuint8_t sz_utf8_uncased_search_greek_fold_sve2_(svuint8_
 }
 
 /** Greek alarm: expanding diaeresis vowels, Greek symbols, Ohm sign, polytonic/archaic leads. */
-STRINGZILLA_OUTLINED_ int sz_utf8_uncased_search_greek_alarm_sve2_(svuint8_t text_u8x, svuint8_t previous_u8x,
-                                                                   svuint8_t next_u8x, svbool_t loaded_b8x) {
+STRINGZILLA_OUTLINED int sz_utf8_uncased_search_greek_alarm_sve2_(svuint8_t text_u8x, svuint8_t previous_u8x,
+                                                                  svuint8_t next_u8x, svbool_t loaded_b8x) {
     sz_unused_(next_u8x);
     svbool_t const all_b8x = svptrue_b8();
 
@@ -487,9 +485,8 @@ STRINGZILLA_OUTLINED_ int sz_utf8_uncased_search_greek_alarm_sve2_(svuint8_t tex
 }
 
 /** Armenian fold: three second-byte offsets on disjoint lanes plus the two +1 lead promotions. */
-STRINGZILLA_OUTLINED_ svuint8_t sz_utf8_uncased_search_armenian_fold_sve2_(svuint8_t text_u8x, svuint8_t previous_u8x,
-                                                                           svuint8_t previous2_u8x,
-                                                                           svuint8_t next_u8x) {
+STRINGZILLA_OUTLINED svuint8_t sz_utf8_uncased_search_armenian_fold_sve2_(svuint8_t text_u8x, svuint8_t previous_u8x,
+                                                                          svuint8_t previous2_u8x, svuint8_t next_u8x) {
     sz_unused_(previous2_u8x);
     svbool_t const all_b8x = svptrue_b8();
     svuint8_t result_u8x = sz_utf8_uncased_search_ascii_fold_sve2_(text_u8x);
@@ -514,8 +511,8 @@ STRINGZILLA_OUTLINED_ svuint8_t sz_utf8_uncased_search_armenian_fold_sve2_(svuin
 }
 
 /** Armenian alarm: the Ech-Yiwn ligature (D6 87) and the presentation-form ligatures (EF AC xx). */
-STRINGZILLA_OUTLINED_ int sz_utf8_uncased_search_armenian_alarm_sve2_(svuint8_t text_u8x, svuint8_t previous_u8x,
-                                                                      svuint8_t next_u8x, svbool_t loaded_b8x) {
+STRINGZILLA_OUTLINED int sz_utf8_uncased_search_armenian_alarm_sve2_(svuint8_t text_u8x, svuint8_t previous_u8x,
+                                                                     svuint8_t next_u8x, svbool_t loaded_b8x) {
     sz_unused_(next_u8x);
     svbool_t const all_b8x = svptrue_b8();
     svbool_t danger_b8x = svand_b_z(all_b8x, svcmpeq_n_u8(all_b8x, text_u8x, 0x87),
@@ -527,9 +524,9 @@ STRINGZILLA_OUTLINED_ int sz_utf8_uncased_search_armenian_alarm_sve2_(svuint8_t 
 }
 
 /** Vietnamese fold: four Latin blocks folding in place, incl. the E1 B8-BB third-byte parity. */
-STRINGZILLA_OUTLINED_ svuint8_t sz_utf8_uncased_search_vietnamese_fold_sve2_(svuint8_t text_u8x, svuint8_t previous_u8x,
-                                                                             svuint8_t previous2_u8x,
-                                                                             svuint8_t next_u8x) {
+STRINGZILLA_OUTLINED svuint8_t sz_utf8_uncased_search_vietnamese_fold_sve2_(svuint8_t text_u8x, svuint8_t previous_u8x,
+                                                                            svuint8_t previous2_u8x,
+                                                                            svuint8_t next_u8x) {
     sz_unused_(next_u8x);
     svbool_t const all_b8x = svptrue_b8();
     svuint8_t result_u8x = sz_utf8_uncased_search_ascii_fold_sve2_(text_u8x);
@@ -566,8 +563,8 @@ STRINGZILLA_OUTLINED_ svuint8_t sz_utf8_uncased_search_vietnamese_fold_sve2_(svu
 }
 
 /** Vietnamese alarm: the expanding E1 BA 96-9F block and the shared Latin width-changers. */
-STRINGZILLA_OUTLINED_ int sz_utf8_uncased_search_vietnamese_alarm_sve2_(svuint8_t text_u8x, svuint8_t previous_u8x,
-                                                                        svuint8_t next_u8x, svbool_t loaded_b8x) {
+STRINGZILLA_OUTLINED int sz_utf8_uncased_search_vietnamese_alarm_sve2_(svuint8_t text_u8x, svuint8_t previous_u8x,
+                                                                       svuint8_t next_u8x, svbool_t loaded_b8x) {
     svbool_t const all_b8x = svptrue_b8();
 
     svbool_t danger_b8x = svand_b_z( // E1 BA 96-9F (expanding third byte)
@@ -589,8 +586,8 @@ STRINGZILLA_OUTLINED_ int sz_utf8_uncased_search_vietnamese_alarm_sve2_(svuint8_
 }
 
 /** Georgian alarm: the historical scripts (Mtavruli, Asomtavruli, Nuskhuri) fold across blocks. */
-STRINGZILLA_OUTLINED_ int sz_utf8_uncased_search_georgian_alarm_sve2_(svuint8_t text_u8x, svuint8_t previous_u8x,
-                                                                      svuint8_t next_u8x, svbool_t loaded_b8x) {
+STRINGZILLA_OUTLINED int sz_utf8_uncased_search_georgian_alarm_sve2_(svuint8_t text_u8x, svuint8_t previous_u8x,
+                                                                     svuint8_t next_u8x, svbool_t loaded_b8x) {
     svbool_t const all_b8x = svptrue_b8();
     svbool_t const after_e1_b8x = svcmpeq_n_u8(all_b8x, previous_u8x, 0xE1);
 

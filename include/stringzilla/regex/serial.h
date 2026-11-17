@@ -1207,7 +1207,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_add_sequence_(sz_regex_builder_t *builde
  *  sequence of single codepoints, so <tt>[sß]</tt> tries @c s before @c ss; a class left with no ranges is
  *  dropped from the alternation. Out of line, as it recurses for those folds and has six callers.
  */
-STRINGZILLA_OUTLINED_ sz_status_t sz_regex_add_class_(sz_regex_builder_t *builder, sz_size_t begin, sz_u32_t *index) {
+STRINGZILLA_OUTLINED sz_status_t sz_regex_add_class_(sz_regex_builder_t *builder, sz_size_t begin, sz_u32_t *index) {
     sz_size_t const base = builder->pending_count, expansions_count = builder->expansions_count;
     sz_status_t status;
     sz_regex_normalize_ranges_(builder, begin);
@@ -1499,13 +1499,13 @@ STRINGZILLA_INLINE sz_status_t sz_regex_parse_count_(sz_regex_parser_t *parser, 
     return parser->position == begin ? sz_invalid_syntax_k : sz_success_k;
 }
 
-STRINGZILLA_OUTLINED_ sz_status_t sz_regex_parse_alternation_(sz_regex_builder_t *builder, sz_regex_parser_t *parser,
-                                                              sz_u32_t *flags, sz_u32_t depth, sz_u32_t *index);
+STRINGZILLA_OUTLINED sz_status_t sz_regex_parse_alternation_(sz_regex_builder_t *builder, sz_regex_parser_t *parser,
+                                                             sz_u32_t *flags, sz_u32_t depth, sz_u32_t *index);
 
 /** Parses a lookaround from the <tt>=</tt>, <tt>!</tt> or <tt>&lt;</tt> after its <tt>(?</tt> into a look node testing the
  *  lookaround's bit, refusing a capturing group in its body, out of which no walk reads groups. */
-STRINGZILLA_OUTLINED_ sz_status_t sz_regex_parse_lookaround_(sz_regex_builder_t *builder, sz_regex_parser_t *parser,
-                                                             sz_u32_t flags, sz_u32_t depth, sz_u32_t *index) {
+STRINGZILLA_OUTLINED sz_status_t sz_regex_parse_lookaround_(sz_regex_builder_t *builder, sz_regex_parser_t *parser,
+                                                            sz_u32_t flags, sz_u32_t depth, sz_u32_t *index) {
     sz_size_t const names_count = builder->names_count, nested = builder->lookarounds_count;
     sz_bool_t const behind = (sz_bool_t)(parser->text[parser->position] == '<');
     sz_regex_lookaround_t *lookarounds;
@@ -1546,8 +1546,8 @@ STRINGZILLA_OUTLINED_ sz_status_t sz_regex_parse_lookaround_(sz_regex_builder_t 
  *
  *  Capturing groups, named or not, are numbered from one by their opening parenthesis.
  */
-STRINGZILLA_OUTLINED_ sz_status_t sz_regex_parse_group_(sz_regex_builder_t *builder, sz_regex_parser_t *parser,
-                                                        sz_u32_t *flags, sz_u32_t depth, sz_u32_t *index) {
+STRINGZILLA_OUTLINED sz_status_t sz_regex_parse_group_(sz_regex_builder_t *builder, sz_regex_parser_t *parser,
+                                                       sz_u32_t *flags, sz_u32_t depth, sz_u32_t *index) {
     sz_u8_t const *const text = parser->text;
     sz_u32_t scoped = *flags, group = 0;
     sz_size_t name_begin = ++parser->position, name_length = 0;
@@ -1726,8 +1726,8 @@ STRINGZILLA_INLINE sz_status_t sz_regex_parse_quantifier_(sz_regex_builder_t *bu
 }
 
 /** Parses items up to the next <tt>|</tt> or <tt>)</tt> into one concatenation. */
-STRINGZILLA_OUTLINED_ sz_status_t sz_regex_parse_concat_(sz_regex_builder_t *builder, sz_regex_parser_t *parser,
-                                                         sz_u32_t *flags, sz_u32_t depth, sz_u32_t *index) {
+STRINGZILLA_OUTLINED sz_status_t sz_regex_parse_concat_(sz_regex_builder_t *builder, sz_regex_parser_t *parser,
+                                                        sz_u32_t *flags, sz_u32_t depth, sz_u32_t *index) {
     sz_size_t const base = builder->pending_count;
     sz_u8_t const *const text = parser->text;
     sz_status_t status;
@@ -1780,8 +1780,8 @@ STRINGZILLA_OUTLINED_ sz_status_t sz_regex_parse_concat_(sz_regex_builder_t *bui
     return sz_regex_add_sequence_(builder, sz_regex_node_concat_k, base, index);
 }
 
-STRINGZILLA_OUTLINED_ sz_status_t sz_regex_parse_alternation_(sz_regex_builder_t *builder, sz_regex_parser_t *parser,
-                                                              sz_u32_t *flags, sz_u32_t depth, sz_u32_t *index) {
+STRINGZILLA_OUTLINED sz_status_t sz_regex_parse_alternation_(sz_regex_builder_t *builder, sz_regex_parser_t *parser,
+                                                             sz_u32_t *flags, sz_u32_t depth, sz_u32_t *index) {
     sz_size_t const base = builder->pending_count;
     for (;;) {
         sz_u32_t branch;
@@ -2001,15 +2001,15 @@ STRINGZILLA_INLINE sz_status_t sz_regex_add_position_(sz_regex_builder_t *builde
     return sz_success_k;
 }
 
-STRINGZILLA_OUTLINED_ sz_status_t sz_regex_compile_node_(sz_regex_builder_t *builder, sz_regex_nfa_t *nfa,
-                                                         sz_u32_t index, sz_regex_direction_t direction,
-                                                         sz_regex_fragment_t *fragment);
+STRINGZILLA_OUTLINED sz_status_t sz_regex_compile_node_(sz_regex_builder_t *builder, sz_regex_nfa_t *nfa,
+                                                        sz_u32_t index, sz_regex_direction_t direction,
+                                                        sz_regex_fragment_t *fragment);
 
 /** Compiles @p count copies of a node one after another, or an empty state for none. */
-STRINGZILLA_OUTLINED_ sz_status_t sz_regex_compile_copies_(sz_regex_builder_t *builder, sz_regex_nfa_t *nfa,
-                                                           sz_u32_t index, sz_u32_t count,
-                                                           sz_regex_direction_t direction,
-                                                           sz_regex_fragment_t *fragment) {
+STRINGZILLA_OUTLINED sz_status_t sz_regex_compile_copies_(sz_regex_builder_t *builder, sz_regex_nfa_t *nfa,
+                                                          sz_u32_t index, sz_u32_t count,
+                                                          sz_regex_direction_t direction,
+                                                          sz_regex_fragment_t *fragment) {
     sz_status_t status;
     if (count == 0) {
         status = sz_regex_nfa_add_(builder, nfa, sz_regex_nfa_empty_k, &fragment->start);
@@ -2034,9 +2034,9 @@ STRINGZILLA_OUTLINED_ sz_status_t sz_regex_compile_copies_(sz_regex_builder_t *b
  *  An unbounded repetition of a child that can match empty compiles as <tt>(x+)?</tt> rather than a loop
  *  around @c x, and a bounded one as a chain of optional copies sharing one exit.
  */
-STRINGZILLA_OUTLINED_ sz_status_t sz_regex_compile_repeat_(sz_regex_builder_t *builder, sz_regex_nfa_t *nfa,
-                                                           sz_regex_node_t const *node, sz_regex_direction_t direction,
-                                                           sz_regex_fragment_t *fragment) {
+STRINGZILLA_OUTLINED sz_status_t sz_regex_compile_repeat_(sz_regex_builder_t *builder, sz_regex_nfa_t *nfa,
+                                                          sz_regex_node_t const *node, sz_regex_direction_t direction,
+                                                          sz_regex_fragment_t *fragment) {
     sz_u32_t const child = node->first, minimum = node->minimum, maximum = node->maximum;
     sz_regex_greed_t const greed = node->greed;
     sz_regex_fragment_t body;
@@ -2120,9 +2120,9 @@ STRINGZILLA_CONSTEXPR sz_u32_t sz_regex_reverse_look_(sz_u32_t look) {
 
 /** Compiles one syntax tree node into NFA states, children in reverse order for
  *  a reversed pattern. */
-STRINGZILLA_OUTLINED_ sz_status_t sz_regex_compile_node_(sz_regex_builder_t *builder, sz_regex_nfa_t *nfa,
-                                                         sz_u32_t index, sz_regex_direction_t direction,
-                                                         sz_regex_fragment_t *fragment) {
+STRINGZILLA_OUTLINED sz_status_t sz_regex_compile_node_(sz_regex_builder_t *builder, sz_regex_nfa_t *nfa,
+                                                        sz_u32_t index, sz_regex_direction_t direction,
+                                                        sz_regex_fragment_t *fragment) {
     sz_regex_node_t const node = builder->nodes[index];
     sz_status_t status;
     switch (node.kind) {
@@ -3887,8 +3887,8 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_regex_rune_kind_(sz_rune_t rune) {
     return rune < 0x80 ? sz_regex_byte_kind_((sz_u8_t)rune) : 3;
 }
 
-STRINGZILLA_OUTLINED_ void sz_regex_looks_serial_(sz_regex_engine_t const *engine, sz_cptr_t haystack, sz_size_t length,
-                                                  sz_regex_walk_t *walk);
+STRINGZILLA_OUTLINED void sz_regex_looks_serial_(sz_regex_engine_t const *engine, sz_cptr_t haystack, sz_size_t length,
+                                                 sz_regex_walk_t *walk);
 
 /**
  *  @brief Grows the engine's round block for @p haystack and carves @p walk out of it, its windows
@@ -4698,9 +4698,9 @@ STRINGZILLA_INLINE void sz_regex_mark_settle_serial_(sz_regex_engine_t const *en
  *  of it ended on; in lockstep, it guesses the other entries and settles them once every window is
  *  marked. Outlined, so that no tier's target widens the chains into gathers.
  */
-STRINGZILLA_OUTLINED_ void sz_regex_mark_states_serial_(sz_regex_engine_t const *engine, sz_cptr_t haystack,
-                                                        sz_size_t length, sz_regex_walk_t *walk, sz_size_t first,
-                                                        sz_size_t count, sz_bool_t skipping, sz_bool_t trying) {
+STRINGZILLA_OUTLINED void sz_regex_mark_states_serial_(sz_regex_engine_t const *engine, sz_cptr_t haystack,
+                                                       sz_size_t length, sz_regex_walk_t *walk, sz_size_t first,
+                                                       sz_size_t count, sz_bool_t skipping, sz_bool_t trying) {
     sz_u8_t const *const bytes = (sz_u8_t const *)haystack;
     sz_size_t const *const bounds = walk->bounds + first;
     sz_u32_t states[sz_regex_chains_serial_k], finals[sz_regex_chains_serial_k];
@@ -5292,8 +5292,8 @@ STRINGZILLA_INLINE void sz_regex_looks_bodies_(sz_regex_engine_t const *engine, 
  *  haystack, and the rest step a PikeVM. Steps inside the folds of one codepoint see no lookaround
  *  hold, and a body ending or starting there marks the codepoint's edge it snaps out to.
  */
-STRINGZILLA_OUTLINED_ void sz_regex_looks_serial_(sz_regex_engine_t const *engine, sz_cptr_t haystack, sz_size_t length,
-                                                  sz_regex_walk_t *walk) {
+STRINGZILLA_OUTLINED void sz_regex_looks_serial_(sz_regex_engine_t const *engine, sz_cptr_t haystack, sz_size_t length,
+                                                 sz_regex_walk_t *walk) {
     sz_regex_pike_t *const pike = &walk->pike;
     sz_u32_t *const looks = walk->looks;
     sz_size_t const slots_count = pike->slots_count;

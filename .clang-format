@@ -22,7 +22,7 @@ StatementAttributeLikeMacros:
   - STRINGZILLA_API
   - STRINGZILLA_CONSTEXPR
   - STRINGZILLA_INLINE
-  - STRINGZILLA_OUTLINED_
+  - STRINGZILLA_OUTLINED
 
 # Attribute-like macros (clang-format 12+)
 AttributeMacros:

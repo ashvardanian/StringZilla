@@ -1900,9 +1900,9 @@ STRINGZILLA_INLINE void sz_substrings_find_ascending_(sz_substrings_engine_t con
     }
 }
 
-STRINGZILLA_OUTLINED_ void sz_substrings_find_bytes_serial_(sz_substrings_engine_t const *engine, sz_cptr_t haystack,
-                                                            sz_size_t length, sz_substrings_report_order_t order,
-                                                            sz_substrings_reporter_t reporter, void *context) {
+STRINGZILLA_OUTLINED void sz_substrings_find_bytes_serial_(sz_substrings_engine_t const *engine, sz_cptr_t haystack,
+                                                           sz_size_t length, sz_substrings_report_order_t order,
+                                                           sz_substrings_reporter_t reporter, void *context) {
     sz_size_t const warm_up = sz_substrings_bytes_warm_up_(engine);
     sz_u8_t const *const bytes = (sz_u8_t const *)haystack;
     sz_u8_t const *slices[sz_substrings_chains_serial_k];
@@ -2236,9 +2236,8 @@ STRINGZILLA_INLINE void sz_substrings_leftmost_drain_(sz_substrings_leftmost_con
 }
 
 /** Takes one overlapping match into the ring, draining whatever it settles on the way. */
-STRINGZILLA_OUTLINED_ sz_substrings_walk_t sz_substrings_leftmost_report_(void *context, sz_size_t needle_index,
-                                                                          sz_size_t byte_offset,
-                                                                          sz_size_t byte_length) {
+STRINGZILLA_OUTLINED sz_substrings_walk_t sz_substrings_leftmost_report_(void *context, sz_size_t needle_index,
+                                                                         sz_size_t byte_offset, sz_size_t byte_length) {
     sz_substrings_leftmost_context_t *const leftmost = (sz_substrings_leftmost_context_t *)context;
     sz_substrings_ring_t *const ring = leftmost->ring;
     sz_size_t const settles_before = byte_offset + byte_length > ring->width ? byte_offset + byte_length - ring->width
@@ -2310,8 +2309,8 @@ STRINGZILLA_INLINE void sz_substrings_visit_(sz_substrings_engine_t const *engin
 #pragma region Serial Backends
 
 /** Notes that a match was reported and stops the walk, which is all a containment test needs. */
-STRINGZILLA_OUTLINED_ sz_substrings_walk_t sz_substrings_first_report_(void *context, sz_size_t needle_index,
-                                                                       sz_size_t byte_offset, sz_size_t byte_length) {
+STRINGZILLA_OUTLINED sz_substrings_walk_t sz_substrings_first_report_(void *context, sz_size_t needle_index,
+                                                                      sz_size_t byte_offset, sz_size_t byte_length) {
     sz_unused_(needle_index), sz_unused_(byte_offset), sz_unused_(byte_length);
     *(sz_bool_t *)context = sz_true_k;
     return sz_substrings_stop_k;
@@ -2325,8 +2324,8 @@ typedef struct sz_substrings_tally_t {
     sz_size_t count;
 } sz_substrings_tally_t;
 
-STRINGZILLA_OUTLINED_ sz_substrings_walk_t sz_substrings_tally_report_(void *context, sz_size_t needle_index,
-                                                                       sz_size_t byte_offset, sz_size_t byte_length) {
+STRINGZILLA_OUTLINED sz_substrings_walk_t sz_substrings_tally_report_(void *context, sz_size_t needle_index,
+                                                                      sz_size_t byte_offset, sz_size_t byte_length) {
     sz_unused_(needle_index), sz_unused_(byte_offset), sz_unused_(byte_length);
     ++((sz_substrings_tally_t *)context)->count;
     return sz_substrings_continue_k;
@@ -2349,8 +2348,8 @@ typedef struct sz_substrings_collector_t {
     sz_size_t haystack_index;
 } sz_substrings_collector_t;
 
-STRINGZILLA_OUTLINED_ sz_substrings_walk_t sz_substrings_collect_report_(void *context, sz_size_t needle_index,
-                                                                         sz_size_t byte_offset, sz_size_t byte_length) {
+STRINGZILLA_OUTLINED sz_substrings_walk_t sz_substrings_collect_report_(void *context, sz_size_t needle_index,
+                                                                        sz_size_t byte_offset, sz_size_t byte_length) {
     sz_substrings_collector_t *const collector = (sz_substrings_collector_t *)context;
     if (collector->count < collector->capacity) {
         sz_match_t *const match = collector->matches + collector->count;
@@ -2404,8 +2403,8 @@ STRINGZILLA_INLINE void sz_substrings_rewriter_emit_(sz_substrings_rewriter_t *r
     rewriter->written += bytes;
 }
 
-STRINGZILLA_OUTLINED_ sz_substrings_walk_t sz_substrings_rewrite_report_(void *context, sz_size_t needle_index,
-                                                                         sz_size_t byte_offset, sz_size_t byte_length) {
+STRINGZILLA_OUTLINED sz_substrings_walk_t sz_substrings_rewrite_report_(void *context, sz_size_t needle_index,
+                                                                        sz_size_t byte_offset, sz_size_t byte_length) {
     sz_substrings_rewriter_t *const rewriter = (sz_substrings_rewriter_t *)context;
     sz_string_view_t replacement;
     sz_strings_get_(rewriter->replacements, &needle_index, 1, &replacement);
@@ -2711,9 +2710,9 @@ typedef struct sz_substrings_frequencies_t {
     sz_size_t needles_count;
 } sz_substrings_frequencies_t;
 
-STRINGZILLA_OUTLINED_ sz_substrings_walk_t sz_substrings_frequencies_report_(void *context, sz_size_t needle_index,
-                                                                             sz_size_t byte_offset,
-                                                                             sz_size_t byte_length) {
+STRINGZILLA_OUTLINED sz_substrings_walk_t sz_substrings_frequencies_report_(void *context, sz_size_t needle_index,
+                                                                            sz_size_t byte_offset,
+                                                                            sz_size_t byte_length) {
     sz_substrings_frequencies_t *const frequencies = (sz_substrings_frequencies_t *)context;
     sz_unused_(byte_offset), sz_unused_(byte_length);
     if (frequencies->counts[needle_index]++ == 0)

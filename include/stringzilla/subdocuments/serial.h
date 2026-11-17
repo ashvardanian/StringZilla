@@ -795,7 +795,7 @@ typedef enum sz_subdocuments_primary_t {
 STRINGZILLA_INLINE sz_status_t sz_subdocuments_parse_segments_(sz_subdocuments_parser_t *parser, sz_size_t root,
                                                                sz_bool_t filtering, sz_size_t *segments_count,
                                                                sz_bool_t *singular);
-STRINGZILLA_OUTLINED_ sz_status_t sz_subdocuments_parse_or_(sz_subdocuments_parser_t *parser);
+STRINGZILLA_OUTLINED sz_status_t sz_subdocuments_parse_or_(sz_subdocuments_parser_t *parser);
 
 /** Emits the instruction reading a query that ends at @p final_step as
  *  @p operation, unless already emitted. */
@@ -817,9 +817,9 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_emit_query_(sz_subdocuments_parse
  *
  *  @param[out] final_step For a query, its last step, whose live nodes are what it selects.
  */
-STRINGZILLA_OUTLINED_ sz_status_t sz_subdocuments_parse_primary_(sz_subdocuments_parser_t *parser,
-                                                                 sz_subdocuments_primary_t *primary,
-                                                                 sz_size_t *final_step) {
+STRINGZILLA_OUTLINED sz_status_t sz_subdocuments_parse_primary_(sz_subdocuments_parser_t *parser,
+                                                                sz_subdocuments_primary_t *primary,
+                                                                sz_size_t *final_step) {
     sz_subdocuments_builder_t *const builder = parser->builder;
     sz_cptr_t const path = parser->path;
     sz_size_t const length = parser->length;
@@ -1060,7 +1060,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_parse_and_(sz_subdocuments_parser
 
 /** Parses a disjunction of conjunctions: a whole logical expression. Every recursion of the filter
  *  grammar passes through here, so it stays out of line, as GCC 15 crashed inlining that cycle. */
-STRINGZILLA_OUTLINED_ sz_status_t sz_subdocuments_parse_or_(sz_subdocuments_parser_t *parser) {
+STRINGZILLA_OUTLINED sz_status_t sz_subdocuments_parse_or_(sz_subdocuments_parser_t *parser) {
     sz_status_t status = sz_subdocuments_parse_and_(parser);
     while (status == sz_success_k) {
         sz_size_t const position = sz_subdocuments_skip_blanks_(parser->path, parser->length, parser->position);
@@ -2504,11 +2504,11 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_filter_holds_(sz_subdocuments_eng
  *      levels take the next ones.
  *  @param[in,out] emitted Matches so far, or null for a filter's replay.
  */
-STRINGZILLA_OUTLINED_ sz_status_t sz_subdocuments_replay_(sz_subdocuments_engine_t *engine, sz_u8_t const *text,
-                                                          sz_u64_t *stack, sz_size_t begin, sz_size_t end,
-                                                          sz_size_t spare, sz_ptr_t buffer, sz_size_t capacity,
-                                                          sz_size_t document_index, sz_match_t *matches,
-                                                          sz_size_t matches_capacity, sz_size_t *emitted) {
+STRINGZILLA_OUTLINED sz_status_t sz_subdocuments_replay_(sz_subdocuments_engine_t *engine, sz_u8_t const *text,
+                                                         sz_u64_t *stack, sz_size_t begin, sz_size_t end,
+                                                         sz_size_t spare, sz_ptr_t buffer, sz_size_t capacity,
+                                                         sz_size_t document_index, sz_match_t *matches,
+                                                         sz_size_t matches_capacity, sz_size_t *emitted) {
     sz_size_t const header_words = sz_subdocuments_frame_header_words_(), words_count = engine->words_count;
     sz_size_t const frame_words = header_words + words_count + sz_subdocuments_names_words_(engine);
     sz_u64_t *const results = stack + spare * frame_words;

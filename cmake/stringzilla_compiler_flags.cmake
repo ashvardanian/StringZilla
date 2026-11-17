@@ -78,11 +78,12 @@ endif ()
 # expressions rather than `CMAKE_BUILD_TYPE`, which is empty under multi-config generators like Visual
 # Studio - string comparisons there would silently strip every optimization and debug flag.
 function (stringzilla_set_optimization_flags target_ target_type_)
-    target_compile_options(${target_} PRIVATE "$<$<AND:${stringzilla_msvc_},$<CONFIG:Debug>>:/Od;/Zi>")
+    # The runtime checks need the CRT, which the shared library leaves out; CMakeLists.txt strips CMake's own `/RTC1`.
     if (NOT target_type_ STREQUAL "SHARED_LIBRARY")
         target_compile_options(${target_} PRIVATE "$<$<AND:${stringzilla_msvc_},$<CONFIG:Debug>>:/RTC1>")
     endif ()
-    target_compile_options(${target_} PRIVATE "$<$<AND:${stringzilla_msvc_},$<CONFIG:Release,RelWithDebInfo>>:/O2;/Zi>")
+    # Release keeps a program database too, which CMake only gives Debug and RelWithDebInfo.
+    target_compile_options(${target_} PRIVATE "$<$<AND:${stringzilla_msvc_},$<CONFIG:Release>>:/Zi>")
 
     if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
         set(nvcc_debug_
@@ -137,35 +138,15 @@ endfunction ()
 function (stringzilla_set_compiler_flags target_ cpp_standard_)
     get_target_property(target_type_ ${target_} TYPE)
 
-    # Set output directory for single-configuration generators (like Make)
-    set_target_properties(${target_} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/$<0:>)
-    set_target_properties(${target_} PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/$<0:>)
+    # The `$<0:>` keeps multi-configuration generators from adding a per-configuration subdirectory.
+    set_target_properties(
+        ${target_} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/$<0:> ARCHIVE_OUTPUT_DIRECTORY
+                                                                                 ${CMAKE_BINARY_DIR}/$<0:>
+    )
 
-    # Set output directory for multi-configuration generators (like Visual Studio)
-    foreach (configuration_ IN LISTS CMAKE_CONFIGURATION_TYPES)
-        string(TOUPPER ${configuration_} configuration_uppercase_)
-        set_target_properties(
-            ${target_} PROPERTIES RUNTIME_OUTPUT_DIRECTORY_${configuration_uppercase_} ${CMAKE_BINARY_DIR}/$<0:>
-        )
-        set_target_properties(
-            ${target_} PROPERTIES ARCHIVE_OUTPUT_DIRECTORY_${configuration_uppercase_} ${CMAKE_BINARY_DIR}/$<0:>
-        )
-    endforeach ()
-
-    # Set the C++ standard
+    # CMake spells the standard for every compiler, MSVC's `/std:c++latest` for 23 included.
     if (NOT cpp_standard_ STREQUAL "")
-        set_target_properties(${target_} PROPERTIES CUDA_STANDARD ${cpp_standard_})
-        if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-            # For MSVC, explicitly set the /std: flag - don't set CXX_STANDARD property to avoid conflicts. MSVC has no
-            # `/std:c++23`; its newest standard is exposed as `/std:c++latest`, so map 23+ onto it.
-            if (cpp_standard_ GREATER_EQUAL 23)
-                target_compile_options(${target_} PRIVATE "$<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/std:c++latest>")
-            else ()
-                target_compile_options(${target_} PRIVATE "$<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/std:c++${cpp_standard_}>")
-            endif ()
-        else ()
-            set_target_properties(${target_} PROPERTIES CXX_STANDARD ${cpp_standard_})
-        endif ()
+        set_target_properties(${target_} PROPERTIES CXX_STANDARD ${cpp_standard_} CUDA_STANDARD ${cpp_standard_})
     endif ()
 
     # Make sure CUDA C++ allows calling `constexpr` from device code

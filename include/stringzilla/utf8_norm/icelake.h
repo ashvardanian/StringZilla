@@ -43,8 +43,8 @@ extern "C" {
 #endif
 
 /** 64-entry lead lookup in one AVX-512 VBMI @c vpermb, reading the shared LUT verbatim. */
-STRINGZILLA_OUTLINED_ __mmask64 sz_utf8_norm_lead_classify_vbmi_icelake_(__m512i bytes_u8x64, __mmask64 is_lead_m64,
-                                                                         sz_u8_t form_flag) {
+STRINGZILLA_OUTLINED __mmask64 sz_utf8_norm_lead_classify_vbmi_icelake_(__m512i bytes_u8x64, __mmask64 is_lead_m64,
+                                                                        sz_u8_t form_flag) {
     __m512i index_u8x64 = _mm512_and_si512(bytes_u8x64, _mm512_set1_epi8(0x3F));
     __m512i table_u8x64 = _mm512_loadu_si512((void const *)sz_utf8_norm_lead_lut_);
     __m512i families_u8x64 = _mm512_permutexvar_epi8(index_u8x64, table_u8x64);
@@ -53,8 +53,7 @@ STRINGZILLA_OUTLINED_ __mmask64 sz_utf8_norm_lead_classify_vbmi_icelake_(__m512i
 }
 
 /** Ice Lake scan primitive: the Skylake skeleton with the single @c vpermb lead classifier. */
-STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_norm_classify_icelake_(sz_cptr_t text, sz_size_t length,
-                                                               sz_normal_form_t form) {
+STRINGZILLA_OUTLINED sz_cptr_t sz_utf8_norm_classify_icelake_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     return sz_utf8_norm_classify_avx512_(text, length, form, &sz_utf8_norm_lead_classify_vbmi_icelake_);
 }
 

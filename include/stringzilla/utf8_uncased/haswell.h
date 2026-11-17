@@ -365,7 +365,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_ascii_4probe_haswell_( //
  *  excluding the caseless '×' C3 97), and 'ß' (U+00DF, C3 9F) → "ss" where both bytes of the
  *  pair become 's' so the folded image matches the needle's "ss".
  */
-STRINGZILLA_OUTLINED_ __m256i sz_utf8_uncased_search_western_europe_fold_ymm_haswell_(__m256i text_u8x32) {
+STRINGZILLA_OUTLINED __m256i sz_utf8_uncased_search_western_europe_fold_ymm_haswell_(__m256i text_u8x32) {
     __m256i result_u8x32 = sz_utf8_uncased_search_ascii_fold_ymm_haswell_(text_u8x32);
     __m256i previous_bytes_u8x32 = sz_utf8_uncased_previous_bytes_haswell_(text_u8x32);
     __m256i is_after_c3_u8x32 = _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0xC3));
@@ -409,8 +409,8 @@ STRINGZILLA_OUTLINED_ __m256i sz_utf8_uncased_search_western_europe_fold_ymm_has
  *  Lake's k-masks, including the boundary behavior where a lead at lane 31 defers to the next
  *  chunk, which overlaps this one.
  */
-STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_western_europe_alarm_ymm_haswell_(__m256i text_u8x32,
-                                                                                        sz_u32_t load_mask) {
+STRINGZILLA_OUTLINED sz_u32_t sz_utf8_uncased_search_western_europe_alarm_ymm_haswell_(__m256i text_u8x32,
+                                                                                       sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_ymm_t_` signature
 
     // Lead bytes (5 CMPEQ + movemask)
@@ -483,7 +483,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_western_europe_haswell_( //
  *  In the C4 B9-BD sub-range, 'ĸ' (C4 B8) is caseless and 'Ŀ' (C4 BF) folds across leads to 'ŀ' (C5
  *  80), so it is routed through the alarm instead.
  */
-STRINGZILLA_OUTLINED_ __m256i sz_utf8_uncased_search_central_europe_fold_ymm_haswell_(__m256i text_u8x32) {
+STRINGZILLA_OUTLINED __m256i sz_utf8_uncased_search_central_europe_fold_ymm_haswell_(__m256i text_u8x32) {
     __m256i result_u8x32 = sz_utf8_uncased_search_ascii_fold_ymm_haswell_(text_u8x32);
     __m256i previous_bytes_u8x32 = sz_utf8_uncased_previous_bytes_haswell_(text_u8x32);
     __m256i is_after_c3_u8x32 = _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0xC3));
@@ -528,8 +528,8 @@ STRINGZILLA_OUTLINED_ __m256i sz_utf8_uncased_search_central_europe_fold_ymm_has
  *  - C5 B8: 'Ÿ' (U+0178) → 'ÿ' (C3 BF), crosses lead bytes
  *  - EF AC 80-86: Latin ligatures 'ﬀ'-'ﬆ' → ASCII pairs/triples
  */
-STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_central_europe_alarm_ymm_haswell_(__m256i text_u8x32,
-                                                                                        sz_u32_t load_mask) {
+STRINGZILLA_OUTLINED sz_u32_t sz_utf8_uncased_search_central_europe_alarm_ymm_haswell_(__m256i text_u8x32,
+                                                                                       sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_ymm_t_` signature
 
     // Lead bytes (5 CMPEQ + movemask)
@@ -591,7 +591,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_central_europe_haswell_( //
  *  both 128-bit lanes since @c VPSHUFB works per lane. Extended Cyrillic (D2/D3) needles are banned
  *  at classification time, so only the D0 continuations need any folding.
  */
-STRINGZILLA_OUTLINED_ __m256i sz_utf8_uncased_search_cyrillic_fold_ymm_haswell_(__m256i text_u8x32) {
+STRINGZILLA_OUTLINED __m256i sz_utf8_uncased_search_cyrillic_fold_ymm_haswell_(__m256i text_u8x32) {
     __m256i result_u8x32 = sz_utf8_uncased_search_ascii_fold_ymm_haswell_(text_u8x32);
     __m256i previous_bytes_u8x32 = sz_utf8_uncased_previous_bytes_haswell_(text_u8x32);
     __m256i is_after_d0_u8x32 = _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0xD0));
@@ -625,8 +625,8 @@ STRINGZILLA_OUTLINED_ __m256i sz_utf8_uncased_search_cyrillic_fold_ymm_haswell_(
  *  through the serial danger-zone scanner. The E1 B2 pair is absent from nearly all real Cyrillic
  *  text, so the third-byte refinement hides behind a branch and the hot path is two compares.
  */
-STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_cyrillic_alarm_ymm_haswell_(__m256i text_u8x32,
-                                                                                  sz_u32_t load_mask) {
+STRINGZILLA_OUTLINED sz_u32_t sz_utf8_uncased_search_cyrillic_alarm_ymm_haswell_(__m256i text_u8x32,
+                                                                                 sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_ymm_t_` signature
     sz_u32_t is_e1_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_u8x32, _mm256_set1_epi8((char)0xE1)));
     sz_u32_t is_b2_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_u8x32, _mm256_set1_epi8((char)0xB2)));
@@ -673,7 +673,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_cyrillic_haswell_( //
  *  disjoint byte positions. The D4 range checks only the lower bound, mirroring the Ice Lake
  *  reference: valid continuation bytes never exceed BF.
  */
-STRINGZILLA_OUTLINED_ __m256i sz_utf8_uncased_search_armenian_fold_ymm_haswell_(__m256i text_u8x32) {
+STRINGZILLA_OUTLINED __m256i sz_utf8_uncased_search_armenian_fold_ymm_haswell_(__m256i text_u8x32) {
     __m256i result_u8x32 = sz_utf8_uncased_search_ascii_fold_ymm_haswell_(text_u8x32);
     __m256i previous_bytes_u8x32 = sz_utf8_uncased_previous_bytes_haswell_(text_u8x32);
     __m256i is_after_d4_u8x32 = _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0xD4));
@@ -709,8 +709,8 @@ STRINGZILLA_OUTLINED_ __m256i sz_utf8_uncased_search_armenian_fold_ymm_haswell_(
  *  reference: the only EF AC neighbors are the Latin/Hebrew presentation forms, which
  *  never appear inside Armenian haystacks, so the coarser test costs nothing in practice.
  */
-STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_armenian_alarm_ymm_haswell_(__m256i text_u8x32,
-                                                                                  sz_u32_t load_mask) {
+STRINGZILLA_OUTLINED sz_u32_t sz_utf8_uncased_search_armenian_alarm_ymm_haswell_(__m256i text_u8x32,
+                                                                                 sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_ymm_t_` signature
 
     // Lead bytes (2 CMPEQ + movemask)
@@ -766,7 +766,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_armenian_haswell_( //
  *  propagated back from the second-byte flags through @c next_bytes like the Eszett rewrite in the
  *  Western European fold.
  */
-STRINGZILLA_OUTLINED_ __m256i sz_utf8_uncased_search_greek_fold_ymm_haswell_(__m256i text_u8x32) {
+STRINGZILLA_OUTLINED __m256i sz_utf8_uncased_search_greek_fold_ymm_haswell_(__m256i text_u8x32) {
     __m256i result_u8x32 = sz_utf8_uncased_search_ascii_fold_ymm_haswell_(text_u8x32);
     __m256i previous_bytes_u8x32 = sz_utf8_uncased_previous_bytes_haswell_(text_u8x32);
     __m256i is_after_ce_u8x32 = _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0xCE));
@@ -830,7 +830,7 @@ STRINGZILLA_OUTLINED_ __m256i sz_utf8_uncased_search_greek_fold_ymm_haswell_(__m
  *  never fire - but when they do, the driver's step−2 retreat keeps a 3-byte danger
  *  sequence straddling the chunk edge fully visible in the next chunk.
  */
-STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_greek_alarm_ymm_haswell_(__m256i text_u8x32, sz_u32_t load_mask) {
+STRINGZILLA_OUTLINED sz_u32_t sz_utf8_uncased_search_greek_alarm_ymm_haswell_(__m256i text_u8x32, sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_ymm_t_` signature
 
     // Lead bytes (5 CMPEQ + movemask)
@@ -898,7 +898,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_greek_haswell_( //
  *  The third-byte rule needs the byte two lanes back, so a second @c previous_bytes pass
  *  materializes it; all rule masks flag disjoint positions and merge into one offset add.
  */
-STRINGZILLA_OUTLINED_ __m256i sz_utf8_uncased_search_vietnamese_fold_ymm_haswell_(__m256i text_u8x32) {
+STRINGZILLA_OUTLINED __m256i sz_utf8_uncased_search_vietnamese_fold_ymm_haswell_(__m256i text_u8x32) {
     __m256i result_u8x32 = sz_utf8_uncased_search_ascii_fold_ymm_haswell_(text_u8x32);
     __m256i previous_bytes_u8x32 = sz_utf8_uncased_previous_bytes_haswell_(text_u8x32);
     __m256i previous2_bytes_u8x32 = sz_utf8_uncased_previous_bytes_haswell_(previous_bytes_u8x32);
@@ -968,8 +968,8 @@ STRINGZILLA_OUTLINED_ __m256i sz_utf8_uncased_search_vietnamese_fold_ymm_haswell
  *  compare is exactly as safe-negative on tail chunks. Unlike the other alarms, the result is
  *  shifted back to the sequence-start positions, mirroring the Ice Lake reference bit-for-bit.
  */
-STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_vietnamese_alarm_ymm_haswell_(__m256i text_u8x32,
-                                                                                    sz_u32_t load_mask) {
+STRINGZILLA_OUTLINED sz_u32_t sz_utf8_uncased_search_vietnamese_alarm_ymm_haswell_(__m256i text_u8x32,
+                                                                                   sz_u32_t load_mask) {
     sz_unused_(load_mask); // Padded loads zero absent bytes, so range compares are safe-negative
 
     // Lead bytes (5 CMPEQ + movemask)
@@ -1039,8 +1039,8 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_vietnamese_haswell_( //
  *  safe-negative. The result is shifted back to the sequence-start positions, mirroring the Ice
  *  Lake reference bit-for-bit.
  */
-STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_georgian_alarm_ymm_haswell_(__m256i text_u8x32,
-                                                                                  sz_u32_t load_mask) {
+STRINGZILLA_OUTLINED sz_u32_t sz_utf8_uncased_search_georgian_alarm_ymm_haswell_(__m256i text_u8x32,
+                                                                                 sz_u32_t load_mask) {
     sz_unused_(load_mask); // Padded loads zero absent bytes, so range compares are safe-negative
 
     // Lead bytes (2 CMPEQ + movemask)

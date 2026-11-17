@@ -68,7 +68,7 @@ STRINGZILLA_INLINE uint8x16_t sz_utf8_norm_classify_lead_neon_(uint8x16_t v_u8x1
  *
  *  @return The first such byte, or NULL.
  */
-STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_norm_classify_neon_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
+STRINGZILLA_OUTLINED sz_cptr_t sz_utf8_norm_classify_neon_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     sz_u8_t const *ptr = (sz_u8_t const *)text;
     sz_u8_t const *const end = ptr + length;
     sz_u8_t const flag = sz_utf8_norm_form_flag_(form);

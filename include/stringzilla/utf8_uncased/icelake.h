@@ -540,7 +540,7 @@ STRINGZILLA_INLINE __m512i sz_utf8_uncased_search_western_europe_fold_naively_zm
  *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
-STRINGZILLA_OUTLINED_ __m512i sz_utf8_uncased_search_western_europe_fold_efficiently_zmm_icelake_(__m512i text_u8x64) {
+STRINGZILLA_OUTLINED __m512i sz_utf8_uncased_search_western_europe_fold_efficiently_zmm_icelake_(__m512i text_u8x64) {
     // No cheaper instruction selection has been found for this fold yet: the naive
     // version already folds Latin-1 with a single masked range check and a blend.
     return sz_utf8_uncased_search_western_europe_fold_naively_zmm_icelake_(text_u8x64);
@@ -639,7 +639,7 @@ STRINGZILLA_INLINE __mmask64 sz_utf8_uncased_search_western_europe_alarm_naively
  *  @param[in] text_u8x64 The text ZMM register to scan for danger bytes.
  *  @return Bitmask of positions where danger characters are detected.
  */
-STRINGZILLA_OUTLINED_ __mmask64 sz_utf8_uncased_search_western_europe_alarm_efficiently_zmm_icelake_(
+STRINGZILLA_OUTLINED __mmask64 sz_utf8_uncased_search_western_europe_alarm_efficiently_zmm_icelake_(
     __m512i text_u8x64, __mmask64 load_m64) {
     sz_unused_(load_m64); // Present for the shared `sz_utf8_uncased_alarm_zmm_t_` signature
 
@@ -831,7 +831,7 @@ STRINGZILLA_INLINE __m512i sz_utf8_uncased_search_central_europe_fold_naively_zm
  *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
-STRINGZILLA_OUTLINED_ __m512i sz_utf8_uncased_search_central_europe_fold_efficiently_zmm_icelake_(__m512i text_u8x64) {
+STRINGZILLA_OUTLINED __m512i sz_utf8_uncased_search_central_europe_fold_efficiently_zmm_icelake_(__m512i text_u8x64) {
     // Inline ASCII fold (avoiding function call overhead)
     __m512i const a_upper_u8x64 = _mm512_set1_epi8('A');
     __m512i const range26_u8x64 = _mm512_set1_epi8(26);
@@ -991,7 +991,7 @@ STRINGZILLA_INLINE __mmask64 sz_utf8_uncased_search_central_europe_alarm_naively
  *  @param[in] text_u8x64 The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
-STRINGZILLA_OUTLINED_ __mmask64 sz_utf8_uncased_search_central_europe_alarm_efficiently_zmm_icelake_(
+STRINGZILLA_OUTLINED __mmask64 sz_utf8_uncased_search_central_europe_alarm_efficiently_zmm_icelake_(
     __m512i text_u8x64, __mmask64 load_m64) {
     sz_unused_(load_m64); // Present for the shared `sz_utf8_uncased_alarm_zmm_t_` signature
 
@@ -1128,7 +1128,7 @@ STRINGZILLA_INLINE __m512i sz_utf8_uncased_search_cyrillic_fold_naively_zmm_icel
  *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
-STRINGZILLA_OUTLINED_ __m512i sz_utf8_uncased_search_cyrillic_fold_efficiently_zmm_icelake_(__m512i text_u8x64) {
+STRINGZILLA_OUTLINED __m512i sz_utf8_uncased_search_cyrillic_fold_efficiently_zmm_icelake_(__m512i text_u8x64) {
     // Start with ASCII folded
     __m512i result_u8x64 = sz_utf8_uncased_search_ascii_fold_zmm_icelake_(text_u8x64);
 
@@ -1218,8 +1218,8 @@ STRINGZILLA_INLINE __mmask64 sz_utf8_uncased_search_cyrillic_alarm_naively_zmm_i
  *  @param[in] load_m64 Present for the shared @ref sz_utf8_uncased_alarm_zmm_t_ signature.
  *  @return Bitmask of positions where danger characters are detected.
  */
-STRINGZILLA_OUTLINED_ __mmask64 sz_utf8_uncased_search_cyrillic_alarm_efficiently_zmm_icelake_(__m512i text_u8x64,
-                                                                                               __mmask64 load_m64) {
+STRINGZILLA_OUTLINED __mmask64 sz_utf8_uncased_search_cyrillic_alarm_efficiently_zmm_icelake_(__m512i text_u8x64,
+                                                                                              __mmask64 load_m64) {
     sz_unused_(load_m64);
     __mmask64 is_e1_m64 = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0xE1));
     __mmask64 is_b2_m64 = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0xB2));
@@ -1336,7 +1336,7 @@ STRINGZILLA_INLINE __m512i sz_utf8_uncased_search_armenian_fold_naively_zmm_icel
  *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
-STRINGZILLA_OUTLINED_ __m512i sz_utf8_uncased_search_armenian_fold_efficiently_zmm_icelake_(__m512i text_u8x64) {
+STRINGZILLA_OUTLINED __m512i sz_utf8_uncased_search_armenian_fold_efficiently_zmm_icelake_(__m512i text_u8x64) {
     // Inline ASCII fold (avoiding function call overhead)
     __m512i const a_upper_u8x64 = _mm512_set1_epi8('A');
     __m512i const range26_u8x64 = _mm512_set1_epi8(26);
@@ -1444,8 +1444,8 @@ STRINGZILLA_INLINE __mmask64 sz_utf8_uncased_search_armenian_alarm_naively_zmm_i
  *  @param[in] text_u8x64 The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
-STRINGZILLA_OUTLINED_ __mmask64 sz_utf8_uncased_search_armenian_alarm_efficiently_zmm_icelake_(__m512i text_u8x64,
-                                                                                               __mmask64 load_m64) {
+STRINGZILLA_OUTLINED __mmask64 sz_utf8_uncased_search_armenian_alarm_efficiently_zmm_icelake_(__m512i text_u8x64,
+                                                                                              __mmask64 load_m64) {
     sz_unused_(load_m64); // Present for the shared `sz_utf8_uncased_alarm_zmm_t_` signature
 
     // Only 4 CMPEQ operations - optimization overhead likely not worth it
@@ -1618,7 +1618,7 @@ STRINGZILLA_INLINE __m512i sz_utf8_uncased_search_greek_fold_naively_zmm_icelake
  *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
-STRINGZILLA_OUTLINED_ __m512i sz_utf8_uncased_search_greek_fold_efficiently_zmm_icelake_(__m512i text_u8x64) {
+STRINGZILLA_OUTLINED __m512i sz_utf8_uncased_search_greek_fold_efficiently_zmm_icelake_(__m512i text_u8x64) {
     // Inline ASCII fold (avoiding function call overhead)
     __m512i const a_upper_u8x64 = _mm512_set1_epi8('A');
     __m512i const range26_u8x64 = _mm512_set1_epi8(26);
@@ -1760,8 +1760,8 @@ STRINGZILLA_INLINE __mmask64 sz_utf8_uncased_search_greek_alarm_naively_zmm_icel
  *  @param[in] text_u8x64 The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
-STRINGZILLA_OUTLINED_ __mmask64 sz_utf8_uncased_search_greek_alarm_efficiently_zmm_icelake_(__m512i text_u8x64,
-                                                                                            __mmask64 load_m64) {
+STRINGZILLA_OUTLINED __mmask64 sz_utf8_uncased_search_greek_alarm_efficiently_zmm_icelake_(__m512i text_u8x64,
+                                                                                           __mmask64 load_m64) {
     sz_unused_(load_m64); // Present for the shared `sz_utf8_uncased_alarm_zmm_t_` signature
 
     // The naive reference burns 13 CMPEQs - all bound to port 5. The danger second bytes pair up
@@ -1956,7 +1956,7 @@ STRINGZILLA_INLINE __m512i sz_utf8_uncased_search_vietnamese_fold_naively_zmm_ic
  *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
-STRINGZILLA_OUTLINED_ __m512i sz_utf8_uncased_search_vietnamese_fold_efficiently_zmm_icelake_(__m512i text_u8x64) {
+STRINGZILLA_OUTLINED __m512i sz_utf8_uncased_search_vietnamese_fold_efficiently_zmm_icelake_(__m512i text_u8x64) {
     // Inline ASCII fold (avoiding function call overhead)
     __m512i const a_upper_u8x64 = _mm512_set1_epi8('A');
     __m512i const range26_u8x64 = _mm512_set1_epi8(26);
@@ -2145,8 +2145,8 @@ STRINGZILLA_INLINE __mmask64 sz_utf8_uncased_search_vietnamese_alarm_naively_zmm
  *  @param[in] load_m64 Mask of valid bytes in the ZMM register.
  *  @return Bitmask of positions where danger characters are detected (at sequence start).
  */
-STRINGZILLA_OUTLINED_ __mmask64 sz_utf8_uncased_search_vietnamese_alarm_efficiently_zmm_icelake_(__m512i text_u8x64,
-                                                                                                 __mmask64 load_m64) {
+STRINGZILLA_OUTLINED __mmask64 sz_utf8_uncased_search_vietnamese_alarm_efficiently_zmm_icelake_(__m512i text_u8x64,
+                                                                                                __mmask64 load_m64) {
     // Range constants
     __m512i const x_e1_u8x64 = _mm512_set1_epi8((char)0xE1);
     __m512i const x_c3_u8x64 = _mm512_set1_epi8((char)0xC3);
@@ -2283,8 +2283,8 @@ STRINGZILLA_INLINE __mmask64 sz_utf8_uncased_search_georgian_alarm_zmm_icelake_(
  *  port-5 ops. The reference @ref sz_utf8_uncased_search_georgian_alarm_zmm_icelake_ keeps its name
  *  unsuffixed because the probe harness references it directly.
  */
-STRINGZILLA_OUTLINED_ __mmask64 sz_utf8_uncased_search_georgian_alarm_efficiently_zmm_icelake_(__m512i text_u8x64,
-                                                                                               __mmask64 load_m64) {
+STRINGZILLA_OUTLINED __mmask64 sz_utf8_uncased_search_georgian_alarm_efficiently_zmm_icelake_(__m512i text_u8x64,
+                                                                                              __mmask64 load_m64) {
     sz_unused_(load_m64); // Present for the shared `sz_utf8_uncased_alarm_zmm_t_` signature
 
     // Index vector for materializing the previous byte: lane i takes byte i-1, lane 0 is zeroed
@@ -2337,7 +2337,7 @@ STRINGZILLA_OUTLINED_ __mmask64 sz_utf8_uncased_search_georgian_alarm_efficientl
  *  Georgian Mkhedruli is caseless, so Georgian characters pass through unchanged.
  *  Only ASCII uppercase letters need folding for mixed Latin text.
  */
-STRINGZILLA_OUTLINED_ __m512i sz_utf8_uncased_search_georgian_fold_zmm_icelake_(__m512i text_u8x64) {
+STRINGZILLA_OUTLINED __m512i sz_utf8_uncased_search_georgian_fold_zmm_icelake_(__m512i text_u8x64) {
     // ASCII A-Z range check: (byte - 'A') <= 25
     __m512i offset_a_u8x64 = _mm512_sub_epi8(text_u8x64, _mm512_set1_epi8('A'));
     __mmask64 is_upper_m64 = _mm512_cmple_epu8_mask(offset_a_u8x64, _mm512_set1_epi8(25));
