@@ -561,6 +561,7 @@ endif ()
 if (STRINGZILLA_BUILD_PYTHON)
     find_package(Python 3.12 REQUIRED COMPONENTS Interpreter Development.Module)
     find_package(OpenMP COMPONENTS C)
+    find_package(Threads REQUIRED)
     python_add_library(
         stringzilla_python
         MODULE
@@ -604,7 +605,7 @@ if (STRINGZILLA_BUILD_PYTHON)
                                    $<$<C_COMPILER_ID:Clang,AppleClang>:-Wno-incompatible-function-pointer-types>
     )
     target_link_libraries(
-        stringzilla_python PRIVATE stringzilla_static
+        stringzilla_python PRIVATE stringzilla_static Threads::Threads
                                    $<$<AND:$<BOOL:${OpenMP_C_FOUND}>,$<PLATFORM_ID:Linux,FreeBSD>>:OpenMP::OpenMP_C>
     )
     # The module's one export is its init function; the static library's kernels stay inside it.
@@ -636,6 +637,7 @@ if (STRINGZILLA_BUILD_NODE)
         message(FATAL_ERROR "The Node addon is built by cmake-js, which supplies the headers and import library")
     endif ()
     find_package(OpenMP COMPONENTS C)
+    find_package(Threads REQUIRED)
     # `CMAKE_JS_SRC` is the Windows delay-load hook and empty everywhere else.
     add_library(stringzilla_node SHARED javascript/stringzilla.c src/parallel.c ${CMAKE_JS_SRC})
     set_target_properties(
@@ -649,7 +651,7 @@ if (STRINGZILLA_BUILD_NODE)
     # The BigInt conversions need Node-API 6.
     target_compile_definitions(stringzilla_node PRIVATE NAPI_VERSION=8)
     target_link_libraries(
-        stringzilla_node PRIVATE stringzilla_static ${CMAKE_JS_LIB}
+        stringzilla_node PRIVATE stringzilla_static ${CMAKE_JS_LIB} Threads::Threads
                                  $<$<AND:$<BOOL:${OpenMP_C_FOUND}>,$<PLATFORM_ID:Linux,FreeBSD>>:OpenMP::OpenMP_C>
     )
 endif ()
@@ -744,6 +746,14 @@ if (STRINGZILLA_BUILD_TEST)
         stringzilla_cpu_header_test stringzilla_header COMPILE test/main_cpu.cpp ${stringzilla_cross_test_sources_}
     )
     add_test(NAME stringzilla_cpu_header_test COMMAND stringzilla_cpu_header_test)
+
+    # The tile scheduler the bindings share, on every thread count, under whatever sanitizer the build enables.
+    find_package(Threads REQUIRED)
+    add_executable(stringzilla_parallel_test test/parallel.cpp src/parallel.c)
+    stringzilla_set_compiler_flags(stringzilla_parallel_test 20)
+    target_include_directories(stringzilla_parallel_test PRIVATE src)
+    target_link_libraries(stringzilla_parallel_test PRIVATE stringzilla_static Threads::Threads)
+    add_test(NAME stringzilla_parallel_test COMMAND stringzilla_parallel_test)
 
 endif ()
 

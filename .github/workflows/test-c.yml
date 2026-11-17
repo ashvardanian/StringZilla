@@ -94,6 +94,25 @@ jobs:
           STRINGZILLA_SCALE: "0.1"
         run: ctest --preset debug
 
+  # The bindings' tile scheduler, the only code here that runs threads of its own.
+  test_ubuntu_tsan:
+    name: Test Tile Scheduler under ThreadSanitizer
+    runs-on: ubuntu-26.04
+    container: ghcr.io/ashvardanian/fatwheels:cpu@sha256:644a4ce0011feb651a2011d6e2a08400fa4ea8015787e33e62e1a88dc1cd1009
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+      - name: Build with Clang 23
+        run: |
+          cmake -S . -B build_tsan -G Ninja -D CMAKE_BUILD_TYPE=RelWithDebInfo -D CMAKE_C_COMPILER=clang-23 \
+            -D CMAKE_CXX_COMPILER=clang++-23 -D STRINGZILLA_BUILD_TEST=ON -D STRINGZILLA_BUILD_SANITIZERS=thread
+          cmake --build build_tsan --target stringzilla_parallel_test
+      - name: Test
+        run: ctest --test-dir build_tsan -R '^stringzilla_parallel_test$' --output-on-failure
+        env:
+          TSAN_OPTIONS: halt_on_error=1
+
   test_macos:
     name: Test on macOS
     runs-on: macos-26
