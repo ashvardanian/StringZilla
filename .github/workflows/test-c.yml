@@ -15,14 +15,14 @@ env:
 
 jobs:
   test_ubuntu_gcc:
-    name: Test on ${{ matrix.os }} with GCC 13
+    name: Test the GCC 13 Floor on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         # GCC 13 is the floor, the default on Ubuntu 24.04
-        os: [ubuntu-24.04, ubuntu-24.04-arm]
+        os: [ubuntu-26.04, ubuntu-26.04-arm]
     env:
       CC: gcc-13
       CXX: g++-13
@@ -43,14 +43,14 @@ jobs:
         run: ctest --preset release
 
   test_ubuntu_clang:
-    name: Test on ${{ matrix.os }} with Clang 18
+    name: Test the Clang 18 Floor on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         # Clang 18 is the floor, the default on Ubuntu 24.04
-        os: [ubuntu-24.04, ubuntu-24.04-arm]
+        os: [ubuntu-26.04, ubuntu-26.04-arm]
     env:
       CC: clang-18
       CXX: clang++-18
@@ -76,15 +76,15 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 90
     env:
-      CC: gcc-15
-      CXX: g++-15
+      CC: gcc-16
+      CXX: g++-16
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
       - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y build-essential gcc-15 g++-15
+          sudo apt install -y build-essential gcc-16 g++-16
       - name: Build
         run: |
           cmake --preset debug -D CMAKE_C_COMPILER="$CC" -D CMAKE_CXX_COMPILER="$CXX"
@@ -98,7 +98,7 @@ jobs:
   test_ubuntu_tsan:
     name: Test Tile Scheduler under ThreadSanitizer
     runs-on: ubuntu-26.04
-    container: ghcr.io/ashvardanian/fatwheels:cpu@sha256:644a4ce0011feb651a2011d6e2a08400fa4ea8015787e33e62e1a88dc1cd1009
+    container: ghcr.io/ashvardanian/fatwheels:cpu@sha256:d229196426ec02f358ab84b845434906180cd93d9ae37987651a078b277d17bb
     timeout-minutes: 20
     steps:
       - name: Checkout Repository
@@ -222,27 +222,27 @@ jobs:
             target_arch: loongarch64
             target: loongarch64-linux-gnu
             target_processor: loong64
-            cross_package: g++-15-loongarch64-linux-gnu
-            cc: loongarch64-linux-gnu-gcc-15
-            cxx: loongarch64-linux-gnu-g++-15
+            cross_package: g++-16-loongarch64-linux-gnu
+            cc: loongarch64-linux-gnu-gcc-16
+            cxx: loongarch64-linux-gnu-g++-16
             file_id: LoongArch
           - os: ubuntu-26.04
             arch: x86-64
             target_arch: ppc64le
             target: powerpc64le-linux-gnu
             target_processor: ppc64el
-            cross_package: g++-15-powerpc64le-linux-gnu
-            cc: powerpc64le-linux-gnu-gcc-15
-            cxx: powerpc64le-linux-gnu-g++-15
+            cross_package: g++-16-powerpc64le-linux-gnu
+            cc: powerpc64le-linux-gnu-gcc-16
+            cxx: powerpc64le-linux-gnu-g++-16
             file_id: PowerPC
 
     # LASX and POWER9 scope per function only from GCC 15 on, so those two legs cross-compile with GCC.
     env:
-      CC: ${{ matrix.cc || 'clang-22' }}
-      CXX: ${{ matrix.cxx || 'clang++-22' }}
-      AR: llvm-ar-22
-      NM: llvm-nm-22
-      RANLIB: llvm-ranlib-22
+      CC: ${{ matrix.cc || 'clang-23' }}
+      CXX: ${{ matrix.cxx || 'clang++-23' }}
+      AR: llvm-ar-23
+      NM: llvm-nm-23
+      RANLIB: llvm-ranlib-23
 
     steps:
       - name: Checkout Repository
@@ -252,10 +252,10 @@ jobs:
         run: |
           curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
             | sudo gpg --dearmor -o /usr/share/keyrings/llvm.gpg
-          echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/resolute/ llvm-toolchain-resolute-22 main" \
+          echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/resolute/ llvm-toolchain-resolute-23 main" \
             | sudo tee /etc/apt/sources.list.d/llvm.list > /dev/null
           sudo apt-get update
-          sudo apt-get install -y build-essential clang-22 lld-22 llvm-22 ${{ matrix.cross_package }}
+          sudo apt-get install -y build-essential clang-23 lld-23 llvm-23 ${{ matrix.cross_package }}
 
       - name: Build for ${{ matrix.target_arch }}
         run: |

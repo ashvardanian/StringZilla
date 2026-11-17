@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   test_go:
-    name: Test Go on ${{ matrix.os }} with ${{ matrix.cc }}
+    name: Test Go on ${{ matrix.os }} with the ${{ matrix.cc }} Floor
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -16,10 +16,10 @@ jobs:
       matrix:
         # The GCC rows skip the SHA tests.
         include:
-          - { os: ubuntu-24.04, cc: gcc-13, cxx: g++-13, tags: no_sha256 }
-          - { os: ubuntu-24.04-arm, cc: gcc-13, cxx: g++-13, tags: no_sha256 }
-          - { os: ubuntu-24.04, cc: clang-18, cxx: clang++-18, tags: "" }
-          - { os: ubuntu-24.04-arm, cc: clang-18, cxx: clang++-18, tags: "" }
+          - { os: ubuntu-26.04, cc: gcc-13, cxx: g++-13, tags: no_sha256 }
+          - { os: ubuntu-26.04-arm, cc: gcc-13, cxx: g++-13, tags: no_sha256 }
+          - { os: ubuntu-26.04, cc: clang-18, cxx: clang++-18, tags: "" }
+          - { os: ubuntu-26.04-arm, cc: clang-18, cxx: clang++-18, tags: "" }
     env:
       CC: ${{ matrix.cc }}
       CXX: ${{ matrix.cxx }}
@@ -50,15 +50,15 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     env:
-      CC: gcc-15
-      CXX: g++-15
+      CC: gcc-16
+      CXX: g++-16
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
       - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y build-essential gcc-15 g++-15
+          sudo apt install -y build-essential gcc-16 g++-16
       - name: Build the Debug Library
         run: |
           cmake --preset debug -B build_golang -D STRINGZILLA_BUILD_SANITIZERS=off -D CMAKE_C_COMPILER="$CC" -D CMAKE_CXX_COMPILER="$CXX"
