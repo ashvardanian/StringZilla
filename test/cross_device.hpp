@@ -83,9 +83,9 @@ inline void join_(device_backend_t const &runtime, sz_stream_t stream) {
 /** @p strings as one tape in pinned memory, gathered on the host, which the serial oracle walks and
  *  the device gathers its own copy from. */
 inline pinned_strings_t staged_(device_backend_t const &runtime, sz_strings_view_t const &strings) {
-    expected<pinned_strings_t> gathered = strings_view_t(strings).gather(pinned_alloc_<char>(runtime));
-    expect_equal(gathered.status, status_t::success_k);
-    return std::move(gathered.value);
+    auto [gathered, status] = strings_view_t(strings).gather(pinned_alloc_<char>(runtime));
+    expect_equal(status, status_t::success_k);
+    return std::move(gathered);
 }
 inline pinned_strings_t staged_(device_backend_t const &runtime, std::vector<std::string> const &texts) {
     return staged_(runtime, strings_from_(texts));
@@ -284,22 +284,22 @@ struct levenshtein_device_corpus_t {
     std::size_t count() const { return pinned.size(); }
 };
 
-/** The serial backend's answers for the same corpus, read off the pinned tape the device copied. */
-inline std::vector<sz_size_t> levenshtein_serial_reference_(levenshtein_device_corpus_t const &corpus,
-                                                            sz_levenshtein_symbol_t symbol) {
+/** The serial backend's answers for the same corpus, read off the pinned tape the device copied,
+ *  into @p expected, one per distance the corpus holds. */
+inline void levenshtein_serial_reference_(levenshtein_device_corpus_t const &corpus, sz_levenshtein_symbol_t symbol,
+                                          std::span<sz_size_t> expected) {
     sz_strings_view_t const query_strings = corpus.query_strings();
     handle_checked_heap_t heap;
     sz_levenshtein_engine_t engine {};
     expect_equal(sz_levenshtein_engine_init_serial(&engine, &query_strings, symbol, &heap.allocator, nullptr),
                  sz_success_k);
-    std::vector<sz_size_t> expected(corpus.distances.size());
+    std::memset(expected.data(), 0, expected.size_bytes());
     sz_strings_view_t const candidates = corpus.pinned.view().raw;
     expect_equal(sz_levenshtein_distances_serial(&engine, &candidates, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
                                                  expected.data(), corpus.count(), nullptr),
                  sz_success_k);
     sz_levenshtein_engine_free(&engine, nullptr);
     expect_equal(heap.live_allocations, 0);
-    return expected;
 }
 
 #pragma endregion Levenshtein Helpers
@@ -334,6 +334,7 @@ inline constexpr std::size_t levenshtein_device_query_symbols_k[] = {
 /** One backend's distances against serial's, on a corpus that never leaves the device. */
 inline void check_levenshtein_device_equivalence_(auto const &backend, levenshtein_device_alphabet_t alphabet,
                                                   sz_levenshtein_symbol_t symbol) {
+    std::vector<sz_size_t> expected;
     for (std::size_t const query_symbols : levenshtein_device_query_symbols_k)
         for (std::size_t count : {1u, 129u, 2048u}) {
             std::size_t const queries = levenshtein_device_sweep_queries_k;
@@ -348,7 +349,8 @@ inline void check_levenshtein_device_equivalence_(auto const &backend, levenshte
                 fail_backend_(backend.name, "a device batch drew a status the rungs do not imply");
             if (prepared != sz_success_k) continue;
             sz_strings_view_t const candidates = corpus.device;
-            std::vector<sz_size_t> const expected = levenshtein_serial_reference_(corpus, symbol);
+            expected.resize(corpus.distances.size());
+            levenshtein_serial_reference_(corpus, symbol, expected);
             // Unbounded, then half the query's length, which leaves candidates on both sides.
             for (sz_size_t const bound : {STRINGZILLA_SIZE_MAX, (sz_size_t)(query_symbols / 2)}) {
                 sz_status_t const produced = backend.levenshtein_distances(&engine, &candidates, nullptr, nullptr,
@@ -428,6 +430,7 @@ enum { levenshtein_device_skewed_budget_k = 256u * 1024u * 1024u };
 inline void check_levenshtein_device_skewed_(split_mix_generator_t &generator, auto const &backend,
                                              levenshtein_device_alphabet_t alphabet) {
     sz_levenshtein_symbol_t const symbol = levenshtein_device_symbol_(alphabet);
+    std::vector<sz_size_t> expected;
     for (device_skew_t const skew : {device_skew_t::lone_long_k, device_skew_t::log_uniform_k}) {
         std::vector<std::size_t> const lengths = device_skewed_lengths_(generator, skew);
         std::size_t total = 0;
@@ -449,7 +452,8 @@ inline void check_levenshtein_device_skewed_(split_mix_generator_t &generator, a
             sz_levenshtein_engine_free(&engine, backend.runtime.stream);
             if (produced != sz_success_k) fail_backend_(backend.name, "a skewed batch was refused");
 
-            std::vector<sz_size_t> const expected = levenshtein_serial_reference_(corpus, symbol);
+            expected.resize(corpus.distances.size());
+            levenshtein_serial_reference_(corpus, symbol, expected);
             for (std::size_t index = 0; index != expected.size(); ++index)
                 if (corpus.distances[index] != expected[index])
                     fail_backend_(backend.name, "a skewed batch's distance differs from serial");
@@ -617,7 +621,8 @@ inline void check_levenshtein_device_threads_(auto const &backend) {
                                             nullptr, queue),
                  sz_success_k);
     join_(backend.runtime, queue);
-    std::vector<sz_size_t> const expected = levenshtein_serial_reference_(corpus, sz_levenshtein_bytes_k);
+    std::vector<sz_size_t> expected(corpus.distances.size());
+    levenshtein_serial_reference_(corpus, sz_levenshtein_bytes_k, expected);
     pinned_vector<sz_size_t> other_distances(corpus.distances.size(), STRINGZILLA_SIZE_MAX,
                                              pinned_alloc_<sz_size_t>(backend.runtime));
     std::vector<sz_string_view_t> reversed_views = views_of_(corpus.pinned);
@@ -651,7 +656,8 @@ inline void check_levenshtein_device_deferred_free_(auto const &backend) {
     levenshtein_device_corpus_t corpus(backend.runtime, 129, 1024, levenshtein_device_sweep_queries_k,
                                        levenshtein_device_alphabet_t::bytes_k);
     sz_strings_view_t const query_strings = corpus.query_strings();
-    std::vector<sz_size_t> const expected = levenshtein_serial_reference_(corpus, sz_levenshtein_bytes_k);
+    std::vector<sz_size_t> expected(corpus.distances.size());
+    levenshtein_serial_reference_(corpus, sz_levenshtein_bytes_k, expected);
     sz_levenshtein_engine_t engine {};
     expect_equal(sz_levenshtein_engine_init(&engine, &query_strings, sz_levenshtein_bytes_k,
                                             backend.runtime.capabilities, STRINGZILLA_NULL, queue),
@@ -754,23 +760,23 @@ struct overlap_device_corpus_t {
     std::size_t query_stride() const noexcept { return pinned.size() * candidate_stride(); }
 };
 
-/** The serial backend's answers for the same corpus, read off the pinned tape the device copied. */
-inline std::vector<sz_u32_t> overlap_serial_reference_(overlap_device_corpus_t const &corpus,
-                                                       std::span<sz_size_t const> widths, sz_f32_t radius = 1.0f) {
+/** The serial backend's answers for the same corpus, read off the pinned tape the device copied,
+ *  into @p expected, one per count the corpus holds. */
+inline void overlap_serial_reference_(overlap_device_corpus_t const &corpus, std::span<sz_size_t const> widths,
+                                      sz_f32_t radius, std::span<sz_u32_t> expected) {
     sz_strings_view_t const query_strings = corpus.query_strings();
     handle_checked_heap_t heap;
     sz_overlap_engine_t engine {};
     expect_equal(sz_overlap_engine_init_serial(&engine, &query_strings, widths.data(), widths.size(), 0,
                                                &heap.allocator, nullptr),
                  sz_success_k);
-    std::vector<sz_u32_t> expected(corpus.matches.size(), 0xFFFFFFFFu);
+    std::memset(expected.data(), 0xFF, expected.size_bytes());
     sz_strings_view_t const candidates = corpus.pinned.view().raw;
     expect_equal(sz_overlap_scores_serial(&engine, &candidates, radius, expected.data(), corpus.query_stride(),
                                           corpus.candidate_stride(), nullptr),
                  sz_success_k);
     sz_overlap_engine_free(&engine, nullptr);
     expect_equal(heap.live_allocations, 0);
-    return expected;
 }
 
 #pragma endregion Overlap Helpers
@@ -781,6 +787,7 @@ inline std::vector<sz_u32_t> overlap_serial_reference_(overlap_device_corpus_t c
  *  at radii that keep every pair, some, and only identical ones. */
 inline void check_overlap_device_equivalence_(split_mix_generator_t &generator, auto const &backend) {
     std::array<sz_size_t, 3> const widths {4, 6, 8};
+    std::vector<sz_u32_t> expected;
 
     for (std::size_t queries_count : {1u, 3u})
         for (std::size_t count : {1u, 129u, 4096u})
@@ -794,9 +801,9 @@ inline void check_overlap_device_equivalence_(split_mix_generator_t &generator, 
                                            backend.runtime.stream) != sz_success_k)
                     fail_backend_(backend.name, "a device engine was refused for a well-formed batch");
                 sz_strings_view_t const candidates = corpus.device;
+                expected.resize(corpus.matches.size());
                 for (sz_f32_t const radius : {1.0f, 0.0f, 0.5f}) {
-                    std::vector<sz_u32_t> const expected = overlap_serial_reference_(
-                        corpus, {widths.data(), widths.size()}, radius);
+                    overlap_serial_reference_(corpus, widths, radius, expected);
                     if (backend.overlap_scores(&engine, &candidates, radius, corpus.matches.data(),
                                                corpus.query_stride(), corpus.candidate_stride(),
                                                backend.runtime.stream) != sz_success_k)
@@ -814,11 +821,13 @@ inline void check_overlap_device_equivalence_(split_mix_generator_t &generator, 
  *  lone-long batch's candidates are too short to hold. */
 inline void check_overlap_device_skewed_(split_mix_generator_t &generator, auto const &backend) {
     std::array<sz_size_t, 4> const widths {3, 8, 33, 100};
+    std::vector<sz_u32_t> expected;
     for (device_skew_t const skew : {device_skew_t::lone_long_k, device_skew_t::log_uniform_k}) {
         std::vector<std::size_t> const lengths = device_skewed_lengths_(generator, skew);
         overlap_device_corpus_t corpus(backend.runtime, generator, 2, lengths, 777, widths.size());
         sz_strings_view_t const query_strings = corpus.query_strings();
-        std::vector<sz_u32_t> const expected = overlap_serial_reference_(corpus, {widths.data(), widths.size()});
+        expected.resize(corpus.matches.size());
+        overlap_serial_reference_(corpus, widths, 1.0f, expected);
         // The lone-long batch carries more candidates than Metal's default round budget.
         sz_overlap_engine_t engine {};
         if (sz_overlap_engine_init(&engine, &query_strings, widths.data(), widths.size(), lengths.size(),
@@ -950,7 +959,8 @@ inline void check_overlap_device_streams_(split_mix_generator_t &generator, auto
     std::array<sz_size_t, 3> const widths {4, 6, 8};
     overlap_device_corpus_t corpus(backend.runtime, generator, 8, 4096, 777, widths.size());
     sz_strings_view_t const query_strings = corpus.query_strings();
-    std::vector<sz_u32_t> const expected = overlap_serial_reference_(corpus, {widths.data(), widths.size()});
+    std::vector<sz_u32_t> expected(corpus.matches.size());
+    overlap_serial_reference_(corpus, widths, 1.0f, expected);
     pinned_vector<sz_u32_t> second(corpus.matches.size(), 0xFFFFFFFFu, pinned_alloc_<sz_u32_t>(backend.runtime));
     stream_t const first_stream(backend.runtime.selected.ordinal(), backend.runtime.init, backend.runtime.free);
     stream_t const second_stream(backend.runtime.selected.ordinal(), backend.runtime.init, backend.runtime.free);

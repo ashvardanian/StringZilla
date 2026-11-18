@@ -1897,6 +1897,34 @@ int probe() { return 1; }
 #endif
 FIXTURE
 
+assert_rejects "value unwrapped from a call result" "unwraps a call result" test/probe.cpp <<'FIXTURE'
+inline int probe(text_t text) { return parse(text).value; }
+FIXTURE
+
+assert_accepts "structured binding and a trait value" test/probe.cpp <<'FIXTURE'
+inline int probe(text_t text) { auto [value, status] = parse(text); static_assert(std::is_same_v<int, int> && std::is_integral<int>::value); return value; }
+FIXTURE
+
+assert_rejects "const expected local" "declares an expected" test/probe.cpp <<'FIXTURE'
+    expected<report_t> const healed = heal_(plans_);
+FIXTURE
+
+assert_rejects "expected local spelling the return type twice" "declares an expected" test/probe.cpp <<'FIXTURE'
+    nk::expected<nk::matrix<f32_t>> made = nk::matrix<f32_t>::zeros({2, 3});
+FIXTURE
+
+assert_rejects "expected local with brace initializer" "declares an expected" test/probe.cpp <<'FIXTURE'
+    sz::expected<text_t> joined {text_t::make("a")};
+FIXTURE
+
+assert_accepts "expected local bound as a structure" test/probe.cpp <<'FIXTURE'
+    auto [made, status] = nk::matrix<f32_t>::zeros({2, 3});
+FIXTURE
+
+assert_accepts "expected return type of a declaration" test/probe.cpp <<'FIXTURE'
+expected<index_t> make(config_t const &config) noexcept;
+FIXTURE
+
 # endregion C and C++ Idiom Fixtures
 
 # region Other Language Fixtures

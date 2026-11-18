@@ -911,9 +911,8 @@ Copies and conversions come from `copy` and `make`, which return an `sz::expecte
 namespace sz = ashvardanian::stringzilla;
 
 int main() {
-    sz::expected<sz::string_t> made = sz::string_t::make("hello");
-    if (!made) return 1;
-    sz::string_t greeting = std::move(made.value);
+    auto [greeting, status] = sz::string_t::make("hello");
+    if (sz::failed(status)) return 1;
     if (sz::failed(greeting.append(", world"))) return 1;
     assert(greeting == "hello, world");
 

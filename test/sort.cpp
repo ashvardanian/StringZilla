@@ -69,8 +69,11 @@ void test_sort_unit() {
     // Byte arg-sort: {"banana","apple","cherry"} sorts lexicographically to {1, 0, 2}, and uncased
     // {"Banana","apple"} case-folds to {"banana","apple"}, ordering them {1, 0}.
     check_sort_unit_(sort_dispatched);
-    expect_equal(sz::argsort(strs_t {"banana", "apple", "cherry"}).value, order_t({1u, 0u, 2u}));
-    expect_equal(sz::argsort_utf8_uncased(strs_t {"Banana", "apple"}).value, order_t({1u, 0u}));
+    auto const [fruit_order, fruit_status] = sz::argsort(strs_t {"banana", "apple", "cherry"});
+    auto const [uncased_order, uncased_status] = sz::argsort_utf8_uncased(strs_t {"Banana", "apple"});
+    expect_true(sz::succeeded(fruit_status) && sz::succeeded(uncased_status));
+    expect_equal(fruit_order, order_t({1u, 0u, 2u}));
+    expect_equal(uncased_order, order_t({1u, 0u}));
 
     // Intersection: {"apple","banana","cherry"} vs {"cherry","date","banana"} share {"banana","cherry"}.
     {
@@ -123,16 +126,24 @@ void test_sort_unit() {
     }
 
     // Basic tests with predetermined orders.
-    expect_equal(sz::argsort(strs_t({"a", "b", "c", "d"})).value, order_t({0u, 1u, 2u, 3u}));
-    expect_equal(sz::argsort(strs_t({"b", "c", "d", "a"})).value, order_t({3u, 0u, 1u, 2u}));
-    expect_equal(sz::argsort(strs_t({"b", "a", "d", "c"})).value, order_t({1u, 0u, 3u, 2u}));
+    auto const [sorted_order, sorted_status] = sz::argsort(strs_t({"a", "b", "c", "d"}));
+    auto const [rotated_order, rotated_status] = sz::argsort(strs_t({"b", "c", "d", "a"}));
+    auto const [swapped_order, swapped_status] = sz::argsort(strs_t({"b", "a", "d", "c"}));
+    expect_true(sz::succeeded(sorted_status) && sz::succeeded(rotated_status) && sz::succeeded(swapped_status));
+    expect_equal(sorted_order, order_t({0u, 1u, 2u, 3u}));
+    expect_equal(rotated_order, order_t({3u, 0u, 1u, 2u}));
+    expect_equal(swapped_order, order_t({1u, 0u, 3u, 2u}));
 
     // Single character vs multi-character strings
-    expect_equal(sz::argsort(strs_t({"aa", "a", "aaa", "aa"})).value, order_t({1u, 0u, 3u, 2u}));
+    auto const [length_order, length_status] = sz::argsort(strs_t({"aa", "a", "aaa", "aa"}));
+    expect_true(sz::succeeded(length_status));
+    expect_equal(length_order, order_t({1u, 0u, 3u, 2u}));
 
     // Mix of short and long strings with common prefixes
-    expect_equal(sz::argsort(strs_t({"test", "t", "testing", "te", "tests", "testify", "tea", "team"})).value,
-                 order_t({1u, 3u, 6u, 7u, 0u, 5u, 2u, 4u}));
+    strs_t const prefixed_words = {"test", "t", "testing", "te", "tests", "testify", "tea", "team"};
+    auto const [prefix_order, prefix_status] = sz::argsort(prefixed_words);
+    expect_true(sz::succeeded(prefix_status));
+    expect_equal(prefix_order, order_t({1u, 3u, 6u, 7u, 0u, 5u, 2u, 4u}));
 
     // A prefix spanning dozens of pgram windows, so only the numeric tail decides the order.
     {
@@ -142,26 +153,34 @@ void test_sort_unit() {
         std::iota(expected.begin(), expected.end(), 0u);
         std::sort(expected.begin(), expected.end(),
                   [&](sz_size_t first, sz_size_t second) { return shared_prefix[first] < shared_prefix[second]; });
-        expect_equal(sz::argsort(shared_prefix).value, expected);
-        expect_equal(sz::argsort_utf8_uncased(shared_prefix).value, expected);
+        auto const [ascending_order, ascending_status] = sz::argsort(shared_prefix);
+        auto const [folded_order, folded_status] = sz::argsort_utf8_uncased(shared_prefix);
+        auto const [descending_order, descending_status] = sz::argsort(shared_prefix, 0, true);
+        expect_true(sz::succeeded(ascending_status) && sz::succeeded(folded_status) &&
+                    sz::succeeded(descending_status));
+        expect_equal(ascending_order, expected);
+        expect_equal(folded_order, expected);
         std::reverse(expected.begin(), expected.end());
-        expect_equal(sz::argsort(shared_prefix, 0, true).value, expected);
+        expect_equal(descending_order, expected);
     }
 
     // Single character vs multi-character strings with varied patterns
-    expect_equal(
-        sz::argsort(strs_t({"zebra", "z", "zoo", "zip", "zap", "a", "apple", "ant", "ark", "mango", "m", "maple"}))
-            .value,
-        order_t({5u, 7u, 6u, 8u, 10u, 9u, 11u, 1u, 4u, 0u, 3u, 2u}));
+    auto const [pattern_order, pattern_status] = sz::argsort(
+        strs_t({"zebra", "z", "zoo", "zip", "zap", "a", "apple", "ant", "ark", "mango", "m", "maple"}));
+    expect_true(sz::succeeded(pattern_status));
+    expect_equal(pattern_order, order_t({5u, 7u, 6u, 8u, 10u, 9u, 11u, 1u, 4u, 0u, 3u, 2u}));
 
     // Numeric-like strings of varying lengths
-    expect_equal(sz::argsort(strs_t({"100", "1", "10", "1000", "11", "111", "101", "110"})).value,
-                 order_t({1u, 2u, 0u, 3u, 6u, 4u, 7u, 5u}));
+    strs_t const numerals = {"100", "1", "10", "1000", "11", "111", "101", "110"};
+    auto const [numeric_order, numeric_status] = sz::argsort(numerals);
+    expect_true(sz::succeeded(numeric_status));
+    expect_equal(numeric_order, order_t({1u, 2u, 0u, 3u, 6u, 4u, 7u, 5u}));
 
     // Real names with varied lengths and prefixes
-    expect_equal(
-        sz::argsort(strs_t({"Anna", "Andrew", "Alex", "Bob", "Bobby", "Charlie", "Chris", "David", "Dan"})).value,
-        order_t({2u, 1u, 0u, 3u, 4u, 5u, 6u, 8u, 7u}));
+    auto const [name_order, name_status] = sz::argsort(
+        strs_t({"Anna", "Andrew", "Alex", "Bob", "Bobby", "Charlie", "Chris", "David", "Dan"}));
+    expect_true(sz::succeeded(name_status));
+    expect_equal(name_order, order_t({2u, 1u, 0u, 3u, 4u, 5u, 6u, 8u, 7u}));
 }
 
 /** Known-answer intersection pairs through the dispatched API and the C++ wrapper. */
@@ -186,29 +205,32 @@ void test_intersect_unit() {
         strs_t dcba({"d", "c", "b", "a"});
         strs_t abs({"a", "b", "s"});
         strs_t empty;
-        result_t result;
         // Empty sets
         {
-            result = sz::intersect(empty, empty).value;
-            expect_true(result.first_offsets.size() == 0 && result.second_offsets.size() == 0);
-            result = sz::intersect(abcd, empty).value;
-            expect_true(result.first_offsets.size() == 0 && result.second_offsets.size() == 0);
+            auto const [both_empty, both_empty_status] = sz::intersect(empty, empty);
+            auto const [right_empty, right_empty_status] = sz::intersect(abcd, empty);
+            expect_true(sz::succeeded(both_empty_status) && sz::succeeded(right_empty_status));
+            expect_true(both_empty.first_offsets.size() == 0 && both_empty.second_offsets.size() == 0);
+            expect_true(right_empty.first_offsets.size() == 0 && right_empty.second_offsets.size() == 0);
         }
         // Identity check
         {
-            result = sz::intersect(abcd, abcd).value;
+            auto const [result, intersect_status] = sz::intersect(abcd, abcd);
+            expect_true(sz::succeeded(intersect_status));
             expect_true(result.first_offsets.size() == 4 && result.second_offsets.size() == 4);
             expect_equal(to_pairs(result), index_pairs_t({{0u, 0u}, {1u, 1u}, {2u, 2u}, {3u, 3u}}));
         }
         // Identical size, different order
         {
-            result = sz::intersect(abcd, dcba).value;
+            auto const [result, intersect_status] = sz::intersect(abcd, dcba);
+            expect_true(sz::succeeded(intersect_status));
             expect_true(result.first_offsets.size() == 4 && result.second_offsets.size() == 4);
             expect_equal(to_pairs(result), index_pairs_t({{0u, 3u}, {1u, 2u}, {2u, 1u}, {3u, 0u}}));
         }
         // Different sets
         {
-            result = sz::intersect(abcd, abs).value;
+            auto const [result, intersect_status] = sz::intersect(abcd, abs);
+            expect_true(sz::succeeded(intersect_status));
             expect_true(result.first_offsets.size() == 2 && result.second_offsets.size() == 2);
             expect_equal(to_pairs(result), index_pairs_t({{0u, 0u}, {1u, 1u}}));
         }
@@ -225,7 +247,6 @@ void test_intersect_unit() {
 void test_intersect_equivalence() {
     split_mix_generator_t generator {case_stream_key()};
     using strs_t = std::vector<std::string>;
-    using result_t = sz::intersect_result_t;
 
     struct {
         std::size_t min_length;
@@ -247,7 +268,8 @@ void test_intersect_equivalence() {
         strs_t first_half(all_strings.begin(), all_strings.begin() + all_strings.size() / 2);
 
         // Try different joins
-        result_t const result = sz::intersect(all_strings, first_half).value;
+        auto const [result, intersect_status] = sz::intersect(all_strings, first_half);
+        expect_true(sz::succeeded(intersect_status));
         expect_true(
             result.first_offsets.size() == first_half.size() && result.second_offsets.size() == first_half.size(),
             "A subset intersected with its superset must recover the whole subset");
@@ -283,7 +305,8 @@ void test_sort_reference_equivalence() {
 
             for (std::size_t experiment_index = 0; experiment_index < experiment_count; ++experiment_index) {
                 std::shuffle(dataset.begin(), dataset.end(), generator);
-                auto order = sz::argsort(dataset).value;
+                auto const [order, sort_status] = sz::argsort(dataset);
+                expect_true(sz::succeeded(sort_status));
                 for (std::size_t i = 1; i < dataset.size(); ++i)
                     expect_true(dataset[order[i - 1]] <= dataset[order[i]], "argsort output is not sorted");
             }
@@ -299,7 +322,8 @@ void test_sort_reference_equivalence() {
 
         for (std::size_t experiment_index = 0; experiment_index < experiment_count; ++experiment_index) {
             std::shuffle(dataset.begin(), dataset.end(), generator);
-            auto order = sz::argsort(dataset).value;
+            auto const [order, sort_status] = sz::argsort(dataset);
+            expect_true(sz::succeeded(sort_status));
             for (std::size_t i = 1; i < dataset_size; ++i) {
                 expect_true(dataset[order[i - 1]] <= dataset[order[i]], "argsort output is not sorted");
             }
@@ -316,7 +340,8 @@ void test_sort_reference_equivalence() {
 
         for (std::size_t experiment_index = 0; experiment_index < experiment_count; ++experiment_index) {
             std::shuffle(dataset.begin(), dataset.end(), generator);
-            auto order = sz::argsort(dataset).value;
+            auto const [order, sort_status] = sz::argsort(dataset);
+            expect_true(sz::succeeded(sort_status));
             for (std::size_t i = 1; i < dataset_size; ++i) {
                 expect_true(dataset[order[i - 1]] <= dataset[order[i]], "argsort output is not sorted");
             }
@@ -332,7 +357,8 @@ void test_sort_reference_equivalence() {
 
         for (std::size_t experiment_index = 0; experiment_index < experiment_count; ++experiment_index) {
             std::shuffle(dataset.begin(), dataset.end(), generator);
-            auto order = sz::argsort(dataset).value;
+            auto const [order, sort_status] = sz::argsort(dataset);
+            expect_true(sz::succeeded(sort_status));
             for (std::size_t i = 1; i < dataset_size; ++i) {
                 expect_true(dataset[order[i - 1]] <= dataset[order[i]], "argsort output is not sorted");
             }
@@ -387,17 +413,21 @@ void test_sort_reference_equivalence() {
     };
 
     // Ascending and descending must match a byte-key stable sort exactly.
-    expect_true(is_permutation(sz::argsort(mixed).value), "argsort output is not a permutation");
-    expect_equal(sz::argsort(mixed).value, reference_order(mixed, sort_direction_t::ascending_k),
+    auto const [ascending_order, ascending_status] = sz::argsort(mixed);
+    auto const [descending_order, descending_status] = sz::argsort(mixed, 0, true);
+    expect_true(sz::succeeded(ascending_status) && sz::succeeded(descending_status));
+    expect_true(is_permutation(ascending_order), "argsort output is not a permutation");
+    expect_equal(ascending_order, reference_order(mixed, sort_direction_t::ascending_k),
                  "Ascending argsort disagrees with the stable-sort reference");
-    expect_equal(sz::argsort(mixed, 0, true).value, reference_order(mixed, sort_direction_t::descending_k),
+    expect_equal(descending_order, reference_order(mixed, sort_direction_t::descending_k),
                  "Descending argsort disagrees with the stable-sort reference");
 
     // Top-K must reproduce the value-prefix of the full sort and stay a permutation.
     for (std::size_t top_count : {std::size_t(1), std::size_t(50), std::size_t(777), mixed_count}) {
         for (sort_direction_t direction : {sort_direction_t::ascending_k, sort_direction_t::descending_k}) {
             bool const reverse = direction == sort_direction_t::descending_k;
-            order_t const got = sz::argsort(mixed, top_count, reverse).value;
+            auto const [got, top_status] = sz::argsort(mixed, top_count, reverse);
+            expect_true(sz::succeeded(top_status));
             order_t const reference = reference_order(mixed, direction);
             expect_true(is_permutation(got), "Top-K argsort output is not a permutation");
             std::size_t const head = top_count < mixed_count ? top_count : mixed_count;
@@ -409,10 +439,12 @@ void test_sort_reference_equivalence() {
     // Uncased sort must match folding every string then byte-stable-sorting.
     std::vector<std::string> folded(mixed_count);
     for (std::size_t i = 0; i < mixed_count; ++i) folded[i] = fold_string(mixed[i]);
-    expect_equal(sz::argsort_utf8_uncased(mixed).value, reference_order(folded, sort_direction_t::ascending_k),
+    auto const [folded_ascending_order, folded_ascending_status] = sz::argsort_utf8_uncased(mixed);
+    auto const [folded_descending_order, folded_descending_status] = sz::argsort_utf8_uncased(mixed, 0, true);
+    expect_true(sz::succeeded(folded_ascending_status) && sz::succeeded(folded_descending_status));
+    expect_equal(folded_ascending_order, reference_order(folded, sort_direction_t::ascending_k),
                  "Ascending uncased argsort disagrees with the folded stable-sort reference");
-    expect_equal(sz::argsort_utf8_uncased(mixed, 0, true).value,
-                 reference_order(folded, sort_direction_t::descending_k),
+    expect_equal(folded_descending_order, reference_order(folded, sort_direction_t::descending_k),
                  "Descending uncased argsort disagrees with the folded stable-sort reference");
 }
 

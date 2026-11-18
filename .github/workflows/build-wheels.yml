@@ -47,7 +47,7 @@ jobs:
         env:
           CIBW_BUILD: cp${{ matrix.python-version }}-*
           CIBW_ARCHS: ${{ matrix.archs }}
-          MACOSX_DEPLOYMENT_TARGET: "11.0"
+          MACOSX_DEPLOYMENT_TARGET: "26.0"
       - name: Upload Wheels
         uses: actions/upload-artifact@v7
         with:

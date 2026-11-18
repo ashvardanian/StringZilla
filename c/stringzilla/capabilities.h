@@ -1029,9 +1029,10 @@ STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_arm64_(void) {
     uint32_t supports_neonaes = 0;
     uint32_t supports_neonsha = 0;
     size_t size = sizeof(supports_neon);
-    if (sysctlbyname("hw.optional.neon", &supports_neon, &size, NULL, 0) != 0) supports_neon = 0;
-    if (sysctlbyname("hw.optional.arm.FEAT_AES", &supports_neonaes, &size, NULL, 0) != 0) supports_neonaes = 0;
-    if (sysctlbyname("hw.optional.arm.FEAT_SHA256", &supports_neonsha, &size, NULL, 0) != 0) supports_neonsha = 0;
+    // Every Apple arm64 core has NEON, AES and SHA2, so a denied sysctl keeps them.
+    if (sysctlbyname("hw.optional.neon", &supports_neon, &size, NULL, 0) != 0) supports_neon = 1;
+    if (sysctlbyname("hw.optional.arm.FEAT_AES", &supports_neonaes, &size, NULL, 0) != 0) supports_neonaes = 1;
+    if (sysctlbyname("hw.optional.arm.FEAT_SHA256", &supports_neonsha, &size, NULL, 0) != 0) supports_neonsha = 1;
 
     // The `+crypto` in both tiers' targets enables AES and SHA2 together.
     return (sz_capability_t)(                                         //

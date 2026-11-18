@@ -22,12 +22,13 @@
 #include <cstdint> // `std::uint64_t`
 #include <cstring> // `std::memcmp`, `std::memset`
 
-#include <algorithm>   // `std::sort`, `std::unique`, `std::shuffle`
+#include <algorithm>   // `std::sort`, `std::unique`, `std::shuffle`, `std::fill_n`
 #include <array>       // `std::array`
 #include <limits>      // `std::numeric_limits`
 #include <map>         // `std::map`, the block sizes a sized heap remembers
 #include <random>      // `std::uniform_int_distribution`
 #include <set>         // `std::set`, the window-overlap oracle and intersection pairs
+#include <span>        // `std::span`, the oracles' caller-owned outputs
 #include <string>      // `std::string`
 #include <string_view> // `std::string_view`
 #include <vector>      // `std::vector`
@@ -1716,38 +1717,37 @@ struct find_backend_t {
 };
 
 /** Each first offset of @p needle in `strings[order[i]]`, or in every string without an order,
- *  found by @p find_strings over @p view. */
-inline std::vector<sz_size_t> found_in_strings_(sz_kernel_find_strings_t find_strings, sz_strings_view_t const &view,
-                                                std::vector<sz_size_t> const *order, std::string_view needle) {
-    sz_size_t const count = order ? order->size() : view.count;
-    std::vector<sz_size_t> positions(count, 42);
-    expect_equal(find_strings(&view, order ? order->data() : nullptr, count, needle.data(), needle.size(),
+ *  found by @p find_strings over @p view into @p positions, one per string searched. */
+inline void found_in_strings_(sz_kernel_find_strings_t find_strings, sz_strings_view_t const &view,
+                              std::vector<sz_size_t> const *order, std::string_view needle,
+                              std::span<sz_size_t> positions) {
+    std::fill_n(positions.data(), positions.size(), (sz_size_t)42);
+    expect_equal(find_strings(&view, order ? order->data() : nullptr, positions.size(), needle.data(), needle.size(),
                               positions.data(), nullptr),
                  sz_success_k);
-    return positions;
 }
 
 /** The same offsets found one string at a time by the serial substring search, the oracle. */
-inline std::vector<sz_size_t> found_alone_(std::vector<std::string> const &strings, std::vector<sz_size_t> const *order,
-                                           std::string_view needle) {
-    std::size_t const count = order ? order->size() : strings.size();
-    std::vector<sz_size_t> positions(count);
-    for (std::size_t position = 0; position != count; ++position) {
+inline void found_alone_(std::vector<std::string> const &strings, std::vector<sz_size_t> const *order,
+                         std::string_view needle, std::span<sz_size_t> positions) {
+    for (std::size_t position = 0; position != positions.size(); ++position) {
         std::string const &string = strings[order ? order->at(position) : position];
         sz_cptr_t const match = sz_find_serial_(string.data(), string.size(), needle.data(), needle.size());
         positions[position] = match ? (sz_size_t)(match - string.data()) : STRINGZILLA_SIZE_MAX;
     }
-    return positions;
 }
 
 /** Holds a column search to known answers: matches crossing into the next string, empty strings and
  *  needles, and an order repeating strings. */
 inline void check_find_strings_unit_(sz_kernel_find_strings_t find_strings) {
     sz_size_t const none = STRINGZILLA_SIZE_MAX;
+    std::vector<sz_size_t> positions;
     auto const found = [&](std::vector<std::string> const &strings, std::string_view needle,
-                           std::vector<sz_size_t> const *order = nullptr) {
+                           std::vector<sz_size_t> const *order = nullptr) -> std::vector<sz_size_t> const & {
         strings_layouts_t const layouts(strings);
-        return found_in_strings_(find_strings, layouts.u32_tape(), order, needle);
+        positions.resize(order ? order->size() : strings.size());
+        found_in_strings_(find_strings, layouts.u32_tape(), order, needle, positions);
+        return positions;
     };
     // A match crossing into the next string counts for neither, and an empty string holds none.
     expect_equal(found({"ab", "cd", "", "xabcd"}, "bc"), std::vector<sz_size_t>({none, none, none, 2}));
@@ -1788,6 +1788,7 @@ inline void check_find_strings_equivalence_(split_mix_generator_t &generator, ch
     static constexpr std::size_t needle_lengths[] = {0, 1, 2, 3, 4, 16, 63, 64, 65, 200};
     std::uniform_int_distribution<std::size_t> count_distribution(0, 150), empty_distribution(0, 7),
         needle_distribution(0, std::size(needle_lengths) - 1), density_distribution(0, 2);
+    std::vector<sz_size_t> expected, found;
     for (std::size_t iteration = 0; iteration != scaled_iterations(60); ++iteration) {
         std::string const needle = random_string(generator, needle_lengths[needle_distribution(generator)], characters);
         std::uniform_int_distribution<std::size_t> length_distribution(0, 2 * needle.size() + 24);
@@ -1818,9 +1819,12 @@ inline void check_find_strings_equivalence_(split_mix_generator_t &generator, ch
         strings_layouts_t const layouts(strings);
         std::vector<sz_size_t> const *const selections[] = {nullptr, &order};
         for (std::vector<sz_size_t> const *selection : selections) {
-            std::vector<sz_size_t> const expected = found_alone_(strings, selection, needle);
+            std::size_t const count = selection ? selection->size() : strings.size();
+            expected.resize(count), found.resize(count);
+            found_alone_(strings, selection, needle, expected);
             for (named_strings_t const &layout : layouts.all()) {
-                if (found_in_strings_(find_strings, layout.view, selection, needle) == expected) continue;
+                found_in_strings_(find_strings, layout.view, selection, needle, found);
+                if (found == expected) continue;
                 fmt::println(stderr, "{}: find_strings of {:?} in {} {} differs from a search per string", name, needle,
                              layout.name, selection ? "reordered" : "in order");
                 fail_backend_(name, "a column search disagreed with searching each string");
@@ -2331,26 +2335,21 @@ inline void check_bytesum_equivalence_(split_mix_generator_t &generator, sz_kern
 }
 
 /** Each hash of `strings[order[i]]`, or of every string without an order, as @p hash_strings
- *  computes it over @p view under @p seed. */
-inline std::vector<sz_u64_t> hashed_in_strings_(sz_kernel_hash_strings_t hash_strings, sz_strings_view_t const &view,
-                                                std::vector<sz_size_t> const *order, sz_u64_t seed) {
-    sz_size_t const count = order ? order->size() : view.count;
-    std::vector<sz_u64_t> hashes(count, 0);
-    expect_equal(hash_strings(&view, order ? order->data() : nullptr, count, seed, hashes.data(), nullptr),
+ *  computes it over @p view under @p seed, into @p hashes, one per string hashed. */
+inline void hashed_in_strings_(sz_kernel_hash_strings_t hash_strings, sz_strings_view_t const &view,
+                               std::vector<sz_size_t> const *order, sz_u64_t seed, std::span<sz_u64_t> hashes) {
+    std::fill_n(hashes.data(), hashes.size(), (sz_u64_t)0); // an empty span may be null, which `memset` rejects
+    expect_equal(hash_strings(&view, order ? order->data() : nullptr, hashes.size(), seed, hashes.data(), nullptr),
                  sz_success_k);
-    return hashes;
 }
 
 /** Each hash of the same strings as @c sz_hash_serial computes it for one string alone. */
-inline std::vector<sz_u64_t> hashed_alone_(std::vector<std::string> const &strings, std::vector<sz_size_t> const *order,
-                                           sz_u64_t seed) {
-    std::size_t const count = order ? order->size() : strings.size();
-    std::vector<sz_u64_t> hashes(count);
-    for (std::size_t position = 0; position != count; ++position) {
+inline void hashed_alone_(std::vector<std::string> const &strings, std::vector<sz_size_t> const *order, sz_u64_t seed,
+                          std::span<sz_u64_t> hashes) {
+    for (std::size_t position = 0; position != hashes.size(); ++position) {
         std::string const &string = strings[order ? order->at(position) : position];
         hashes[position] = sz_hash_serial_(string.data(), string.size(), seed);
     }
-    return hashes;
 }
 
 /** The key lengths a column hash is held to: empty, around every 16-byte block, and past the 64
@@ -2362,6 +2361,7 @@ inline constexpr std::size_t hash_strings_key_lengths_[] = {0, 1, 15, 16, 17, 31
  *  around every 16-byte block and past the 64 bytes a window reads. */
 inline void check_hash_strings_equivalence_(split_mix_generator_t &generator, char const *name,
                                             sz_kernel_hash_strings_t hash_strings) {
+    std::vector<sz_u64_t> hashed, expected;
     for (std::size_t iteration = 0; iteration != scaled_iterations(40); ++iteration) {
         // Odd iterations keep every key within 64 bytes, so whole columns hash in windows.
         std::uniform_int_distribution<std::size_t> length_index_distribution(0, iteration % 2 ? 12 : 14);
@@ -2379,15 +2379,18 @@ inline void check_hash_strings_equivalence_(split_mix_generator_t &generator, ch
         sz_u64_t const seed = generator();
         strings_layouts_t const layouts(strings);
         std::vector<sz_size_t> const *const selections[] = {nullptr, &order};
-        for (std::vector<sz_size_t> const *selection : selections)
+        for (std::vector<sz_size_t> const *selection : selections) {
+            std::size_t const count = selection ? selection->size() : strings.size();
+            hashed.resize(count), expected.resize(count);
+            hashed_alone_(strings, selection, seed, expected);
             for (named_strings_t const &layout : layouts.all()) {
-                if (hashed_in_strings_(hash_strings, layout.view, selection, seed) ==
-                    hashed_alone_(strings, selection, seed))
-                    continue;
+                hashed_in_strings_(hash_strings, layout.view, selection, seed, hashed);
+                if (hashed == expected) continue;
                 fmt::println(stderr, "{}: hash_strings over {} {} differs from hashing each string", name, layout.name,
                              selection ? "reordered" : "in order");
                 fail_backend_(name, "a column hash disagreed with hashing each string");
             }
+        }
     }
 }
 
@@ -2395,6 +2398,7 @@ inline void check_hash_strings_equivalence_(split_mix_generator_t &generator, ch
  *  its exact size, so a load past its end trips the address sanitizer, read in order and through an
  *  order revisiting them. */
 inline void check_hash_strings_safety_(sz_kernel_hash_strings_t hash_strings) {
+    std::vector<sz_u64_t> hashed, expected;
     for (sz_size_t const length : span_over(backend_ladder_lengths_)) {
         std::vector<std::string> keys;
         std::vector<sz_u32_t> u32_offsets {0};
@@ -2413,9 +2417,14 @@ inline void check_hash_strings_safety_(sz_kernel_hash_strings_t hash_strings) {
         std::vector<sz_size_t> const *const selections[] = {nullptr, &order};
         for (sz_strings_view_t const &view :
              {strings_tape_over_(payload.data(), u32_offsets), strings_tape_over_(payload.data(), u64_offsets)})
-            for (std::vector<sz_size_t> const *selection : selections)
-                expect_equal(hashed_in_strings_(hash_strings, view, selection, 42), hashed_alone_(keys, selection, 42),
+            for (std::vector<sz_size_t> const *selection : selections) {
+                std::size_t const count = selection ? selection->size() : keys.size();
+                hashed.resize(count), expected.resize(count);
+                hashed_in_strings_(hash_strings, view, selection, 42, hashed);
+                hashed_alone_(keys, selection, 42, expected);
+                expect_equal(hashed, expected,
                              "A column hash disagreed with hashing each string at the end of its payload");
+            }
     }
 }
 
@@ -3831,9 +3840,11 @@ inline overlap_case_t overlap_past_query_case_() {
     return {{"ab", "abc"}, {"\0\0ab"s, "\0\0bc"s, "\0abc"s, "abc", ""}, {2, 4}};
 }
 
-inline std::vector<sz_u32_t> overlap_tensor_(overlap_backend_t const &backend, std::vector<std::string> const &queries,
-                                             std::vector<std::string> const &candidates,
-                                             std::vector<std::size_t> const &widths, sz_f32_t radius = 1.0f) {
+/** The counts of every query, candidate and width @p backend scores within @p radius, into
+ *  @p matches, one per triple, queries outermost and widths innermost. */
+inline void overlap_tensor_(overlap_backend_t const &backend, std::vector<std::string> const &queries,
+                            std::vector<std::string> const &candidates, std::vector<std::size_t> const &widths,
+                            sz_f32_t radius, std::span<sz_u32_t> matches) {
     handle_checked_heap_t heap;
     sz_strings_view_t const query_strings = strings_from_(queries);
     sz_strings_view_t const candidate_strings = strings_from_(candidates);
@@ -3841,20 +3852,23 @@ inline std::vector<sz_u32_t> overlap_tensor_(overlap_backend_t const &backend, s
     if (backend.init(&engine, &query_strings, widths.data(), widths.size(), 0, &heap.allocator, nullptr) !=
         sz_success_k)
         fail_backend_(backend.name, "the engine refused a well-formed batch of queries");
-    std::vector<sz_u32_t> matches(queries.size() * candidates.size() * widths.size(), 0xFFFFFFFFu);
+    std::fill_n(matches.data(), matches.size(), 0xFFFFFFFFu); // an empty span may be null, which `memset` rejects
     if (backend.scores(&engine, &candidate_strings, radius, matches.data(), candidates.size() * widths.size(),
                        widths.size(), nullptr) != sz_success_k)
         fail_backend_(backend.name, "the engine refused a well-formed batch of candidates");
     sz_overlap_engine_free(&engine, nullptr);
     expect_equal(heap.live_allocations, 0);
-    return matches;
 }
 
-/** Runs @p queries against @p candidates through @p backend at @p widths, asserting each count
- *  is the oracle's. */
+/** Runs @p queries against @p candidates through @p backend at @p widths into @p computed,
+ *  asserting each count is the oracle's. */
 inline void check_overlap_scores_(overlap_backend_t const &backend, std::vector<std::string> const &queries,
-                                  std::vector<std::string> const &candidates, std::vector<std::size_t> const &widths) {
-    std::vector<sz_u32_t> const computed = overlap_tensor_(backend, queries, candidates, widths);
+                                  std::vector<std::string> const &candidates, std::vector<std::size_t> const &widths,
+                                  std::vector<sz_u32_t> &computed) {
+    computed.resize(queries.size() * candidates.size() * widths.size());
+    // An empty tensor still reaches the engine as null, as the safety cases mean to check.
+    overlap_tensor_(backend, queries, candidates, widths, 1.0f,
+                    computed.empty() ? std::span<sz_u32_t> {} : std::span<sz_u32_t> {computed});
     std::size_t const candidate_stride = widths.size(), query_stride = candidates.size() * widths.size();
     for (std::size_t query = 0; query != queries.size(); ++query)
         for (std::size_t candidate = 0; candidate != candidates.size(); ++candidate)
@@ -3889,19 +3903,20 @@ inline std::vector<std::pair<sz_u64_t, sz_u64_t>> overlap_misses_(std::vector<sz
     return misses;
 }
 
-/** One backend's bounded rounds against @p exact, its own unbounded tensor: at each radius, a pair
- *  within it keeps every exact count, a pair 2⁻²⁴ or more past it counts zero at every width, and
- *  a pair between may do either. */
+/** One backend's bounded rounds against @p exact, its own unbounded tensor, scored into
+ *  @p bounded: at each radius, a pair within it keeps every exact count, a pair 2⁻²⁴ or more past
+ *  it counts zero at every width, and a pair between may do either. */
 inline void check_overlap_bounds_(overlap_backend_t const &backend, std::vector<std::string> const &queries,
                                   std::vector<std::string> const &candidates, std::vector<std::size_t> const &widths,
-                                  std::vector<sz_u32_t> const &exact) {
+                                  std::vector<sz_u32_t> const &exact, std::vector<sz_u32_t> &bounded) {
     std::vector<std::pair<sz_u64_t, sz_u64_t>> const misses = overlap_misses_(exact, queries, candidates, widths);
     std::vector<sz_f32_t> shares;
     for (auto const [missed, longer] : misses) shares.push_back(longer ? (sz_f32_t)missed / (sz_f32_t)longer : 0.0f);
     std::sort(shares.begin(), shares.end());
+    bounded.resize(exact.size());
     for (sz_f32_t const radius :
          {0.0f, shares[shares.size() / 4], shares[shares.size() / 2], std::nextafter(shares.back(), 0.0f)}) {
-        std::vector<sz_u32_t> const bounded = overlap_tensor_(backend, queries, candidates, widths, radius);
+        overlap_tensor_(backend, queries, candidates, widths, radius, bounded);
         for (std::size_t pair = 0; pair != misses.size(); ++pair) {
             auto const [missed, longer] = misses[pair];
             bool const within = missed <= (double)radius * longer;
@@ -3924,6 +3939,7 @@ inline void check_overlap_bounds_(overlap_backend_t const &backend, std::vector<
  */
 inline void check_overlap_equivalence_(split_mix_generator_t &generator, overlap_backend_t const &backend) {
     std::vector<std::size_t> const widths = {1, 3, 4, 6, 8, 11, 32};
+    std::vector<sz_u32_t> computed, batched, lone, from_reference, from_candidate, bounded;
     for (std::size_t round = 0; round != scaled_iterations(8); ++round) {
         std::size_t const query_length = std::uniform_int_distribution<std::size_t>(0, 700)(generator);
         std::string query(query_length, '\0');
@@ -3937,13 +3953,14 @@ inline void check_overlap_equivalence_(split_mix_generator_t &generator, overlap
         candidates.push_back(query.substr(query_length / 3));
         candidates.push_back(query + query);
         std::vector<std::string> const queries = {query, random_string(generator, query_length, "ab"), std::string()};
-        check_overlap_scores_(backend, queries, candidates, widths);
+        check_overlap_scores_(backend, queries, candidates, widths, computed);
 
-        std::vector<sz_u32_t> const batched = overlap_tensor_(backend, queries, candidates, widths);
         std::size_t const query_stride = candidates.size() * widths.size();
+        batched.resize(queries.size() * query_stride), lone.resize(query_stride);
+        overlap_tensor_(backend, queries, candidates, widths, 1.0f, batched);
         for (std::size_t index = 0; index != queries.size(); ++index) {
             std::vector<std::string> const alone = {queries[index]};
-            std::vector<sz_u32_t> const lone = overlap_tensor_(backend, alone, candidates, widths);
+            overlap_tensor_(backend, alone, candidates, widths, 1.0f, lone);
             if (std::memcmp(batched.data() + index * query_stride, lone.data(), query_stride * sizeof(sz_u32_t)) != 0)
                 fail_backend_(backend.name, "a query's row differs between a batched engine and its own");
         }
@@ -3959,10 +3976,12 @@ inline void check_overlap_equivalence_(split_mix_generator_t &generator, overlap
         candidates.push_back(query.substr(query.size() / 3));
         std::vector<std::string> const queries = {query, query.substr(query.size() / 2), std::string()};
 
-        std::vector<sz_u32_t> const from_reference = overlap_tensor_(reference, queries, candidates, widths);
-        std::vector<sz_u32_t> const from_candidate = overlap_tensor_(backend, queries, candidates, widths);
+        from_reference.resize(queries.size() * candidates.size() * widths.size());
+        from_candidate.resize(from_reference.size());
+        overlap_tensor_(reference, queries, candidates, widths, 1.0f, from_reference);
+        overlap_tensor_(backend, queries, candidates, widths, 1.0f, from_candidate);
         if (from_reference != from_candidate) fail_backend_(backend.name, "the engine's counts disagreed with serial");
-        check_overlap_bounds_(backend, queries, candidates, widths, from_reference);
+        check_overlap_bounds_(backend, queries, candidates, widths, from_reference, bounded);
     }
 }
 
@@ -3979,15 +3998,16 @@ inline void check_overlap_safety_(overlap_backend_t const &backend) {
     std::vector<std::string> const narrow = {"ab"};
     std::vector<std::string> const none;
     std::vector<std::size_t> const widths = {3, 8};
+    std::vector<sz_u32_t> computed;
 
-    check_overlap_scores_(backend, empty, words, widths);
-    check_overlap_scores_(backend, kitten, empty, widths);
-    check_overlap_scores_(backend, empty, empty, widths);
-    check_overlap_scores_(backend, kitten, none, widths);
-    check_overlap_scores_(backend, none, words, widths);
-    check_overlap_scores_(backend, kitten, narrow, widths);
+    check_overlap_scores_(backend, empty, words, widths, computed);
+    check_overlap_scores_(backend, kitten, empty, widths, computed);
+    check_overlap_scores_(backend, empty, empty, widths, computed);
+    check_overlap_scores_(backend, kitten, none, widths, computed);
+    check_overlap_scores_(backend, none, words, widths, computed);
+    check_overlap_scores_(backend, kitten, narrow, widths, computed);
     overlap_case_t const past_query = overlap_past_query_case_();
-    check_overlap_scores_(backend, past_query.queries, past_query.candidates, past_query.widths);
+    check_overlap_scores_(backend, past_query.queries, past_query.candidates, past_query.widths, computed);
 
     sz_strings_view_t const kitten_strings = strings_from_(kitten);
     sz_strings_view_t const words_strings = strings_from_(words);
@@ -4216,14 +4236,15 @@ inline std::string oracle_rewrite_(std::string const &haystack, std::size_t hays
     return rewritten;
 }
 
-/** BM25 over the oracle's own overlapping matches, summed in double precision in any order. */
-inline std::vector<double> oracle_bm25_(std::vector<substrings_case_t> const &overlapping,
-                                        std::vector<std::string> const &haystacks, std::size_t needles_count,
-                                        std::vector<sz_f32_t> const &document_lengths,
-                                        sz_substrings_bm25_t const &parameters, std::vector<sz_f32_t> const &weights) {
+/** BM25 over the oracle's own overlapping matches, summed in double precision in any order into
+ *  @p scores, one per haystack. */
+inline void oracle_bm25_(std::vector<substrings_case_t> const &overlapping, std::vector<std::string> const &haystacks,
+                         std::size_t needles_count, std::vector<sz_f32_t> const &document_lengths,
+                         sz_substrings_bm25_t const &parameters, std::vector<sz_f32_t> const &weights,
+                         std::span<sz_f64_t> scores) {
     std::vector<std::vector<std::size_t>> frequencies(haystacks.size(), std::vector<std::size_t>(needles_count));
     for (substrings_case_t const &match : overlapping) ++frequencies[match.haystack_index][match.needle_index];
-    std::vector<double> scores(haystacks.size(), 0);
+    std::fill_n(scores.data(), scores.size(), (sz_f64_t)0);
     for (std::size_t haystack_index = 0; haystack_index != haystacks.size(); ++haystack_index) {
         double const length = document_lengths.empty() ? (double)haystacks[haystack_index].size()
                                                        : (double)document_lengths[haystack_index];
@@ -4239,7 +4260,6 @@ inline std::vector<double> oracle_bm25_(std::vector<substrings_case_t> const &ov
                                           (frequency + saturation * norm);
         }
     }
-    return scores;
 }
 
 /** One tier's BM25 against the oracle, by byte lengths and by caller-given ones, with and without
@@ -4256,13 +4276,13 @@ inline void check_bm25_(substrings_tier_t const &tier, sz_substrings_engine_t *e
         bytes_total += haystacks[index].size(), given_total += given_lengths[index];
     }
 
+    std::vector<sz_f64_t> expected(haystacks.size());
     for (std::vector<sz_f32_t> const &lengths : {std::vector<sz_f32_t>(), given_lengths}) {
         double const average = (lengths.empty() ? bytes_total : given_total) / haystacks.size();
         sz_substrings_bm25_t const normalized {1.2f, 0.75f, (sz_f32_t)(average > 0 ? average : 1)};
         sz_substrings_bm25_t const unnormalized {1.2f, 0.0f, 0.0f};
         for (sz_substrings_bm25_t const &parameters : {normalized, unnormalized}) {
-            std::vector<double> const expected = oracle_bm25_(overlapping, haystacks, needles_count, lengths,
-                                                              parameters, weights);
+            oracle_bm25_(overlapping, haystacks, needles_count, lengths, parameters, weights, expected);
             std::vector<sz_f32_t> scores(haystacks.size(), -1);
             expect_equal(tier.bm25_scores(engine, haystack_strings, lengths.empty() ? nullptr : lengths.data(),
                                           &parameters, weights.data(), scores.data(), 1, nullptr),

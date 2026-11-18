@@ -90,7 +90,7 @@
         "STRINGZILLA_BUILD_BENCH": "OFF",
         "STRINGZILLA_BUILD_SHARED": "OFF",
         "STRINGZILLA_BUILD_SWIFT": "ON",
-        "CMAKE_OSX_DEPLOYMENT_TARGET": "12.0"
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "26.0"
       }
     },
     {

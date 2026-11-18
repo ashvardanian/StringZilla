@@ -66,9 +66,9 @@ inline void expect_equality(char const *first, char const *second, std::size_t s
  *  failing the test when the factory reports an error. */
 template <typename content_type_>
 sz::string_t owned_(content_type_ const &content) {
-    sz::expected<sz::string_t> made = sz::string_t::make(content);
-    expect_true(sz::succeeded(made.status));
-    return std::move(made.value);
+    auto [made, status] = sz::string_t::make(content);
+    expect_true(sz::succeeded(status));
+    return std::move(made);
 }
 
 /**
@@ -935,12 +935,12 @@ void test_stl_updates_unit() {
         expect_equal(s.size(), 5);
     }
     {
-        sz::expected<str> copied = owned_("hello").copy();
-        expect_true(ok(copied.status) && copied.value == "hello");
+        auto const [copied, status] = owned_("hello").copy();
+        expect_true(ok(status) && copied == "hello");
     }
     {
-        sz::expected<str> joined = str::make("hel"_sv | "lo");
-        expect_true(ok(joined.status) && joined.value == "hello");
+        auto const [joined, status] = str::make("hel"_sv | "lo");
+        expect_true(ok(status) && joined == "hello");
     }
     {
         str s;
@@ -1687,8 +1687,8 @@ void test_extensions_updates_unit() {
         expect_equal(owned_(sz::concatenate(name, domain)), "ashmail");
         expect_equal(owned_(sz::concatenate("@", name)), "@ash");
         {
-            sz::expected<str> email = str::make(name | "@" | domain);
-            expect_true(sz::succeeded(email.status) && email.value == "ash@mail");
+            auto const [email, status] = str::make(name | "@" | domain);
+            expect_true(sz::succeeded(status) && email == "ash@mail");
         }
     }
 
@@ -2025,7 +2025,8 @@ void test_memory_stability_equivalence(std::size_t length) {
     // How about the move constructor?
     assert_balanced_memory(live_bytes, [&]() {
         for (std::size_t i = 0; i < iterations; ++i) {
-            accounting_string_t unique_item = base.copy().value;
+            auto [unique_item, copy_status] = base.copy();
+            expect_true(sz::succeeded(copy_status));
             expect_equal(unique_item.length(), length, "Pre-move string has the wrong length at iteration i");
             expect_equal(unique_item, base, "Pre-move string diverged from `base` at iteration i");
             accounting_string_t copy(std::move(unique_item));
@@ -2037,7 +2038,8 @@ void test_memory_stability_equivalence(std::size_t length) {
     // And the move assignment operator with an empty target payload?
     assert_balanced_memory(live_bytes, [&]() {
         for (std::size_t i = 0; i < iterations; ++i) {
-            accounting_string_t unique_item = base.copy().value;
+            auto [unique_item, copy_status] = base.copy();
+            expect_true(sz::succeeded(copy_status));
             accounting_string_t copy(allocator);
             copy = std::move(unique_item);
             expect_equal(copy.length(), length,
@@ -2049,7 +2051,8 @@ void test_memory_stability_equivalence(std::size_t length) {
     // And move assignment where the target had a payload?
     assert_balanced_memory(live_bytes, [&]() {
         for (std::size_t i = 0; i < iterations; ++i) {
-            accounting_string_t unique_item = base.copy().value;
+            auto [unique_item, copy_status] = base.copy();
+            expect_true(sz::succeeded(copy_status));
             accounting_string_t copy(allocator);
             for (std::size_t j = 0; j < 317; j++) expect_true(sz::succeeded(copy.push_back('q')));
             copy = std::move(unique_item);
@@ -2063,7 +2066,8 @@ void test_memory_stability_equivalence(std::size_t length) {
     // bytes into the target's own.
     assert_balanced_memory(live_bytes, [&]() {
         for (std::size_t i = 0; i < iterations; ++i) {
-            accounting_string_t unique_item = base.copy().value;
+            auto [unique_item, copy_status] = base.copy();
+            expect_true(sz::succeeded(copy_status));
             accounting_string_t moved(foreign_allocator), copied(foreign_allocator);
             for (std::size_t j = 0; j < 317; j++) expect_true(sz::succeeded(moved.push_back('q')));
             moved = std::move(unique_item);

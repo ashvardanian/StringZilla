@@ -4006,6 +4006,27 @@ check_call_result_not_indexed() {
         "$staged_path indexes through a call or a cast; index the owning container, or bind a named local:"
 }
 
+# Rejects `.value` read straight off a call's result, as `parse(text).value`, because an unchecked unwrap hides the
+# failure that the status code reports: bind the result with `auto [value, status] = parse(text);` and check `status`.
+# A trait's `::value` and a call to `.value(...)` are not member reads and pass.
+check_call_value_unwrap() {
+    local unwrapped
+    unwrapped=$(added_code_text | grep -E '\)\.value\b([^(]|$)' || true)
+    [ -z "$unwrapped" ] || reject_with_reason "$unwrapped" \
+        "$staged_path unwraps a call result with .value; bind it as auto [value, status] = call(...)," \
+        "            and check the status:"
+}
+
+# Rejects a local declared as `expected<...>` from a call, because it spells the return type twice: bind the result
+# with `auto [value, status] = call(...);`. Return types, parameters and members have no `=` or `{` after the name.
+check_expected_local_binding() {
+    local declared
+    declared=$(added_code_text | grep -E '^\+[[:space:]]*([A-Za-z_]+::)?expected<.*>([[:space:]]+const)?[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*(=|\{)' |
+        grep -vE '^\+[[:space:]]*(return|using|typedef|template)\b' || true)
+    [ -z "$declared" ] || reject_with_reason "$declared" \
+        "$staged_path declares an expected<…> local; bind it as auto [value, status] = call(...):"
+}
+
 # Rejects a LibC string call in the library headers, because the headers must also compile without LibC, under
 # `STRINGZILLA_WITH_LIBC=0`. Only `memcpy`, `memmove` and `memset` pass: every freestanding GCC and Clang target
 # provides them, and types.h declares them when LibC is absent.
@@ -4714,6 +4735,8 @@ run_project_checks() {
         check_iterator_address_not_laundered
         check_pointer_not_cast_through_integer
         check_call_result_not_indexed
+        check_call_value_unwrap
+        check_expected_local_binding
         check_iostreams_absent
         check_include_guards_internal
         ;;

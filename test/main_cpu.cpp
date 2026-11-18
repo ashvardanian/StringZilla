@@ -54,9 +54,10 @@ void test_device_unit() {
     sz::device_t const cpu = sz::device_t::cpu();
     auto const [detected, detected_status] = cpu.capabilities_detected();
     auto const [enabled, enabled_status] = cpu.capabilities_enabled();
-    expect_true(sz::succeeded(detected_status) && sz::succeeded(enabled_status));
+    auto const [compiled, compiled_status] = cpu.capabilities_compiled();
+    expect_true(sz::succeeded(detected_status) && sz::succeeded(enabled_status) && sz::succeeded(compiled_status));
     expect_true((enabled & sz_cap_serial_k) && !(enabled & ~(detected | sz_cap_serial_k)));
-    expect_true(!(enabled & ~cpu.capabilities_compiled().value));
+    expect_true(!(enabled & ~compiled));
     expect_true(sz::succeeded(cpu.configure_thread(enabled)));
     for (sz::device_kind_t kind :
          {sz::device_kind_t::cpu_k, sz::device_kind_t::cuda_k, sz::device_kind_t::rocm_k, sz::device_kind_t::metal_k}) {
@@ -66,7 +67,9 @@ void test_device_unit() {
         expect_equal(sz::device_t::make(kind, devices).status, sz::status_t::missing_gpu_k);
         if (kind == sz::device_kind_t::cpu_k) continue;
         auto const [gpu, make_status] = sz::device_t::make(kind, 0);
-        expect_true(sz::succeeded(make_status) && !(gpu.capabilities_compiled().value & sz_cap_cpus_k));
+        if (!expect_true(sz::succeeded(make_status))) continue;
+        auto const [gpu_compiled, gpu_compiled_status] = gpu.capabilities_compiled();
+        expect_true(sz::succeeded(gpu_compiled_status) && !(gpu_compiled & sz_cap_cpus_k));
         expect_equal(gpu.configure_thread(sz_cap_any_k), sz::status_t::missing_kernel_k);
     }
 }

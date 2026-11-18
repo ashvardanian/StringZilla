@@ -76,26 +76,26 @@ jobs:
             slice "macos_$arch" -D CMAKE_OSX_ARCHITECTURES=$arch
             # The `-target` names the deployment version, which the preset's macOS one would contradict.
             slice "catalyst_$arch" -D CMAKE_OSX_ARCHITECTURES=$arch -D CMAKE_OSX_DEPLOYMENT_TARGET= \
-              -D "CMAKE_C_FLAGS=-target $arch-apple-ios15.0-macabi" -D "CMAKE_CXX_FLAGS=-target $arch-apple-ios15.0-macabi"
+              -D "CMAKE_C_FLAGS=-target $arch-apple-ios26.0-macabi" -D "CMAKE_CXX_FLAGS=-target $arch-apple-ios26.0-macabi"
             slice "iossim_$arch" -D CMAKE_SYSTEM_NAME=iOS -D CMAKE_OSX_SYSROOT=iphonesimulator \
-              -D CMAKE_OSX_ARCHITECTURES=$arch -D CMAKE_OSX_DEPLOYMENT_TARGET=15.0
+              -D CMAKE_OSX_ARCHITECTURES=$arch -D CMAKE_OSX_DEPLOYMENT_TARGET=26.0
             slice "tvossim_$arch" -D CMAKE_SYSTEM_NAME=tvOS -D CMAKE_OSX_SYSROOT=appletvsimulator \
-              -D CMAKE_OSX_ARCHITECTURES=$arch -D CMAKE_OSX_DEPLOYMENT_TARGET=15.0
+              -D CMAKE_OSX_ARCHITECTURES=$arch -D CMAKE_OSX_DEPLOYMENT_TARGET=26.0
             slice "watchsim_$arch" -D CMAKE_SYSTEM_NAME=watchOS -D CMAKE_OSX_SYSROOT=watchsimulator \
-              -D CMAKE_OSX_ARCHITECTURES=$arch -D CMAKE_OSX_DEPLOYMENT_TARGET=9.0
+              -D CMAKE_OSX_ARCHITECTURES=$arch -D CMAKE_OSX_DEPLOYMENT_TARGET=26.0
             slice "xrsim_$arch" -D CMAKE_SYSTEM_NAME=visionOS -D CMAKE_OSX_SYSROOT=xrsimulator \
-              -D CMAKE_OSX_ARCHITECTURES=$arch -D CMAKE_OSX_DEPLOYMENT_TARGET=1.0
+              -D CMAKE_OSX_ARCHITECTURES=$arch -D CMAKE_OSX_DEPLOYMENT_TARGET=26.0
           done
           slice watchos_arm64_32 -D CMAKE_SYSTEM_NAME=watchOS -D CMAKE_OSX_SYSROOT=watchos \
-            -D CMAKE_OSX_ARCHITECTURES=arm64_32 -D CMAKE_OSX_DEPLOYMENT_TARGET=9.0
+            -D CMAKE_OSX_ARCHITECTURES=arm64_32 -D CMAKE_OSX_DEPLOYMENT_TARGET=26.0
           slice watchos_arm64 -D CMAKE_SYSTEM_NAME=watchOS -D CMAKE_OSX_SYSROOT=watchos \
-            -D CMAKE_OSX_ARCHITECTURES=arm64 -D CMAKE_OSX_DEPLOYMENT_TARGET=9.0
+            -D CMAKE_OSX_ARCHITECTURES=arm64 -D CMAKE_OSX_DEPLOYMENT_TARGET=26.0
           slice ios -D CMAKE_SYSTEM_NAME=iOS -D CMAKE_OSX_SYSROOT=iphoneos \
-            -D CMAKE_OSX_ARCHITECTURES=arm64 -D CMAKE_OSX_DEPLOYMENT_TARGET=15.0
+            -D CMAKE_OSX_ARCHITECTURES=arm64 -D CMAKE_OSX_DEPLOYMENT_TARGET=26.0
           slice tvos -D CMAKE_SYSTEM_NAME=tvOS -D CMAKE_OSX_SYSROOT=appletvos \
-            -D CMAKE_OSX_ARCHITECTURES=arm64 -D CMAKE_OSX_DEPLOYMENT_TARGET=15.0
+            -D CMAKE_OSX_ARCHITECTURES=arm64 -D CMAKE_OSX_DEPLOYMENT_TARGET=26.0
           slice xros -D CMAKE_SYSTEM_NAME=visionOS -D CMAKE_OSX_SYSROOT=xros \
-            -D CMAKE_OSX_ARCHITECTURES=arm64 -D CMAKE_OSX_DEPLOYMENT_TARGET=1.0
+            -D CMAKE_OSX_ARCHITECTURES=arm64 -D CMAKE_OSX_DEPLOYMENT_TARGET=26.0
           (cd build_swift && zip -qry ../StringZillaC.xcframework.zip StringZillaC.xcframework)
       - name: Upload XCFramework
         uses: actions/upload-artifact@v7

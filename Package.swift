@@ -40,11 +40,11 @@ else {
 let package = Package(
     name: "StringZilla",
     platforms: [
-        .macOS(.v12),
-        .iOS(.v15),
-        .tvOS(.v15),
-        .watchOS(.v9),
-        .visionOS(.v1),
+        .macOS(.v26),
+        .iOS(.v26),
+        .tvOS(.v26),
+        .watchOS(.v26),
+        .visionOS(.v26),
     ],
     products: [
         .library(name: "StringZilla", targets: ["StringZilla"])

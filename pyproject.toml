@@ -185,12 +185,9 @@ before-build = ["rd /s /q {project}\\build_python || echo Done"]
 # cibuildwheel 4 defaults this to `delvewheel`; we link only system DLLs.
 repair-wheel-command = ""
 
-# macOS: both arches share an 11.0 floor. The release jobs already force
-# `MACOSX_DEPLOYMENT_TARGET=11.0`, so the x86_64 wheels were built against 11.0 while declaring
-# 10.13 - this makes the declaration match what actually ships. Big Sur is also the first release
-# to run on Apple Silicon, so a single number covers both arches without narrowing Intel support.
+# macOS: both arches share the 26.0 floor.
 [[tool.cibuildwheel.overrides]]
-environment.MACOSX_DEPLOYMENT_TARGET = "11.0"
+environment.MACOSX_DEPLOYMENT_TARGET = "26.0"
 inherit.environment = "append"
 select = "*-macos*"
 
