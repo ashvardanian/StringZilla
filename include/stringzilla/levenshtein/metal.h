@@ -223,6 +223,8 @@ STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_metal(sz_levenshtein_engi
     sz_status_t status = sz_device_enter_metal_(stream, &call);
     if (status != sz_success_k) return sz_metal_commit_(&call, status);
     if (queries->count > 0xFFFFFFFFu) return sz_metal_commit_(&call, sz_unexpected_dimensions_k);
+    status = sz_stream_synchronize_metal_(call.queue);
+    if (status != sz_success_k) return sz_metal_commit_(&call, status);
 
     sz_size_t longest = 0, text_bytes = 0;
     sz_string_view_t views[64];

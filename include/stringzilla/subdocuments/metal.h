@@ -633,6 +633,8 @@ STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_metal(
     sz_metal_bound_t bound;
     sz_status_t status;
     if (!context) return sz_missing_gpu_k;
+    status = sz_stream_synchronize_metal_(stream);
+    if (status != sz_success_k) return status;
     if (allocator) unified = *allocator;
     else sz_allocator_init_unified_metal(&unified);
     status = sz_subdocuments_engine_compile_(engine, paths, format, options, malformed_index, sz_cap_metal_k, &unified,

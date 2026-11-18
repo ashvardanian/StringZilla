@@ -572,6 +572,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_long_rocm_(sz_levenshtein_engine_t
                                         ? sz_true_k
                                         : sz_false_k;
     sz_size_t populated = 0;
+    if (host_readable && hipStreamSynchronize((hipStream_t)stream) != hipSuccess) return sz_device_code_mismatch_k;
     if (host_readable) {
         sz_string_view_t views[64];
         for (sz_size_t index = 0; index != candidates->count; ++index) {

@@ -112,6 +112,8 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_metal(sz_overlap_engine_t *en
     sz_metal_call_t call;
     sz_status_t const entered = sz_device_enter_metal_(stream, &call);
     if (entered != sz_success_k) return sz_metal_commit_(&call, entered);
+    sz_status_t const drained = sz_stream_synchronize_metal_(call.queue);
+    if (drained != sz_success_k) return sz_metal_commit_(&call, drained);
 
     sz_allocator_t unified;
     if (allocator) unified = *allocator;

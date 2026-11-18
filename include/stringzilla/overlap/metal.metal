@@ -258,7 +258,7 @@ inline void sz_overlap_sweep_metal_(device uchar *engine, device uchar *scratch,
         }
 
         // Bytes before `origin` count as zeros, so a window not yet full holds its own bytes' hash.
-        for (ulong position = origin; position != segment_end; ++position) {
+        for (ulong position = origin; position < segment_end; ++position) {
             ulong const ending = position + 1;
             uint const incoming = text[position];
             for (ulong index = 0; index != group; ++index) {

@@ -682,6 +682,9 @@ STRINGZILLA_INLINE sz_status_t sz_metal_tape_call_(sz_metal_call_t *call, sz_str
     // Retain the offsets before reading the last of them.
     if (!sz_metal_resolve_call_(call, offsets_block, (strings->count + 1) * offset_bytes, offsets))
         return sz_device_memory_mismatch_k;
+    // A gather committed earlier on this queue may still be writing the offsets read from here on.
+    sz_status_t const drained = sz_stream_synchronize_metal_(call->queue);
+    if (drained != sz_success_k) return drained;
     sz_size_t const end = wide ? (sz_size_t)strings->data.u64_tape.offsets[strings->count]
                                : strings->data.u32_tape.offsets[strings->count];
     data->buffer = STRINGZILLA_NULL, data->offset = 0;

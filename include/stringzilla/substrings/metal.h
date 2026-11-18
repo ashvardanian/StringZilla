@@ -389,6 +389,7 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init_metal(
     sz_metal_bound_t bound;
     sz_metal_call_t call;
     sz_status_t status = sz_device_enter_metal_(stream, &call);
+    if (status == sz_success_k) status = sz_stream_synchronize_metal_(call.queue);
     if (status != sz_success_k) return sz_metal_commit_(&call, status);
     if (allocator) unified = *allocator;
     else sz_allocator_init_unified_metal(&unified);
