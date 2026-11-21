@@ -1256,8 +1256,8 @@ PyTypeObject StringsType = {
     .tp_str = (reprfunc)Strings_to_unicode,
 };
 
-sz_status_t sz_py_lookup(sz_ptr_t target, sz_cptr_t source, sz_size_t length, char const *lut,
-                         sz_capability_t capabilities) {
+static sz_status_t sz_py_lookup_with_kernel_(sz_kernel_strings_lookup_t kernel, sz_ptr_t target, sz_cptr_t source,
+                                             sz_size_t length, char const *lut, sz_capability_t capabilities) {
     // A one-string tape over the caller's buffers, in the offsets width the kernel writes, so it
     // allocates nothing; in place, the offsets are shared too, making it the very tape it reads.
     sz_u32_t narrow_source[2] = {0, (sz_u32_t)length}, narrow_target[2] = {0, (sz_u32_t)length};
@@ -1276,7 +1276,13 @@ sz_status_t sz_py_lookup(sz_ptr_t target, sz_cptr_t source, sz_size_t length, ch
         strings.data.u64_tape.data = source, strings.data.u64_tape.offsets = wide_source;
         tape.data.u64_tape.data = target, tape.data.u64_tape.offsets = in_place ? wide_source : wide_target;
     }
-    return sz_strings_lookup_best(&strings, NULL, 1, lut, NULL, &tape, capabilities, NULL);
+    return kernel ? kernel(&strings, NULL, 1, lut, NULL, &tape, NULL)
+                  : sz_strings_lookup_best(&strings, NULL, 1, lut, NULL, &tape, capabilities, NULL);
+}
+
+sz_status_t sz_py_lookup(sz_ptr_t target, sz_cptr_t source, sz_size_t length, char const *lut,
+                         sz_capability_t capabilities) {
+    return sz_py_lookup_with_kernel_(NULL, target, source, length, lut, capabilities);
 }
 
 /** Reads a 256-byte string or a dict of characters below U+0100, one byte each, into @p lut. */
@@ -1342,11 +1348,33 @@ char const doc_translate[] =                                                    
     "    is too short, partially overlaps the input, or comes with inplace=True.\n"                        //
     "  UnicodeDecodeError: If a str input translates into malformed UTF-8.\n"                              //
     "  TypeError: If the table is not a string or dictionary, or out does not hold bytes.\n"               //
-    "  BufferError: If out is read-only or not C-contiguous.\n"                                            //
+    "  BufferError: If out is read-only or its layout is unsupported.\n"                                   //
+    "\n"                                                                                                   //
+    "The module-level function accepts matching 2-D or 3-D byte memoryviews with padding between\n"        //
+    "packed rows when translating the entire input into out. Padding is untouched.\n"                      //
     "\n"                                                                                                   //
     "Example:\n"                                                                                           //
     "  >>> sz.String('abc').translate({'a': 'A'}) == b'Abc'\n"                                             //
     "  True";
+
+static int String_translate_flat_(sz_string_view_t text, Py_buffer const *out, char const *table,
+                                  sz_capability_t capabilities) {
+    if ((sz_size_t)out->len < text.length) {
+        PyErr_Format(PyExc_ValueError, "out holds %zd entries, need %zu", out->len, text.length);
+        return -1;
+    }
+    sz_size_t const source_address = (sz_size_t)text.start, output_address = (sz_size_t)out->buf;
+    sz_size_t const distance = source_address < output_address ? output_address - source_address
+                                                               : source_address - output_address;
+    if (distance != 0 && distance < text.length) {
+        PyErr_SetString(PyExc_ValueError, "out must not partially overlap the input");
+        return -1;
+    }
+    sz_status_t const status = sz_py_lookup((sz_ptr_t)out->buf, text.start, text.length, table, capabilities);
+    if (status == sz_success_k) return 0;
+    sz_py_raise_status(status, "translate()");
+    return -1;
+}
 
 /** Translates the [start, end) slice of @p text_object into the caller-owned @p out_object.
  *  Exports the source only after the output, as exporting the output may run Python code. */
@@ -1379,29 +1407,113 @@ static PyObject *String_translate_into_(PyObject *text_object, PyObject *out_obj
     sz_ssize_clamp_interval(text.length, start, end, &normalized_offset, &normalized_length);
     text.start += normalized_offset;
     text.length = normalized_length;
-    if ((sz_size_t)out_view.len < text.length) {
-        PyErr_Format(PyExc_ValueError, "out holds %zd entries, need %zu", out_view.len, text.length);
-        goto cleanup;
-    }
-    sz_size_t const source_address = (sz_size_t)text.start, output_address = (sz_size_t)out_view.buf;
-    sz_size_t const distance = source_address < output_address ? output_address - source_address
-                                                               : source_address - output_address;
-    if (distance != 0 && distance < text.length) {
-        PyErr_SetString(PyExc_ValueError, "out must not partially overlap the input");
-        goto cleanup;
-    }
-
-    sz_status_t const status = sz_py_lookup((sz_ptr_t)out_view.buf, text.start, text.length, look_up_table,
-                                            capabilities);
-    if (status != sz_success_k) {
-        sz_py_raise_status(status, "translate()");
-        goto cleanup;
-    }
+    if (String_translate_flat_(text, &out_view, look_up_table, capabilities) != 0) goto cleanup;
     Py_INCREF(out_object);
     result = out_object;
 cleanup:
     PyBuffer_Release(&out_view);
     return result;
+}
+
+static int String_translate_row_layout_(Py_buffer const *view, Py_ssize_t row_length, Py_ssize_t *row_stride,
+                                        Py_ssize_t *span) {
+    Py_ssize_t inner_size = 1;
+    for (int axis = view->ndim - 1; axis > 0; --axis) {
+        if (view->shape[axis] < 1 || view->shape[axis] > row_length / inner_size ||
+            (view->shape[axis] > 1 && view->strides[axis] != inner_size)) {
+            PyErr_SetString(PyExc_BufferError, "translate requires packed bytes within each row");
+            return -1;
+        }
+        inner_size *= view->shape[axis];
+    }
+    Py_ssize_t const rows = view->shape[0];
+    *row_stride = rows > 1 ? view->strides[0] : row_length;
+    if (inner_size != row_length || *row_stride < row_length) {
+        PyErr_SetString(PyExc_BufferError, "translate requires forward non-overlapping rows");
+        return -1;
+    }
+    if (rows - 1 > (PY_SSIZE_T_MAX - row_length) / *row_stride) {
+        PyErr_SetString(PyExc_OverflowError, "translate row layout is too large");
+        return -1;
+    }
+    *span = (rows - 1) * *row_stride + row_length;
+    return 0;
+}
+
+static int String_translate_rows_(Py_buffer const *source, Py_buffer const *out, char const *table,
+                                  sz_capability_t capabilities) {
+    if (source->ndim < 2 || source->ndim > 3 || source->ndim != out->ndim) {
+        PyErr_SetString(PyExc_BufferError, "strided translate requires matching 2-D or 3-D views");
+        return -1;
+    }
+    for (int axis = 0; axis < source->ndim; ++axis) {
+        if (source->shape[axis] != out->shape[axis]) {
+            PyErr_SetString(PyExc_ValueError, "strided translate requires matching shapes");
+            return -1;
+        }
+    }
+    if (source->len != out->len || source->len < 0) {
+        PyErr_SetString(PyExc_ValueError, "strided translate requires matching byte counts");
+        return -1;
+    }
+    if (!source->len) return 0;
+    Py_ssize_t const rows = source->shape[0];
+    if (rows < 1 || source->len % rows) {
+        PyErr_SetString(PyExc_BufferError, "translate requires complete rows");
+        return -1;
+    }
+    Py_ssize_t const row_length = source->len / rows;
+    Py_ssize_t source_stride, output_stride, source_span, output_span;
+    if (String_translate_row_layout_(source, row_length, &source_stride, &source_span) != 0 ||
+        String_translate_row_layout_(out, row_length, &output_stride, &output_span) != 0)
+        return -1;
+
+    sz_size_t const source_address = (sz_size_t)source->buf, output_address = (sz_size_t)out->buf;
+    int const overlap = source_address == output_address  ? source_stride != output_stride
+                        : source_address < output_address ? output_address - source_address < (sz_size_t)source_span
+                                                          : source_address - output_address < (sz_size_t)output_span;
+    if (overlap) {
+        PyErr_SetString(PyExc_ValueError, "out must not partially overlap the input");
+        return -1;
+    }
+
+    sz_kernel_punned_t kernel;
+    sz_capability_t capability;
+    sz_status_t status = sz_strings_find_kernel(sz_kernel_strings_lookup_k, capabilities, &kernel, &capability);
+    if (status != sz_success_k) {
+        sz_py_raise_status(status, "translate()");
+        return -1;
+    }
+    for (Py_ssize_t row = 0; row < rows; ++row) {
+        status = sz_py_lookup_with_kernel_((sz_kernel_strings_lookup_t)kernel, (sz_ptr_t)out->buf + row * output_stride,
+                                           (sz_cptr_t)source->buf + row * source_stride, (sz_size_t)row_length, table,
+                                           capabilities);
+        if (status != sz_success_k) {
+            sz_py_raise_status(status, "translate()");
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static PyObject *String_translate_memoryviews_(PyObject *source_object, PyObject *out_object, char const *table,
+                                               sz_capability_t capabilities) {
+    Py_buffer out, source;
+    if (sz_py_export_contiguous_buffer(out_object, "out", PyBUF_STRIDES | PyBUF_WRITABLE, 1, 0, &out) != 0) return NULL;
+    if (PyObject_GetBuffer(source_object, &source, PyBUF_STRIDES) != 0) {
+        PyBuffer_Release(&out);
+        return NULL;
+    }
+    int status = -1;
+    if (source.itemsize != 1) PyErr_SetString(PyExc_ValueError, "Only single-byte integral types are supported");
+    else if (PyBuffer_IsContiguous(&source, 'A') && PyBuffer_IsContiguous(&out, 'C')) {
+        sz_string_view_t text = {(sz_cptr_t)source.buf, (sz_size_t)source.len};
+        status = String_translate_flat_(text, &out, table, capabilities);
+    }
+    else status = String_translate_rows_(&source, &out, table, capabilities);
+    PyBuffer_Release(&source);
+    PyBuffer_Release(&out);
+    return status == 0 ? Py_NewRef(out_object) : NULL;
 }
 
 PyObject *String_like_translate(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
@@ -1472,6 +1584,9 @@ PyObject *String_like_translate(PyObject *self, PyObject *const *args, Py_ssize_
 
     sz_align_(64) char look_up_table[256];
     if (sz_py_export_lookup_table_(table_object, look_up_table) != 0) return NULL;
+    if (has_out && start == 0 && end == PY_SSIZE_T_MAX && PyMemoryView_Check(text_object) &&
+        PyMemoryView_Check(out_object))
+        return String_translate_memoryviews_(text_object, out_object, look_up_table, capabilities);
     if (has_out) return String_translate_into_(text_object, out_object, look_up_table, start, end, capabilities);
 
     // Clamp [start, end) into the string, so negative, out-of-range or inverted windows fit

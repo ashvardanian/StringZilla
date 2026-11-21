@@ -1234,7 +1234,10 @@ def translate(
         is too short, partially overlaps the input, or comes with inplace=True.
       UnicodeDecodeError: If a str input translates into malformed UTF-8.
       TypeError: If the table is not a string or dictionary, or out does not hold bytes.
-      BufferError: If out is read-only or not C-contiguous.
+      BufferError: If out is read-only or its layout is unsupported.
+
+    The module-level function accepts matching 2-D or 3-D byte memoryviews with padding between
+    packed rows when translating the entire input into out. Padding is untouched.
 
     Example:
       >>> sz.String('abc').translate({'a': 'A'}) == b'Abc'
