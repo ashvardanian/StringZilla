@@ -694,6 +694,50 @@ def test_translation_out_buffers():
     assert sz.translate("abc", {}, out=None) == "abc"
 
 
+@pytest.mark.parametrize("channels", [None, 3])
+def test_translation_writes_packed_rows_without_touching_padding(channels):
+    """Translate read-only cropped inputs into destinations with different row strides."""
+    np = pytest.importorskip("numpy")
+    trailing = () if channels is None else (channels,)
+    source = np.arange(4 * 10 * (channels or 1), dtype=np.uint8).reshape((4, 10, *trailing))[:, 1:7]
+    storage = np.full((4, 13, *trailing), 7, dtype=np.uint8)
+    target = storage[:, 3:9]
+    out = memoryview(target)
+    table = np.arange(255, -1, -1, dtype=np.int32).astype(np.uint8)
+    assert sz.translate(memoryview(source).toreadonly(), table.tobytes(), out=out) is out
+    np.testing.assert_array_equal(target, table[source])
+    assert np.all(storage[:, :3] == 7)
+    assert np.all(storage[:, 9:] == 7)
+
+
+def test_translation_strided_rows_allow_exact_alias_and_reject_overlap():
+    """Permit exact layout aliases and reject shifted overlapping views before writing."""
+    np = pytest.importorskip("numpy")
+    storage = np.arange(32, dtype=np.uint8).reshape(4, 8)
+    original = storage.copy()
+    view = memoryview(storage[:, 1:6])
+    table = bytes(reversed(range(256)))
+    with pytest.raises(ValueError, match="overlap"):
+        sz.translate(view, table, out=memoryview(storage[:, 2:7]))
+    np.testing.assert_array_equal(storage, original)
+    assert sz.translate(view, table, out=view) is view
+    original[:, 1:6] = 255 - original[:, 1:6]
+    np.testing.assert_array_equal(storage, original)
+
+
+def test_translation_strided_rows_reject_unsupported_layouts():
+    """Reject reversed rows, gaps within rows, and mismatched views."""
+    np = pytest.importorskip("numpy")
+    storage = np.zeros((4, 12), dtype=np.uint8)
+    table = bytes(range(256))
+    target = memoryview(np.empty((4, 6), dtype=np.uint8))
+    for source in (storage[::-1, :6], storage[:, ::2]):
+        with pytest.raises(BufferError):
+            sz.translate(memoryview(source), table, out=target)
+    with pytest.raises(ValueError, match="matching shapes"):
+        sz.translate(memoryview(storage[:, :5]), table, out=target)
+
+
 def test_translation_out_errors():
     """`translate(out=...)` rejects read-only, strided, wide, short, and in-place outputs before writing."""
     source = bytearray(b"abc")
