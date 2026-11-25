@@ -2,7 +2,9 @@
 #
 # This file defines several library build & installation targets:
 #
-# * stringzilla_header: A header-only library with the StringZilla C and C++ headers.
+# * stringzilla_abi: The C headers of `c/`, declaring the public interface, with nothing to link.
+# * stringzilla_cpp: The C++ SDK of `cpp/`, over `stringzilla_abi` and `stringzilla_static`.
+# * stringzilla_header: A header-only library with the StringZilla C and C++ headers and the kernels they inline.
 # * stringzilla_static: A static library with dynamic SIMD dispatch, and the GPU backends STRINGZILLA_CUDA_ARCH,
 #   STRINGZILLA_ROCM_ARCH and STRINGZILLA_METAL_ARCH ask for, side by side.
 # * stringzilla_shared: The same as a shared library.
@@ -12,7 +14,7 @@
 #
 # Consumers link the same namespaced spellings whether pulled in with `add_subdirectory` or found with `find_package`:
 #
-# * stringzilla::header, stringzilla::static, stringzilla::shared.
+# * stringzilla::abi, stringzilla::cpp, stringzilla::header, stringzilla::static, stringzilla::shared.
 #
 # Tests:
 #
@@ -225,22 +227,38 @@ endfunction ()
 
 # Tests and benchmarks link the precompiled libraries below.
 
-# Define our libraries, first the header-only version.
+# Define our libraries, first the C interface and the header-only version.
 #
-# Published as `stringzilla::header`: the namespace already says "stringzilla". The target keeps the long name, since a
-# bare `header` would be a poor global one, and `EXPORT_NAME` advertises the short spelling to installed consumers.
+# Published as `stringzilla::abi` and `stringzilla::header`: the namespace already says "stringzilla". The targets keep
+# the long names, since a bare `header` would be a poor global one, and `EXPORT_NAME` advertises the short spellings to
+# installed consumers.
+add_library(stringzilla_abi INTERFACE)
+add_library(${PROJECT_NAME}::abi ALIAS stringzilla_abi)
+set_target_properties(stringzilla_abi PROPERTIES EXPORT_NAME abi)
+# MSVC reads BOM-less UTF-8 in the system code page, so consumers of these Unicode-commented headers need `/utf-8`.
+target_compile_options(
+    stringzilla_abi INTERFACE "$<$<OR:$<COMPILE_LANG_AND_ID:C,MSVC>,$<COMPILE_LANG_AND_ID:CXX,MSVC>>:/utf-8>"
+)
+# The C headers include the serial kernels' state types and `stringzilla/metal.h` from `include/` whatever the flavor,
+# so the build tree's path names both roots, as the install prefix merges them into one.
+target_include_directories(
+    stringzilla_abi
+    INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/c> $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+              $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+
+# The whole library header-only: the C headers, the kernels of `include/` and the C++ SDK of `cpp/`. The three roots are
+# listed here, not only inherited from `stringzilla::abi`, as `$<TARGET_PROPERTY:...,INTERFACE_INCLUDE_DIRECTORIES>`
+# does not follow links.
 add_library(stringzilla_header INTERFACE)
 add_library(${PROJECT_NAME}::header ALIAS stringzilla_header)
 set_target_properties(stringzilla_header PROPERTIES EXPORT_NAME header)
-# MSVC reads BOM-less UTF-8 in the system code page, so consumers of these Unicode-commented headers need `/utf-8`.
-target_compile_options(
-    stringzilla_header INTERFACE "$<$<OR:$<COMPILE_LANG_AND_ID:C,MSVC>,$<COMPILE_LANG_AND_ID:CXX,MSVC>>:/utf-8>"
-)
 target_include_directories(
     stringzilla_header
     INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/c> $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
               $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/cpp> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
+target_link_libraries(stringzilla_header INTERFACE stringzilla_abi)
 # Consumers of the header target compile every kernel themselves, and link no dispatch points.
 target_compile_definitions(stringzilla_header INTERFACE STRINGZILLA_HEADER_ONLY=1)
 if (APPLE)
@@ -352,10 +370,11 @@ endif ()
 
 foreach (library_ IN LISTS stringzilla_libraries_)
     target_compile_definitions(${library_} PRIVATE "STRINGZILLA_WITH_LIBC=${stringzilla_with_libc_}")
+    target_link_libraries(${library_} PUBLIC stringzilla_abi)
     target_include_directories(
         ${library_}
-        PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/c> $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-               $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/cpp> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+        PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include> $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/cpp>
+               $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
 
     # Force aggressive inlining for SHA-256 functions to avoid stack overflow in Go CGO (-mno-red-zone) The SHA-256
@@ -374,6 +393,8 @@ foreach (library_ IN LISTS stringzilla_libraries_)
         target_compile_definitions(${library_} PUBLIC _ARM64_)
     endif ()
 endforeach ()
+
+add_subdirectory(cpp)
 
 # A monoversioned build folds each dispatch table to the kernel of the best enabled capability implementing its
 # operation. Its static archive links as bitcode, so the folded tables leave the kernels they skip out of the products'

@@ -93,6 +93,8 @@ target_link_libraries(your_app PRIVATE stringzilla::shared)
 ```
 
 Either library's dispatch points pick a capability by the mask each call passes, so one artifact runs optimally on any CPU.
+C++ code links `stringzilla::cpp`, which adds the C++ SDK of `cpp/` and links `stringzilla::static`.
+`stringzilla::abi` carries the C headers alone, with nothing to link, for a project that brings its own build of the library.
 
 ### CMake, Header Only
 

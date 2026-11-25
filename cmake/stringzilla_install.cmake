@@ -74,7 +74,7 @@ if (STRINGZILLA_INSTALL)
     # Every installed library belongs to an `EXPORT` set - a `.so` with no imported target leaves consumers
     # hand-rolling `find_library`.
     # Destinations come from the `GNUInstallDirs` defaults, so each call names only its target and export set.
-    install(TARGETS stringzilla_header stringzilla_static EXPORT stringzillaTargets)
+    install(TARGETS stringzilla_abi stringzilla_cpp stringzilla_header stringzilla_static EXPORT stringzillaTargets)
     if (TARGET stringzilla_shared)
         install(TARGETS stringzilla_shared EXPORT stringzillaTargets)
     endif ()
