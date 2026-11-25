@@ -455,7 +455,7 @@ struct matcher_find_last_of {
 
 /** Whether a type carries a nested @c ::string_view_t typedef. */
 template <typename type_>
-concept has_string_view_member_ = requires { typename type_::string_view_t; };
+concept a_type_with_string_view_member_ = requires { typename type_::string_view_t; };
 
 /** Extracts the view type of a string-like type: the nested @c string_view_t typedef of
  *  StringZilla types, or the type itself for STL types like @c std::string_view. */
@@ -465,7 +465,7 @@ struct string_view_for {
 };
 
 template <typename string_type_>
-    requires has_string_view_member_<string_type_>
+    requires a_type_with_string_view_member_<string_type_>
 struct string_view_for<string_type_> {
     using type = typename string_type_::string_view_t;
 };
@@ -478,7 +478,7 @@ struct string_view_for<string_type_> {
  *  @c static_assert that rejects them at the call site instead.
  */
 template <typename type_>
-concept has_remove_prefix_member_ = requires(type_ &view) { view.remove_prefix(1); };
+concept a_type_with_remove_prefix_member_ = requires(type_ &view) { view.remove_prefix(1); };
 
 /**
  *  @brief Infers how a haystack is stored inside a range-producing view.
@@ -499,8 +499,8 @@ struct range_haystack_for {
 /**
  *  @brief Borrows an lvalue haystack as its view type, shedding any @c const qualifier first.
  *
- *  StringZilla types survive the qualifier either way, as @c has_string_view_member_ reaches the
- *  nested typedef through the @c const, but an STL view is its own view type:
+ *  StringZilla types survive the qualifier either way, as @c a_type_with_string_view_member_
+ *  reaches the nested typedef through the @c const, but an STL view is its own view type:
  *  <tt>std::string_view const</tt> would keep the qualifier and lose its @c remove_prefix.
  */
 template <typename haystack_type_>
@@ -561,7 +561,7 @@ using range_haystack_type = typename range_haystack_for<haystack_type_>::type;
  */
 template <typename view_type_>
 struct range_walkable_view_ {
-    static_assert(has_remove_prefix_member_<view_type_>,
+    static_assert(a_type_with_remove_prefix_member_<view_type_>,
                   "Range haystacks need a `remove_prefix` member - pass a view, or `.view()` of an owning string.");
     using type = view_type_;
 };
@@ -5125,8 +5125,8 @@ expected<std::size_t> intersect(                                                
 /** A callable exposing each element of @p container_type_ as something a @c string_view_t is built
  *  from. */
 template <typename extractor_type_, typename container_type_>
-concept string_extractor = requires(extractor_type_ const &extract, container_type_ const &container,
-                                    std::size_t index) {
+concept a_string_extractor = requires(extractor_type_ const &extract, container_type_ const &container,
+                                      std::size_t index) {
     { extract(container[index]) } -> std::convertible_to<string_view_t>;
 };
 
@@ -5157,7 +5157,7 @@ status_t resize_or_bad_alloc_(container_type_ &container, std::size_t count) noe
  *  @param[in] allocator Serves the returned indices and the scratch memory of the sort.
  *  @return The permutation.
  */
-template <typename container_type_, string_extractor<container_type_> string_extractor_,
+template <typename container_type_, a_string_extractor<container_type_> string_extractor_,
           typename allocator_type_ = std::allocator<char>>
 expected<sorted_indices<allocator_type_>> argsort( //
     container_type_ const &container, string_extractor_ const &extractor, std::size_t top_count = 0,
@@ -5185,7 +5185,7 @@ expected<sorted_indices<allocator_type_>> argsort(container_type_ const &contain
  *  @param[in] allocator Serves the returned indices and the scratch memory of the sort.
  *  @return The permutation.
  */
-template <typename container_type_, string_extractor<container_type_> string_extractor_,
+template <typename container_type_, a_string_extractor<container_type_> string_extractor_,
           typename allocator_type_ = std::allocator<char>>
 expected<sorted_indices<allocator_type_>> argsort_utf8_uncased( //
     container_type_ const &container, string_extractor_ const &extractor, std::size_t top_count = 0,
@@ -5224,8 +5224,8 @@ using intersect_result_t = intersect_result<>;
  *  @return Two arrays of indices, mapping the elements of the first and the second array that
  *      hold identical values, with @c bad_alloc_k if an allocation failed.
  */
-template <typename first_type_, typename second_type_, string_extractor<first_type_> first_extractor_,
-          string_extractor<second_type_> second_extractor_, typename allocator_type_ = std::allocator<char>>
+template <typename first_type_, typename second_type_, a_string_extractor<first_type_> first_extractor_,
+          a_string_extractor<second_type_> second_extractor_, typename allocator_type_ = std::allocator<char>>
 expected<intersect_result<allocator_type_>> intersect(first_type_ const &first, second_type_ const &second,
                                                       first_extractor_ const &first_extractor,
                                                       second_extractor_ const &second_extractor, std::uint64_t seed = 0,
