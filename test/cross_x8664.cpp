@@ -147,10 +147,21 @@ void test_cross_x8664() {
     run_test_case("check_levenshtein_safety_(levenshtein_haswell)", haswell,
                   [&] { check_levenshtein_safety_(levenshtein_haswell); });
 
-    constexpr overlap_backend_t overlap_haswell {"haswell", sz_overlap_engine_init_haswell, sz_overlap_scores_haswell};
-    run_test_case("check_overlap_equivalence_(overlap_haswell)", haswell,
-                  [&](split_mix_generator_t &generator) { check_overlap_equivalence_(generator, overlap_haswell); });
-    run_test_case("check_overlap_safety_(overlap_haswell)", haswell, [&] { check_overlap_safety_(overlap_haswell); });
+    constexpr ngrams_backend_t ngrams_haswell {"haswell",
+                                               sz_ngrams_engine_init_haswell,
+                                               sz_ngrams_overlaps_haswell,
+                                               sz_ngrams_sketches_haswell,
+                                               sz_ngrams_residues_haswell,
+                                               sz_ngrams_sketch_haswell};
+    run_test_case("check_ngrams_overlaps_(ngrams_haswell)", haswell,
+                  [&](split_mix_generator_t &generator) { check_ngrams_overlaps_(generator, ngrams_haswell); });
+    run_test_case("check_ngrams_residues_(ngrams_haswell)", haswell,
+                  [&](split_mix_generator_t &generator) { check_ngrams_residues_(generator, ngrams_haswell); });
+    run_test_case("check_ngrams_sketches_(ngrams_haswell)", haswell,
+                  [&](split_mix_generator_t &generator) { check_ngrams_sketches_(generator, ngrams_haswell); });
+    run_test_case("check_ngrams_jaccard_(ngrams_haswell)", haswell,
+                  [&](split_mix_generator_t &generator) { check_ngrams_jaccard_(generator, ngrams_haswell); });
+    run_test_case("check_ngrams_safety_(ngrams_haswell)", haswell, [&] { check_ngrams_safety_(ngrams_haswell); });
 
     constexpr substrings_tier_t substrings_haswell {
         .init = sz_substrings_engine_init_haswell,
@@ -344,10 +355,21 @@ void test_cross_x8664() {
     run_test_case("check_levenshtein_safety_(levenshtein_skylake)", skylake,
                   [&] { check_levenshtein_safety_(levenshtein_skylake); });
 
-    constexpr overlap_backend_t overlap_skylake {"skylake", sz_overlap_engine_init_skylake, sz_overlap_scores_skylake};
-    run_test_case("check_overlap_equivalence_(overlap_skylake)", skylake,
-                  [&](split_mix_generator_t &generator) { check_overlap_equivalence_(generator, overlap_skylake); });
-    run_test_case("check_overlap_safety_(overlap_skylake)", skylake, [&] { check_overlap_safety_(overlap_skylake); });
+    constexpr ngrams_backend_t ngrams_skylake {"skylake",
+                                               sz_ngrams_engine_init_skylake,
+                                               sz_ngrams_overlaps_skylake,
+                                               sz_ngrams_sketches_skylake,
+                                               sz_ngrams_residues_skylake,
+                                               sz_ngrams_sketch_skylake};
+    run_test_case("check_ngrams_overlaps_(ngrams_skylake)", skylake,
+                  [&](split_mix_generator_t &generator) { check_ngrams_overlaps_(generator, ngrams_skylake); });
+    run_test_case("check_ngrams_residues_(ngrams_skylake)", skylake,
+                  [&](split_mix_generator_t &generator) { check_ngrams_residues_(generator, ngrams_skylake); });
+    run_test_case("check_ngrams_sketches_(ngrams_skylake)", skylake,
+                  [&](split_mix_generator_t &generator) { check_ngrams_sketches_(generator, ngrams_skylake); });
+    run_test_case("check_ngrams_jaccard_(ngrams_skylake)", skylake,
+                  [&](split_mix_generator_t &generator) { check_ngrams_jaccard_(generator, ngrams_skylake); });
+    run_test_case("check_ngrams_safety_(ngrams_skylake)", skylake, [&] { check_ngrams_safety_(ngrams_skylake); });
 
     constexpr utf8_norm_kernels_t utf8_norm_skylake {sz_utf8_norm_skylake, sz_utf8_find_denormalized_skylake};
     run_test_case("check_utf8_norm_unit_(utf8_norm_skylake)", skylake,

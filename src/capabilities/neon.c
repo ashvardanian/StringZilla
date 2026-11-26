@@ -12,7 +12,7 @@
 #include "stringzilla/find/neon.h"
 #include "stringzilla/sort/neon.h"
 #include "stringzilla/levenshtein/neon.h"
-#include "stringzilla/overlap/neon.h"
+#include "stringzilla/ngrams/neon.h"
 #include "stringzilla/substrings/neon.h"
 #include "stringzilla/regex/neon.h"
 #include "stringzilla/subdocuments/neon.h"

@@ -2,7 +2,8 @@
 //!
 //! Provides fast string search, comparison, hashing, and manipulation functions optimized with SWAR
 //! and SIMD instructions, plus the stateful cross-product engines - Levenshtein distances, window
-//! overlap, and multi-pattern search - that prepare a batch of queries once and reuse it per round.
+//! overlaps and sketches, and multi-pattern search - that prepare a batch of queries once and reuse
+//! it per round.
 //!
 //! File: rust/stringzilla.rs
 //! Author: Ash Vardanian
@@ -14,7 +15,7 @@ mod find;
 mod hash;
 mod intersect;
 mod levenshtein;
-mod overlap;
+mod ngrams;
 mod regex;
 mod sort;
 mod strings;
@@ -39,7 +40,7 @@ pub use find::*;
 pub use hash::*;
 pub use intersect::*;
 pub use levenshtein::*;
-pub use overlap::*;
+pub use ngrams::*;
 pub use regex::*;
 pub use sort::*;
 pub use strings::*;
@@ -655,8 +656,8 @@ unsafe extern "C" {
         stream: sz_stream_t,
     ) -> sz_status_t;
 
-    pub(crate) fn sz_overlap_engine_init(
-        engine: *mut OverlapEngine,
+    pub(crate) fn sz_ngrams_engine_init(
+        engine: *mut NgramsEngine,
         queries: *const sz_strings_view_t,
         window_widths: *const sz_size_t,
         window_widths_count: sz_size_t,
@@ -665,14 +666,22 @@ unsafe extern "C" {
         allocator: *const c_void,
         stream: sz_stream_t,
     ) -> sz_status_t;
-    pub(crate) fn sz_overlap_engine_free(engine: *mut OverlapEngine, stream: sz_stream_t);
-    pub(crate) fn sz_overlap_scores(
-        engine: *mut OverlapEngine,
+    pub(crate) fn sz_ngrams_engine_free(engine: *mut NgramsEngine, stream: sz_stream_t);
+    pub(crate) fn sz_ngrams_overlaps(
+        engine: *mut NgramsEngine,
         candidates: *const sz_strings_view_t,
         radius: f32,
         matches: *mut u32,
         matches_query_stride: sz_size_t,
         matches_candidate_stride: sz_size_t,
+        stream: sz_stream_t,
+    ) -> sz_status_t;
+    pub(crate) fn sz_ngrams_sketches(
+        engine: *mut NgramsEngine,
+        texts: *const sz_strings_view_t,
+        slots: sz_size_t,
+        sketches: *mut u8,
+        sketches_stride: sz_size_t,
         stream: sz_stream_t,
     ) -> sz_status_t;
 

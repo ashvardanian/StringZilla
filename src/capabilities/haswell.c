@@ -14,7 +14,7 @@
 #include "stringzilla/find/haswell.h"
 #include "stringzilla/sort/haswell.h"
 #include "stringzilla/levenshtein/haswell.h"
-#include "stringzilla/overlap/haswell.h"
+#include "stringzilla/ngrams/haswell.h"
 #include "stringzilla/substrings/haswell.h"
 #include "stringzilla/regex/haswell.h"
 #include "stringzilla/subdocuments/haswell.h"

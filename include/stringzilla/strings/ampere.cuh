@@ -24,7 +24,7 @@ extern "C" {
 #endif
 
 /** The sum of @p value over the warp, in every lane, with one @c redux.sync . */
-STRINGZILLA_DEVICE sz_u32_t sz_u32_lanes_sum_ampere_(sz_u32_t value) {
+STRINGZILLA_DEVICE sz_u32_t sz_u32_lanes_sum_ampere(sz_u32_t value) {
     sz_u32_t sum;
     asm volatile("redux.sync.add.u32 %0, %1, 0xFFFFFFFF;" : "=r"(sum) : "r"(value));
     return sum;
@@ -33,8 +33,8 @@ STRINGZILLA_DEVICE sz_u32_t sz_u32_lanes_sum_ampere_(sz_u32_t value) {
 /** The sum of @p value over the warp, in every lane, for a warp whose sum is below 2^59: two exact
  *  @c redux.sync of its halves split at bit 27, as 32 lanes of 27 bits sum below 2^32. */
 STRINGZILLA_DEVICE sz_u64_t sz_u64_lanes_sum_ampere_(sz_u64_t value) {
-    sz_u32_t const low = sz_u32_lanes_sum_ampere_((sz_u32_t)(value & ((1u << 27) - 1u)));
-    sz_u32_t const high = sz_u32_lanes_sum_ampere_((sz_u32_t)(value >> 27));
+    sz_u32_t const low = sz_u32_lanes_sum_ampere((sz_u32_t)(value & ((1u << 27) - 1u)));
+    sz_u32_t const high = sz_u32_lanes_sum_ampere((sz_u32_t)(value >> 27));
     return ((sz_u64_t)high << 27) + low;
 }
 
@@ -64,10 +64,10 @@ STRINGZILLA_DEVICE sz_size_t sz_block_sum_ampere_(sz_size_t value, sz_size_t *sh
 }
 
 /** @ref sz_block_sum_ampere_ for a block whose sum is below 2^32, each warp's total from one
- *  @ref sz_u32_lanes_sum_ampere_ and @p shared taken as 32-bit entries. */
+ *  @ref sz_u32_lanes_sum_ampere and @p shared taken as 32-bit entries. */
 STRINGZILLA_DEVICE sz_size_t sz_block_sum_bounded_ampere_(sz_size_t value, sz_size_t *shared, unsigned threads) {
     sz_u32_t *const totals = (sz_u32_t *)shared;
-    sz_u32_t const warp_total = sz_u32_lanes_sum_ampere_((sz_u32_t)value);
+    sz_u32_t const warp_total = sz_u32_lanes_sum_ampere((sz_u32_t)value);
     sz_u32_t sum = 0;
     if ((threadIdx.x & 31u) == 0) totals[threadIdx.x / 32] = warp_total;
     __syncthreads();

@@ -3,7 +3,7 @@
 //! Fast string processing with SIMD and GPU acceleration.
 //!
 //! The crate exposes single-string search, comparison, hashing, sorting and UTF-8 segmentation,
-//! beside the stateful cross-product engines - `LevenshteinEngine`, `OverlapEngine` and
+//! beside the stateful cross-product engines - `LevenshteinEngine`, `NgramsEngine` and
 //! `SubstringsEngine` - which prepare a batch of queries once and score any number of candidate
 //! batches against it.
 //!

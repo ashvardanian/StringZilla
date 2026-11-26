@@ -27,6 +27,9 @@ pub enum LevenshteinSymbol {
 /// a one-shot distance repeats per pair is paid here exactly once. Construction also fixes the
 /// capability and, on a GPU, the launch geometry.
 ///
+/// A GPU engine's verbs take every input and output in memory its device reaches, such as a
+/// [`Strings`] and a `Vec` in a [`UnifiedAllocator`].
+///
 /// The fields mirror `sz_levenshtein_engine_t` one for one and only `count`, `symbol` and
 /// `capability` are read from Rust, so the layout is load-bearing and the engine travels to C by
 /// pointer. Owning raw pointers makes it neither `Send` nor `Sync`, which is what the C contract
@@ -122,9 +125,8 @@ impl LevenshteinEngine {
     /// every candidate past it, on every backend, which lets a round stop early. `None` keeps every
     /// distance exact.
     ///
-    /// A GPU engine takes candidates and `distances` in memory its device reaches, such as a
-    /// [`Strings`] and a `Vec` in a [`UnifiedAllocator`]. A stream of another group than the
-    /// engine's is refused with [`Status::DeviceMemoryMismatch`].
+    /// A stream of another group than the engine's is refused with
+    /// [`Status::DeviceMemoryMismatch`].
     pub fn distances<'scope>(
         &'scope mut self,
         scope: &'scope Scope<'scope, '_>,

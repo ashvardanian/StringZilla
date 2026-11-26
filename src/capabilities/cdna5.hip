@@ -11,12 +11,12 @@
 #undef STRINGZILLA_TARGET_CDNA4
 #define STRINGZILLA_TARGET_CDNA4 0
 #include "stringzilla/levenshtein.h"
-#include "stringzilla/overlap.h"
+#include "stringzilla/ngrams.h"
 #include "stringzilla/substrings.h"
 #include "stringzilla/subdocuments.h"
 
 #include "stringzilla/levenshtein/cdna5.cuh"
-#include "stringzilla/overlap/cdna5.cuh"
+#include "stringzilla/ngrams/cdna5.cuh"
 #include "stringzilla/substrings/cdna5.cuh"
 #include "stringzilla/subdocuments/cdna5.cuh"
 

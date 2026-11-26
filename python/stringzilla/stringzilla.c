@@ -27,9 +27,9 @@
  *  This translation unit owns the module-init glue - @c PyModuleDef, the type-registration table,
  *  and @c PyInit_stringzilla - plus the argument plumbing the three engine files share. The struct
  *  layouts of @c File, @c String, and @c Strings and the @c PyTypeObject forward declarations every
- *  domain file needs live in `stringzilla.h`; the domains are split across `shared.c`, `file.c`,
- *  `string.c`, `strings.c`, `hash.c`, `cipher.c`, `find.c`, `compare.c`, `sort.c`, `intersect.c`,
- *  `levenshtein.c`, `overlap.c`, `substrings.c`, and the `utf8_*.c` files.
+ *  domain file needs live in @c stringzilla.h; the domains are split across @c shared.c, @c file.c,
+ *  @c string.c, @c strings.c, @c hash.c, @c cipher.c, @c find.c, @c compare.c, @c sort.c,
+ *  @c intersect.c, @c levenshtein.c, @c ngrams.c, @c substrings.c, and the @c utf8_*.c files.
  *
  *  @see PyArrow arrays: https://arrow.apache.org/docs/python/generated/pyarrow.array.html
  */
@@ -724,7 +724,7 @@ static struct {
     {"Aes256GcmEncryptor", &Aes256GcmEncryptorType},
     {"Aes256GcmDecryptor", &Aes256GcmDecryptorType},
     {"LevenshteinEngine", &LevenshteinEngineType},
-    {"OverlapEngine", &OverlapEngineType},
+    {"NgramsEngine", &NgramsEngineType},
     {"SubstringsEngine", &SubstringsEngineType},
     {"RegexEngine", &RegexEngineType},
     {"SubdocumentsEngine", &SubdocumentsEngineType},

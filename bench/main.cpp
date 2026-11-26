@@ -68,7 +68,7 @@ int main(int argc, char **argv) {
             bench_cipher(env);
             bench_container(env);
             bench_levenshtein(env);
-            bench_overlap(env);
+            bench_ngrams(env);
             bench_substrings(env);
             bench_regex(env);
             bench_subdocuments(env);

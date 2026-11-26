@@ -113,7 +113,7 @@ STRINGZILLA_INLINE void *sz_metal_device_(sz_size_t ordinal) {
 #pragma clang diagnostic ignored "-Wc23-extensions"
 
 /** The MSL prelude every family library is compiled behind, ahead of the family's own source. */
-static char const sz_metal_prelude_source_[] = {
+static char const sz_metal_prelude_source[] = {
 #embed "stringzilla/types.metal"
     , 0};
 #pragma clang diagnostic pop
@@ -564,7 +564,7 @@ STRINGZILLA_INLINE void *sz_metal_pipeline_(sz_metal_context_t *context, char co
             void *error = STRINGZILLA_NULL;
             void *const library = ((void *(*)(void *, SEL, void *, void *, void **))objc_msgSend)(
                 context->device, sel_registerName("newLibraryWithSource:options:error:"),
-                ((void *(*)(void *, SEL, void *))objc_msgSend)(sz_metal_string_(sz_metal_prelude_source_),
+                ((void *(*)(void *, SEL, void *))objc_msgSend)(sz_metal_string_(sz_metal_prelude_source),
                                                                sel_registerName("stringByAppendingString:"),
                                                                sz_metal_string_(source)),
                 options, &error);

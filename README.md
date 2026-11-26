@@ -83,7 +83,7 @@ Split lines separated by \n or \r  (GB/s)
 > The two CPUs therefore differ in standard library as much as in ISA, which is most of the gap in the `strstr`, `strcspn`, and `std::string::find_first_of` rows; the StringZilla rows build from the same source on both.
 > These will not reproduce exactly; the links below carry the methodology and the per-library breakdowns.
 
-The batch engines are timed per family and per backend, CPU beside GPU, in [`levenshtein/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/include/stringzilla/levenshtein/README.md), [`overlap/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/include/stringzilla/overlap/README.md), and [`substrings/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/include/stringzilla/substrings/README.md).
+The batch engines are timed per family and per backend, CPU beside GPU, in [`levenshtein/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/include/stringzilla/levenshtein/README.md), [`ngrams/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/include/stringzilla/ngrams/README.md), and [`substrings/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/include/stringzilla/substrings/README.md).
 
 Most StringZilla modules ship ready-to-run benchmarks for C, C++, Python, and more.
 Grab them from `./bench`, and see [`CONTRIBUTING.md`](https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md), [`test/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/test/README.md), and [`bench/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/bench/README.md) for instructions.
@@ -117,7 +117,7 @@ The Python package upgrades `str` and `bytes` with SIMD search, sorting, hashing
 
 Link `stringzilla::static` from C or `stringzilla::cpp` from C++ through CMake `FetchContent`, or `find_package(stringzilla)` an installed build, or go header-only in C &centerdot; guides: [`c/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/c/README.md) and [`cpp/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/cpp/README.md)
 
-The library covers search, hashing, sorting, comparison, set intersection, collection conversions like escaping, normalization and Arrow-compatible tapes, and lazy UTF-8 segmentation, plus the engines for edit distances, window overlap, and multi-pattern search, each with a host arm, a CUDA and ROCm one, and a Metal one.
+The library covers search, hashing, sorting, comparison, set intersection, collection conversions like escaping, normalization and Arrow-compatible tapes, and lazy UTF-8 segmentation, plus the engines for edit distances, N-gram overlaps and MinHash sketches, and multi-pattern search, each with a host arm, a CUDA and ROCm one, and a Metal one.
 
 ### Rust
 
@@ -130,7 +130,7 @@ assert_eq!(sz::find("the quick brown fox", "brown"), Some(10));
 let digest = sz::hash("hello"); // fast 64-bit hash
 ```
 
-The crate adds SIMD search, sorting, hashing, and UTF-8 segmentation to any `AsRef<[u8]>`, plus the `LevenshteinEngine`, `OverlapEngine` and `SubstringsEngine` batch engines, whose device arms come with the `cuda` feature.
+The crate adds SIMD search, sorting, hashing, and UTF-8 segmentation to any `AsRef<[u8]>`, plus the `LevenshteinEngine`, `NgramsEngine` and `SubstringsEngine` batch engines, whose device arms come with the `cuda` feature.
 
 ### JavaScript
 
@@ -269,7 +269,7 @@ Consider contributing if you need a feature that's not yet implemented.
 | Codepoint Counting & Indexing  |    🌳    | ✅  | ✅  |   ✅   |  ✅  | ✅  |  ✅   | ✅  | ✅  |  ✅  |
 |                                |          |     |     |        |      |     |       |     |     |      |
 | Batch Edit Distances           |    🌳    | ✅  | ✅  |   ✅   |  ✅  | ⚪  |  ⚪   | ⚪  | ⚪  |  ⚪  |
-| Batch Window Overlap           |    🚧    | ✅  | ✅  |   ✅   |  ✅  | ⚪  |  ⚪   | ⚪  | ⚪  |  ⚪  |
+| Batch Overlaps & Sketches      |    🚧    | ✅  | ✅  |   ✅   |  ✅  | ⚪  |  ⚪   | ⚪  | ⚪  |  ⚪  |
 | Batch Multi-Pattern Search     |    🚧    | ✅  | ✅  |   ✅   |  ✅  | ⚪  |  ⚪   | ⚪  | ⚪  |  ⚪  |
 
 > 🌳 parts are used in production.
@@ -367,7 +367,7 @@ One is to use sparse DFA representation, which is more cache-friendly, but would
 StringZilla takes that route in [`substrings`](https://github.com/ashvardanian/StringZilla/blob/main/include/stringzilla/substrings/README.md), compiling a needle vocabulary once into a goto-completed Aho-Corasick automaton and reusing it across every later round of haystacks.
 The automaton is split into two tiers — a dense goto-completed row per frequently-visited state, one target per byte class, and a double array for the rest — so a step is one load with no failure-following at runtime.
 It matches raw bytes or applies full Unicode case folding to both sides, runs on the host or on a CUDA device, and answers counts, located matches, rewritten haystacks, or BM25 scores out of the one walk.
-Where only near-duplicate detection or candidate filtering is needed, the window-overlap machinery described below is the cheaper tool.
+Where only near-duplicate detection or candidate filtering is needed, the N-gram overlaps and sketches described below are the cheaper tool.
 
 ### Levenshtein Edit Distance
 
@@ -646,13 +646,15 @@ StringZilla intersects two deduplicated string collections through a power-of-tw
 The hash is seeded for adversarial resistance and the probe sequence runs under a bounded collision budget, so the intersection completes in linear time and space rather than degrading on crafted inputs.
 The implementation lives in `include/stringzilla/intersect/`, declared in `c/stringzilla/intersect.h`.
 
-### Window Overlap
+### N-gram Overlaps & MinHash Sketches
 
-For near-duplicate detection and candidate filtering, StringZilla slides Rabin-Karp rolling-hash windows of several widths over each query at once, and sorts every width's window hashes of one query into that query's own B-tree.
-A candidate then streams through the forest, hashing its own windows and probing, so nothing is stored per candidate and the candidates may change round to round while the queries and the widths stay.
+For near-duplicate detection and candidate filtering, StringZilla slides Rabin-Karp rolling-hash N-grams of several widths over each query at once, and files every distinct window of one query, at every width, into that query's own hash table.
+A candidate then streams through the tables, hashing its own N-grams and probing, so nothing is stored per candidate and the candidates may change round to round while the queries and the widths stay.
 A window hash is a prefix difference, one modular multiply-add at any width and any offset, against a 32-bit prime chosen for collision weight rather than for size.
-The measure is asymmetric: a candidate's window occurrences count against a query's distinct windows, so swapping the sides changes the score when either repeats a window.
-The implementation lives in `include/stringzilla/overlap/`, one backend per capability, declared in `c/stringzilla/overlap.h`.
+The measure is asymmetric: a score is the share of the query's distinct N-grams the candidate holds, each counted once, so swapping the sides changes it.
+The same window hashes sketch any text into as many one-byte slots as the caller asks, with one permutation and densification: every window lands in one slot and keeps the least rank there, and an empty slot borrows from the next filled one.
+The share of bytes two sketches agree at then estimates the Jaccard index of the two texts' window sets.
+The implementation lives in `include/stringzilla/ngrams/`, one backend per capability, declared in `c/stringzilla/ngrams.h`.
 
 ### GPU Edit Distances
 

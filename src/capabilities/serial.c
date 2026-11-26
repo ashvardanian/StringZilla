@@ -16,7 +16,7 @@
 #include "stringzilla/sort/serial.h"
 #include "stringzilla/intersect/serial.h"
 #include "stringzilla/levenshtein/serial.h"
-#include "stringzilla/overlap/serial.h"
+#include "stringzilla/ngrams/serial.h"
 #include "stringzilla/substrings/serial.h"
 #include "stringzilla/regex/serial.h"
 #include "stringzilla/subdocuments/serial.h"

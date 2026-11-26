@@ -72,13 +72,13 @@ STRINGZILLA_DEVICE sz_u64_t sz_u64_lanes_sum_cdna3_(sz_u64_t value) {
 
 /** The sum of @p value over this lane and every lane below it across the 64-lane wavefront: past
  *  each half's own scan, rows 2 and 3 add lane 31. */
-STRINGZILLA_DEVICE sz_u32_t sz_u32_wavefront_prefix_sum_cdna3_(sz_u32_t value) {
+STRINGZILLA_DEVICE sz_u32_t sz_u32_wavefront_prefix_sum_cdna3(sz_u32_t value) {
     value = sz_u32_lanes_prefix_sum_cdna3_(value);
     return value + __builtin_amdgcn_update_dpp(0u, value, sz_dpp_row_broadcast_31_cdna3_k, 0xC, 0xF, false);
 }
 
-/** @ref sz_u32_wavefront_prefix_sum_cdna3_ over 64-bit values, each move two DPP moves. */
-STRINGZILLA_DEVICE sz_u64_t sz_u64_wavefront_prefix_sum_cdna3_(sz_u64_t value) {
+/** @ref sz_u32_wavefront_prefix_sum_cdna3 over 64-bit values, each move two DPP moves. */
+STRINGZILLA_DEVICE sz_u64_t sz_u64_wavefront_prefix_sum_cdna3(sz_u64_t value) {
     value = sz_u64_lanes_prefix_sum_cdna3_(value);
     return value + __builtin_amdgcn_update_dpp((sz_u64_t)0, value, sz_dpp_row_broadcast_31_cdna3_k, 0xC, 0xF, false);
 }
@@ -93,13 +93,13 @@ STRINGZILLA_DEVICE sz_i32_t sz_i32_wavefront_prefix_min_cdna3_(sz_i32_t value) {
 
 /** The sum of @p value over the 64-lane wavefront, in every lane. */
 STRINGZILLA_DEVICE sz_u32_t sz_u32_wavefront_sum_cdna3_(sz_u32_t value) {
-    return (sz_u32_t)__builtin_amdgcn_readlane((int)sz_u32_wavefront_prefix_sum_cdna3_(value), 63);
+    return (sz_u32_t)__builtin_amdgcn_readlane((int)sz_u32_wavefront_prefix_sum_cdna3(value), 63);
 }
 
 /** @ref sz_block_scan_simt_ over 64-lane wavefronts scanning themselves through DPP. */
 STRINGZILLA_DEVICE sz_size_t sz_block_scan_cdna3_(sz_size_t value, sz_size_t *shared, sz_size_t *total,
                                                   unsigned threads) {
-    return sz_block_scan_simt_(value, shared, total, 64, threads, sz_u64_wavefront_prefix_sum_cdna3_);
+    return sz_block_scan_simt_(value, shared, total, 64, threads, sz_u64_wavefront_prefix_sum_cdna3);
 }
 
 /** @ref sz_block_scan_bounded_simt_ over 64-lane wavefronts scanning themselves through DPP, one
@@ -107,12 +107,12 @@ STRINGZILLA_DEVICE sz_size_t sz_block_scan_cdna3_(sz_size_t value, sz_size_t *sh
 STRINGZILLA_DEVICE sz_size_t sz_block_scan_bounded_cdna3_(sz_size_t value, sz_size_t *shared, sz_size_t *total,
                                                           unsigned threads) {
     return sz_block_scan_bounded_simt_(value, (sz_u32_t *)shared, total, 64, threads,
-                                       sz_u32_wavefront_prefix_sum_cdna3_);
+                                       sz_u32_wavefront_prefix_sum_cdna3);
 }
 
 /** @ref sz_block_sum_simt_ over 64-lane wavefronts summing themselves through DPP. */
 STRINGZILLA_DEVICE sz_size_t sz_block_sum_cdna3_(sz_size_t value, sz_size_t *shared, unsigned threads) {
-    return sz_block_sum_simt_(value, shared, 64, threads, sz_u64_wavefront_prefix_sum_cdna3_);
+    return sz_block_sum_simt_(value, shared, 64, threads, sz_u64_wavefront_prefix_sum_cdna3);
 }
 
 #ifdef __cplusplus

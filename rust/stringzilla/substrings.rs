@@ -126,6 +126,10 @@ impl Bm25Params {
 /// engine amortizes that across every later batch: a dictionary of thousands of terms costs one
 /// pass over a haystack rather than thousands.
 ///
+/// A GPU engine's verbs take haystacks, replacements and every buffer, weights and lengths
+/// included, in memory its device reaches, such as a [`Strings`] and a `Vec` in a
+/// [`UnifiedAllocator`].
+///
 /// The fields mirror `sz_substrings_engine_t` one for one and only `needles_count`,
 /// `overlap_policy` and `report` are read from Rust, so the layout is load-bearing and the engine
 /// travels to C by pointer. Owning raw pointers makes it neither `Send` nor `Sync`, which is what
@@ -209,9 +213,7 @@ impl SubstringsEngine {
     /// `matches_budget` is what a device round may emit before every later kernel retires, and
     /// `haystacks_budget` how many haystacks it may carry; the round's arena is sized for both
     /// here, zero asking for a default, so no verb allocates, a round carrying more haystacks is
-    /// refused, and matches past the budget surface as the report's `shortfall`. A GPU engine's
-    /// verbs take haystacks, replacements and every buffer, weights and lengths included, in
-    /// memory the device reaches, such as a [`Strings`] and a `Vec` in a [`UnifiedAllocator`].
+    /// refused, and matches past the budget surface as the report's `shortfall`.
     pub fn new<Needle>(
         needles: &[Needle],
         case_sensitivity: CaseSensitivity,

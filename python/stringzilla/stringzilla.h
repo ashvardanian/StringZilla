@@ -4,11 +4,11 @@
  *  @date September 2, 2023
  *  @brief The shared types and forward declarations for the per-domain files.
  *
- *  The @c stringzilla extension is split into one translation unit per domain - `strings.c`,
- *  `hash.c`, `cipher.c`, `find.c`, `compare.c`, `sort.c`, `intersect.c`, `levenshtein.c`,
- *  `overlap.c`, `substrings.c`, and the `utf8_*.c` files - alongside the CPython object-model files
- *  `file.c`, `string.c` and the `shared.c` plumbing. This header carries everything more than one
- *  of those files touches: the @c File, @c String, and @c Strings struct layouts, the full
+ *  The @c stringzilla extension is split into one translation unit per domain - @c strings.c,
+ *  @c hash.c, @c cipher.c, @c find.c, @c compare.c, @c sort.c, @c intersect.c, @c levenshtein.c,
+ *  @c ngrams.c, @c substrings.c, and the @c utf8_*.c files - alongside the CPython object-model
+ *  files @c file.c, @c string.c and the @c shared.c plumbing. This header carries everything more
+ *  than one of those files touches: the @c File, @c String, and @c Strings struct layouts, the full
  *  @c PyTypeObject forward-declaration set the module-init file needs to build its
  *  type-registration table, and the per-interpreter free-list state. Structs read by a single
  *  translation unit live in that file instead.
@@ -135,7 +135,7 @@ extern PyTypeObject Aes256GcmKeyType;
 extern PyTypeObject Aes256GcmEncryptorType;
 extern PyTypeObject Aes256GcmDecryptorType;
 extern PyTypeObject LevenshteinEngineType;
-extern PyTypeObject OverlapEngineType;
+extern PyTypeObject NgramsEngineType;
 extern PyTypeObject SubstringsEngineType;
 extern PyTypeObject RegexEngineType;
 extern PyTypeObject SubdocumentsEngineType;

@@ -66,10 +66,21 @@ void test_cross_arm64() {
     run_test_case("check_levenshtein_safety_(levenshtein_neon)", neon,
                   [&] { check_levenshtein_safety_(levenshtein_neon); });
 
-    constexpr overlap_backend_t overlap_neon {"neon", sz_overlap_engine_init_neon, sz_overlap_scores_neon};
-    run_test_case("check_overlap_equivalence_(overlap_neon)", neon,
-                  [&](split_mix_generator_t &generator) { check_overlap_equivalence_(generator, overlap_neon); });
-    run_test_case("check_overlap_safety_(overlap_neon)", neon, [&] { check_overlap_safety_(overlap_neon); });
+    constexpr ngrams_backend_t ngrams_neon {"neon",
+                                            sz_ngrams_engine_init_neon,
+                                            sz_ngrams_overlaps_neon,
+                                            sz_ngrams_sketches_neon,
+                                            sz_ngrams_residues_neon,
+                                            sz_ngrams_sketch_neon};
+    run_test_case("check_ngrams_overlaps_(ngrams_neon)", neon,
+                  [&](split_mix_generator_t &generator) { check_ngrams_overlaps_(generator, ngrams_neon); });
+    run_test_case("check_ngrams_residues_(ngrams_neon)", neon,
+                  [&](split_mix_generator_t &generator) { check_ngrams_residues_(generator, ngrams_neon); });
+    run_test_case("check_ngrams_sketches_(ngrams_neon)", neon,
+                  [&](split_mix_generator_t &generator) { check_ngrams_sketches_(generator, ngrams_neon); });
+    run_test_case("check_ngrams_jaccard_(ngrams_neon)", neon,
+                  [&](split_mix_generator_t &generator) { check_ngrams_jaccard_(generator, ngrams_neon); });
+    run_test_case("check_ngrams_safety_(ngrams_neon)", neon, [&] { check_ngrams_safety_(ngrams_neon); });
 
     constexpr substrings_tier_t substrings_neon {
         .init = sz_substrings_engine_init_neon,

@@ -11,7 +11,7 @@ abstract: >-
   It covers exact and fuzzy search, non-cryptographic hashing and SHA-256 checksums,
   sorting and set intersection of string collections, and Unicode case folding, segmentation,
   and normalization (UAX-15/29/14), plus batch and on-GPU fuzzy matching such as
-  Levenshtein and MinHash.
+  Levenshtein distances, N-gram overlaps and MinHash sketches.
   It exposes lazily-evaluated, allocation-free iterators, with native bindings for languages
   including C, C++, Python, Rust, Go, Swift, and JavaScript, and kernels tuned for architectures
   including x86, Arm, RISC-V, LoongArch, Power, and WebAssembly.

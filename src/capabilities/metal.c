@@ -6,7 +6,7 @@
  */
 #include "stringzilla/strings.h"
 #include "stringzilla/levenshtein.h"
-#include "stringzilla/overlap.h"
+#include "stringzilla/ngrams.h"
 #include "stringzilla/substrings.h"
 #include "stringzilla/regex.h"
 #include "stringzilla/subdocuments.h"
@@ -14,7 +14,7 @@
 #include "stringzilla/utf8_uncased_fold.h"
 
 #include "stringzilla/levenshtein/metal.h"
-#include "stringzilla/overlap/metal.h"
+#include "stringzilla/ngrams/metal.h"
 #include "stringzilla/strings/metal.h"
 #include "stringzilla/substrings/metal.h"
 #include "stringzilla/regex/metal.h"

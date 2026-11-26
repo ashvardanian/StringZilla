@@ -1175,7 +1175,7 @@ struct sz_aes256_gcm_encryptor_t; // Forward declaration of an AES-256-GCM seali
 struct sz_aes256_gcm_decryptor_t; // Forward declaration of an AES-256-GCM opening state
 struct sz_substrings_bm25_t;      // Forward declaration of BM25's continuous parameters
 struct sz_levenshtein_engine_t;   // Forward declaration of a batch of prepared Levenshtein queries
-struct sz_overlap_engine_t;       // Forward declaration of a forest of prepared overlap query trees
+struct sz_ngrams_engine_t;        // Forward declaration of prepared window tables and the scratch both verbs grow
 struct sz_substrings_engine_t;    // Forward declaration of a compiled multi-pattern vocabulary
 struct sz_regex_engine_t;         // Forward declaration of a compiled vocabulary of regular expressions
 struct sz_subdocuments_engine_t;  // Forward declaration of a compiled vocabulary of JSONPath or XPath queries

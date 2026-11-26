@@ -1,15 +1,15 @@
 # StringZilla for C
 
-The C ABI exposes each kernel family as a stable C 99 surface: substring and byte-set search, non-cryptographic hashing and checksums, lexicographic comparison, sorting and intersection of string collections, collection conversions from escaping and normalization to byte translation, and the stateful cross-product engines for edit distances, window overlap, and multi-pattern search.
+The C ABI exposes each kernel family as a stable C 99 surface: substring and byte-set search, non-cryptographic hashing and checksums, lexicographic comparison, sorting and intersection of string collections, collection conversions from escaping and normalization to byte translation, and the stateful cross-product engines for edit distances, N-gram overlaps and MinHash sketches, and multi-pattern search.
 It ships as a precompiled __static__ or __shared__ library that compiles every capability once and picks one per call, for maximum portability, declared by the C headers `<stringzilla/stringzilla.h>`, which can also compile the kernels inline with `STRINGZILLA_HEADER_ONLY=1`.
 The [C++ SDK](../cpp/README.md) is built on this library, and the [kernels](../include/stringzilla/README.md) it compiles are described beside their sources.
 
 Every verb has a dispatch point, like `sz_find_best`, which runs the best capability a mask shares with the verb's list, and the mask to pass on the CPU is the one `sz_capabilities_enabled_cpu` reports.
 There is no hidden global allocation and no thread pool: every function that may allocate takes an explicit `sz_allocator_t *`, and an engine holds the blocks its allocator handed it until you free it.
-An engine is prepared by `sz_levenshtein_engine_init`, and its twins for overlap and substrings, for one device's capabilities and a stream, which names the device, so choosing a device is choosing the mask and the stream an engine is built with rather than setting a global.
+An engine is prepared by `sz_levenshtein_engine_init`, and its twins for N-grams and substrings, for one device's capabilities and a stream, which names the device, so choosing a device is choosing the mask and the stream an engine is built with rather than setting a global.
 Its rounds, such as `sz_levenshtein_distances`, take a trailing stream: null on the CPU, while on a GPU they enqueue there and return, leaving the join to the caller.
 A GPU engine's init uses its stream for its own work alone and sizes a round's device memory from the budgets it takes, so no compute verb allocates or joins, and a round carrying more haystacks than its budget, or on Metal more candidates, is refused with `sz_unexpected_dimensions_k`.
-Overlap and Levenshtein engines keep no per-round state on a CUDA device, so several streams may score one engine at once, while the rounds of one substrings engine share its arena and its report, so the caller orders them.
+N-gram and Levenshtein engines keep no per-round state on a CUDA device, so several streams may score one engine at once, while the rounds of one substrings engine share its arena and its report, so the caller orders them.
 
 The headers compile as freestanding C 99; set `STRINGZILLA_WITH_LIBC=0` to drop the libc dependency.
 
@@ -33,7 +33,7 @@ Each family can also be included on its own when you only need a slice of the AP
 #include <stringzilla/strings.h> // `sz_strings_to_tape_best`, `sz_strings_lookup_best`
 #include <stringzilla/small_string.h> // `sz_string_t` SSO container
 #include <stringzilla/levenshtein.h> // `sz_levenshtein_engine_init`, `sz_levenshtein_distances`
-#include <stringzilla/overlap.h> // `sz_overlap_engine_init`, `sz_overlap_scores`
+#include <stringzilla/ngrams.h> // `sz_ngrams_engine_init`, `sz_ngrams_overlaps`, `sz_ngrams_sketches`
 #include <stringzilla/substrings.h> // `sz_substrings_engine_init`, `sz_substrings_counts`
 ```
 
@@ -566,7 +566,7 @@ sz_status_t sz_levenshtein_distances(sz_levenshtein_engine_t *engine, sz_strings
 void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine, sz_stream_t stream);
 ```
 
-Their per-tier building blocks and their design notes live beside the kernels, in [`levenshtein/README.md`](../include/stringzilla/levenshtein/README.md), [`overlap/README.md`](../include/stringzilla/overlap/README.md), and [`substrings/README.md`](../include/stringzilla/substrings/README.md).
+Their per-tier building blocks and their design notes live beside the kernels, in [`levenshtein/README.md`](../include/stringzilla/levenshtein/README.md), [`ngrams/README.md`](../include/stringzilla/ngrams/README.md), and [`substrings/README.md`](../include/stringzilla/substrings/README.md).
 
 A device round reads memory the device reaches, and strings only as a tape, never through an accessor, which is host code. `strings.h` declares allocation and gathering into tapes; `capabilities.h` declares stream creation, synchronization and release. Their `_best` dispatch points take a mask, with `_serial`, `_cuda`, `_rocm` and `_metal` twins, the GPU ones exported only where built:
 

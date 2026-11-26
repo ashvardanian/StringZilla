@@ -15,7 +15,7 @@ The family files time the dispatch points against the standard baselines, like `
 - `cipher.cpp` — AES-256 counter mode and Galois/counter mode throughput.
 - `container.cpp` — STL associative containers with string keys.
 - `levenshtein.cpp` — one-to-one and one-to-many edit distances, over bytes and over runes.
-- `overlap.cpp` — window hashing, key extraction, B-tree probes, and whole-verb overlap scoring.
+- `ngrams.cpp` — N-gram overlaps through the dispatch point, then N-gram residues and sketches at 128, 512 and 2,048 slots, per CPU capability.
 - `substrings.cpp` — multi-pattern Aho-Corasick counting, locating, rewriting, and BM25 scoring.
 - `regex.cpp` — multi-pattern regular expressions: counting, locating, rewriting, and extracting groups.
 - `subdocuments.cpp` — batched JSONPath and XPath queries: counting and locating the selected nodes.

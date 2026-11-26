@@ -107,10 +107,21 @@ void test_cross_serial() {
     run_test_case("check_levenshtein_safety_(levenshtein_serial)", serial,
                   [&] { check_levenshtein_safety_(levenshtein_serial); });
 
-    constexpr overlap_backend_t overlap_serial {"serial", sz_overlap_engine_init_serial, sz_overlap_scores_serial};
-    run_test_case("check_overlap_equivalence_(overlap_serial)", serial,
-                  [&](split_mix_generator_t &generator) { check_overlap_equivalence_(generator, overlap_serial); });
-    run_test_case("check_overlap_safety_(overlap_serial)", serial, [&] { check_overlap_safety_(overlap_serial); });
+    constexpr ngrams_backend_t ngrams_serial {"serial",
+                                              sz_ngrams_engine_init_serial,
+                                              sz_ngrams_overlaps_serial,
+                                              sz_ngrams_sketches_serial,
+                                              sz_ngrams_residues_serial,
+                                              sz_ngrams_sketch_serial};
+    run_test_case("check_ngrams_overlaps_(ngrams_serial)", serial,
+                  [&](split_mix_generator_t &generator) { check_ngrams_overlaps_(generator, ngrams_serial); });
+    run_test_case("check_ngrams_residues_(ngrams_serial)", serial,
+                  [&](split_mix_generator_t &generator) { check_ngrams_residues_(generator, ngrams_serial); });
+    run_test_case("check_ngrams_sketches_(ngrams_serial)", serial,
+                  [&](split_mix_generator_t &generator) { check_ngrams_sketches_(generator, ngrams_serial); });
+    run_test_case("check_ngrams_jaccard_(ngrams_serial)", serial,
+                  [&](split_mix_generator_t &generator) { check_ngrams_jaccard_(generator, ngrams_serial); });
+    run_test_case("check_ngrams_safety_(ngrams_serial)", serial, [&] { check_ngrams_safety_(ngrams_serial); });
 
     constexpr substrings_tier_t substrings_serial {
         .init = sz_substrings_engine_init_serial,

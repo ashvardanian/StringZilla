@@ -45,7 +45,8 @@ struct device_kernels {
     device_backend_t const &runtime;
 
     sz_kernel_levenshtein_distances_t levenshtein_distances;
-    sz_kernel_overlap_scores_t overlap_scores;
+    sz_kernel_ngrams_overlaps_t ngrams_overlaps;
+    sz_kernel_ngrams_sketches_t ngrams_sketches;
 
     /** The three @c contains, each null where the vendor has none. */
     sz_kernel_substrings_contains_t substrings_contains;
@@ -676,7 +677,7 @@ inline void check_levenshtein_device_deferred_free_(auto const &backend) {
 
 #pragma endregion Levenshtein Checks
 
-#pragma region Overlap Helpers
+#pragma region Ngrams Helpers
 
 /**
  *  @brief Candidates in a pinned tape and their device copy, and room for one round's counts.
@@ -685,9 +686,9 @@ inline void check_levenshtein_device_deferred_free_(auto const &backend) {
  *  copy. The queries stay plain host strings, because an engine's builder reads them on the host
  *  and no kernel ever sees them.
  */
-struct overlap_device_corpus_t {
+struct ngrams_overlaps_corpus_t {
 
-    /** The texts whose windows are sorted into the forest. */
+    /** The texts whose N-grams fill the tables. */
     std::vector<std::string> queries;
 
     /** The candidates, which the serial reference walks. */
@@ -702,9 +703,9 @@ struct overlap_device_corpus_t {
     /** Host accessors, which is what an engine's builder calls. */
     sz_strings_view_t query_strings() const { return strings_from_(queries); }
 
-    overlap_device_corpus_t(device_backend_t const &runtime, split_mix_generator_t &generator,
-                            std::size_t queries_count, std::size_t count, std::size_t query_length,
-                            std::size_t widths_count)
+    ngrams_overlaps_corpus_t(device_backend_t const &runtime, split_mix_generator_t &generator,
+                             std::size_t queries_count, std::size_t count, std::size_t query_length,
+                             std::size_t widths_count)
         : matches(queries_count * count * widths_count, pinned_alloc_<sz_u32_t>(runtime)) {
         fill_queries_(generator, queries_count, query_length);
         std::vector<std::string> candidates(count);
@@ -717,10 +718,10 @@ struct overlap_device_corpus_t {
     }
 
     /** Candidates of @p lengths bytes, spliced from spans of the queries between runs of random
-     *  bytes, so windows match across wherever a kernel cuts a candidate. */
-    overlap_device_corpus_t(device_backend_t const &runtime, split_mix_generator_t &generator,
-                            std::size_t queries_count, std::vector<std::size_t> const &lengths,
-                            std::size_t query_length, std::size_t widths_count)
+     *  bytes, so N-grams match across wherever a kernel cuts a candidate. */
+    ngrams_overlaps_corpus_t(device_backend_t const &runtime, split_mix_generator_t &generator,
+                             std::size_t queries_count, std::vector<std::size_t> const &lengths,
+                             std::size_t query_length, std::size_t widths_count)
         : matches(queries_count * lengths.size() * widths_count, pinned_alloc_<sz_u32_t>(runtime)) {
         fill_queries_(generator, queries_count, query_length);
         std::size_t total = 0;
@@ -762,84 +763,84 @@ struct overlap_device_corpus_t {
 
 /** The serial backend's answers for the same corpus, read off the pinned tape the device copied,
  *  into @p expected, one per count the corpus holds. */
-inline void overlap_serial_reference_(overlap_device_corpus_t const &corpus, std::span<sz_size_t const> widths,
-                                      sz_f32_t radius, std::span<sz_u32_t> expected) {
+inline void ngrams_overlaps_serial_reference_(ngrams_overlaps_corpus_t const &corpus, std::span<sz_size_t const> widths,
+                                              sz_f32_t radius, std::span<sz_u32_t> expected) {
     sz_strings_view_t const query_strings = corpus.query_strings();
     handle_checked_heap_t heap;
-    sz_overlap_engine_t engine {};
-    expect_equal(sz_overlap_engine_init_serial(&engine, &query_strings, widths.data(), widths.size(), 0,
-                                               &heap.allocator, nullptr),
+    sz_ngrams_engine_t engine {};
+    expect_equal(sz_ngrams_engine_init_serial(&engine, &query_strings, widths.data(), widths.size(), 0, &heap.allocator,
+                                              nullptr),
                  sz_success_k);
     std::memset(expected.data(), 0xFF, expected.size_bytes());
     sz_strings_view_t const candidates = corpus.pinned.view().raw;
-    expect_equal(sz_overlap_scores_serial(&engine, &candidates, radius, expected.data(), corpus.query_stride(),
-                                          corpus.candidate_stride(), nullptr),
+    expect_equal(sz_ngrams_overlaps_serial(&engine, &candidates, radius, expected.data(), corpus.query_stride(),
+                                           corpus.candidate_stride(), nullptr),
                  sz_success_k);
-    sz_overlap_engine_free(&engine, nullptr);
+    sz_ngrams_engine_free(&engine, nullptr);
     expect_equal(heap.live_allocations, 0);
 }
 
-#pragma endregion Overlap Helpers
+#pragma endregion Ngrams Helpers
 
-#pragma region Overlap Checks
+#pragma region Ngrams Overlaps Checks
 
 /** One backend's counts against serial's, on a corpus that never leaves the device, unbounded and
  *  at radii that keep every pair, some, and only identical ones. */
-inline void check_overlap_device_equivalence_(split_mix_generator_t &generator, auto const &backend) {
+inline void check_ngrams_overlaps_device_equivalence_(split_mix_generator_t &generator, auto const &backend) {
     std::array<sz_size_t, 3> const widths {4, 6, 8};
     std::vector<sz_u32_t> expected;
 
     for (std::size_t queries_count : {1u, 3u})
         for (std::size_t count : {1u, 129u, 4096u})
             for (std::size_t query_length : {12u, 777u}) {
-                overlap_device_corpus_t corpus(backend.runtime, generator, queries_count, count, query_length,
-                                               widths.size());
+                ngrams_overlaps_corpus_t corpus(backend.runtime, generator, queries_count, count, query_length,
+                                                widths.size());
                 sz_strings_view_t const query_strings = corpus.query_strings();
-                sz_overlap_engine_t engine {};
-                if (sz_overlap_engine_init(&engine, &query_strings, widths.data(), widths.size(), 0,
-                                           backend.runtime.capabilities, STRINGZILLA_NULL,
-                                           backend.runtime.stream) != sz_success_k)
+                sz_ngrams_engine_t engine {};
+                if (sz_ngrams_engine_init(&engine, &query_strings, widths.data(), widths.size(), 0,
+                                          backend.runtime.capabilities, STRINGZILLA_NULL,
+                                          backend.runtime.stream) != sz_success_k)
                     fail_backend_(backend.name, "a device engine was refused for a well-formed batch");
                 sz_strings_view_t const candidates = corpus.device;
                 expected.resize(corpus.matches.size());
                 for (sz_f32_t const radius : {1.0f, 0.0f, 0.5f}) {
-                    overlap_serial_reference_(corpus, widths, radius, expected);
-                    if (backend.overlap_scores(&engine, &candidates, radius, corpus.matches.data(),
-                                               corpus.query_stride(), corpus.candidate_stride(),
-                                               backend.runtime.stream) != sz_success_k)
+                    ngrams_overlaps_serial_reference_(corpus, widths, radius, expected);
+                    if (backend.ngrams_overlaps(&engine, &candidates, radius, corpus.matches.data(),
+                                                corpus.query_stride(), corpus.candidate_stride(),
+                                                backend.runtime.stream) != sz_success_k)
                         fail_backend_(backend.name, "a device-resident batch was refused");
                     join_(backend.runtime, backend.runtime.stream);
                     for (std::size_t slot = 0; slot != expected.size(); ++slot)
                         if (corpus.matches[slot] != expected[slot])
                             fail_backend_(backend.name, "a count differs from serial");
                 }
-                sz_overlap_engine_free(&engine, backend.runtime.stream);
+                sz_ngrams_engine_free(&engine, backend.runtime.stream);
             }
 }
 
-/** Skewed batches against serial, at narrow windows and at windows past 32 bytes, which most of the
+/** Skewed batches against serial, at narrow widths and at widths past 32 bytes, which most of the
  *  lone-long batch's candidates are too short to hold. */
-inline void check_overlap_device_skewed_(split_mix_generator_t &generator, auto const &backend) {
+inline void check_ngrams_overlaps_device_skewed_(split_mix_generator_t &generator, auto const &backend) {
     std::array<sz_size_t, 4> const widths {3, 8, 33, 100};
     std::vector<sz_u32_t> expected;
     for (device_skew_t const skew : {device_skew_t::lone_long_k, device_skew_t::log_uniform_k}) {
         std::vector<std::size_t> const lengths = device_skewed_lengths_(generator, skew);
-        overlap_device_corpus_t corpus(backend.runtime, generator, 2, lengths, 777, widths.size());
+        ngrams_overlaps_corpus_t corpus(backend.runtime, generator, 2, lengths, 777, widths.size());
         sz_strings_view_t const query_strings = corpus.query_strings();
         expected.resize(corpus.matches.size());
-        overlap_serial_reference_(corpus, widths, 1.0f, expected);
+        ngrams_overlaps_serial_reference_(corpus, widths, 1.0f, expected);
         // The lone-long batch carries more candidates than Metal's default round budget.
-        sz_overlap_engine_t engine {};
-        if (sz_overlap_engine_init(&engine, &query_strings, widths.data(), widths.size(), lengths.size(),
-                                   backend.runtime.capabilities, STRINGZILLA_NULL,
-                                   backend.runtime.stream) != sz_success_k)
+        sz_ngrams_engine_t engine {};
+        if (sz_ngrams_engine_init(&engine, &query_strings, widths.data(), widths.size(), lengths.size(),
+                                  backend.runtime.capabilities, STRINGZILLA_NULL,
+                                  backend.runtime.stream) != sz_success_k)
             fail_backend_(backend.name, "a device engine was refused for a well-formed batch");
         sz_strings_view_t const candidates = corpus.device;
-        if (backend.overlap_scores(&engine, &candidates, 1.0f, corpus.matches.data(), corpus.query_stride(),
-                                   corpus.candidate_stride(), backend.runtime.stream) != sz_success_k)
+        if (backend.ngrams_overlaps(&engine, &candidates, 1.0f, corpus.matches.data(), corpus.query_stride(),
+                                    corpus.candidate_stride(), backend.runtime.stream) != sz_success_k)
             fail_backend_(backend.name, "a skewed batch was refused");
         join_(backend.runtime, backend.runtime.stream);
-        sz_overlap_engine_free(&engine, backend.runtime.stream);
+        sz_ngrams_engine_free(&engine, backend.runtime.stream);
         for (std::size_t slot = 0; slot != expected.size(); ++slot)
             if (corpus.matches[slot] != expected[slot])
                 fail_backend_(backend.name, "a skewed batch's count differs from serial");
@@ -847,14 +848,14 @@ inline void check_overlap_device_skewed_(split_mix_generator_t &generator, auto 
 }
 
 /** One backend refusing host memory no kernel can address, rather than reading a bad pointer. */
-inline void check_overlap_device_memory_safety_(split_mix_generator_t &generator, auto const &backend) {
+inline void check_ngrams_overlaps_device_memory_safety_(split_mix_generator_t &generator, auto const &backend) {
     std::array<sz_size_t, 2> const widths {4, 6};
-    overlap_device_corpus_t corpus(backend.runtime, generator, 1, 8, 333, widths.size());
+    ngrams_overlaps_corpus_t corpus(backend.runtime, generator, 1, 8, 333, widths.size());
     std::fill(corpus.matches.begin(), corpus.matches.end(), 0xFFFFFFFFu);
     sz_strings_view_t const query_strings = corpus.query_strings();
-    sz_overlap_engine_t engine {};
-    if (sz_overlap_engine_init(&engine, &query_strings, widths.data(), widths.size(), 0, backend.runtime.capabilities,
-                               STRINGZILLA_NULL, backend.runtime.stream) != sz_success_k)
+    sz_ngrams_engine_t engine {};
+    if (sz_ngrams_engine_init(&engine, &query_strings, widths.data(), widths.size(), 0, backend.runtime.capabilities,
+                              STRINGZILLA_NULL, backend.runtime.stream) != sz_success_k)
         fail_backend_(backend.name, "a device engine was refused for a well-formed batch");
 
     // The corpus's own tapes live in pinned and device memory, so host strings need plain storage.
@@ -866,125 +867,268 @@ inline void check_overlap_device_memory_safety_(split_mix_generator_t &generator
 
     std::vector<sz_u32_t> host_matches(corpus.matches.size(), 0xFFFFFFFFu);
     sz_strings_view_t const candidates = corpus.device;
-    if (backend.overlap_scores(&engine, &candidates, 1.0f, host_matches.data(), corpus.query_stride(),
-                               corpus.candidate_stride(), backend.runtime.stream) != sz_device_memory_mismatch_k)
+    if (backend.ngrams_overlaps(&engine, &candidates, 1.0f, host_matches.data(), corpus.query_stride(),
+                                corpus.candidate_stride(), backend.runtime.stream) != sz_device_memory_mismatch_k)
         fail_backend_(backend.name, "host counts were not refused");
-    if (backend.overlap_scores(&engine, &host_candidates, 1.0f, corpus.matches.data(), corpus.query_stride(),
-                               corpus.candidate_stride(), backend.runtime.stream) != sz_device_memory_mismatch_k)
+    if (backend.ngrams_overlaps(&engine, &host_candidates, 1.0f, corpus.matches.data(), corpus.query_stride(),
+                                corpus.candidate_stride(), backend.runtime.stream) != sz_device_memory_mismatch_k)
         fail_backend_(backend.name, "host-resident candidates were not refused");
     // An accessor is host code, so it is refused even over bytes the device reaches.
     std::vector<sz_string_view_t> const resident_views = views_of_(corpus.pinned);
     sz_strings_view_t const resident_accessor = strings_from_(resident_views);
-    expect_equal(backend.overlap_scores(&engine, &resident_accessor, 1.0f, corpus.matches.data(), corpus.query_stride(),
-                                        corpus.candidate_stride(), backend.runtime.stream),
+    expect_equal(backend.ngrams_overlaps(&engine, &resident_accessor, 1.0f, corpus.matches.data(),
+                                         corpus.query_stride(), corpus.candidate_stride(), backend.runtime.stream),
                  sz_device_memory_mismatch_k);
     // Metal reserves per-candidate storage; CUDA and ROCm ignore this budget.
     if (backend.runtime.selected.kind() == sz::device_kind_t::metal_k) {
-        sz_overlap_engine_t narrow {};
+        sz_ngrams_engine_t narrow {};
         expect_equal(
-            sz_overlap_engine_init(&narrow, &query_strings, widths.data(), widths.size(), corpus.pinned.size() - 1,
-                                   backend.runtime.capabilities, STRINGZILLA_NULL, backend.runtime.stream),
+            sz_ngrams_engine_init(&narrow, &query_strings, widths.data(), widths.size(), corpus.pinned.size() - 1,
+                                  backend.runtime.capabilities, STRINGZILLA_NULL, backend.runtime.stream),
             sz_success_k);
-        expect_equal(backend.overlap_scores(&narrow, &candidates, 1.0f, corpus.matches.data(), corpus.query_stride(),
-                                            corpus.candidate_stride(), backend.runtime.stream),
+        expect_equal(backend.ngrams_overlaps(&narrow, &candidates, 1.0f, corpus.matches.data(), corpus.query_stride(),
+                                             corpus.candidate_stride(), backend.runtime.stream),
                      sz_unexpected_dimensions_k);
-        sz_overlap_engine_free(&narrow, backend.runtime.stream);
+        sz_ngrams_engine_free(&narrow, backend.runtime.stream);
     }
     join_(backend.runtime, backend.runtime.stream);
     for (sz_u32_t const untouched : corpus.matches) expect_equal(untouched, 0xFFFFFFFFu);
     for (sz_u32_t const untouched : host_matches)
         if (untouched != 0xFFFFFFFFu) fail_backend_(backend.name, "a refused call still wrote a count");
-    sz_overlap_engine_free(&engine, backend.runtime.stream);
+    sz_ngrams_engine_free(&engine, backend.runtime.stream);
 }
 
-/** Known answers past 32 bytes, at a text's own length and one past it, over more widths than one
- *  walk rolls together: every window of a text and of its first half is among the text's own. */
-inline void check_overlap_device_width_safety_(split_mix_generator_t &generator, auto const &backend) {
-    std::array<sz_size_t, sz_overlap_gpu_widths_per_walk_k * 2 + 1> const widths {
-        1, 2, 3, 5, 8, 13, 21, 31, 32, 33, 64, 100, 128, 129, 200, 256, 257};
+/** Known answers past 32 bytes, at a text's own length and one past it, over more widths than a
+ *  Metal walk rolls together: a text holds every window of its own and of its first half. */
+inline void check_ngrams_overlaps_device_width_safety_(split_mix_generator_t &generator, auto const &backend) {
+    std::array<sz_size_t, 17> const widths {1, 2, 3, 5, 8, 13, 21, 31, 32, 33, 64, 100, 128, 129, 200, 256, 257};
 
     // Both candidates are the query's own bytes, whole and halved.
-    overlap_device_corpus_t corpus(backend.runtime, generator, 1, 2, 256, widths.size());
+    ngrams_overlaps_corpus_t corpus(backend.runtime, generator, 1, 2, 256, widths.size());
     sz_strings_view_t const query_strings = corpus.query_strings();
     std::string const &query = corpus.queries.front();
     std::vector<std::string> const candidates {query, query.substr(0, query.size() / 2)};
     corpus.stage_(backend.runtime, candidates);
 
-    sz_overlap_engine_t engine {};
-    if (sz_overlap_engine_init(&engine, &query_strings, widths.data(), widths.size(), 0, backend.runtime.capabilities,
-                               STRINGZILLA_NULL, backend.runtime.stream) != sz_success_k)
+    sz_ngrams_engine_t engine {};
+    if (sz_ngrams_engine_init(&engine, &query_strings, widths.data(), widths.size(), 0, backend.runtime.capabilities,
+                              STRINGZILLA_NULL, backend.runtime.stream) != sz_success_k)
         fail_backend_(backend.name, "a device engine refused widths the host takes");
     sz_strings_view_t const itself_strings = corpus.device;
-    if (backend.overlap_scores(&engine, &itself_strings, 1.0f, corpus.matches.data(), corpus.query_stride(),
-                               corpus.candidate_stride(), backend.runtime.stream) != sz_success_k)
+    if (backend.ngrams_overlaps(&engine, &itself_strings, 1.0f, corpus.matches.data(), corpus.query_stride(),
+                                corpus.candidate_stride(), backend.runtime.stream) != sz_success_k)
         fail_backend_(backend.name, "a device-resident batch was refused");
     join_(backend.runtime, backend.runtime.stream);
-    sz_overlap_engine_free(&engine, backend.runtime.stream);
+    sz_ngrams_engine_free(&engine, backend.runtime.stream);
     for (std::size_t candidate = 0; candidate != 2; ++candidate)
         for (std::size_t index = 0; index != widths.size(); ++index)
             if (corpus.matches[candidate * widths.size() + index] !=
-                overlap_reference_matches_(query, candidates[candidate], widths[index]))
+                ngrams_reference_overlap_(query, candidates[candidate], widths[index]))
                 fail_backend_(backend.name, "a text and its half do not overlap it as the oracle says");
 }
 
-/** Widths past every query, as @c overlap_past_query_case_ lays them out, count as the oracle says:
+/** Widths past every query, as @c ngrams_past_query_case_ lays them out, count as the oracle says:
  *  a window opening on zero bytes at such a width matches nothing. */
-inline void check_overlap_device_past_query_(split_mix_generator_t &generator, auto const &backend) {
-    overlap_case_t const past_query = overlap_past_query_case_();
+inline void check_ngrams_overlaps_device_past_query_(split_mix_generator_t &generator, auto const &backend) {
+    ngrams_case_t const past_query = ngrams_past_query_case_();
     std::vector<sz_size_t> const widths(past_query.widths.begin(), past_query.widths.end());
-    overlap_device_corpus_t corpus(backend.runtime, generator, past_query.queries.size(), past_query.candidates.size(),
-                                   1, widths.size());
+    ngrams_overlaps_corpus_t corpus(backend.runtime, generator, past_query.queries.size(), past_query.candidates.size(),
+                                    1, widths.size());
     corpus.queries = past_query.queries;
     corpus.stage_(backend.runtime, past_query.candidates);
     sz_strings_view_t const query_strings = corpus.query_strings();
-    sz_overlap_engine_t engine {};
-    if (sz_overlap_engine_init(&engine, &query_strings, widths.data(), widths.size(), 0, backend.runtime.capabilities,
-                               STRINGZILLA_NULL, backend.runtime.stream) != sz_success_k)
+    sz_ngrams_engine_t engine {};
+    if (sz_ngrams_engine_init(&engine, &query_strings, widths.data(), widths.size(), 0, backend.runtime.capabilities,
+                              STRINGZILLA_NULL, backend.runtime.stream) != sz_success_k)
         fail_backend_(backend.name, "a device engine refused widths the host takes");
-    if (backend.overlap_scores(&engine, &corpus.device, 1.0f, corpus.matches.data(), corpus.query_stride(),
-                               corpus.candidate_stride(), backend.runtime.stream) != sz_success_k)
+    if (backend.ngrams_overlaps(&engine, &corpus.device, 1.0f, corpus.matches.data(), corpus.query_stride(),
+                                corpus.candidate_stride(), backend.runtime.stream) != sz_success_k)
         fail_backend_(backend.name, "a device-resident batch was refused");
     join_(backend.runtime, backend.runtime.stream);
-    sz_overlap_engine_free(&engine, backend.runtime.stream);
+    sz_ngrams_engine_free(&engine, backend.runtime.stream);
     for (std::size_t query = 0; query != corpus.queries.size(); ++query)
         for (std::size_t candidate = 0; candidate != past_query.candidates.size(); ++candidate)
             for (std::size_t index = 0; index != widths.size(); ++index)
                 if (corpus.matches[query * corpus.query_stride() + candidate * corpus.candidate_stride() + index] !=
-                    overlap_reference_matches_(corpus.queries[query], past_query.candidates[candidate], widths[index]))
+                    ngrams_reference_overlap_(corpus.queries[query], past_query.candidates[candidate], widths[index]))
                     fail_backend_(backend.name, "a width past the query counted a window");
 }
 
 /** Two streams score one prepared engine and produce the same answers after synchronization. */
-inline void check_overlap_device_streams_(split_mix_generator_t &generator, auto const &backend) {
+inline void check_ngrams_overlaps_device_streams_(split_mix_generator_t &generator, auto const &backend) {
     std::array<sz_size_t, 3> const widths {4, 6, 8};
-    overlap_device_corpus_t corpus(backend.runtime, generator, 8, 4096, 777, widths.size());
+    ngrams_overlaps_corpus_t corpus(backend.runtime, generator, 8, 4096, 777, widths.size());
     sz_strings_view_t const query_strings = corpus.query_strings();
     std::vector<sz_u32_t> expected(corpus.matches.size());
-    overlap_serial_reference_(corpus, widths, 1.0f, expected);
+    ngrams_overlaps_serial_reference_(corpus, widths, 1.0f, expected);
     pinned_vector<sz_u32_t> second(corpus.matches.size(), 0xFFFFFFFFu, pinned_alloc_<sz_u32_t>(backend.runtime));
     stream_t const first_stream(backend.runtime.selected.ordinal(), backend.runtime.init, backend.runtime.free);
     stream_t const second_stream(backend.runtime.selected.ordinal(), backend.runtime.init, backend.runtime.free);
 
-    sz_overlap_engine_t engine {};
-    expect_equal(sz_overlap_engine_init(&engine, &query_strings, widths.data(), widths.size(), 0,
-                                        backend.runtime.capabilities, STRINGZILLA_NULL, backend.runtime.stream),
+    sz_ngrams_engine_t engine {};
+    expect_equal(sz_ngrams_engine_init(&engine, &query_strings, widths.data(), widths.size(), 0,
+                                       backend.runtime.capabilities, STRINGZILLA_NULL, backend.runtime.stream),
                  sz_success_k);
     sz_strings_view_t const candidates = corpus.device;
-    expect_equal(sz_overlap_scores(&engine, &candidates, 1.0f, corpus.matches.data(), corpus.query_stride(),
-                                   corpus.candidate_stride(), first_stream.handle),
+    expect_equal(sz_ngrams_overlaps(&engine, &candidates, 1.0f, corpus.matches.data(), corpus.query_stride(),
+                                    corpus.candidate_stride(), first_stream.handle),
                  sz_success_k);
-    expect_equal(sz_overlap_scores(&engine, &candidates, 1.0f, second.data(), corpus.query_stride(),
-                                   corpus.candidate_stride(), second_stream.handle),
+    expect_equal(sz_ngrams_overlaps(&engine, &candidates, 1.0f, second.data(), corpus.query_stride(),
+                                    corpus.candidate_stride(), second_stream.handle),
                  sz_success_k);
     join_(backend.runtime, first_stream.handle);
     join_(backend.runtime, second_stream.handle);
-    sz_overlap_engine_free(&engine, backend.runtime.stream);
+    sz_ngrams_engine_free(&engine, backend.runtime.stream);
     for (std::size_t slot = 0; slot != expected.size(); ++slot)
         if (corpus.matches[slot] != expected[slot] || second[slot] != expected[slot])
             fail_backend_("dispatched", "two streams scoring one engine disagreed with serial");
 }
 
-#pragma endregion Overlap Checks
+#pragma endregion Ngrams Overlaps Checks
+
+#pragma region Ngrams Sketches Checks
+
+/** Texts of mixed alphabets for a device round, in a pinned tape the serial reference walks and in
+ *  the device's own copy, with room for sketches of @c slots bytes, @c stride bytes apart. */
+struct ngrams_sketches_corpus_t {
+
+    /** The texts, which the serial reference walks. */
+    pinned_strings_t pinned;
+
+    /** The texts gathered on the device, which every device round reads. */
+    sz_strings_view_t device {};
+
+    /** One sketch per text, over a fill of 0x55. */
+    pinned_vector<sz_u8_t> sketches;
+
+    /** Bytes of one sketch. */
+    std::size_t slots;
+
+    /** Bytes from one sketch to the next, three past the slots. */
+    std::size_t stride;
+
+    ngrams_sketches_corpus_t(device_backend_t const &runtime, split_mix_generator_t &generator,
+                             std::vector<std::size_t> const &lengths, std::size_t slots = 512)
+        : sketches(lengths.size() * (slots + 3), 0x55, pinned_alloc_<sz_u8_t>(runtime)), slots(slots),
+          stride(slots + 3) {
+        std::vector<std::string> texts(lengths.size());
+        for (std::size_t index = 0; index != lengths.size(); ++index) {
+            if (index % 3 == 0) texts[index].resize(lengths[index]), randomize_string(generator, texts[index]);
+            else if (index % 3 == 1) texts[index] = random_string(generator, lengths[index], "ab");
+            else texts[index] = random_string(generator, lengths[index], alphabet_characters("aZéЖ€𝄞"));
+        }
+        end_off_word_(texts);
+        pinned = staged_(runtime, texts);
+        device = uploaded_(runtime, pinned.view().raw);
+    }
+
+    /** The serial kernels' sketches of the pinned texts at @p widths, laid out as the device's. */
+    std::vector<sz_u8_t> serial_reference(std::vector<sz_size_t> const &widths) const {
+        handle_checked_heap_t heap;
+        sz_ngrams_engine_t engine {};
+        expect_equal(
+            sz_ngrams_engine_init_serial(&engine, nullptr, widths.data(), widths.size(), 0, &heap.allocator, nullptr),
+            sz_success_k);
+        std::vector<sz_u8_t> expected(sketches.size(), 0x55);
+        sz_strings_view_t const texts = pinned.view().raw;
+        expect_equal(sz_ngrams_sketches_serial(&engine, &texts, slots, expected.data(), stride, nullptr), sz_success_k);
+        sz_ngrams_engine_free(&engine, nullptr);
+        expect_equal(heap.live_allocations, 0);
+        return expected;
+    }
+};
+
+/** Text lengths of the sketch rounds: one per text, every one short of a warp's words to several
+ *  times them. */
+inline std::vector<std::size_t> ngrams_sketches_lengths_(std::size_t count) {
+    std::vector<std::size_t> lengths(count);
+    for (std::size_t index = 0; index != count; ++index) lengths[index] = (index * 37) % 211;
+    return lengths;
+}
+
+/** One backend's sketches of @p corpus at @p widths against serial's, every byte of the strided
+ *  output included, so a lane writing past its slots shows. */
+inline void check_ngrams_sketches_device_round_(auto const &backend, ngrams_sketches_corpus_t &corpus,
+                                                std::vector<sz_size_t> const &widths) {
+    std::vector<sz_u8_t> const expected = corpus.serial_reference(widths);
+    sz_ngrams_engine_t engine {};
+    if (sz_ngrams_engine_init(&engine, nullptr, widths.data(), widths.size(), 0, backend.runtime.capabilities,
+                              STRINGZILLA_NULL, backend.runtime.stream) != sz_success_k)
+        fail_backend_(backend.name, "a sketching engine was refused for well-formed widths");
+    if (backend.ngrams_sketches(&engine, &corpus.device, corpus.slots, corpus.sketches.data(), corpus.stride,
+                                backend.runtime.stream) != sz_success_k)
+        fail_backend_(backend.name, "a device-resident batch was refused");
+    join_(backend.runtime, backend.runtime.stream);
+    sz_ngrams_engine_free(&engine, backend.runtime.stream);
+    if (!std::equal(expected.begin(), expected.end(), corpus.sketches.begin()))
+        fail_backend_(backend.name, "a sketch differs from serial");
+}
+
+/** One backend's sketches against serial's, of texts that never leave the device, at one width and
+ *  at many, in batches of one warp, of several and of many blocks, at slot counts inside one lane's
+ *  share, across lanes and past a warp's 32 a pass, and over skewed batches whose long texts spread
+ *  their N-grams over every lane. */
+inline void check_ngrams_sketches_device_equivalence_(split_mix_generator_t &generator, auto const &backend) {
+    for (std::vector<sz_size_t> const &widths : std::vector<std::vector<sz_size_t>> {{5, 8}, {1}, {3, 70, 7, 2}})
+        for (std::size_t count : {1u, 129u, 1000u}) {
+            ngrams_sketches_corpus_t corpus(backend.runtime, generator, ngrams_sketches_lengths_(count));
+            check_ngrams_sketches_device_round_(backend, corpus, widths);
+        }
+    for (std::size_t slots : {1u, 3u, 4u, 17u, 64u, 513u, 1024u}) {
+        ngrams_sketches_corpus_t corpus(backend.runtime, generator, ngrams_sketches_lengths_(129), slots);
+        check_ngrams_sketches_device_round_(backend, corpus, {3, 70, 7, 2});
+    }
+    ngrams_sketches_corpus_t skewed(backend.runtime, generator,
+                                    device_skewed_lengths_(generator, device_skew_t::log_uniform_k), 513);
+    check_ngrams_sketches_device_round_(backend, skewed, {5, 8, 33});
+}
+
+/** One backend refusing host memory no kernel can address, a stride under the slots, no slots,
+ *  ranks past what the device holds per text and widths it cannot take, rather than reading a bad
+ *  pointer or writing one sketch into its neighbour's. */
+inline void check_ngrams_sketches_device_memory_safety_(split_mix_generator_t &generator, auto const &backend) {
+    ngrams_sketches_corpus_t corpus(backend.runtime, generator, ngrams_sketches_lengths_(8));
+    std::vector<sz_size_t> const widths = {5, 8}, many(sz_ngrams_widths_max_k + 1, 3), zero = {3, 0};
+    sz_ngrams_engine_t engine {};
+    expect_equal(sz_ngrams_engine_init(&engine, nullptr, widths.data(), widths.size(), 0, backend.runtime.capabilities,
+                                       STRINGZILLA_NULL, backend.runtime.stream),
+                 sz_success_k);
+
+    std::vector<sz_u8_t> host_sketches(corpus.sketches.size(), 0x55);
+    if (backend.ngrams_sketches(&engine, &corpus.device, corpus.slots, host_sketches.data(), corpus.stride,
+                                backend.runtime.stream) != sz_device_memory_mismatch_k)
+        fail_backend_(backend.name, "host sketches were not refused");
+    // An accessor is host code, so it is refused even over bytes the device reaches.
+    std::vector<sz_string_view_t> const resident_views = views_of_(corpus.pinned);
+    sz_strings_view_t const resident_accessor = strings_from_(resident_views);
+    if (backend.ngrams_sketches(&engine, &resident_accessor, corpus.slots, corpus.sketches.data(), corpus.stride,
+                                backend.runtime.stream) != sz_device_memory_mismatch_k)
+        fail_backend_(backend.name, "an accessor over the texts was not refused");
+    if (backend.ngrams_sketches(&engine, &corpus.device, 0, corpus.sketches.data(), corpus.stride,
+                                backend.runtime.stream) != sz_unexpected_dimensions_k)
+        fail_backend_(backend.name, "a sketch of no slots was not refused");
+    if (backend.ngrams_sketches(&engine, &corpus.device, corpus.slots, corpus.sketches.data(), corpus.slots - 1,
+                                backend.runtime.stream) != sz_unexpected_dimensions_k)
+        fail_backend_(backend.name, "a stride under the slots was not refused");
+    // No device holds a gibibyte of ranks per text on chip.
+    sz_size_t const vast = (sz_size_t)1 << 28;
+    if (backend.ngrams_sketches(&engine, &corpus.device, vast, corpus.sketches.data(), vast, backend.runtime.stream) !=
+        sz_unexpected_dimensions_k)
+        fail_backend_(backend.name, "ranks past the device's per-text memory were not refused");
+    sz_ngrams_engine_free(&engine, backend.runtime.stream);
+    for (std::vector<sz_size_t> const *refused : {&many, &zero}) {
+        sz_ngrams_engine_t narrow {};
+        if (sz_ngrams_engine_init(&narrow, nullptr, refused->data(), refused->size(), 0, backend.runtime.capabilities,
+                                  STRINGZILLA_NULL, backend.runtime.stream) != sz_unexpected_dimensions_k)
+            fail_backend_(backend.name, "widths past the bound or of zero were not refused");
+    }
+    join_(backend.runtime, backend.runtime.stream);
+    for (sz_u8_t const untouched : corpus.sketches) expect_equal(untouched, 0x55);
+    for (sz_u8_t const untouched : host_sketches)
+        if (untouched != 0x55) fail_backend_(backend.name, "a refused call still wrote a sketch");
+}
+
+#pragma endregion Ngrams Sketches Checks
 
 #pragma region Substrings Helpers
 
@@ -2649,23 +2793,31 @@ inline void check_device_levenshtein_(capability_gate_t const &gate, auto const 
                   }));
 }
 
-/** Registers the overlap checks of one vendor's kernels, of one tier's, or of the dispatch
+/** Registers the N-grams checks of one vendor's kernels, of one tier's, or of the dispatch
  *  points, behind @p gate . */
-inline void check_device_overlap_(capability_gate_t const &gate, auto const &backend) {
+inline void check_device_ngrams_(capability_gate_t const &gate, auto const &backend) {
     std::string const suffix = backend.name;
-    run_test_case(("check_overlap_device_equivalence_(" + suffix + ")").c_str(), gate,
+    run_test_case(("check_ngrams_overlaps_device_equivalence_(" + suffix + ")").c_str(), gate,
                   rewound_(backend.runtime, [&](split_mix_generator_t &generator) {
-                      check_overlap_device_equivalence_(generator, backend);
+                      check_ngrams_overlaps_device_equivalence_(generator, backend);
                   }));
-    run_test_case(("check_overlap_device_skewed_(" + suffix + ")").c_str(), gate,
+    run_test_case(("check_ngrams_overlaps_device_skewed_(" + suffix + ")").c_str(), gate,
                   rewound_(backend.runtime, [&](split_mix_generator_t &generator) {
-                      check_overlap_device_skewed_(generator, backend);
+                      check_ngrams_overlaps_device_skewed_(generator, backend);
                   }));
-    run_test_case(("check_overlap_device_memory_safety_(" + suffix + ")").c_str(), gate,
+    run_test_case(("check_ngrams_overlaps_device_memory_safety_(" + suffix + ")").c_str(), gate,
                   rewound_(backend.runtime, [&](split_mix_generator_t &generator) {
-                      check_overlap_device_memory_safety_(generator, backend);
-                      check_overlap_device_width_safety_(generator, backend);
-                      check_overlap_device_past_query_(generator, backend);
+                      check_ngrams_overlaps_device_memory_safety_(generator, backend);
+                      check_ngrams_overlaps_device_width_safety_(generator, backend);
+                      check_ngrams_overlaps_device_past_query_(generator, backend);
+                  }));
+    run_test_case(("check_ngrams_sketches_device_equivalence_(" + suffix + ")").c_str(), gate,
+                  rewound_(backend.runtime, [&](split_mix_generator_t &generator) {
+                      check_ngrams_sketches_device_equivalence_(generator, backend);
+                  }));
+    run_test_case(("check_ngrams_sketches_device_memory_safety_(" + suffix + ")").c_str(), gate,
+                  rewound_(backend.runtime, [&](split_mix_generator_t &generator) {
+                      check_ngrams_sketches_device_memory_safety_(generator, backend);
                   }));
 }
 
@@ -2793,7 +2945,7 @@ inline void check_sha256_multistate_device_safety_(auto const &backend) {
 inline void check_device_kernels_(capability_gate_t const &gate, auto const &backend) {
     std::string const suffix = backend.name;
     check_device_levenshtein_(gate, backend);
-    check_device_overlap_(gate, backend);
+    check_device_ngrams_(gate, backend);
     check_device_substrings_(gate, backend);
     check_device_regex_(gate, backend);
     check_device_subdocuments_(gate, backend);
@@ -2838,7 +2990,8 @@ inline void test_cross_dispatch_device(device_backend_t const &runtime, auto sha
     device_kernels const dispatched {"dispatched",
                                      runtime,
                                      sz_levenshtein_distances,
-                                     sz_overlap_scores,
+                                     sz_ngrams_overlaps,
+                                     sz_ngrams_sketches,
                                      offered(sz_kernel_substrings_contains_k) ? sz_substrings_contains : nullptr,
                                      sz_substrings_counts,
                                      sz_substrings_find,
@@ -2862,9 +3015,9 @@ inline void test_cross_dispatch_device(device_backend_t const &runtime, auto sha
                   rewound_(runtime, [&] { check_levenshtein_device_threads_(dispatched); }));
     run_test_case("check_levenshtein_device_deferred_free_(dispatched)", gate,
                   rewound_(runtime, [&] { check_levenshtein_device_deferred_free_(dispatched); }));
-    run_test_case("check_overlap_device_streams_(dispatched)", gate,
+    run_test_case("check_ngrams_overlaps_device_streams_(dispatched)", gate,
                   rewound_(runtime, [&](split_mix_generator_t &generator) {
-                      check_overlap_device_streams_(generator, dispatched);
+                      check_ngrams_overlaps_device_streams_(generator, dispatched);
                   }));
 }
 

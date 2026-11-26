@@ -15,7 +15,7 @@ EXCLUDE_SYMBOLS        = *_ sz_aes256*_serial sz_allocator*_serial sz_bytesum*_s
                          sz_levenshtein_engine_layout_t sz_levenshtein_engine_shape_t \
                          sz_levenshtein_length_bucket_t sz_levenshtein_u64x1_state_serial_t \
                          sz_levenshtein_u64x1_vertical_serial_t sz_line_break_carry_t sz_line_break_cluster_t \
-                         sz_line_break_state_serial_t sz_line_break_window_t sz_overlap_round_t \
+                         sz_line_break_state_serial_t sz_line_break_window_t sz_ngrams_round_t \
                          sz_regex_body_t sz_regex_builder_t sz_regex_checkpoint_t sz_regex_dfa_t \
                          sz_regex_direction_t sz_regex_flags_t sz_regex_follow_t sz_regex_fragment_t \
                          sz_regex_greed_t sz_regex_image_t sz_regex_lookaround_kind_t sz_regex_lookaround_t \

@@ -26,6 +26,7 @@
 #include <array>       // `std::array`
 #include <limits>      // `std::numeric_limits`
 #include <map>         // `std::map`, the block sizes a sized heap remembers
+#include <memory>      // `std::unique_ptr`, texts in blocks of exactly their bytes
 #include <random>      // `std::uniform_int_distribution`
 #include <set>         // `std::set`, the window-overlap oracle and intersection pairs
 #include <span>        // `std::span`, the oracles' caller-owned outputs
@@ -3801,126 +3802,168 @@ inline void check_levenshtein_equivalence_(split_mix_generator_t &generator, lev
 
 #pragma endregion Levenshtein
 
-#pragma region Overlap
+#pragma region Ngrams
 
-/** One backend's engine constructor and the round it then scores. */
-struct overlap_backend_t {
+/** One backend's N-grams kernels: the engine constructor, its two verbs, and the per-text residues
+ *  and sketch kernels, null at a dispatch point. */
+struct ngrams_backend_t {
     char const *name;
-    sz_kernel_overlap_engine_init_t init;
-    sz_kernel_overlap_scores_t scores;
+    sz_kernel_ngrams_engine_init_t init;
+    sz_kernel_ngrams_overlaps_t overlaps;
+    sz_kernel_ngrams_sketches_t sketches;
+    void (*residues)(sz_cptr_t, sz_size_t, sz_size_t const *, sz_size_t, sz_f64_t *, sz_u32_t *);
+    sz_status_t (*sketch)(sz_cptr_t, sz_size_t, sz_size_t const *, sz_size_t, sz_u32_t *, sz_size_t, sz_u8_t *);
 };
 
-/** The @p candidate windows among the distinct @p query windows, through @c std::set. */
-inline sz_u32_t overlap_reference_matches_(std::string const &query, std::string const &candidate, std::size_t width) {
-    std::size_t const query_windows = width <= query.size() ? query.size() - width + 1 : 0;
-    std::size_t const candidate_windows = width <= candidate.size() ? candidate.size() - width + 1 : 0;
-    std::set<std::string> present;
-    for (std::size_t window = 0; window != query_windows; ++window) present.insert(query.substr(window, width));
+/** A window's residue by its definition: its bytes as one big-endian integer under the prime. */
+inline std::uint32_t ngrams_reference_residue_(std::string_view window) {
+    std::uint64_t residue = 0;
+    for (char const byte : window) residue = (residue * 256 + static_cast<unsigned char>(byte)) % 4026525731ull;
+    return static_cast<std::uint32_t>(residue);
+}
+
+inline std::uint32_t ngrams_reference_mix_(std::uint32_t value) {
+    value ^= value >> 16, value *= 0x7FEB352Du, value ^= value >> 15, value *= 0x846CA68Bu;
+    return value ^ (value >> 16);
+}
+
+/** The @p slots bytes of the sketch of @p text by the definition in @c ngrams.h, densifying each
+ *  unreached slot by a forward search over the reached ones alone. */
+inline std::vector<sz_u8_t> ngrams_reference_sketch_(std::vector<sz_size_t> const &widths, std::string_view text,
+                                                     std::size_t slots) {
+    std::vector<std::uint32_t> ranks(slots, 0xFFFFFFFFu);
+    for (sz_size_t const width : widths)
+        for (std::size_t first = 0; first + width <= text.size(); ++first) {
+            std::uint32_t const mixed = ngrams_reference_mix_(ngrams_reference_residue_(text.substr(first, width)) +
+                                                              width);
+            std::size_t const slot = static_cast<std::size_t>((static_cast<std::uint64_t>(mixed) * slots) >> 32);
+            ranks[slot] = min_of(ranks[slot], ngrams_reference_mix_(mixed ^ 0x9E3779B9u));
+        }
+    std::vector<std::uint32_t> dense = ranks;
+    for (std::size_t slot = 0; slot != slots; ++slot) {
+        if (ranks[slot] != 0xFFFFFFFFu) continue;
+        for (std::size_t step = 1; step < slots; ++step)
+            if (ranks[(slot + step) % slots] != 0xFFFFFFFFu) {
+                dense[slot] = ngrams_reference_mix_(ranks[(slot + step) % slots] + static_cast<std::uint32_t>(step));
+                break;
+            }
+    }
+    std::vector<sz_u8_t> sketch(slots);
+    for (std::size_t slot = 0; slot != slots; ++slot)
+        sketch[slot] = static_cast<sz_u8_t>(ngrams_reference_mix_(dense[slot]));
+    return sketch;
+}
+
+/** The distinct N-grams of @p text at @p width, through @c std::set. */
+inline std::set<std::string> ngrams_reference_set_(std::string const &text, std::size_t width) {
+    std::set<std::string> ngrams;
+    for (std::size_t first = 0; width && first + width <= text.size(); ++first)
+        ngrams.insert(text.substr(first, width));
+    return ngrams;
+}
+
+/** The distinct residues of @p text 's N-grams at @p width, through @c std::set: what the engine
+ *  counts, as two N-grams wider than four bytes may share a residue. */
+inline std::set<std::uint32_t> ngrams_reference_residues_(std::string const &text, std::size_t width) {
+    std::set<std::uint32_t> residues;
+    for (std::size_t first = 0; width && first + width <= text.size(); ++first)
+        residues.insert(ngrams_reference_residue_(std::string_view(text).substr(first, width)));
+    return residues;
+}
+
+/** The distinct @p query N-grams that @p candidate holds, by residue, through @c std::set. */
+inline sz_u32_t ngrams_reference_overlap_(std::string const &query, std::string const &candidate, std::size_t width) {
+    std::set<std::uint32_t> const present = ngrams_reference_residues_(candidate, width);
     sz_u32_t matches = 0;
-    for (std::size_t window = 0; window != candidate_windows; ++window)
-        matches += (sz_u32_t)present.count(candidate.substr(window, width));
+    for (std::uint32_t const residue : ngrams_reference_residues_(query, width))
+        matches += (sz_u32_t)present.count(residue);
     return matches;
 }
 
 /** Queries, candidates and widths that one check scores together. */
-struct overlap_case_t {
+struct ngrams_case_t {
     std::vector<std::string> queries, candidates;
     std::vector<std::size_t> widths;
 };
 
 /**
- *  @brief A width past both queries, against candidates whose windows at it open on zero bytes.
+ *  @brief A width past both queries, against candidates whose N-grams at it open on zero bytes.
  *
- *  A zero byte leading a window leaves its hash unchanged, so <tt>"\0\0ab"</tt> at width four hashes
- *  as <tt>"ab"</tt> at width two, and one tree holds every width's hashes. A backend that probes a
- *  width past the query counts a window there, which serial and the oracle never do.
+ *  A zero byte leading a window leaves its residue unchanged, so <tt>"\0\0ab"</tt> at width four has the
+ *  residue of <tt>"ab"</tt> at width two, and one table holds every width's N-grams. Unlike serial and the
+ *  oracle, a backend probing a width past the query counts a window there.
  */
-inline overlap_case_t overlap_past_query_case_() {
+inline ngrams_case_t ngrams_past_query_case_() {
     using namespace std::string_literals;
     return {{"ab", "abc"}, {"\0\0ab"s, "\0\0bc"s, "\0abc"s, "abc", ""}, {2, 4}};
 }
 
 /** The counts of every query, candidate and width @p backend scores within @p radius, into
  *  @p matches, one per triple, queries outermost and widths innermost. */
-inline void overlap_tensor_(overlap_backend_t const &backend, std::vector<std::string> const &queries,
-                            std::vector<std::string> const &candidates, std::vector<std::size_t> const &widths,
-                            sz_f32_t radius, std::span<sz_u32_t> matches) {
+inline void ngrams_overlaps_tensor_(ngrams_backend_t const &backend, std::vector<std::string> const &queries,
+                                    std::vector<std::string> const &candidates, std::vector<std::size_t> const &widths,
+                                    sz_f32_t radius, std::span<sz_u32_t> matches) {
     handle_checked_heap_t heap;
     sz_strings_view_t const query_strings = strings_from_(queries);
     sz_strings_view_t const candidate_strings = strings_from_(candidates);
-    sz_overlap_engine_t engine {};
+    sz_ngrams_engine_t engine {};
     if (backend.init(&engine, &query_strings, widths.data(), widths.size(), 0, &heap.allocator, nullptr) !=
         sz_success_k)
         fail_backend_(backend.name, "the engine refused a well-formed batch of queries");
     std::fill_n(matches.data(), matches.size(), 0xFFFFFFFFu); // an empty span may be null, which `memset` rejects
-    if (backend.scores(&engine, &candidate_strings, radius, matches.data(), candidates.size() * widths.size(),
-                       widths.size(), nullptr) != sz_success_k)
+    if (backend.overlaps(&engine, &candidate_strings, radius, matches.data(), candidates.size() * widths.size(),
+                         widths.size(), nullptr) != sz_success_k)
         fail_backend_(backend.name, "the engine refused a well-formed batch of candidates");
-    sz_overlap_engine_free(&engine, nullptr);
+    sz_ngrams_engine_free(&engine, nullptr);
     expect_equal(heap.live_allocations, 0);
 }
 
 /** Runs @p queries against @p candidates through @p backend at @p widths into @p computed,
  *  asserting each count is the oracle's. */
-inline void check_overlap_scores_(overlap_backend_t const &backend, std::vector<std::string> const &queries,
-                                  std::vector<std::string> const &candidates, std::vector<std::size_t> const &widths,
-                                  std::vector<sz_u32_t> &computed) {
+inline void check_ngrams_oracle_(ngrams_backend_t const &backend, std::vector<std::string> const &queries,
+                                 std::vector<std::string> const &candidates, std::vector<std::size_t> const &widths,
+                                 std::vector<sz_u32_t> &computed) {
     computed.resize(queries.size() * candidates.size() * widths.size());
     // An empty tensor still reaches the engine as null, as the safety cases mean to check.
-    overlap_tensor_(backend, queries, candidates, widths, 1.0f,
-                    computed.empty() ? std::span<sz_u32_t> {} : std::span<sz_u32_t> {computed});
+    ngrams_overlaps_tensor_(backend, queries, candidates, widths, 1.0f,
+                            computed.empty() ? std::span<sz_u32_t> {} : std::span<sz_u32_t> {computed});
     std::size_t const candidate_stride = widths.size(), query_stride = candidates.size() * widths.size();
     for (std::size_t query = 0; query != queries.size(); ++query)
         for (std::size_t candidate = 0; candidate != candidates.size(); ++candidate)
             for (std::size_t width_index = 0; width_index != widths.size(); ++width_index)
                 if (computed[query * query_stride + candidate * candidate_stride + width_index] !=
-                    overlap_reference_matches_(queries[query], candidates[candidate], widths[width_index]))
+                    ngrams_reference_overlap_(queries[query], candidates[candidate], widths[width_index]))
                     fail_backend_(backend.name, "a count differs from the std::set oracle");
-}
-
-/** Each pair's misses and its longer side's windows, both summed over every width, off its exact
- *  @p matches. */
-inline std::vector<std::pair<sz_u64_t, sz_u64_t>> overlap_misses_(std::vector<sz_u32_t> const &matches,
-                                                                  std::vector<std::string> const &queries,
-                                                                  std::vector<std::string> const &candidates,
-                                                                  std::vector<std::size_t> const &widths) {
-    std::vector<std::pair<sz_u64_t, sz_u64_t>> misses;
-    for (std::size_t query = 0; query != queries.size(); ++query)
-        for (std::size_t candidate = 0; candidate != candidates.size(); ++candidate) {
-            sz_u64_t longer = 0, found = 0;
-            for (std::size_t width_index = 0; width_index != widths.size(); ++width_index) {
-                std::size_t const width = widths[width_index];
-                std::size_t const query_windows = width <= queries[query].size() ? queries[query].size() - width + 1
-                                                                                 : 0;
-                std::size_t const candidate_windows = width <= candidates[candidate].size()
-                                                          ? candidates[candidate].size() - width + 1
-                                                          : 0;
-                longer += max_of(query_windows, candidate_windows);
-                found += matches[(query * candidates.size() + candidate) * widths.size() + width_index];
-            }
-            misses.emplace_back(longer - found, longer);
-        }
-    return misses;
 }
 
 /** One backend's bounded rounds against @p exact, its own unbounded tensor, scored into
  *  @p bounded: at each radius, a pair within it keeps every exact count, a pair 2⁻²⁴ or more past
  *  it counts zero at every width, and a pair between may do either. */
-inline void check_overlap_bounds_(overlap_backend_t const &backend, std::vector<std::string> const &queries,
-                                  std::vector<std::string> const &candidates, std::vector<std::size_t> const &widths,
-                                  std::vector<sz_u32_t> const &exact, std::vector<sz_u32_t> &bounded) {
-    std::vector<std::pair<sz_u64_t, sz_u64_t>> const misses = overlap_misses_(exact, queries, candidates, widths);
+inline void check_ngrams_bounds_(ngrams_backend_t const &backend, std::vector<std::string> const &queries,
+                                 std::vector<std::string> const &candidates, std::vector<std::size_t> const &widths,
+                                 std::vector<sz_u32_t> const &exact, std::vector<sz_u32_t> &bounded) {
+    std::vector<std::pair<sz_u64_t, sz_u64_t>> misses;
+    for (std::size_t query = 0; query != queries.size(); ++query)
+        for (std::size_t candidate = 0; candidate != candidates.size(); ++candidate) {
+            sz_u64_t distinct = 0, found = 0;
+            for (std::size_t width_index = 0; width_index != widths.size(); ++width_index) {
+                distinct += ngrams_reference_residues_(queries[query], widths[width_index]).size();
+                found += exact[(query * candidates.size() + candidate) * widths.size() + width_index];
+            }
+            misses.emplace_back(distinct - found, distinct);
+        }
     std::vector<sz_f32_t> shares;
-    for (auto const [missed, longer] : misses) shares.push_back(longer ? (sz_f32_t)missed / (sz_f32_t)longer : 0.0f);
+    for (auto const [missed, distinct] : misses)
+        shares.push_back(distinct ? (sz_f32_t)missed / (sz_f32_t)distinct : 0.0f);
     std::sort(shares.begin(), shares.end());
     bounded.resize(exact.size());
     for (sz_f32_t const radius :
          {0.0f, shares[shares.size() / 4], shares[shares.size() / 2], std::nextafter(shares.back(), 0.0f)}) {
-        overlap_tensor_(backend, queries, candidates, widths, radius, bounded);
+        ngrams_overlaps_tensor_(backend, queries, candidates, widths, radius, bounded);
         for (std::size_t pair = 0; pair != misses.size(); ++pair) {
-            auto const [missed, longer] = misses[pair];
-            bool const within = missed <= (double)radius * longer;
-            bool const past = missed >= ((double)radius + 0x1p-24) * longer;
+            auto const [missed, distinct] = misses[pair];
+            bool const within = missed <= (double)radius * distinct;
+            bool const past = missed >= ((double)radius + 0x1p-24) * distinct;
             for (std::size_t width_index = 0; width_index != widths.size(); ++width_index) {
                 std::size_t const slot = pair * widths.size() + width_index;
                 bool const kept = bounded[slot] == exact[slot], dropped = bounded[slot] == 0;
@@ -3932,12 +3975,12 @@ inline void check_overlap_bounds_(overlap_backend_t const &backend, std::vector<
 }
 
 /**
- *  @brief One backend's engine against the @c std::set oracle and against serial, bit for bit.
+ *  @brief One backend's overlaps against the @c std::set oracle and against serial, bit for bit.
  *
  *  One engine over every query must also match one engine per query, since batched and lone rows
- *  walk different forests. Serial is the reference for everything, itself included.
+ *  probe tables at different offsets.
  */
-inline void check_overlap_equivalence_(split_mix_generator_t &generator, overlap_backend_t const &backend) {
+inline void check_ngrams_overlaps_(split_mix_generator_t &generator, ngrams_backend_t const &backend) {
     std::vector<std::size_t> const widths = {1, 3, 4, 6, 8, 11, 32};
     std::vector<sz_u32_t> computed, batched, lone, from_reference, from_candidate, bounded;
     for (std::size_t round = 0; round != scaled_iterations(8); ++round) {
@@ -3953,20 +3996,25 @@ inline void check_overlap_equivalence_(split_mix_generator_t &generator, overlap
         candidates.push_back(query.substr(query_length / 3));
         candidates.push_back(query + query);
         std::vector<std::string> const queries = {query, random_string(generator, query_length, "ab"), std::string()};
-        check_overlap_scores_(backend, queries, candidates, widths, computed);
+        check_ngrams_oracle_(backend, queries, candidates, widths, computed);
 
         std::size_t const query_stride = candidates.size() * widths.size();
         batched.resize(queries.size() * query_stride), lone.resize(query_stride);
-        overlap_tensor_(backend, queries, candidates, widths, 1.0f, batched);
+        ngrams_overlaps_tensor_(backend, queries, candidates, widths, 1.0f, batched);
         for (std::size_t index = 0; index != queries.size(); ++index) {
             std::vector<std::string> const alone = {queries[index]};
-            overlap_tensor_(backend, alone, candidates, widths, 1.0f, lone);
+            ngrams_overlaps_tensor_(backend, alone, candidates, widths, 1.0f, lone);
             if (std::memcmp(batched.data() + index * query_stride, lone.data(), query_stride * sizeof(sz_u32_t)) != 0)
                 fail_backend_(backend.name, "a query's row differs between a batched engine and its own");
         }
     }
 
-    overlap_backend_t const reference {"serial", sz_overlap_engine_init_serial, sz_overlap_scores_serial};
+    ngrams_backend_t const reference {"serial",
+                                      sz_ngrams_engine_init_serial,
+                                      sz_ngrams_overlaps_serial,
+                                      sz_ngrams_sketches_serial,
+                                      sz_ngrams_residues_serial,
+                                      sz_ngrams_sketch_serial};
     std::vector<std::string> candidates;
     for (std::size_t round = 0; round != scaled_iterations(8); ++round) {
         std::string query(std::uniform_int_distribution<std::size_t>(0, 700)(generator), '\0');
@@ -3974,22 +4022,195 @@ inline void check_overlap_equivalence_(split_mix_generator_t &generator, overlap
         randomize_strings(generator, fuzzy_config_t("ab", 12, 0, 900), candidates);
         candidates.push_back(query);
         candidates.push_back(query.substr(query.size() / 3));
+
+        // The query, or a slice of it, planted in unrelated text holds every one of its N-grams.
+        for (std::size_t planted = 0; planted != 4; ++planted) {
+            std::size_t const first = planted ? std::uniform_int_distribution<std::size_t>(0, query.size())(generator)
+                                              : 0;
+            std::size_t const length =
+                planted ? std::uniform_int_distribution<std::size_t>(0, query.size() - first)(generator) : query.size();
+            std::string text(std::uniform_int_distribution<std::size_t>(0, 300)(generator), '\0');
+            randomize_string(generator, text);
+            text.insert(std::uniform_int_distribution<std::size_t>(0, text.size())(generator), query, first, length);
+            candidates.push_back(text);
+        }
         std::vector<std::string> const queries = {query, query.substr(query.size() / 2), std::string()};
 
         from_reference.resize(queries.size() * candidates.size() * widths.size());
         from_candidate.resize(from_reference.size());
-        overlap_tensor_(reference, queries, candidates, widths, 1.0f, from_reference);
-        overlap_tensor_(backend, queries, candidates, widths, 1.0f, from_candidate);
+        ngrams_overlaps_tensor_(reference, queries, candidates, widths, 1.0f, from_reference);
+        ngrams_overlaps_tensor_(backend, queries, candidates, widths, 1.0f, from_candidate);
         if (from_reference != from_candidate) fail_backend_(backend.name, "the engine's counts disagreed with serial");
-        check_overlap_bounds_(backend, queries, candidates, widths, from_reference, bounded);
+        check_ngrams_bounds_(backend, queries, candidates, widths, from_reference, bounded);
     }
 }
 
-/** One backend's engine on degenerate inputs: empties on either side, both, and none survive, as
- *  does a candidate narrower than the width or a width past the query; zero widths, a refused
- *  allocation and a stride under its own axis are reported without touching the outputs; and known
- *  answers at three radii. */
-inline void check_overlap_safety_(overlap_backend_t const &backend) {
+/** One backend's residues against the definition, at mixed widths with a zero among them, over
+ *  lengths around every step a backend takes, from texts in blocks of exactly their bytes. */
+inline void check_ngrams_residues_(split_mix_generator_t &generator, ngrams_backend_t const &backend) {
+    std::vector<sz_size_t> const widths = {1, 3, 0, 2, 4, 5, 7, 8, 9, 16, 17, 31, 64, 200};
+    for (std::size_t length = 0; length < 300; length += length < 80 ? 1 : 37) {
+        std::unique_ptr<char[]> const exact(new char[length]);
+        randomize_string(generator, {exact.get(), length});
+        std::string_view const text {exact.get(), length};
+        std::size_t const count = sz_ngrams_count(length, widths.data(), widths.size());
+        std::vector<sz_f64_t> prefixes(length + 1, -1.0);
+        std::vector<sz_u32_t> residues(count + 1, 0x55555555u);
+        backend.residues(text.data(), length, widths.data(), widths.size(), prefixes.data(), residues.data());
+        std::size_t written = 0;
+        for (sz_size_t const width : widths)
+            for (std::size_t first = 0; width && first + width <= length; ++first)
+                if (residues[written++] != ngrams_reference_residue_(text.substr(first, width)))
+                    fail_backend_(backend.name, "a residue differs from the definition");
+        if (written != count || residues[count] != 0x55555555u)
+            fail_backend_(backend.name, "the residues wrote other than their count");
+    }
+}
+
+/** The sketches of @p texts, read from an accessor or a tape, through @p backend 's batch verb from
+ *  an engine of no queries: @p slots bytes each, @p stride bytes apart, over a fill of 0x55. */
+inline std::vector<sz_u8_t> ngrams_sketches_(ngrams_backend_t const &backend, std::vector<sz_size_t> const &widths,
+                                             std::vector<std::string> const &texts, std::size_t slots,
+                                             std::size_t stride, bool from_tape = false) {
+    handle_checked_heap_t heap;
+    std::string payload;
+    std::vector<sz_u32_t> offsets;
+    sz_strings_view_t const strings = from_tape ? strings_tape_from_(texts, payload, offsets) : strings_from_(texts);
+    sz_ngrams_engine_t engine {};
+    if (backend.init(&engine, nullptr, widths.data(), widths.size(), 0, &heap.allocator, nullptr) != sz_success_k)
+        fail_backend_(backend.name, "an engine of no queries was refused");
+    std::vector<sz_u8_t> sketches(texts.size() * stride, 0x55);
+    if (backend.sketches(&engine, &strings, slots, sketches.data(), stride, nullptr) != sz_success_k)
+        fail_backend_(backend.name, "a well-formed batch of texts was refused");
+    sz_ngrams_engine_free(&engine, nullptr);
+    expect_equal(heap.live_allocations, 0);
+    return sketches;
+}
+
+/** One backend's sketches against the definition, at slot counts from one to past a device's pass,
+ *  through the batch verb and the per-text kernel, at one width and at many, within the reach of a
+ *  segment and past it, bit for bit, so every capability writes the same bytes. */
+inline void check_ngrams_sketches_(split_mix_generator_t &generator, ngrams_backend_t const &backend) {
+    std::vector<std::vector<sz_size_t>> const variants = {{5, 8}, {1}, {3, 70, 7, 2}, {300, 9, 192, 193}};
+    for (std::vector<sz_size_t> const &widths : variants) {
+        std::vector<std::string> texts(scaled_iterations(24));
+        for (std::size_t index = 0; index != texts.size(); ++index) {
+            std::size_t const longest = index % 8 ? 300 : 1500;
+            std::size_t const length = std::uniform_int_distribution<std::size_t>(0, longest)(generator);
+            if (index % 2) texts[index] = random_string(generator, length, "ab");
+            else texts[index].resize(length), randomize_string(generator, texts[index]);
+        }
+        for (std::size_t const slots : {1u, 3u, 4u, 17u, 513u, 1024u}) {
+            std::size_t const stride = slots + 3;
+            std::vector<sz_u8_t> const batched = ngrams_sketches_(backend, widths, texts, slots, stride);
+            if (batched != ngrams_sketches_(backend, widths, texts, slots, stride, true))
+                fail_backend_(backend.name, "a tape's sketches differ from an accessor's");
+            std::vector<sz_u32_t> ranks(slots);
+            std::vector<sz_u8_t> whole(stride, 0x55);
+            for (std::size_t index = 0; index != texts.size(); ++index) {
+                std::string const &text = texts[index];
+                std::vector<sz_u8_t> const expected = ngrams_reference_sketch_(widths, text, slots);
+                sz_u8_t const *const row = batched.data() + index * stride;
+                if (!std::equal(expected.begin(), expected.end(), row))
+                    fail_backend_(backend.name, "a batch's sketch differs from the definition");
+                if (row[slots] != 0x55 || row[slots + 1] != 0x55 || row[slots + 2] != 0x55)
+                    fail_backend_(backend.name, "a batch wrote past a sketch's slots");
+                if (!backend.sketch) continue;
+                if (backend.sketch(text.data(), text.size(), widths.data(), widths.size(), ranks.data(), slots,
+                                   whole.data()) != sz_success_k ||
+                    !std::equal(expected.begin(), expected.end(), whole.begin()) || whole[slots] != 0x55)
+                    fail_backend_(backend.name, "the per-text sketch differs from the definition");
+            }
+        }
+    }
+}
+
+/** The share of all N-grams of @p first and @p second that both hold, and how many exist in all. */
+inline std::pair<double, std::size_t> ngrams_reference_jaccard_(std::vector<sz_size_t> const &widths,
+                                                                std::string_view first, std::string_view second) {
+    std::set<std::string_view> first_ngrams, second_ngrams;
+    for (sz_size_t const width : widths) {
+        for (std::size_t start = 0; start + width <= first.size(); ++start)
+            first_ngrams.insert(first.substr(start, width));
+        for (std::size_t start = 0; start + width <= second.size(); ++start)
+            second_ngrams.insert(second.substr(start, width));
+    }
+    std::size_t shared = 0;
+    for (std::string_view const window : first_ngrams) shared += second_ngrams.count(window);
+    std::size_t const united = first_ngrams.size() + second_ngrams.size() - shared;
+    return {static_cast<double>(shared) / static_cast<double>(united), united};
+}
+
+/**
+ *  @brief One backend's sketches against what they promise of shared N-grams.
+ *
+ *  Equal window sets give equal sketches whatever the order and the repeats, a width changes the
+ *  sketch, and two texts agree at a slot with probability J + (1 - J) / 256 for their exact Jaccard
+ *  index J. Over @c slots slots the share varies as J (1 - J) / slots, and a union of @c n N-grams
+ *  under the slots spreads each window over a run of slots of random length, which adds about twice
+ *  J (1 - J) / n. The summed drift of all pairs must sit within four standard deviations, and each
+ *  pair whose union fills the slots within five, as a hundred such pairs a run meet a four-sigma
+ *  stray about once in a hundred runs; a smaller union's share is a few exponential run lengths,
+ *  whose tail no normal bound holds.
+ */
+inline void check_ngrams_jaccard_(split_mix_generator_t &generator, ngrams_backend_t const &backend) {
+    std::size_t const slots = 512;
+
+    // A text with no N-grams holds the low byte of all ones mixed at every slot.
+    std::vector<sz_u8_t> const short_sketches = ngrams_sketches_(backend, {5, 8}, {"", "abcd"}, slots, slots);
+    for (sz_u8_t const byte : short_sketches) expect_equal(byte, 0x4A);
+
+    // Three texts of the same three N-grams, in other orders and counts, and one of a fourth.
+    std::vector<sz_u8_t> const repeated = ngrams_sketches_(backend, {3}, {"abcabc", "bcabca", "cabcabcabcab", "abcabd"},
+                                                           slots, slots);
+    expect_true(std::equal(repeated.begin(), repeated.begin() + slots, repeated.begin() + slots));
+    expect_true(std::equal(repeated.begin(), repeated.begin() + slots, repeated.begin() + 2 * slots));
+    expect_true(!std::equal(repeated.begin(), repeated.begin() + slots, repeated.begin() + 3 * slots));
+
+    // Equal bytes at two widths are two N-grams, so a width past the text leaves the sketch alone,
+    // and a width within it changes it.
+    std::vector<sz_u8_t> const narrow = ngrams_sketches_(backend, {4}, {"abcd"}, slots, slots);
+    expect_true(narrow == ngrams_sketches_(backend, {4, 9}, {"abcd"}, slots, slots));
+    expect_true(narrow != ngrams_sketches_(backend, {4, 3}, {"abcd"}, slots, slots));
+
+    std::vector<sz_size_t> const widths = {5, 8};
+    double drift = 0, drift_variance = 0;
+    for (std::size_t const length : {16u, 100u, 450u, 2000u}) {
+        std::size_t const pairs = 64;
+        std::vector<std::string> texts;
+        std::vector<std::pair<double, std::size_t>> shares;
+        for (std::size_t pair = 0; pair != pairs; ++pair) {
+            // The second text keeps a prefix of the first, a third of the pairs none of it.
+            std::size_t const kept = pair % 3 ? std::uniform_int_distribution<std::size_t>(0, length)(generator) : 0;
+            std::string const first = random_string(generator, length, "abcdefghijklm");
+            std::string const second = first.substr(0, kept) + random_string(generator, length - kept, "nopqrstuvwxyz");
+            shares.push_back(ngrams_reference_jaccard_(widths, first, second));
+            texts.push_back(first), texts.push_back(second);
+        }
+        std::vector<sz_u8_t> const sketches = ngrams_sketches_(backend, widths, texts, slots, slots);
+        for (std::size_t pair = 0; pair != pairs; ++pair) {
+            auto const [share, united] = shares[pair];
+            sz_u8_t const *const first = sketches.data() + 2 * pair * slots, *const second = first + slots;
+            double agreements = 0;
+            for (std::size_t slot = 0; slot != slots; ++slot) agreements += first[slot] == second[slot];
+            double const expected = share + (1 - share) / 256;
+            double const variance = expected * (1 - expected) * (1.0 / slots + 2.0 / static_cast<double>(united));
+            // Under the slots, a pair's share is a sum of run lengths, too heavy-tailed to bound
+            // one pair by.
+            if (united >= slots && std::fabs(agreements / slots - expected) > 5 * std::sqrt(variance) + 1e-9)
+                fail_backend_(backend.name, "a pair's agreeing slots stray from its Jaccard index");
+            drift += agreements / slots - expected, drift_variance += variance;
+        }
+    }
+    if (std::fabs(drift) > 4 * std::sqrt(drift_variance))
+        fail_backend_(backend.name, "the agreeing slots are biased against the Jaccard index");
+}
+
+/** One backend on degenerate inputs: empties on either side, both, and none survive, as does a
+ *  candidate narrower than the width or a width past the query; zero widths, a width of zero, a
+ *  refused allocation, a stride under its own axis, no slots and too many widths are reported
+ *  without touching the outputs; and known answers at three radii. */
+inline void check_ngrams_safety_(ngrams_backend_t const &backend) {
     handle_checked_heap_t heap;
     sz_allocator_t refusing = refusing_c_allocator();
     std::vector<std::string> const words = {"sitting", "kitten"};
@@ -4000,21 +4221,26 @@ inline void check_overlap_safety_(overlap_backend_t const &backend) {
     std::vector<std::size_t> const widths = {3, 8};
     std::vector<sz_u32_t> computed;
 
-    check_overlap_scores_(backend, empty, words, widths, computed);
-    check_overlap_scores_(backend, kitten, empty, widths, computed);
-    check_overlap_scores_(backend, empty, empty, widths, computed);
-    check_overlap_scores_(backend, kitten, none, widths, computed);
-    check_overlap_scores_(backend, none, words, widths, computed);
-    check_overlap_scores_(backend, kitten, narrow, widths, computed);
-    overlap_case_t const past_query = overlap_past_query_case_();
-    check_overlap_scores_(backend, past_query.queries, past_query.candidates, past_query.widths, computed);
+    check_ngrams_oracle_(backend, empty, words, widths, computed);
+    check_ngrams_oracle_(backend, kitten, empty, widths, computed);
+    check_ngrams_oracle_(backend, empty, empty, widths, computed);
+    check_ngrams_oracle_(backend, kitten, none, widths, computed);
+    check_ngrams_oracle_(backend, none, words, widths, computed);
+    check_ngrams_oracle_(backend, kitten, narrow, widths, computed);
+
+    ngrams_case_t const past_query = ngrams_past_query_case_();
+    check_ngrams_oracle_(backend, past_query.queries, past_query.candidates, past_query.widths, computed);
 
     sz_strings_view_t const kitten_strings = strings_from_(kitten);
     sz_strings_view_t const words_strings = strings_from_(words);
-    sz_overlap_engine_t engine {};
+    std::vector<std::size_t> const zero_width = {3, 0};
+    sz_ngrams_engine_t engine {};
     if (backend.init(&engine, &kitten_strings, widths.data(), 0, 0, &heap.allocator, nullptr) !=
         sz_unexpected_dimensions_k)
         fail_backend_(backend.name, "the engine accepted zero widths");
+    if (backend.init(&engine, &kitten_strings, zero_width.data(), zero_width.size(), 0, &heap.allocator, nullptr) !=
+        sz_unexpected_dimensions_k)
+        fail_backend_(backend.name, "the engine accepted a width of zero");
     if (sizeof(sz_size_t) > 4) {
         sz_size_t const oversized_width = (sz_size_t)0xFFFFFFFFu + 1u;
         if (backend.init(&engine, &kitten_strings, &oversized_width, 1, 0, &heap.allocator, nullptr) !=
@@ -4028,39 +4254,72 @@ inline void check_overlap_safety_(overlap_backend_t const &backend) {
         fail_backend_(backend.name, "the engine refused a well-formed batch of queries");
 
     sz_u32_t refused[4] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
-    if (backend.scores(&engine, &words_strings, 1.0f, refused, words.size() * widths.size(), widths.size() - 1,
-                       nullptr) != sz_unexpected_dimensions_k)
+    if (backend.overlaps(&engine, &words_strings, 1.0f, refused, words.size() * widths.size(), widths.size() - 1,
+                         nullptr) != sz_unexpected_dimensions_k)
         fail_backend_(backend.name, "the engine accepted a candidate stride under its widths");
-    if (backend.scores(&engine, &words_strings, 1.0f, refused, words.size() * widths.size() - 1, widths.size(),
-                       nullptr) != sz_unexpected_dimensions_k)
+    if (backend.overlaps(&engine, &words_strings, 1.0f, refused, words.size() * widths.size() - 1, widths.size(),
+                         nullptr) != sz_unexpected_dimensions_k)
         fail_backend_(backend.name, "the engine accepted a query stride under its candidates");
 
-    // "sitting" holds one of the five windows "kitten" could match at width three, so it misses
-    // four of five, and "kitten" misses none of its four; no text holds a window of eight.
-    sz_f32_t const four_fifths = 0.8f;
+    // "sitting" holds one of the four distinct N-grams of "kitten" at width three, "itt", so it
+    // misses three of four, and "kitten" misses none of its four; no text holds a window of eight.
+    sz_f32_t const three_quarters = 0.75f;
     sz_u32_t bounded[4] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
     expect_equal(
-        backend.scores(&engine, &words_strings, 0.0f, bounded, words.size() * widths.size(), widths.size(), nullptr),
+        backend.overlaps(&engine, &words_strings, 0.0f, bounded, words.size() * widths.size(), widths.size(), nullptr),
         sz_success_k);
     if (bounded[0] != 0 || bounded[1] != 0 || bounded[2] != 4 || bounded[3] != 0)
         fail_backend_(backend.name, "a zero radius kept a pair past it or dropped an identical one");
-    expect_equal(backend.scores(&engine, &words_strings, std::nextafter(four_fifths, 0.0f), bounded,
-                                words.size() * widths.size(), widths.size(), nullptr),
+    expect_equal(backend.overlaps(&engine, &words_strings, std::nextafter(three_quarters, 0.0f), bounded,
+                                  words.size() * widths.size(), widths.size(), nullptr),
                  sz_success_k);
     if (bounded[0] != 0 || bounded[1] != 0 || bounded[2] != 4 || bounded[3] != 0)
-        fail_backend_(backend.name, "a radius just short of four fifths kept a pair missing four of five");
-    expect_equal(backend.scores(&engine, &words_strings, four_fifths, bounded, words.size() * widths.size(),
-                                widths.size(), nullptr),
+        fail_backend_(backend.name, "a radius just short of three quarters kept a pair missing three of four");
+    expect_equal(backend.overlaps(&engine, &words_strings, three_quarters, bounded, words.size() * widths.size(),
+                                  widths.size(), nullptr),
                  sz_success_k);
     if (bounded[0] != 1 || bounded[1] != 0 || bounded[2] != 4 || bounded[3] != 0)
-        fail_backend_(backend.name, "a radius of four fifths dropped a pair missing four of five");
+        fail_backend_(backend.name, "a radius of three quarters dropped a pair missing three of four");
     for (sz_u32_t const untouched : refused)
         if (untouched != 0xFFFFFFFFu) fail_backend_(backend.name, "a refused call still wrote a count");
-    sz_overlap_engine_free(&engine, nullptr);
+
+    // The same engine sketches, refusing zero slots and a stride under them, and writes nothing for
+    // an empty batch.
+    std::size_t const slots = 64;
+    std::vector<sz_u8_t> untouched(words.size() * slots, 0x55);
+    sz_strings_view_t const none_strings = strings_from_(none);
+    if (backend.sketches(&engine, &none_strings, slots, untouched.data(), slots, nullptr) != sz_success_k)
+        fail_backend_(backend.name, "an empty batch was refused");
+    if (backend.sketches(&engine, &words_strings, 0, untouched.data(), slots, nullptr) != sz_unexpected_dimensions_k)
+        fail_backend_(backend.name, "a sketch of no slots was accepted");
+    if (backend.sketches(&engine, &words_strings, slots, untouched.data(), slots - 1, nullptr) !=
+        sz_unexpected_dimensions_k)
+        fail_backend_(backend.name, "a stride under the slots was accepted");
+    sz_ngrams_engine_free(&engine, nullptr);
     expect_equal(heap.live_allocations, 0);
+
+    if (backend.sketch) {
+        std::vector<sz_size_t> const zero = {3, 0}, many(sz_ngrams_widths_max_k + 1, 3), short_widths = {5, 8, 64};
+        std::vector<sz_u32_t> ranks(slots);
+        if (backend.sketch("sitting", 7, zero.data(), zero.size(), ranks.data(), slots, untouched.data()) !=
+            sz_unexpected_dimensions_k)
+            fail_backend_(backend.name, "the per-text sketch accepted a width of zero");
+        if (backend.sketch("sitting", 7, many.data(), many.size(), ranks.data(), slots, untouched.data()) !=
+            sz_unexpected_dimensions_k)
+            fail_backend_(backend.name, "the per-text sketch accepted more widths than the bound");
+        if (backend.sketch("sitting", 7, short_widths.data(), short_widths.size(), ranks.data(), 0, untouched.data()) !=
+            sz_unexpected_dimensions_k)
+            fail_backend_(backend.name, "the per-text sketch accepted a sketch of no slots");
+        std::vector<sz_u8_t> whole(slots);
+        if (backend.sketch("", 0, nullptr, 0, ranks.data(), slots, whole.data()) != sz_success_k ||
+            std::count(whole.begin(), whole.end(), 0x4A) != (std::ptrdiff_t)slots)
+            fail_backend_(backend.name, "a sketch of no widths was not all 0x4A");
+    }
+    for (sz_u8_t const byte : untouched)
+        if (byte != 0x55) fail_backend_(backend.name, "an empty batch or a refused call wrote a sketch");
 }
 
-#pragma endregion Overlap
+#pragma endregion Ngrams
 
 #pragma region Substrings
 

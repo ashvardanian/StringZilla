@@ -105,12 +105,21 @@ void test_cross_ppc64() {
     run_test_case("check_levenshtein_safety_(levenshtein_powervsx)", powervsx,
                   [&] { check_levenshtein_safety_(levenshtein_powervsx); });
 
-    constexpr overlap_backend_t overlap_powervsx {"powervsx", sz_overlap_engine_init_powervsx,
-                                                  sz_overlap_scores_powervsx};
-    run_test_case("check_overlap_equivalence_(overlap_powervsx)", powervsx,
-                  [&](split_mix_generator_t &generator) { check_overlap_equivalence_(generator, overlap_powervsx); });
-    run_test_case("check_overlap_safety_(overlap_powervsx)", powervsx,
-                  [&] { check_overlap_safety_(overlap_powervsx); });
+    constexpr ngrams_backend_t ngrams_powervsx {"powervsx",
+                                                sz_ngrams_engine_init_powervsx,
+                                                sz_ngrams_overlaps_powervsx,
+                                                sz_ngrams_sketches_powervsx,
+                                                sz_ngrams_residues_powervsx,
+                                                sz_ngrams_sketch_powervsx};
+    run_test_case("check_ngrams_overlaps_(ngrams_powervsx)", powervsx,
+                  [&](split_mix_generator_t &generator) { check_ngrams_overlaps_(generator, ngrams_powervsx); });
+    run_test_case("check_ngrams_residues_(ngrams_powervsx)", powervsx,
+                  [&](split_mix_generator_t &generator) { check_ngrams_residues_(generator, ngrams_powervsx); });
+    run_test_case("check_ngrams_sketches_(ngrams_powervsx)", powervsx,
+                  [&](split_mix_generator_t &generator) { check_ngrams_sketches_(generator, ngrams_powervsx); });
+    run_test_case("check_ngrams_jaccard_(ngrams_powervsx)", powervsx,
+                  [&](split_mix_generator_t &generator) { check_ngrams_jaccard_(generator, ngrams_powervsx); });
+    run_test_case("check_ngrams_safety_(ngrams_powervsx)", powervsx, [&] { check_ngrams_safety_(ngrams_powervsx); });
 
     constexpr substrings_tier_t substrings_powervsx {
         .init = sz_substrings_engine_init_powervsx,

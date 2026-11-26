@@ -23,7 +23,7 @@
  *  them. Throughput is Cell Updates Per Second, as the CPU benchmark reports it.
  *
  *  Overlap is compute-bound too: every candidate byte costs a modular multiply-add per width and
- *  a B-tree descent, over candidates the unified dataset already makes device-reachable.
+ *  a hash-table probe, over candidates the unified dataset already makes device-reachable.
  *
  *  Substrings is memory-bound: every haystack byte is one data-dependent load into the automaton,
  *  and the device fills by haystack chunks rather than haystacks. A corpus that cuts into fewer
@@ -69,8 +69,8 @@ struct simt_backend_t {
     device_backend_t const &runtime;
     sz_kernel_levenshtein_engine_init_t levenshtein_engine_init;
     sz_kernel_levenshtein_distances_t levenshtein_distances;
-    sz_kernel_overlap_engine_init_t overlap_engine_init;
-    sz_kernel_overlap_scores_t overlap_scores;
+    sz_kernel_ngrams_engine_init_t ngrams_engine_init;
+    sz_kernel_ngrams_overlaps_t ngrams_overlaps;
     sz_kernel_substrings_engine_init_t substrings_engine_init;
     sz_kernel_substrings_counts_t substrings_counts;
     sz_kernel_substrings_find_t substrings_find;
@@ -388,41 +388,41 @@ inline std::vector<sz_string_view_t> overlap_token_views(simt_backend_t const &b
 }
 
 /** Every arm at one query width, the width and the corpus @p label carried in each arm's name. */
-inline void bench_overlap_scores(simt_backend_t const &backend, environment_t const &env, corpus_t const &corpus,
-                                 overlap_corpus_t &resident, std::size_t query_bytes, char const *label) {
+inline void bench_ngrams_overlaps(simt_backend_t const &backend, environment_t const &env, corpus_t const &corpus,
+                                  overlap_corpus_t &resident, std::size_t query_bytes, char const *label) {
     std::size_t const width = overlap_width_(corpus, query_bytes);
     auto const query = std::string_view(corpus.tokens[0]).substr(0, query_bytes);
     std::string const suffix = ":w" + std::to_string(width) + label;
     std::string const device_suffix = std::string(":") + backend.name + ":" +
                                       std::to_string(backend.runtime.selected.ordinal());
-    std::string const device_name = simt_arm(backend, "sz_overlap_scores") + suffix;
-    auto validator = scores_from_sz {sz_overlap_engine_init_serial,
-                                     sz_overlap_scores_serial,
-                                     query,
-                                     width,
-                                     resident.host_candidates(),
-                                     resident.views};
-    auto dispatched = scores_from_sz {overlap_engine_init_cpu_,   sz_overlap_scores, query, width,
-                                      resident.host_candidates(), resident.views};
-    std::optional<double> const base = bench_baseline(env, corpus, "sz_overlap_scores" + device_suffix + suffix,
+    std::string const device_name = simt_arm(backend, "sz_ngrams_overlaps") + suffix;
+    auto validator = overlaps_from_sz {sz_ngrams_engine_init_serial,
+                                       sz_ngrams_overlaps_serial,
+                                       query,
+                                       width,
+                                       resident.host_candidates(),
+                                       resident.views};
+    auto dispatched = overlaps_from_sz {ngrams_engine_init_cpu_,    sz_ngrams_overlaps, query, width,
+                                        resident.host_candidates(), resident.views};
+    std::optional<double> const base = bench_baseline(env, corpus, "sz_ngrams_overlaps" + device_suffix + suffix,
                                                       {device_name}, dispatched);
     print(bench_unary(env, corpus, device_name, validator,
-                      scores_from_sz {backend.overlap_engine_init, backend.overlap_scores, query, width,
-                                      resident.candidates.view().raw, resident.views, std::cref(backend.runtime)}),
+                      overlaps_from_sz {backend.ngrams_engine_init, backend.ngrams_overlaps, query, width,
+                                        resident.candidates.view().raw, resident.views, std::cref(backend.runtime)}),
           base);
 }
 
 /** Every overlap row over the leading tokens of @p corpus, then over as many skewed spans of
  *  the same bytes. */
-inline void bench_overlap_simt(simt_backend_t const &backend, environment_t const &env, corpus_t const &corpus) {
+inline void bench_ngrams_simt(simt_backend_t const &backend, environment_t const &env, corpus_t const &corpus) {
     overlap_corpus_t resident(overlap_token_views(backend, env, corpus), backend.runtime);
     fmt::println("Starting window overlap benchmarks over {} resident candidates...", resident.candidates.size());
-    bench_overlap_scores(backend, env, corpus, resident, median_token_bytes(corpus), "");
+    bench_ngrams_overlaps(backend, env, corpus, resident, median_token_bytes(corpus), "");
     std::size_t const bytes = resident.bytes();
     overlap_corpus_t skewed(simt_skewed_views(corpus.dataset.data(), corpus.dataset.size(), resident.candidates.size(),
                                               (double)bytes / (double)resident.candidates.size(), env.settings.seed),
                             backend.runtime);
-    bench_overlap_scores(backend, env, corpus, skewed, median_token_bytes(corpus), ":skewed");
+    bench_ngrams_overlaps(backend, env, corpus, skewed, median_token_bytes(corpus), ":skewed");
 }
 
 #pragma endregion Overlap
@@ -889,7 +889,7 @@ inline int bench_cross_simt(environment_t &env, simt_backend_t const &backend) {
     try {
         corpus_t const &corpus = env.corpora.multilingual_lines();
         bench_levenshtein_simt(backend, env, corpus);
-        bench_overlap_simt(backend, env, corpus);
+        bench_ngrams_simt(backend, env, corpus);
         bench_substrings_simt(backend, env, corpus);
         bench_regex_simt(backend, env, env.corpora.multilingual_slice());
         bench_subdocuments_simt(backend, env);
@@ -911,7 +911,7 @@ inline int bench_cross_simt_engines(environment_t &env, simt_backend_t const &ba
     try {
         corpus_t const &corpus = env.corpora.multilingual_lines();
         bench_levenshtein_simt(backend, env, corpus);
-        bench_overlap_simt(backend, env, corpus);
+        bench_ngrams_simt(backend, env, corpus);
         bench_substrings_simt(backend, env, corpus);
         bench_regex_simt(backend, env, env.corpora.multilingual_slice());
         bench_subdocuments_simt(backend, env);
@@ -942,11 +942,11 @@ inline int bench_cross_simt_searches(environment_t &env, simt_backend_t const &b
 
 /** The Levenshtein and overlap rows of a later CUDA tier, which carries no other family's
  *  kernels. */
-inline int bench_cross_simt_levenshtein_overlap(environment_t &env, simt_backend_t const &backend) {
+inline int bench_cross_simt_levenshtein_ngrams(environment_t &env, simt_backend_t const &backend) {
     try {
         corpus_t const &corpus = env.corpora.multilingual_lines();
         bench_levenshtein_simt(backend, env, corpus);
-        bench_overlap_simt(backend, env, corpus);
+        bench_ngrams_simt(backend, env, corpus);
     }
     catch (std::exception const &e) {
         fmt::println(stderr, "Failed with: {}", e.what());

@@ -27,7 +27,7 @@
  *  - @c sort.h - single-threaded sorting algorithms.
  *  - @c intersect.h - intersections of unordered string sets.
  *  - @c levenshtein.h - edit distances between batches of queries and candidates, on a CPU or GPU.
- *  - @c overlap.h - window overlap between batches of queries and candidates, on a CPU or GPU.
+ *  - @c ngrams.h - N-gram overlaps and one-permutation MinHash sketches, on a CPU or GPU.
  *  - @c substrings.h - multi-pattern search over a compiled vocabulary, on a CPU or a CUDA device.
  *  - @c regex.h - leftmost-first regular expression search over a compiled vocabulary of patterns.
  *  - @c subdocuments.h - JSONPath and XPath extraction over batches of JSON or XML documents.
@@ -89,7 +89,7 @@
 #include "stringzilla/sort.h"         // `sz_sort_order_best`, `sz_sort_uncased_order_best`
 #include "stringzilla/intersect.h"    // `sz_intersect_best`
 #include "stringzilla/levenshtein.h"  // `sz_levenshtein_engine_init`, `sz_levenshtein_distances`
-#include "stringzilla/overlap.h"      // `sz_overlap_engine_init`, `sz_overlap_scores`
+#include "stringzilla/ngrams.h"       // `sz_ngrams_engine_init`, `sz_ngrams_overlaps`, `sz_ngrams_sketches`
 #include "stringzilla/substrings.h"   // `sz_substrings_engine_init`, `sz_substrings_find`
 #include "stringzilla/regex.h"        // `sz_regex_engine_init`, `sz_regex_find`
 #include "stringzilla/subdocuments.h" // `sz_subdocuments_engine_init`, `sz_subdocuments_find`

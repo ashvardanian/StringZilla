@@ -1461,7 +1461,7 @@ void bench_strings(environment_t &env);
 void bench_cipher(environment_t &env);
 void bench_container(environment_t &env);
 void bench_levenshtein(environment_t &env);
-void bench_overlap(environment_t &env);
+void bench_ngrams(environment_t &env);
 void bench_substrings(environment_t &env);
 void bench_regex(environment_t &env);
 void bench_subdocuments(environment_t &env);

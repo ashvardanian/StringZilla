@@ -59,7 +59,8 @@ void test_cross_rocm(std::size_t ordinal) {
         "rocm",
         rocm_runtime,
         sz_levenshtein_distances_rocm,
-        sz_overlap_scores_rocm,
+        sz_ngrams_overlaps_rocm,
+        sz_ngrams_sketches_rocm,
         sz_substrings_contains_rocm,
         sz_substrings_counts_rocm,
         sz_substrings_find_rocm,
@@ -96,7 +97,8 @@ void test_cross_rocm(std::size_t ordinal) {
         "cdna3",
         cdna3_runtime,
         sz_levenshtein_distances_cdna3,
-        sz_overlap_scores_cdna3,
+        sz_ngrams_overlaps_cdna3,
+        sz_ngrams_sketches_cdna3,
         sz_substrings_contains_rocm,
         sz_substrings_counts_rocm,
         sz_substrings_find_rocm,
@@ -117,7 +119,7 @@ void test_cross_rocm(std::size_t ordinal) {
     };
     capability_gate_t const cdna3_gate(sz_cap_cdna3_k, runtime.capabilities);
     check_device_levenshtein_(cdna3_gate, cdna3);
-    check_device_overlap_(cdna3_gate, cdna3);
+    check_device_ngrams_(cdna3_gate, cdna3);
 #endif
 #if STRINGZILLA_TARGET_CDNA4
     device_backend_t cdna4_runtime = runtime;
@@ -126,7 +128,8 @@ void test_cross_rocm(std::size_t ordinal) {
         "cdna4",
         cdna4_runtime,
         sz_levenshtein_distances_cdna4,
-        sz_overlap_scores_cdna4,
+        sz_ngrams_overlaps_cdna4,
+        sz_ngrams_sketches_cdna4,
         sz_substrings_contains_rocm,
         sz_substrings_counts_rocm,
         sz_substrings_find_rocm,
@@ -147,7 +150,7 @@ void test_cross_rocm(std::size_t ordinal) {
     };
     capability_gate_t const cdna4_gate(sz_cap_cdna4_k, runtime.capabilities);
     check_device_levenshtein_(cdna4_gate, cdna4);
-    check_device_overlap_(cdna4_gate, cdna4);
+    check_device_ngrams_(cdna4_gate, cdna4);
 #endif
 #if STRINGZILLA_TARGET_CDNA5
     device_backend_t cdna5_runtime = runtime;
@@ -156,7 +159,8 @@ void test_cross_rocm(std::size_t ordinal) {
         "cdna5",
         cdna5_runtime,
         sz_levenshtein_distances_cdna5,
-        sz_overlap_scores_cdna5,
+        sz_ngrams_overlaps_cdna5,
+        sz_ngrams_sketches_cdna5,
         sz_substrings_contains_rocm,
         sz_substrings_counts_rocm,
         sz_substrings_find_rocm,
@@ -177,7 +181,7 @@ void test_cross_rocm(std::size_t ordinal) {
     };
     capability_gate_t const cdna5_gate(sz_cap_cdna5_k, runtime.capabilities);
     check_device_levenshtein_(cdna5_gate, cdna5);
-    check_device_overlap_(cdna5_gate, cdna5);
+    check_device_ngrams_(cdna5_gate, cdna5);
 #endif
     test_cross_dispatch_device(runtime, gpu_best<sz_sha256_multistate_update_best>(runtime.capabilities),
                                gpu_best<sz_sha256_multistate_digest_best>(runtime.capabilities));

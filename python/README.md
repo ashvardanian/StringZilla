@@ -39,7 +39,7 @@ CMAKE_BUILD_PARALLEL_LEVEL=2 pip install .
 
 ## Types
 
-The `stringzilla` module exposes `String`, `Strings`, and `File`, the incremental hashers `Hasher`, `Sha256` and `Sha256s`, the batch engines `LevenshteinEngine`, `OverlapEngine` and `SubstringsEngine`, plus a family of UTF-8 iterator types.
+The `stringzilla` module exposes `String`, `Strings`, and `File`, the incremental hashers `Hasher`, `Sha256` and `Sha256s`, the batch engines `LevenshteinEngine`, `NgramsEngine` and `SubstringsEngine`, plus a family of UTF-8 iterator types.
 
 ### `String`
 
@@ -564,11 +564,11 @@ Three engines prepare one set of queries once and score it against as many colle
 Preparation fixes the alphabet or the vocabulary, resolves the SIMD tier, and takes the memory the rounds reuse; every later call only streams candidates past what is already there.
 Each engine writes into a writable buffer the caller supplies as `out`, so nothing is allocated per round and a round can fill one slice of a larger matrix.
 
-| Engine              | Constructed from                               | Scores with                                                   |
-| :------------------ | :--------------------------------------------- | :------------------------------------------------------------ |
-| `LevenshteinEngine` | a batch of query strings and a symbol alphabet | `distances(candidates, out, bound=None)`                      |
-| `OverlapEngine`     | a batch of query strings and window widths     | `scores(candidates, out, radius=None)`                        |
-| `SubstringsEngine`  | a vocabulary of needles and an overlap policy  | `counts`, `find`, `replace`, and `bm25_scores` over haystacks |
+| Engine              | Constructed from                               | Scores with                                                      |
+| :------------------ | :--------------------------------------------- | :--------------------------------------------------------------- |
+| `LevenshteinEngine` | a batch of query strings and a symbol alphabet | `distances(candidates, out, bound=None)`                         |
+| `NgramsEngine`     | a batch of query strings and window widths     | `overlaps(candidates, out, radius=None)`, `sketches(texts, out)` |
+| `SubstringsEngine`  | a vocabulary of needles and an overlap policy  | `counts`, `find`, `replace`, and `bm25_scores` over haystacks    |
 
 Queries, candidates, and haystacks all arrive as `sz.Strings`, and every `out` buffer is any writable object supporting the buffer protocol — a NumPy array, an `array.array`, or a plain `memoryview`.
 Engine calls release the GIL, and calls into one engine take turns on its lock, so build one engine per thread to score in parallel.
@@ -600,22 +600,30 @@ runes.distances(sz.Strings(["cafe"]), out)
 assert out[0, 0] == 1
 ```
 
-### Window Overlap
+### N-gram Overlaps & MinHash Sketches
 
-`OverlapEngine(queries, widths)` hashes every query's fixed-width byte n-grams into one B-tree per query, at every width in `widths`, and probes that forest with each candidate's own windows.
-A score is the share of a candidate's windows the query also spells, in `[0, 1]`, so it is asymmetric: swapping the two sides changes the answer when either repeats a window.
+`NgramsEngine(queries, widths)` hashes every query's fixed-width byte N-grams into one table of its distinct N-grams, at every width in `widths`, and probes those tables with each candidate's own N-grams.
+A score is the share of the query's distinct N-grams the candidate holds, each counted once, in `[0, 1]`, so it is asymmetric: a candidate holding the whole query scores `1.0` however much more it holds.
 Widths need not form a doubling chain, and a width past a text scores zero for every pair it spans.
 
-`scores(candidates, out, *, radius=None)` fills a `[queries, candidates, widths]` block of 32-bit floats, contiguous along its width axis.
-A pair's distance is the windows it misses over its longer side's, summed over every width, and a `radius` in `[0, 1]` keeps every pair within it exact; a pair past it scores `0.0` at every width, on every backend, and `None` keeps every score exact.
+`overlaps(candidates, out, *, radius=None)` fills a `[queries, candidates, widths]` block of 32-bit floats, contiguous along its width axis.
+A pair's distance is the share of the query's distinct N-grams it misses, summed over every width, and a `radius` in `[0, 1]` keeps every pair within it exact; a pair past it scores `0.0` at every width, on every backend, and `None` keeps every score exact.
+
+`sketches(texts, out)` writes one row of `out` per text, a byte per slot, its column count being the number of slots.
+Two texts agree at a slot about as often as their window sets overlap, by Jaccard index, so the share of unequal bytes estimates how far apart they are, and an engine built from no queries only sketches.
+Sketches of different slot counts are unrelated, so compare only rows of one width.
 
 ```python
 import stringzilla as sz
 
-engine = sz.OverlapEngine(sz.Strings(["the quick brown fox"]), [4, 8])
+engine = sz.NgramsEngine(sz.Strings(["the quick brown fox"]), [4, 8])
 out = memoryview(bytearray(1 * 2 * 2 * 4)).cast("f", (1, 2, 2))
-engine.scores(sz.Strings(["the quick brown cat", "nothing alike"]), out)
+engine.overlaps(sz.Strings(["the quick brown cat", "nothing alike"]), out)
 assert all(0.0 <= out[0, c, w] <= 1.0 for c in range(2) for w in range(2))
+
+sketches = memoryview(bytearray(2 * 512)).cast("B", (2, 512))
+engine.sketches(sz.Strings(["the quick brown fox", "the quick brown fox"]), sketches)
+assert sketches.tolist()[0] == sketches.tolist()[1]
 ```
 
 ### Multi-Pattern Matching
@@ -686,11 +694,11 @@ Every engine constructor takes keyword-only `capabilities=` and `stream=`.
 `capabilities=` defaults to every CPU capability, clamped to what this CPU runs, and a GPU producer's mask, like `sz.capabilities_enabled_cuda(0)`, builds the engine on that vendor.
 It prepares the batch where a kernel reaches it and resolves the launch geometry once, and every later round of that engine runs there.
 `stream=` is a `cudaStream_t`, a `hipStream_t` or an `id<MTLCommandQueue>` as an integer, which names the device, or `None` for the default stream of the default device, and it carries only the preparation: the engine does not keep it; a CPU engine takes no stream.
-`SubstringsEngine` also takes a `haystacks_budget` and `OverlapEngine` a `candidates_budget`, the most one round may carry on a device, which the CPU ignores.
+`SubstringsEngine` also takes a `haystacks_budget` and `NgramsEngine` a `candidates_budget`, the most one round may carry on a device, which the CPU ignores.
 The device arena is sized once from those budgets and no verb allocates, so a substrings round past its budget is refused, while CUDA overlap keeps no per-candidate arena and ignores its budget.
 
 Every verb then takes its own keyword-only `stream`, so one engine can be scored from several streams.
-`LevenshteinEngine` and `OverlapEngine` keep no round state on the device, so their rounds may run on any number of streams at once.
+`LevenshteinEngine` and `NgramsEngine` keep no round state on the device, so their rounds may run on any number of streams at once.
 `SubstringsEngine` rounds share one arena and one report, so the caller orders them, on one stream or with events between two.
 
 A device engine reads its inputs in place, so they come from `sz.Strings(texts).copy(gpu)`, and a host `Strings` raises `BufferError`, while a host engine reads a copy made for any capabilities.

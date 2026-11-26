@@ -436,11 +436,14 @@ typedef enum sz_kernel_kind_t {
     /** Levenshtein distances of a batch against the prepared queries. */
     sz_kernel_levenshtein_distances_k,
 
-    /** Overlap engine preparation. */
-    sz_kernel_overlap_engine_init_k,
+    /** N-grams engine preparation. */
+    sz_kernel_ngrams_engine_init_k,
 
-    /** Overlap scores of a batch against the prepared queries. */
-    sz_kernel_overlap_scores_k,
+    /** N-gram overlaps of a batch against the prepared queries. */
+    sz_kernel_ngrams_overlaps_k,
+
+    /** MinHash sketches of a batch of texts. */
+    sz_kernel_ngrams_sketches_k,
 
     /** Substrings engine preparation. */
     sz_kernel_substrings_engine_init_k,
@@ -563,8 +566,9 @@ STRINGZILLA_CONSTEXPR char const *sz_kernel_name(sz_kernel_kind_t kind) {
     case sz_kernel_utf8_find_cased_k: return "utf8_find_cased";
     case sz_kernel_levenshtein_engine_init_k: return "levenshtein_engine_init";
     case sz_kernel_levenshtein_distances_k: return "levenshtein_distances";
-    case sz_kernel_overlap_engine_init_k: return "overlap_engine_init";
-    case sz_kernel_overlap_scores_k: return "overlap_scores";
+    case sz_kernel_ngrams_engine_init_k: return "ngrams_engine_init";
+    case sz_kernel_ngrams_overlaps_k: return "ngrams_overlaps";
+    case sz_kernel_ngrams_sketches_k: return "ngrams_sketches";
     case sz_kernel_substrings_engine_init_k: return "substrings_engine_init";
     case sz_kernel_substrings_contains_k: return "substrings_contains";
     case sz_kernel_substrings_counts_k: return "substrings_counts";
@@ -658,8 +662,9 @@ STRINGZILLA_CONSTEXPR sz_kernel_kind_t sz_kernel_named(char const *name, sz_size
     if (sz_same_literal_(name, length, "utf8_find_cased")) return sz_kernel_utf8_find_cased_k;
     if (sz_same_literal_(name, length, "levenshtein_engine_init")) return sz_kernel_levenshtein_engine_init_k;
     if (sz_same_literal_(name, length, "levenshtein_distances")) return sz_kernel_levenshtein_distances_k;
-    if (sz_same_literal_(name, length, "overlap_engine_init")) return sz_kernel_overlap_engine_init_k;
-    if (sz_same_literal_(name, length, "overlap_scores")) return sz_kernel_overlap_scores_k;
+    if (sz_same_literal_(name, length, "ngrams_engine_init")) return sz_kernel_ngrams_engine_init_k;
+    if (sz_same_literal_(name, length, "ngrams_overlaps")) return sz_kernel_ngrams_overlaps_k;
+    if (sz_same_literal_(name, length, "ngrams_sketches")) return sz_kernel_ngrams_sketches_k;
     if (sz_same_literal_(name, length, "substrings_engine_init")) return sz_kernel_substrings_engine_init_k;
     if (sz_same_literal_(name, length, "substrings_contains")) return sz_kernel_substrings_contains_k;
     if (sz_same_literal_(name, length, "substrings_counts")) return sz_kernel_substrings_counts_k;
@@ -885,14 +890,18 @@ typedef sz_status_t (*sz_kernel_levenshtein_distances_t)(struct sz_levenshtein_e
                                                          sz_size_t const *, sz_size_t const *, sz_size_t, sz_size_t *,
                                                          sz_size_t, sz_stream_t);
 
-/** Signature of every @c sz_overlap_engine_init kernel. */
-typedef sz_status_t (*sz_kernel_overlap_engine_init_t)(struct sz_overlap_engine_t *, sz_strings_view_t const *,
-                                                       sz_size_t const *, sz_size_t, sz_size_t, sz_allocator_t *,
-                                                       sz_stream_t);
+/** Signature of every @c sz_ngrams_engine_init kernel. */
+typedef sz_status_t (*sz_kernel_ngrams_engine_init_t)(struct sz_ngrams_engine_t *, sz_strings_view_t const *,
+                                                      sz_size_t const *, sz_size_t, sz_size_t, sz_allocator_t *,
+                                                      sz_stream_t);
 
-/** Signature of every @c sz_overlap_scores kernel. */
-typedef sz_status_t (*sz_kernel_overlap_scores_t)(struct sz_overlap_engine_t *, sz_strings_view_t const *, sz_f32_t,
-                                                  sz_u32_t *, sz_size_t, sz_size_t, sz_stream_t);
+/** Signature of every @c sz_ngrams_overlaps kernel. */
+typedef sz_status_t (*sz_kernel_ngrams_overlaps_t)(struct sz_ngrams_engine_t *, sz_strings_view_t const *, sz_f32_t,
+                                                   sz_u32_t *, sz_size_t, sz_size_t, sz_stream_t);
+
+/** Signature of every @c sz_ngrams_sketches kernel. */
+typedef sz_status_t (*sz_kernel_ngrams_sketches_t)(struct sz_ngrams_engine_t *, sz_strings_view_t const *, sz_size_t,
+                                                   sz_u8_t *, sz_size_t, sz_stream_t);
 
 /** Signature of every @c sz_substrings_engine_init kernel. */
 typedef sz_status_t (*sz_kernel_substrings_engine_init_t)(struct sz_substrings_engine_t *, sz_strings_view_t const *,

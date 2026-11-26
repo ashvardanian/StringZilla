@@ -9,7 +9,7 @@ The family files test the dispatch points and `stringzilla.hpp`, and the cross f
 
 - `main_cpu.cpp` — the entry point, registering the family suites and the cross-checks of every architecture.
 - `hash.cpp`, `cipher.cpp`, `sort.cpp`, `string.cpp`, `find.cpp` — hashing, ciphers, sorting and intersection, the string class and memory, search and comparison.
-- `levenshtein.cpp`, `overlap.cpp`, `substrings.cpp` — edit distances, window overlap, and multi-pattern search.
+- `levenshtein.cpp`, `ngrams.cpp`, `substrings.cpp` — edit distances, N-gram overlaps and MinHash sketches, and multi-pattern search.
 - `utf8_runes.cpp`, `utf8_tokens.cpp`, `utf8_wordbreaks.cpp`, `utf8_graphemes.cpp`, `utf8_sentences.cpp`, `utf8_linebreaks.cpp`, `utf8_norm.cpp`, `utf8_uncased.cpp` — UTF-8 decoding, segmentation, normalization and case folding.
 - `cross.hpp` — the kernel-level checks, which take kernels by pointer and never reach a dispatch point.
 - `cross_serial.cpp`, `cross_x8664.cpp`, `cross_arm64.cpp`, `cross_riscv64.cpp`, `cross_loongarch64.cpp`, `cross_ppc64.cpp`, `cross_wasm.cpp` — one per architecture, naming its kernels, one section per capability, skipping those the CPU lacks.

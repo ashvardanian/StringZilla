@@ -168,7 +168,7 @@ STRINGZILLA_INLINE void *sz_reallocate_pinned_cuda_(void *pointer, sz_size_t old
  *  @brief Initializes an allocator handing back memory both the host and the device address.
  *
  *  What a family's scratch needs when the host prepares it and a kernel reads it - a prepared
- *  query's B-tree, a Myers mask table - and what the convenience verbs stage a host-resident
+ *  query's window table, a Myers mask table - and what the convenience verbs stage a host-resident
  *  caller's arguments into.
  *
  *  @param[out] allocator The stateless allocator to initialize, each call on its stream's device.

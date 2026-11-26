@@ -87,8 +87,9 @@ STRINGZILLA_API sz_status_t sz_find_kernel_punned(sz_kernel_kind_t kind, sz_capa
     case sz_kernel_utf8_find_cased_k: return sz_utf8_uncased_find_kernel(kind, capabilities, kernel, capability);
     case sz_kernel_levenshtein_engine_init_k:
     case sz_kernel_levenshtein_distances_k: return sz_levenshtein_find_kernel(kind, capabilities, kernel, capability);
-    case sz_kernel_overlap_engine_init_k:
-    case sz_kernel_overlap_scores_k: return sz_overlap_find_kernel(kind, capabilities, kernel, capability);
+    case sz_kernel_ngrams_engine_init_k:
+    case sz_kernel_ngrams_overlaps_k:
+    case sz_kernel_ngrams_sketches_k: return sz_ngrams_find_kernel(kind, capabilities, kernel, capability);
     case sz_kernel_substrings_engine_init_k:
     case sz_kernel_substrings_contains_k:
     case sz_kernel_substrings_counts_k:

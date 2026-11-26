@@ -2335,17 +2335,20 @@ class LevenshteinEngine:
         """
 
 @final
-class OverlapEngine:
-    """OverlapEngine(queries, widths, *, candidates_budget=0, capabilities=None, stream=None)
+class NgramsEngine:
+    """NgramsEngine(queries, widths, *, candidates_budget=0, capabilities=None, stream=None)
 
-    Hash a batch of queries into one window forest and probe it with many candidates.
+    Score how much of each prepared query every candidate holds, and summarize any texts into
+    MinHash sketches, both over the N-grams of the engine's widths.
 
-    A window is a fixed-width byte n-gram, and a score is the share of a candidate's windows
-    that the query also spells, in [0, 1]. The score is asymmetric in the two sides.
+    An N-gram is a run of a fixed number of bytes, and the engine works at one or more widths
+    at once. Every query's distinct N-grams are hashed into one table at construction, and an
+    engine of no queries only sketches. A GPU engine's methods take texts from `Strings.copy`
+    and output buffers its device reaches.
 
     Args:
-      queries (Strings): Texts whose windows are sorted into the forest.
-      widths (sequence of int): Window widths in bytes, the last axis of every output.
+      queries (Strings): Texts whose distinct N-grams fill the tables, possibly none.
+      widths (sequence of int): N-gram widths in bytes, the last axis of every overlap output.
       candidates_budget (int, optional): The most candidates one round may carry on a device,
         ignored on the CPU.
       capabilities (Capability, optional): A producer's mask, like capabilities_enabled_cuda(0),
@@ -2353,9 +2356,9 @@ class OverlapEngine:
       stream (int, optional): A stream of that vendor as an integer, naming the device, or None
         for the default.
     Example:
-      >>> engine = sz.OverlapEngine(sz.Strings(['abcdef']), [3, 4])
+      >>> engine = sz.NgramsEngine(sz.Strings(['abcdef']), [3, 4])
       >>> out = memoryview(bytearray(8)).cast('f', (1, 1, 2))
-      >>> engine.scores(sz.Strings(['abcdefg']), out)
+      >>> engine.overlaps(sz.Strings(['abcdefg']), out)
       >>> 0.0 <= out[0, 0, 0] <= 1.0
       True
     """
@@ -2369,27 +2372,56 @@ class OverlapEngine:
         capabilities: Capability | None = None,
         stream: int | None = None,
     ) -> None: ...
-    def scores(self, candidates: Strings, out: _Buffer, *, radius: float | None = None, stream: int | None = None) -> None:
-        """scores(candidates, out, *, radius=None, stream=None) -> None
+    def overlaps(
+        self, candidates: Strings, out: _Buffer, *, radius: float | None = None, stream: int | None = None
+    ) -> None:
+        """overlaps(candidates, out, *, radius=None, stream=None) -> None
 
-        Score every prepared query against every candidate, at every width, into `out`.
+        Score every prepared query against every candidate: the share of the query's distinct
+        N-grams that the candidate holds, per width, in [0, 1].
+
+        The score is asymmetric, so a candidate holding the whole query scores 1.0 however much
+        more it holds. The share of query q, candidate c and width w lands at out[q, c, w].
 
         Args:
-          candidates (Strings): Texts whose windows probe the forest, from `Strings.copy` on a GPU.
+          candidates (Strings): Texts scored against the prepared queries.
           out (buffer): Writable 3-D buffer of 32-bit floats, at least
             (len(queries), len(candidates), len(widths)), contiguous along its width axis.
           radius (float, optional): The furthest distance a pair may lie at and still score exactly,
-            a distance being the windows it misses over its longer side's, summed over every width.
+            a distance being the misses over the query's distinct N-grams, summed over every width.
             A pair past it scores 0.0 at every width, and None or 1.0 keep every score exact.
           stream (int, optional): A stream of the engine's device as an integer, or None for the
-            default. A device engine joins it before returning, so `out` must be device-reachable;
-            a host engine ignores it.
+            default. A device engine joins it before returning; a host engine ignores it.
         Example:
-          >>> engine = sz.OverlapEngine(sz.Strings(['abcdef']), [3])
+          >>> engine = sz.NgramsEngine(sz.Strings(['abcdef']), [3])
           >>> out = memoryview(bytearray(4)).cast('f', (1, 1, 1))
-          >>> engine.scores(sz.Strings(['abcdef']), out)
+          >>> engine.overlaps(sz.Strings(['abcdef']), out)
           >>> out[0, 0, 0]
           1.0
+        """
+    def sketches(self, texts: Strings, out: _Buffer, *, stream: int | None = None) -> None:
+        """sketches(texts, out, *, stream=None) -> None
+
+        One MinHash sketch per text, summarizing the set of its N-grams at the engine's widths.
+
+        The share of positions where two sketches differ estimates one minus the Jaccard
+        similarity of their N-gram sets, and more slots give a finer estimate. Only sketches of
+        one slot count compare. Sketch i fills row out[i], and the column count of `out` is the
+        slot count.
+
+        Args:
+          texts (Strings): Texts to sketch.
+          out (buffer): Writable 2-D buffer of unsigned bytes, at least len(texts) rows, contiguous
+            along its column axis; its column count is the number of slots, at least 1.
+          stream (int, optional): A stream of the engine's device as an integer, or None for the
+            default. A device engine joins it before returning; a host engine ignores it.
+        Example:
+          >>> engine = sz.NgramsEngine(sz.Strings([]), [4])
+          >>> out = memoryview(bytearray(2 * 512)).cast('B', (2, 512))
+          >>> engine.sketches(sz.Strings(['hello world', 'hello world']), out)
+          >>> rows = out.tolist()
+          >>> rows[0] == rows[1]
+          True
         """
 
 # endregion Edit Distances and Overlaps

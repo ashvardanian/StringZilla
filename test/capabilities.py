@@ -200,32 +200,70 @@ def test_levenshtein_bound_clips_distances_past_it():
         distances_for(bound=-1)
 
 
-def test_overlap_radius_zeroes_pairs_past_it():
-    """A pair is exact while its misses over its longer side's windows stay within the radius, else 0.0 everywhere."""
-    engine = sz.OverlapEngine(sz.Strings(["abcdefgh"]), [3, 4])
-    # Misses over the longer side's eleven windows at both widths: none, two, and eight.
+def test_ngrams_radius_zeroes_pairs_past_it():
+    """A pair is exact while its misses over the query's distinct N-grams stay in the radius, else 0.0 everywhere."""
+    engine = sz.NgramsEngine(sz.Strings(["abcdefgh"]), [3, 4])
+    # Misses over the query's eleven distinct N-grams at both widths: none, two, and eight.
     candidates = sz.Strings(["abcdefgh", "abcdefgx", "abcdxxxx"])
 
-    def scores_for(**kwargs):
-        scores = memoryview(bytearray(len(candidates) * 2 * 4)).cast("f", (1, len(candidates), 2))
-        engine.scores(candidates, scores, **kwargs)
-        return [list(row) for row in scores.tolist()[0]]
+    def overlaps_for(**kwargs):
+        overlaps = memoryview(bytearray(len(candidates) * 2 * 4)).cast("f", (1, len(candidates), 2))
+        engine.overlaps(candidates, overlaps, **kwargs)
+        return [list(row) for row in overlaps.tolist()[0]]
 
-    exact = scores_for()
+    exact = overlaps_for()
     assert exact[0] == [1.0, 1.0]
     assert all(0.0 < share < 1.0 for share in exact[1] + exact[2])
-    assert scores_for(radius=None) == exact
-    assert scores_for(radius=1.0) == exact
-    assert scores_for(radius=2) == exact
-    assert scores_for(radius=8 / 11) == exact
-    assert scores_for(radius=7 / 11) == [exact[0], exact[1], [0.0, 0.0]]
-    assert scores_for(radius=2 / 11) == [exact[0], exact[1], [0.0, 0.0]]
-    assert scores_for(radius=1 / 11) == [exact[0], [0.0, 0.0], [0.0, 0.0]]
-    assert scores_for(radius=0) == [exact[0], [0.0, 0.0], [0.0, 0.0]]
+    assert overlaps_for(radius=None) == exact
+    assert overlaps_for(radius=1.0) == exact
+    assert overlaps_for(radius=2) == exact
+    assert overlaps_for(radius=8 / 11) == exact
+    assert overlaps_for(radius=7 / 11) == [exact[0], exact[1], [0.0, 0.0]]
+    assert overlaps_for(radius=2 / 11) == [exact[0], exact[1], [0.0, 0.0]]
+    assert overlaps_for(radius=1 / 11) == [exact[0], [0.0, 0.0], [0.0, 0.0]]
+    assert overlaps_for(radius=0) == [exact[0], [0.0, 0.0], [0.0, 0.0]]
     with pytest.raises(TypeError):
-        scores_for(radius="1")
+        overlaps_for(radius="1")
     with pytest.raises(ValueError, match="radius must be a share"):
-        scores_for(radius=-0.5)
+        overlaps_for(radius=-0.5)
+
+
+def test_ngrams_sketches_agree_on_shared_ngrams():
+    """Equal texts sketch alike, a near text agrees at more slots than a far one, a short one is 0x4A, the output's
+    width sets the slots, and an engine of no queries sketches as one of many does."""
+    texts = sz.Strings(["Hello, world", "Hello, world", "Hello, word", "Привет, мир", "Hi"])
+
+    def sketches_for(widths=(5, 8), queries=(), slots=512, **kwargs):
+        engine = sz.NgramsEngine(sz.Strings(list(queries)), widths, **kwargs)
+        sketches = memoryview(bytearray(len(texts) * slots)).cast("B", (len(texts), slots))
+        engine.sketches(texts, sketches)
+        return sketches.tolist()
+
+    def agreements(first, second):
+        return sum(left == right for left, right in zip(first, second))
+
+    for widths in ((5, 8), [4], (3, 5, 8)):
+        for slots in (128, 512, 2048):
+            rows = sketches_for(widths, slots=slots)
+            assert rows[0] == rows[1]
+            assert agreements(rows[0], rows[2]) > agreements(rows[0], rows[3])
+            assert rows[4] == [0x4A] * slots
+    assert sketches_for(capabilities=sz.Capability.SERIAL) == sketches_for()
+    assert sketches_for(queries=["kitten", "sitting"]) == sketches_for()
+    with pytest.raises(ValueError, match="disagree on shape"):
+        sketches_for(widths=[3, 0])
+    with pytest.raises(TypeError):
+        sketches_for(widths=["3"])
+    engine = sz.NgramsEngine(sz.Strings([]), [5])
+    if numpy_available:
+        with pytest.raises(ValueError, match="out axis"):
+            engine.sketches(texts, np.zeros((len(texts), 0), dtype=np.uint8))
+    with pytest.raises(TypeError):
+        engine.sketches(["Hello"], memoryview(bytearray(512)).cast("B", (1, 512)))
+    with pytest.raises(TypeError):
+        engine.sketches(texts)
+    with pytest.raises(ValueError, match="no prepared queries"):
+        engine.overlaps(texts, memoryview(bytearray(4)).cast("f", (1, 1, 1)))
 
 
 def test_engine_calls_from_many_threads_agree():

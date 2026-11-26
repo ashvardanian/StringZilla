@@ -44,7 +44,7 @@ void bench_cross_arm64([[maybe_unused]] environment_t &env) {
             env, "neon", sz_levenshtein_bytes_k);
         bench_levenshtein_distances_kernels<sz_levenshtein_engine_init_neon, sz_levenshtein_distances_neon>(
             env, "neon", sz_levenshtein_runes_k);
-        bench_overlap_scores_kernels<sz_overlap_engine_init_neon, sz_overlap_scores_neon>(env, "neon");
+        bench_ngrams_overlaps_kernels<sz_ngrams_engine_init_neon, sz_ngrams_overlaps_neon>(env, "neon");
         bench_substrings_kernels<sz_substrings_engine_init_neon, sz_substrings_counts_neon, sz_substrings_find_neon,
                                  sz_substrings_replace_neon, sz_substrings_bm25_scores_neon>(env, "neon");
     }

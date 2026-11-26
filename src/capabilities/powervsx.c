@@ -12,7 +12,7 @@
 #include "stringzilla/cipher/powervsx.h"
 #include "stringzilla/find/powervsx.h"
 #include "stringzilla/levenshtein/powervsx.h"
-#include "stringzilla/overlap/powervsx.h"
+#include "stringzilla/ngrams/powervsx.h"
 #include "stringzilla/substrings/powervsx.h"
 #include "stringzilla/regex/powervsx.h"
 #include "stringzilla/subdocuments/powervsx.h"

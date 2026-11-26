@@ -4,7 +4,7 @@
 It exposes its functions, traits, and engines directly at the crate root, covering two kinds of work:
 
 - __single-string operations__ — search, counting, splitting, hashing, sorting, UTF-8 segmentation, normalization, and case folding.
-- __batch engines__ — Levenshtein distances, window overlap, and multi-pattern substring search, each a stateful cross-product engine prepared once from a batch of queries and reused across every later round.
+- __batch engines__ — Levenshtein distances, N-gram overlaps and MinHash sketches, and multi-pattern substring search, each a stateful cross-product engine prepared once from a batch of queries and reused across every later round.
 
 The crate is `no_std`-friendly and SIMD-accelerated; most of the single-string surface is exposed both as free functions and as ergonomic extension-trait methods on any `AsRef<[u8]>` — `&str`, `String`, `&[u8]`, `Vec<u8>`, `Cow<str>`, and more.
 The engines take slices of anything `AsRef<[u8]>` and write into caller-owned buffers at a caller-chosen stride, so a pipeline allocates once and reuses those buffers across every batch.
@@ -740,40 +740,52 @@ cpu.scope(|scope| unicode.distances(scope, StringsView::from_slices(&["cafe"]), 
 assert_eq!(one[0], 1);
 ```
 
-## Window Overlap
+## N-gram Overlaps & MinHash Sketches
 
-`OverlapEngine` hashes and sorts a batch of queries into one B-tree forest over every window width, then streams candidates through it.
-A window is a fixed-width byte n-gram, and the overlap of two texts at that width is the count of one's windows that occur in the other, over whichever of the two holds more.
+`NgramsEngine` hashes a batch of queries into one table of each query's distinct N-grams over every window width, then streams candidates through those tables.
+A window is a fixed-width byte N-gram, and the overlap of a query with a candidate at that width is the share of the query's distinct N-grams the candidate holds, each counted once.
 Nothing is stored per candidate, so the candidates may change round to round while the queries and the widths stay.
 
 ```rust
 fn new<Q: AsRef<[u8]>>(queries: &[Q], window_widths: &[usize], candidates_budget: usize,
-    stream: &Stream) -> Result<OverlapEngine, Status>;
+    stream: &Stream) -> Result<NgramsEngine, Status>;
 
-fn scores<'scope>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
-    candidates: StringsView<'scope>, radius: Option<f32>, scores: &'scope mut [f32],
-    scores_query_stride: usize, scores_candidate_stride: usize) -> Result<(), Status>;
+fn overlaps<'scope>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
+    candidates: StringsView<'scope>, radius: Option<f32>, overlaps: &'scope mut [f32],
+    overlaps_query_stride: usize, overlaps_candidate_stride: usize) -> Result<(), Status>;
+
+fn sketches<'scope>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
+    texts: StringsView<'scope>, sketches: &'scope mut [u8], slots: usize,
+    sketches_stride: usize) -> Result<(), Status>;
 ```
 
 Widths are in bytes and need not form a doubling chain, since a window hash comes from a prefix difference that costs one modular multiply-add at any width; a width past a text scores zero for every pair it spans.
-The output is a `[queries, candidates, widths]` block with the width axis unit-strided: share `[q, c, w]` lands at `scores[q * query_stride + c * candidate_stride + w]`, each in `[0, 1]`.
-The score is asymmetric — a candidate's window occurrences count against a query's distinct windows — so swapping the two sides changes the answer whenever either repeats a window.
-A `radius` of `Some(share)` is the share of the longer side's windows, summed over every width, a pair may miss and still score exactly; a pair past it scores `0.0` at every width, on every backend, and `None` keeps every score exact.
+The output is a `[queries, candidates, widths]` block with the width axis unit-strided: share `[q, c, w]` lands at `overlaps[q * query_stride + c * candidate_stride + w]`, each in `[0, 1]`.
+The score is asymmetric, since a candidate holding the whole query scores `1.0` however much more it holds, so swapping the two sides changes the answer.
+A `radius` of `Some(share)` is the share of the query's distinct N-grams, summed over every width, a pair may miss and still score exactly; a pair past it scores `0.0` at every width, on every backend, and `None` keeps every score exact.
+
+`sketches` writes `slots` bytes per text, so the share of unequal bytes between two texts estimates how far apart their window sets are by Jaccard index.
+An engine built from no queries only sketches, and sketches of different slot counts are unrelated, so only sketches of one count compare.
 
 ```rust
-use stringzilla::{Capabilities, OverlapEngine, Stream, StringsView};
+use stringzilla::{Capabilities, Stream, StringsView, NgramsEngine};
 
 let cpu = Stream::default(Capabilities::enabled_cpu());
-let mut engine = OverlapEngine::new(&["the quick brown fox"], &[4, 8], 0, &cpu).unwrap();
+let mut engine = NgramsEngine::new(&["the quick brown fox"], &[4, 8], 0, &cpu).unwrap();
 
-let mut scores = [0.0f32; 2];
+let mut overlaps = [0.0f32; 2];
 let candidates = StringsView::from_slices(&["the quick brown cat"]);
-cpu.scope(|scope| engine.scores(scope, candidates, None, &mut scores, 2, 2)).unwrap();
-assert!(scores.iter().all(|share| (0.0..=1.0).contains(share)));
+cpu.scope(|scope| engine.overlaps(scope, candidates, None, &mut overlaps, 2, 2)).unwrap();
+assert!(overlaps.iter().all(|share| (0.0..=1.0).contains(share)));
 
-// A pair missing more than a tenth of its windows scores zero at every width.
-cpu.scope(|scope| engine.scores(scope, candidates, Some(0.1), &mut scores, 2, 2)).unwrap();
-assert_eq!(scores, [0.0, 0.0]);
+// A pair missing more than a tenth of the query's N-grams scores zero at every width.
+cpu.scope(|scope| engine.overlaps(scope, candidates, Some(0.1), &mut overlaps, 2, 2)).unwrap();
+assert_eq!(overlaps, [0.0, 0.0]);
+
+let mut sketches = [0u8; 2 * 256];
+let texts = StringsView::from_slices(&["hello world", "hello world"]);
+cpu.scope(|scope| engine.sketches(scope, texts, &mut sketches, 256, 256)).unwrap();
+assert_eq!(sketches[..256], sketches[256..]);
 ```
 
 ## Multi-Pattern Search
@@ -1026,7 +1038,7 @@ The function is idempotent and cheap to call more than once on the same thread.
 
 ### Engines on a GPU
 
-Every engine constructor takes a `Stream`, whose capabilities it is built with, and a GPU stream builds it on that GPU, fixing the launch geometry once and sizing a round's device memory from `candidates_budget` for `OverlapEngine` and `haystacks_budget` for `SubstringsEngine`.
+Every engine constructor takes a `Stream`, whose capabilities it is built with, and a GPU stream builds it on that GPU, fixing the launch geometry once and sizing a round's device memory from `candidates_budget` for `NgramsEngine` and `haystacks_budget` for `SubstringsEngine`.
 The capabilities name the vendor and the stream names the device: `Stream::default(capabilities)` is the default stream of the default device, while `Stream::new(capabilities, ordinal)` makes one on any device by its ordinal and frees it on drop.
 `Stream::from_raw` borrows a `cudaStream_t`, a `hipStream_t` or an `id<MTLCommandQueue>` the caller made, and is `unsafe` because no type system checks that the handle is live and belongs to the vendor.
 

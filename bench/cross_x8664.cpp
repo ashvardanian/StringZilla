@@ -77,7 +77,7 @@ void bench_cross_x8664([[maybe_unused]] environment_t &env) {
             env, "haswell", sz_levenshtein_bytes_k);
         bench_levenshtein_distances_kernels<sz_levenshtein_engine_init_haswell, sz_levenshtein_distances_haswell>(
             env, "haswell", sz_levenshtein_runes_k);
-        bench_overlap_scores_kernels<sz_overlap_engine_init_haswell, sz_overlap_scores_haswell>(env, "haswell");
+        bench_ngrams_overlaps_kernels<sz_ngrams_engine_init_haswell, sz_ngrams_overlaps_haswell>(env, "haswell");
         bench_substrings_kernels<sz_substrings_engine_init_haswell, sz_substrings_counts_haswell,
                                  sz_substrings_find_haswell, sz_substrings_replace_haswell,
                                  sz_substrings_bm25_scores_haswell>(env, "haswell");
@@ -111,7 +111,7 @@ void bench_cross_x8664([[maybe_unused]] environment_t &env) {
             env, "skylake", sz_levenshtein_bytes_k);
         bench_levenshtein_distances_kernels<sz_levenshtein_engine_init_skylake, sz_levenshtein_distances_skylake>(
             env, "skylake", sz_levenshtein_runes_k);
-        bench_overlap_scores_kernels<sz_overlap_engine_init_skylake, sz_overlap_scores_skylake>(env, "skylake");
+        bench_ngrams_overlaps_kernels<sz_ngrams_engine_init_skylake, sz_ngrams_overlaps_skylake>(env, "skylake");
     }
 #endif // STRINGZILLA_TARGET_SKYLAKE
 #if STRINGZILLA_TARGET_ICELAKE

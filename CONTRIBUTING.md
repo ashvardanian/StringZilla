@@ -130,7 +130,7 @@ Only the Platform Identity region of `c/stringzilla/types.h` reads operating-sys
 Compiler predefines like `__clang__`, `__GNUC__` and `_MSC_VER` are read raw where they matter.
 
 C names put the capability last, `sz_<family>_<what>_<capability>`, like `sz_find_haswell`.
-Only a role suffix may follow it: `_t` for a type, `_k` for a constant, `_kernel_` for a GPU entry point, or the trailing `_` of an internal name, like `sz_levenshtein_u64x1_sweep_serial_` and `sz_overlap_scores_blackwell_kernel_`.
+Only a role suffix may follow it: `_t` for a type, `_k` for a constant, `_kernel_` for a GPU entry point, or the trailing `_` of an internal name, like `sz_levenshtein_u64x1_sweep_serial_` and `sz_ngrams_overlaps_blackwell_kernel_`.
 A dispatch point puts `best` in the capability's place, like `sz_strings_lookup_best`, and the kernels it picks from are its twins, like `sz_strings_lookup_haswell`.
 
 Code that several capabilities share belongs to one of three layers, named in the capability's place:
@@ -332,7 +332,7 @@ build_release/stringzilla_cpu_header_bench              # - the kernels header-o
 
 Each family times its dispatch points, like `sz_find_best`, against the standard baselines, like `find<std::strstr>`.
 Each capability's kernels, like `sz_find_haswell`, are timed against the serial ones, like `sz_find_serial`, and skipped on a CPU that lacks the capability.
-The header-only twin has no dispatch points to time, but it reaches the private helpers, like the SIMD sorts of pgrams and the Levenshtein and overlap steps.
+The header-only twin has no dispatch points to time, but it reaches the private helpers, like the SIMD sorts of pgrams and the Levenshtein and N-grams steps.
 
 The same `stringzilla_bench` runs CPU rows once and then all selected GPU backends enabled by
 `STRINGZILLA_CUDA_ARCH`, `STRINGZILLA_ROCM_ARCH`, and `STRINGZILLA_METAL_ARCH`.
@@ -340,7 +340,7 @@ CUDA and ROCm can coexist in one build. `STRINGWARS_DEVICES=cuda:0,rocm:1` selec
 ordinals; unset, each available compiled vendor runs device zero. Explicit unavailable devices are errors.
 The tests follow the same rule with `stringzilla_test` and `STRINGZILLA_DEVICES`.
 
-GPU rows are named after the kernel they time, like `sz_levenshtein_distances_cuda:0:q1024:w16:sorted` or `sz_overlap_scores_metal:0:w5`, which is what `STRINGWARS_FILTER` matches.
+GPU rows are named after the kernel they time, like `sz_levenshtein_distances_cuda:0:q1024:w16:sorted` or `sz_ngrams_overlaps_metal:0:w5`, which is what `STRINGWARS_FILTER` matches.
 
 All of them support customization via environment variables.
 Let's say you want to benchmark large-batch DNA edit distances:
@@ -1119,7 +1119,7 @@ Unaligned stores are a different story, especially on x86, where multiple reads 
 
 ### Register Pressure
 
-Byte-level comparisons are simpler and often faster, than n-gram comparisons with subsequent interleaving.
+Byte-level comparisons are simpler and often faster, than N-gram comparisons with subsequent interleaving.
 In the following example we search for 4-byte needles in a haystack, loading at different offsets, and comparing then as arrays of 32-bit integers.
 
 ```c

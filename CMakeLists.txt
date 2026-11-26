@@ -592,7 +592,7 @@ if (STRINGZILLA_BUILD_PYTHON)
         python/stringzilla/sort.c
         python/stringzilla/intersect.c
         python/stringzilla/levenshtein.c
-        python/stringzilla/overlap.c
+        python/stringzilla/ngrams.c
         python/stringzilla/substrings.c
         python/stringzilla/regex.c
         python/stringzilla/subdocuments.c
@@ -692,7 +692,7 @@ if (STRINGZILLA_BUILD_BENCH)
         bench/cipher.cpp
         bench/container.cpp
         bench/levenshtein.cpp
-        bench/overlap.cpp
+        bench/ngrams.cpp
         bench/substrings.cpp
         bench/regex.cpp
         bench/subdocuments.cpp
@@ -730,7 +730,7 @@ if (STRINGZILLA_BUILD_TEST)
         test/cipher.cpp
         test/sort.cpp
         test/levenshtein.cpp
-        test/overlap.cpp
+        test/ngrams.cpp
         test/substrings.cpp
         test/regex.cpp
         test/subdocuments.cpp

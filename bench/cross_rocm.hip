@@ -49,8 +49,8 @@ int bench_cross_rocm(environment_t &env, std::size_t ordinal) {
                                   runtime,
                                   sz_levenshtein_engine_init_rocm,
                                   sz_levenshtein_distances_rocm,
-                                  sz_overlap_engine_init_rocm,
-                                  sz_overlap_scores_rocm,
+                                  sz_ngrams_engine_init_rocm,
+                                  sz_ngrams_overlaps_rocm,
                                   sz_substrings_engine_init_rocm,
                                   sz_substrings_counts_rocm,
                                   sz_substrings_find_rocm,
@@ -78,8 +78,8 @@ int bench_cross_rocm(environment_t &env, std::size_t ordinal) {
                                     runtime,
                                     sz_levenshtein_engine_init_cdna3,
                                     sz_levenshtein_distances_cdna3,
-                                    sz_overlap_engine_init_cdna3,
-                                    sz_overlap_scores_cdna3,
+                                    sz_ngrams_engine_init_cdna3,
+                                    sz_ngrams_overlaps_cdna3,
                                     sz_substrings_engine_init_rocm,
                                     sz_substrings_counts_rocm,
                                     sz_substrings_find_rocm,
@@ -97,7 +97,7 @@ int bench_cross_rocm(environment_t &env, std::size_t ordinal) {
                                     sz_utf8_norm_rocm,
                                     sz_sha256_multistate_update_rocm,
                                     sz_sha256_multistate_digest_rocm};
-        result += bench_cross_simt_levenshtein_overlap(env, cdna3);
+        result += bench_cross_simt_levenshtein_ngrams(env, cdna3);
     }
 #endif
 #if STRINGZILLA_TARGET_CDNA4
@@ -106,8 +106,8 @@ int bench_cross_rocm(environment_t &env, std::size_t ordinal) {
                                     runtime,
                                     sz_levenshtein_engine_init_cdna4,
                                     sz_levenshtein_distances_cdna4,
-                                    sz_overlap_engine_init_cdna4,
-                                    sz_overlap_scores_cdna4,
+                                    sz_ngrams_engine_init_cdna4,
+                                    sz_ngrams_overlaps_cdna4,
                                     sz_substrings_engine_init_rocm,
                                     sz_substrings_counts_rocm,
                                     sz_substrings_find_rocm,
@@ -125,7 +125,7 @@ int bench_cross_rocm(environment_t &env, std::size_t ordinal) {
                                     sz_utf8_norm_rocm,
                                     sz_sha256_multistate_update_rocm,
                                     sz_sha256_multistate_digest_rocm};
-        result += bench_cross_simt_levenshtein_overlap(env, cdna4);
+        result += bench_cross_simt_levenshtein_ngrams(env, cdna4);
     }
 #endif
 #if STRINGZILLA_TARGET_CDNA5
@@ -134,8 +134,8 @@ int bench_cross_rocm(environment_t &env, std::size_t ordinal) {
                                     runtime,
                                     sz_levenshtein_engine_init_cdna5,
                                     sz_levenshtein_distances_cdna5,
-                                    sz_overlap_engine_init_cdna5,
-                                    sz_overlap_scores_cdna5,
+                                    sz_ngrams_engine_init_cdna5,
+                                    sz_ngrams_overlaps_cdna5,
                                     sz_substrings_engine_init_rocm,
                                     sz_substrings_counts_rocm,
                                     sz_substrings_find_rocm,
@@ -153,7 +153,7 @@ int bench_cross_rocm(environment_t &env, std::size_t ordinal) {
                                     sz_utf8_norm_rocm,
                                     sz_sha256_multistate_update_rocm,
                                     sz_sha256_multistate_digest_rocm};
-        result += bench_cross_simt_levenshtein_overlap(env, cdna5);
+        result += bench_cross_simt_levenshtein_ngrams(env, cdna5);
     }
 #endif
     return result;

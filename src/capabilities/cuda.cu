@@ -13,7 +13,7 @@
 #include "stringzilla/strings.h"
 #include "stringzilla/hash.h"
 #include "stringzilla/levenshtein.h"
-#include "stringzilla/overlap.h"
+#include "stringzilla/ngrams.h"
 #include "stringzilla/substrings.h"
 #include "stringzilla/regex.h"
 #include "stringzilla/subdocuments.h"
@@ -22,7 +22,7 @@
 
 #include "stringzilla/hash/cuda.cuh"
 #include "stringzilla/levenshtein/cuda.cuh"
-#include "stringzilla/overlap/cuda.cuh"
+#include "stringzilla/ngrams/cuda.cuh"
 #include "stringzilla/strings/cuda.cuh"
 #include "stringzilla/substrings/cuda.cuh"
 #include "stringzilla/regex/cuda.cuh"

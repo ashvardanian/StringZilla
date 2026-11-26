@@ -60,7 +60,7 @@ void bench_cross_serial(environment_t &env) {
         env, "serial", sz_levenshtein_bytes_k);
     bench_levenshtein_distances_kernels<sz_levenshtein_engine_init_serial, sz_levenshtein_distances_serial>(
         env, "serial", sz_levenshtein_runes_k);
-    bench_overlap_scores_kernels<sz_overlap_engine_init_serial, sz_overlap_scores_serial>(env, "serial");
+    bench_ngrams_overlaps_kernels<sz_ngrams_engine_init_serial, sz_ngrams_overlaps_serial>(env, "serial");
     bench_substrings_kernels<sz_substrings_engine_init_serial, sz_substrings_counts_serial, sz_substrings_find_serial,
                              sz_substrings_replace_serial, sz_substrings_bm25_scores_serial>(env, "serial");
     bench_regex_kernels<sz_regex_engine_init_serial, sz_regex_counts_serial, sz_regex_find_serial,

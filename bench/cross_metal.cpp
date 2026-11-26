@@ -28,32 +28,32 @@
 
 #include <fmt/format.h>
 
-#include "stringzilla/overlap.h" // `sz_overlap_*`
+#include "stringzilla/ngrams.h" // `sz_ngrams_*`
 
 #endif
 
 namespace ashvardanian::stringzilla::bench {
 
 #if STRINGZILLA_TARGET_METAL
-static void bench_overlap_scores(environment_t const &env, corpus_t const &corpus, overlap_corpus_t &resident,
-                                 std::size_t query_bytes, device_backend_t const &runtime) {
+static void bench_ngrams_overlaps(environment_t const &env, corpus_t const &corpus, overlap_corpus_t &resident,
+                                  std::size_t query_bytes, device_backend_t const &runtime) {
     std::size_t const width = overlap_width_(corpus, query_bytes);
     auto const query = std::string_view(corpus.tokens[0]).substr(0, query_bytes);
-    auto validator = scores_from_sz {sz_overlap_engine_init_serial,
-                                     sz_overlap_scores_serial,
-                                     query,
-                                     width,
-                                     resident.host_candidates(),
-                                     resident.views};
+    auto validator = overlaps_from_sz {sz_ngrams_engine_init_serial,
+                                       sz_ngrams_overlaps_serial,
+                                       query,
+                                       width,
+                                       resident.host_candidates(),
+                                       resident.views};
     std::size_t const ordinal = runtime.selected.ordinal();
-    std::string const metal_name = fmt::format("sz_overlap_scores_metal:{}:w{}", ordinal, width);
-    auto dispatched = scores_from_sz {overlap_engine_init_cpu_,   sz_overlap_scores, query, width,
-                                      resident.host_candidates(), resident.views};
+    std::string const metal_name = fmt::format("sz_ngrams_overlaps_metal:{}:w{}", ordinal, width);
+    auto dispatched = overlaps_from_sz {ngrams_engine_init_cpu_,    sz_ngrams_overlaps, query, width,
+                                        resident.host_candidates(), resident.views};
     std::optional<double> const base = bench_baseline(
-        env, corpus, fmt::format("sz_overlap_scores:metal:{}:w{}", ordinal, width), {metal_name}, dispatched);
+        env, corpus, fmt::format("sz_ngrams_overlaps:metal:{}:w{}", ordinal, width), {metal_name}, dispatched);
     print(bench_unary(env, corpus, metal_name, validator,
-                      scores_from_sz {sz_overlap_engine_init_metal, sz_overlap_scores_metal, query, width,
-                                      resident.candidates.view().raw, resident.views, std::cref(runtime)}),
+                      overlaps_from_sz {sz_ngrams_engine_init_metal, sz_ngrams_overlaps_metal, query, width,
+                                        resident.candidates.view().raw, resident.views, std::cref(runtime)}),
           base);
 }
 
@@ -77,7 +77,7 @@ int bench_cross_metal(environment_t &env, std::size_t ordinal) {
         views[index] = {corpus.tokens[index].data(), corpus.tokens[index].size()};
     overlap_corpus_t resident(views, runtime);
     fmt::println("Starting window overlap benchmarks over {} resident candidates...", resident.candidates.size());
-    bench_overlap_scores(env, corpus, resident, median_token_bytes(corpus), runtime);
+    bench_ngrams_overlaps(env, corpus, resident, median_token_bytes(corpus), runtime);
 #else
     sz_unused_(env);
 #endif

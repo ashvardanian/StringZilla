@@ -52,8 +52,8 @@ int bench_cross_cuda(environment_t &env, std::size_t ordinal) {
                                   runtime,
                                   sz_levenshtein_engine_init_cuda,
                                   sz_levenshtein_distances_cuda,
-                                  sz_overlap_engine_init_cuda,
-                                  sz_overlap_scores_cuda,
+                                  sz_ngrams_engine_init_cuda,
+                                  sz_ngrams_overlaps_cuda,
                                   sz_substrings_engine_init_cuda,
                                   sz_substrings_counts_cuda,
                                   sz_substrings_find_cuda,
@@ -81,8 +81,8 @@ int bench_cross_cuda(environment_t &env, std::size_t ordinal) {
                                      runtime,
                                      sz_levenshtein_engine_init_ampere,
                                      sz_levenshtein_distances_ampere,
-                                     sz_overlap_engine_init_ampere,
-                                     sz_overlap_scores_ampere,
+                                     sz_ngrams_engine_init_ampere,
+                                     sz_ngrams_overlaps_ampere,
                                      sz_substrings_engine_init_ampere,
                                      sz_substrings_counts_ampere,
                                      sz_substrings_find_ampere,
@@ -109,8 +109,8 @@ int bench_cross_cuda(environment_t &env, std::size_t ordinal) {
                                      runtime,
                                      sz_levenshtein_engine_init_cuda,
                                      sz_levenshtein_distances_cuda,
-                                     sz_overlap_engine_init_cuda,
-                                     sz_overlap_scores_cuda,
+                                     sz_ngrams_engine_init_cuda,
+                                     sz_ngrams_overlaps_cuda,
                                      sz_substrings_engine_init_hopper,
                                      sz_substrings_counts_hopper,
                                      sz_substrings_find_hopper,
@@ -137,8 +137,8 @@ int bench_cross_cuda(environment_t &env, std::size_t ordinal) {
                                         runtime,
                                         sz_levenshtein_engine_init_blackwell,
                                         sz_levenshtein_distances_blackwell,
-                                        sz_overlap_engine_init_blackwell,
-                                        sz_overlap_scores_blackwell,
+                                        sz_ngrams_engine_init_blackwell,
+                                        sz_ngrams_overlaps_blackwell,
                                         sz_substrings_engine_init_cuda,
                                         sz_substrings_counts_cuda,
                                         sz_substrings_find_cuda,
@@ -156,7 +156,7 @@ int bench_cross_cuda(environment_t &env, std::size_t ordinal) {
                                         sz_utf8_norm_cuda,
                                         sz_sha256_multistate_update_cuda,
                                         sz_sha256_multistate_digest_cuda};
-        result += bench_cross_simt_levenshtein_overlap(env, blackwell);
+        result += bench_cross_simt_levenshtein_ngrams(env, blackwell);
     }
 #endif
     return result;

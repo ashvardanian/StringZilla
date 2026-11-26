@@ -61,7 +61,8 @@ void test_cross_cuda(std::size_t ordinal) {
         "cuda",
         cuda_runtime,
         sz_levenshtein_distances_cuda,
-        sz_overlap_scores_cuda,
+        sz_ngrams_overlaps_cuda,
+        sz_ngrams_sketches_cuda,
         sz_substrings_contains_cuda,
         sz_substrings_counts_cuda,
         sz_substrings_find_cuda,
@@ -98,7 +99,8 @@ void test_cross_cuda(std::size_t ordinal) {
         "ampere",
         ampere_runtime,
         sz_levenshtein_distances_ampere,
-        sz_overlap_scores_ampere,
+        sz_ngrams_overlaps_ampere,
+        sz_ngrams_sketches_ampere,
         sz_substrings_contains_ampere,
         sz_substrings_counts_ampere,
         sz_substrings_find_ampere,
@@ -119,7 +121,7 @@ void test_cross_cuda(std::size_t ordinal) {
     };
     capability_gate_t const ampere_gate(sz_cap_ampere_k, runtime.capabilities);
     check_device_levenshtein_(ampere_gate, ampere);
-    check_device_overlap_(ampere_gate, ampere);
+    check_device_ngrams_(ampere_gate, ampere);
     check_device_substrings_(ampere_gate, ampere);
     check_device_regex_(ampere_gate, ampere);
     check_device_subdocuments_(ampere_gate, ampere);
@@ -131,7 +133,8 @@ void test_cross_cuda(std::size_t ordinal) {
         "hopper",
         hopper_runtime,
         sz_levenshtein_distances_cuda,
-        sz_overlap_scores_cuda,
+        sz_ngrams_overlaps_cuda,
+        sz_ngrams_sketches_cuda,
         sz_substrings_contains_hopper,
         sz_substrings_counts_hopper,
         sz_substrings_find_hopper,
@@ -162,7 +165,8 @@ void test_cross_cuda(std::size_t ordinal) {
         "blackwell",
         blackwell_runtime,
         sz_levenshtein_distances_blackwell,
-        sz_overlap_scores_blackwell,
+        sz_ngrams_overlaps_blackwell,
+        sz_ngrams_sketches_blackwell,
         sz_substrings_contains_cuda,
         sz_substrings_counts_cuda,
         sz_substrings_find_cuda,
@@ -183,7 +187,7 @@ void test_cross_cuda(std::size_t ordinal) {
     };
     capability_gate_t const blackwell_gate(sz_cap_blackwell_k, runtime.capabilities);
     check_device_levenshtein_(blackwell_gate, blackwell);
-    check_device_overlap_(blackwell_gate, blackwell);
+    check_device_ngrams_(blackwell_gate, blackwell);
 #endif
     test_cross_dispatch_device(runtime, gpu_best<sz_sha256_multistate_update_best>(runtime.capabilities),
                                gpu_best<sz_sha256_multistate_digest_best>(runtime.capabilities));

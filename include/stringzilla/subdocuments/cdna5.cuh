@@ -174,7 +174,7 @@ static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_
                                    sz_lanes_below_rocm_,
                                    sz_shuffle_index_rocm_,
                                    sz_shuffle_up_rocm_,
-                                   sz_u32_lanes_prefix_sum_cdna5_,
+                                   sz_u32_lanes_prefix_sum_cdna5,
                                    sz_i32_lanes_prefix_min_cdna5_,
                                    sz_u64_lanes_sum_cdna5_,
                                    sz_group_sync_rocm_};

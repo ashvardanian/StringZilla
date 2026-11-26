@@ -15,5 +15,5 @@
 #include "stringzilla/find/skylake.h"
 #include "stringzilla/sort/skylake.h"
 #include "stringzilla/levenshtein/skylake.h"
-#include "stringzilla/overlap/skylake.h"
+#include "stringzilla/ngrams/skylake.h"
 #include "stringzilla/utf8_norm/skylake.h"

@@ -186,7 +186,7 @@ void test_find_kernel_unit() {
         sz_utf8_uncased_fold_find_kernel,
         sz_utf8_uncased_find_kernel,
         sz_levenshtein_find_kernel,
-        sz_overlap_find_kernel,
+        sz_ngrams_find_kernel,
         sz_substrings_find_kernel,
         sz_regex_find_kernel,
         sz_subdocuments_find_kernel,
@@ -282,9 +282,9 @@ int main(int argc, char **argv) {
     run_test_case("test_levenshtein_unit", test_levenshtein_unit);
     run_test_case("test_levenshtein_all", test_levenshtein_all);
     run_test_case("test_levenshtein_safety", test_levenshtein_safety);
-    run_test_case("test_overlap_unit", test_overlap_unit);
-    run_test_case("test_overlap_all", test_overlap_all);
-    run_test_case("test_overlap_safety", test_overlap_safety);
+    run_test_case("test_ngrams_unit", test_ngrams_unit);
+    run_test_case("test_ngrams_all", test_ngrams_all);
+    run_test_case("test_ngrams_safety", test_ngrams_safety);
     run_test_case("test_substrings_unit", test_substrings_unit);
     run_test_case("test_substrings_all", test_substrings_all);
     run_test_case("test_substrings_safety", test_substrings_safety);
