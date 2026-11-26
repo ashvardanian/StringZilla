@@ -281,6 +281,9 @@ Pass a writable, C-contiguous byte buffer as `out` to write into caller-owned st
 It must hold at least the selected input length; extra bytes remain untouched.
 Exact aliasing is supported, but partial overlap and combining `out` with `inplace=True` raise `ValueError`.
 
+The module-level `translate` can also write between matching 2-D or 3-D byte memoryviews with packed rows
+and positive row strides. This form maps the entire source into `out` and leaves row padding untouched.
+
 ```python
 import stringzilla as sz
 
