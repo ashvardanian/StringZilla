@@ -4644,8 +4644,9 @@ check_generations_split_into_tiers() {
 
 # Rejects a capability's GPU entry point, a function named for a GPU capability, under its vendor's guard alone, because
 # a device keeps every kernel a unit defines, so one under its vendor ships in every unit including its header; it sits
-# under its capability's target. Runtime services, which every unit of the vendor shares, are exempt. The kernels and
-# tables themselves are `check_gpu_kernels_under_their_own_target`'s.
+# under its capability's target. Runtime services, which every unit of the vendor shares, and `STRINGZILLA_DEVICE`
+# building blocks, which a device never emits uncalled, are exempt. The kernels and tables themselves are
+# `check_gpu_kernels_under_their_own_target`'s.
 check_gpu_entry_points_under_targets() {
     local gpu_capabilities misguarded
     gpu_capabilities=$(printf '%s\n' "$capability_architectures" |
@@ -4669,7 +4670,7 @@ check_gpu_entry_points_under_targets() {
         text ~ /^[[:space:]]*#[[:space:]]*if/ { guard[++depth] = condition(text); next }
         text ~ /^[[:space:]]*#[[:space:]]*el(if|se)/ { guard[depth] = "#else of " guard[depth]; next }
         text ~ /^[[:space:]]*#[[:space:]]*endif/ { --depth; next }
-        depth > 0 && match(text, /^(STRINGZILLA_[A-Z_]+|static|inline)[[:space:]][^(=;]*[^A-Za-z0-9_]sz_[a-z0-9_]+[[:space:]]*\(/) {
+        depth > 0 && text !~ /^STRINGZILLA_DEVICE[[:space:]]/ && match(text, /^(STRINGZILLA_[A-Z_]+|static|inline)[[:space:]][^(=;]*[^A-Za-z0-9_]sz_[a-z0-9_]+[[:space:]]*\(/) {
             name = substr(text, RSTART, RLENGTH); sub(/[[:space:]]*\($/, "", name); sub(/.*[^a-z0-9_]/, "", name)
             if (name ~ /allocator|memory_|stream_|sequence_realloc|count_devices|capabilities_/) next
             if (name ~ "_(" ENVIRON["gpu_capabilities"] ")$" && innermost() ~ /STRINGZILLA_ARCH_(CUDA|ROCM|METAL)_/)
