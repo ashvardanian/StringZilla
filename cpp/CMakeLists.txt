@@ -9,3 +9,11 @@ target_include_directories(
 )
 target_link_libraries(stringzilla_cpp INTERFACE stringzilla::abi stringzilla::static)
 target_compile_features(stringzilla_cpp INTERFACE cxx_std_20)
+
+# The smoke test of the SDK, against the compiled kernels a `stringzilla::cpp` consumer links, never the header-only
+# engine.
+if (STRINGZILLA_BUILD_TEST)
+    add_executable(stringzilla_test_cpp test.cpp)
+    target_link_libraries(stringzilla_test_cpp PRIVATE stringzilla::cpp stringzilla_warnings)
+    add_test(NAME stringzilla_test_cpp COMMAND stringzilla_test_cpp)
+endif ()
