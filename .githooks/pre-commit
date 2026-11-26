@@ -56,6 +56,10 @@ std_collections_baseline_paths=''
 # Uppercase non-cache CMake names this project publishes, and the third-party and toolchain inputs it sets.
 cmake_published_variables=''
 cmake_third_party_variables='WASI_SDK_PREFIX BUILD_TYPE'
+# The approved code-generation macro families are .clang-format's `StatementMacros`, from the staged copy so a
+# commit approving a family carries it, else from the copy beside this hook, as the selftest's fixtures have none.
+approved_codegen_macros=$({ git show :.clang-format 2>/dev/null || cat "$(dirname "$0")/../.clang-format"; } |
+    awk '/^StatementMacros:/ { listed = 1; next } /^[^ ]/ { listed = 0 } listed { sub(/^ *- */, ""); print }')
 codegen_macro_prefix=''
 # Its macro prefix, the headers that alone read the operating-system predefines, and the predefines beyond
 # the operating systems that its identity also answers.
@@ -67,6 +71,9 @@ platform_predefines_refused=''
 minmax_helpers="min_of or max_of from types.hpp"
 # The one header whose helpers may call the device bit intrinsics, empty where the project has no device code.
 device_bit_helpers_path="include/stringzilla/types.cuh"
+# The libraries this one builds on, as an alternation of their macro prefixes, whose `_ARCH_` flags and GPU
+# generation targets belong to their own builds.
+library_macro_prefixes=''
 # What a rejected owning container or string gives way to here.
 owning_replacements="the caller's buffer or allocator"
 # The short namespace alias a harness may declare, beside the full namespace and the include prefix.
@@ -3187,6 +3194,31 @@ check_editor_settings_sorted() {
         "            sort them case-insensitively"
 }
 
+# Rejects `zig fmt` drift on staged Zig files, because `zig fmt` is the law; it reads the staged blobs, not
+# the working tree another edit may be changing, and skips without zig.
+check_zig_fmt_clean() {
+    command -v zig > /dev/null 2>&1 || return 0
+    local drifted_zig_paths=()
+    while IFS= read -r -d '' zig_path; do
+        git show ":$zig_path" | zig fmt --stdin --check > /dev/null 2>&1 || drifted_zig_paths+=("$zig_path")
+    done < <(git diff --cached --name-only -z --find-renames --diff-filter=ACMR -- '*.zig')
+    [ ${#drifted_zig_paths[@]} -gt 0 ] || return 0
+    reject_with_reason "" "staged Zig changes are not zig-fmt clean;" "            run: zig fmt ${drifted_zig_paths[*]}"
+}
+
+# Rejects `mojo format` drift on a staged Mojo file; `mojo format` has no check mode, so a copy is formatted
+# and compared at 120 columns. It skips without mojo.
+check_mojo_format_clean() {
+    command -v mojo > /dev/null 2>&1 || return 0
+    local formatted_directory formatted_copy
+    formatted_directory=$(mktemp -d) && formatted_copy="$formatted_directory/copy.mojo"
+    printf '%s\n' "$staged_file_text" > "$formatted_copy"
+    mojo format -q -l 120 "$formatted_copy" > /dev/null 2>&1
+    printf '%s\n' "$staged_file_text" | diff -q - "$formatted_copy" > /dev/null 2>&1 ||
+        reject_with_reason "" "$staged_path is not mojo-format clean;" "            run: mojo format -l 120 $staged_path"
+    rm -rf "$formatted_directory"
+}
+
 # endregion Formatters
 
 # region All Files
@@ -3312,6 +3344,78 @@ check_cmake_string_surgery() {
     [ -z "$surgery" ] || reject_with_reason "$surgery" \
         "$staged_path derives a name or flag by editing a string or a list; spell each one out at its call and pass it as" \
         "            an argument, under a keyword where several kinds travel together:"
+}
+
+# Rejects another library's `_ARCH_` flag, which says what compiles inside that library's own build; a
+# project reads the libraries' public `_TARGET_` switches and names its GPU class through
+# `${macro_prefix}_TARGET_<VENDOR>_<CLASS>`. `library_macro_prefixes` lists the libraries this one builds on.
+check_library_arch_flags_unnamed() {
+    [ -n "$library_macro_prefixes" ] || return 0
+    local named
+    named=$(printf '%s\n' "$staged_added_text" | grep -E "^\+.*($library_macro_prefixes)_ARCH_[A-Z0-9_]+" || true)
+    [ -z "$named" ] || reject_with_reason "$named" \
+        "$staged_path names another library's _ARCH_ flag, which only that library's own build may read;" \
+        "            test its public _TARGET_ switch, or ${macro_prefix}_TARGET_<VENDOR>_<CLASS> for a GPU class:"
+}
+
+# Rejects a CMake line raising another library's GPU generation target, because a class unit lowers the
+# library's floor target and names its own class through its project's `_TARGET_<VENDOR>_<CLASS>` switch.
+check_library_gpu_targets_unset() {
+    [ -n "$library_macro_prefixes" ] || return 0
+    local raised
+    raised=$(printf '%s\n' "$staged_added_text" | grep -vE '^\+?[[:space:]]*#' |
+        grep -E "($library_macro_prefixes)_TARGET_(AMPERE|ADA|HOPPER|BLACKWELL[A-Z]*|CDNA[0-9])=1" || true)
+    [ -z "$raised" ] || reject_with_reason "$raised" \
+        "$staged_path sets a library GPU generation target; class units write the floor target to 0 and name" \
+        "            their class with ${macro_prefix}_TARGET_<VENDOR>_<CLASS>:"
+}
+
+# A sibling's CMake pin, its submodule's gitlink and its Cargo git `rev` name the same commit, or a
+# recursive clone, a plain one and a crate build different code; a Cargo git dependency without a `rev`
+# follows the branch tip and drifts on its own. Every side is read from the index, so the comparison is
+# against what this commit records. Projects without `cmake/<prefix>_siblings.cmake` pin nothing.
+check_sibling_pins_agree() {
+    local pins=cmake/${project_include_prefix}_siblings.cmake pinned sibling pin recorded drifts=""
+    git diff --cached --quiet -- "$pins" Cargo.toml numkong stringzilla forkunion smashtable 2> /dev/null && return 0
+    pinned=$(git show ":$pins" 2> /dev/null | "$fastest_awk" -v call="${project_include_prefix}_sibling(" '
+        index($0, call) { inside = 1; record = ""; sub(/.*_sibling\(/, "") }
+        inside { record = record " " $0 }
+        inside && /\)/ {
+            sub(/\).*/, "", record)
+            count = split(record, fields, /[ \t]+/)
+            name = ""; pin = ""
+            for (field = 1; field <= count; ++field) {
+                if (fields[field] == "") continue
+                if (name == "") name = fields[field]
+                if (fields[field] ~ /^[0-9a-f]+$/ && length(fields[field]) == 40) pin = fields[field]
+            }
+            if (name != "" && pin != "") print name, pin
+            inside = 0
+        }')
+    [ -n "$pinned" ] || return 0
+    while read -r sibling pin; do
+        recorded=$(git ls-files --stage -- "$sibling" | "$fastest_awk" '$1 == "160000" { print $2 }')
+        [ -z "$recorded" ] || [ "$recorded" = "$pin" ] ||
+            drifts="$drifts$sibling: $pins says ${pin:0:12}, the submodule records ${recorded:0:12}"$'\n'
+    done <<< "$pinned"
+    drifts=$drifts$(git show :Cargo.toml 2> /dev/null | "$fastest_awk" -v pinned="$pinned" -v pins="$pins" '
+        BEGIN {
+            count = split(pinned, lines, "\n")
+            for (line = 1; line <= count; ++line) { split(lines[line], fields, " "); pin[fields[1]] = fields[2] }
+        }
+        match($0, /git[[:space:]]*=[[:space:]]*"[^"]*"/) {
+            name = substr($0, RSTART, RLENGTH); sub(/"$/, "", name); sub(/\.git$/, "", name); sub(/.*\//, "", name)
+            name = tolower(name)
+            if (!(name in pin)) next
+            if (!match($0, /rev[[:space:]]*=[[:space:]]*"[0-9a-f]+"/)) {
+                printf "%s: Cargo.toml takes it from git without a rev, %s says %s\n", name, pins, substr(pin[name], 1, 12)
+                next
+            }
+            rev = substr($0, RSTART, RLENGTH); sub(/^[^"]*"/, "", rev); sub(/"$/, "", rev)
+            if (rev != pin[name]) printf "%s: %s says %s, Cargo.toml says %s\n", name, pins, substr(pin[name], 1, 12), substr(rev, 1, 12)
+        }')
+    [ -z "$drifts" ] || reject_with_reason "${drifts%$'\n'}" \
+        "the sibling pins disagree; give the CMake pin, the submodule and the Cargo \`rev\` the same commit:"
 }
 
 # endregion Shared Builds
@@ -3972,13 +4076,49 @@ check_aliases_below_includes() {
         "$staged_path declares an alias above its last #include; move it below the includes, so no header reads it:"
 }
 
+# Rejects a file that includes a library's SDK umbrella `<X/X.hpp>` beside its native umbrella `<X.hpp>`, for this
+# project and every sibling, and a file under `include/` that includes a header resolving under `cpp/`, because
+# the SDK sits on the C ABI over the native engine and one file reads one of those layers; a `.h` header is
+# that ABI, so it is free everywhere.
+check_umbrella_mix_absent() {
+    local mixed
+    mixed=$(export umbrella_libraries="^($project_include_prefix|$sibling_projects)\$" umbrella_file="$staged_path"
+        scan_staged_file_marking_added_lines '
+        BEGIN { libraries = ENVIRON["umbrella_libraries"]; file = ENVIRON["umbrella_file"] }
+        /^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"]/ {
+            header = $0; quoted = ($0 ~ /include[[:space:]]*"/)
+            sub(/^[^<"]*[<"]/, "", header); sub(/[>"].*$/, "", header)
+            if (header !~ /\.hpp$/) next
+            library = header; sub(/\.hpp$/, "", library)
+            if (library ~ libraries) { native[library] = FNR; native_text[library] = $0 }
+            else if (split(library, parts, "/") == 2 && parts[1] == parts[2] && parts[1] ~ libraries) {
+                sdk[parts[1]] = FNR; sdk_text[parts[1]] = $0
+            }
+            if (file !~ /^include\// || !(FNR in added)) next
+            beside = file; sub(/[^\/]*$/, "", beside); beside = beside header
+            while (sub(/[^\/.][^\/]*\/\.\.\//, "", beside)) {}
+            if (quoted && !system("git cat-file -e \":" beside "\" 2> /dev/null")) { if (beside ~ /^cpp\//) printf "line %d: %s\n", FNR, $0 }
+            else if (system("git cat-file -e \":include/" header "\" 2> /dev/null") && system("git cat-file -e \":c/" header "\" 2> /dev/null") &&
+                     !system("git cat-file -e \":cpp/" header "\" 2> /dev/null")) printf "line %d: %s\n", FNR, $0
+        }
+        END {
+            for (library in sdk)
+                if ((library in native) && ((sdk[library] in added) || (native[library] in added)))
+                    printf "line %d: %s\nline %d: %s\n", native[library], native_text[library], sdk[library], sdk_text[library]
+        }' "$staged_code_path")
+    [ -z "$mixed" ] || reject_with_reason "$mixed" \
+        "$staged_path mixes a library's SDK umbrella with its native one, or reaches from include/ into cpp/;" \
+        "            include either <X/X.hpp> or <X.hpp>, and keep include/ on include/ and the C headers:"
+}
+
 # Routes one staged file through the gates when it sits in a gated directory, and every C and C++ source
-# through the pointer-reference and alias-placement checks.
+# through the pointer-reference, alias-placement and umbrella checks.
 run_gate_checks() {
     case "$staged_path" in
     *.h | *.hpp | *.c | *.cpp | *.cc | *.cu | *.cuh | *.hip | *.metal)
         check_pointer_references
         check_aliases_below_includes
+        check_umbrella_mix_absent
         ;;
     esac
     in_gated_sources || return 0
@@ -3996,7 +4136,7 @@ run_gate_checks() {
 # Whether @p 1 is written in a language with C comments, which the comment blanking and the shared C checks read.
 speaks_c_comments() {
     case "$1" in
-    *.c | *.h | *.hpp | *.cpp | *.cc | *.cu | *.cuh | *.hip | *.metal) return 0 ;;
+    *.c | *.h | *.hpp | *.cpp | *.cc | *.cu | *.cuh | *.hip | *.metal | *.pml) return 0 ;;
     esac
     return 1
 }
@@ -4126,7 +4266,8 @@ run_shared_checks() {
     case "$staged_path" in
     c/* | cpp/* | include/* | src/* | python/* | javascript/* | swift/* | golang/* | java/* | csharp/*)
         case "$staged_path" in
-        *.c | *.h | *.cpp | *.hpp | *.cu | *.cuh | *.hip | *.cc | *.cxx)
+        c/test.c | src_stub/test.c | cpp/test.cpp) ;;
+        *.c | *.h | *.cpp | *.hpp | *.cu | *.cuh | *.hip | *.cc | *.cxx | *.mm)
             check_filesystem_in_harnesses_only
             check_std_collections_absent
             ;;
@@ -4139,7 +4280,11 @@ run_shared_checks() {
         ;;
     esac
     case "$staged_path" in
-    CMakeLists.txt | */CMakeLists.txt | *.cmake) check_cmake_string_surgery ;;
+    *.c | *.h | *.hpp | *.cpp | *.cc | *.cu | *.cuh | *.hip | *.metal) check_library_arch_flags_unnamed ;;
+    CMakeLists.txt | */CMakeLists.txt | *.cmake)
+        check_cmake_string_surgery
+        check_library_gpu_targets_unset
+        ;;
     esac
     run_harness_checks
     run_gate_checks
@@ -4150,8 +4295,8 @@ run_shared_checks() {
     test/*.hpp | test/*.cuh | test/*.h | bench/*.hpp | bench/*.cuh | bench/*.h) check_harness_namespace_matches_directory ;;
     esac
     case "$staged_path" in
-    *.hpp | *.h | *.c | *.cpp | *.cc | *.cu | *.cuh | *.hip | *.metal | *.rs | *.go | *.swift | *.ts | *.mts | *.js | \
-        *.mjs | *.cjs | *.py | *.pyi | *.md)
+    *.hpp | *.h | *.c | *.cpp | *.cc | *.cu | *.cuh | *.hip | *.metal | *.pml | *.rs | *.go | *.swift | *.zig | *.mojo | *.ts | *.mts | \
+        *.js | *.mjs | *.cjs | *.py | *.pyi | *.md)
         check_ascii_arrows
         check_backward_references
         check_sibling_justification
@@ -4162,7 +4307,7 @@ run_shared_checks() {
         ;;
     esac
     case "$staged_path" in
-    *.rs | *.go | *.swift | *.ts | *.mts | *.js | *.mjs | *.cjs | *.py | *.pyi | python/*.c)
+    *.rs | *.go | *.swift | *.zig | *.mojo | *.ts | *.mts | *.js | *.mjs | *.cjs | *.py | *.pyi | python/*.c)
         check_binding_prose_width
         check_binding_fences_name_language
         check_binding_prose_filled
@@ -4216,8 +4361,8 @@ run_shared_checks() {
     .vscode/settings.json | .vscode/extensions.json | .zed/settings.json) check_editor_settings_sorted ;;
     esac
     case "$staged_path" in
-    *.c | *.h | *.hpp | *.cpp | *.cc | *.cu | *.cuh | *.hip | *.metal | *.py | *.pyi | *.rs | *.go | *.swift | *.js | \
-        *.mjs | *.cjs | *.ts | *.mts | *.java | *.cs | *.sh | *.cmake | CMakeLists.txt)
+    *.c | *.h | *.hpp | *.cpp | *.cc | *.cu | *.cuh | *.hip | *.metal | *.pml | *.py | *.pyi | *.rs | *.go | *.swift | *.zig | \
+        *.mojo | *.js | *.mjs | *.cjs | *.ts | *.mts | *.java | *.kt | *.cs | *.sh | *.cmake | CMakeLists.txt)
         check_tables_aligned_not_piped
         ;;
     esac
@@ -4232,6 +4377,7 @@ run_shared_formatters() {
     *.c | *.h | *.cc | *.cpp | *.hpp | *.cu | *.cuh | *.hip | *.metal) check_clang_format_on_changed_lines ;;
     CMakeLists.txt | *.cmake) check_cmake_format_clean ;;
     *.go) check_gofmt_clean ;;
+    *.mojo) check_mojo_format_clean ;;
     *.py)
         check_ruff_format_on_added_lines
         check_ruff_lint_on_added_lines
@@ -4244,7 +4390,9 @@ run_tree_checks() {
     check_rustfmt_clean
     check_taplo_clean
     check_swift_format_clean
+    check_zig_fmt_clean
     check_dprint_clean
+    check_sibling_pins_agree
 }
 
 # endregion Shared Dispatch

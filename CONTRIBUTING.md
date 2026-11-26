@@ -40,6 +40,8 @@ csharp/                        C# bindings
 cmake/                         ISA probe modules, package config templates, and cross-compilation toolchain files
 ```
 
+A file never includes both a library's SDK umbrella `<X/X.hpp>` and its native umbrella `<X.hpp>`, for this library and every sibling, and nothing under `include/` includes a header that resolves under `cpp/`; C headers are the ABI every SDK sits on, so they are free everywhere. `.githooks/pre-commit` refuses both.
+
 For minimal test coverage, check the following scripts:
 
 - `test/main_cpu.cpp` - runs the family suites over the dispatch points and the C++ wrappers, and `test/cross_<arch>.cpp` hold every capability's kernels to the serial ones, built as `stringzilla_test`, `stringzilla_shared_test` and `stringzilla_cpu_header_test`.
