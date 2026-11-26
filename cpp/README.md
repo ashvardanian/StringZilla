@@ -272,7 +272,7 @@ int main() {
 
 ## Hashing and Checksums
 
-In C++, hashing is exposed as methods — `view.hash(seed = 0)`, `view.bytesum()`, and `view.hash_multiseed(seeds, hashes)` — and as the function object `sz::hash{}` together with `sz::equal_to{}`, which are convenient as template arguments for `std::unordered_map`/`std::unordered_set`.
+In C++, hashing is exposed as methods — `view.hash(seed = 0)`, `view.bytesum()`, and `view.hash_multiseed(seeds, hashes)` — and as the function object `sz::hash_t{}` together with `sz::equal_to_t{}`, which are convenient as template arguments for `std::unordered_map`/`std::unordered_set`.
 `sz::fill_random(slice, nonce)` fills a mutable span with reproducible noise.
 
 ```cpp
@@ -284,7 +284,7 @@ namespace sz = ashvardanian::stringzilla;
 
 int main() {
     // Drop the SIMD hash and equality into the STL containers as template arguments.
-    std::unordered_map<std::string, int, sz::hash, sz::equal_to> counts;
+    std::unordered_map<std::string, int, sz::hash_t, sz::equal_to_t> counts;
     for (char const *word : {"apple", "banana", "apple"}) counts[word] += 1;
     assert(counts["apple"] == 2);
     assert(counts.size() == 2);

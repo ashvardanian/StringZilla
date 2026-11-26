@@ -1309,7 +1309,7 @@ void test_stl_containers_unit() {
 
     // Equal-valued keys assembled from different storage must hash alike and compare equal,
     // so the second insertion collapses onto the first instead of adding a bucket.
-    std::unordered_map<sz::string_t, int, sz::hash, sz::equal_to> words_sz;
+    std::unordered_map<sz::string_t, int, sz::hash_t, sz::equal_to_t> words_sz;
     words_sz.emplace(owned_("banana"), 7);
     sz::string_t grown_sz = owned_("bana");
     expect_true(sz::succeeded(grown_sz.append("na")));
@@ -1321,16 +1321,16 @@ void test_stl_containers_unit() {
     expect_equal(words_sz.size(), 1);
     expect_equal(words_sz.find("bananas"), words_sz.end());
 
-    // The same, but with `std::string` keys routed through `sz::hash` and `sz::equal_to`.
-    std::unordered_map<std::string, int, sz::hash, sz::equal_to> words_stl;
+    // The same, but with `std::string` keys routed through `sz::hash_t` and `sz::equal_to_t`.
+    std::unordered_map<std::string, int, sz::hash_t, sz::equal_to_t> words_stl;
     std::string const heap_key(200, 'x'); // Long enough to escape any small-string buffer
     std::string grown_stl;
     for (int repetition = 0; repetition < 200; ++repetition) grown_stl.push_back('x');
     words_stl.emplace(heap_key, 7);
-    expect_equal(sz::hash {}(heap_key), sz::hash {}(grown_stl),
-                 "sz::hash disagreed for equal-content strings built via different construction paths");
-    expect_true(sz::equal_to {}(heap_key, grown_stl));
-    expect_equal(sz::equal_to {}(heap_key, "x"), false);
+    expect_equal(sz::hash_t {}(heap_key), sz::hash_t {}(grown_stl),
+                 "sz::hash_t disagreed for equal-content strings built via different construction paths");
+    expect_true(sz::equal_to_t {}(heap_key, grown_stl));
+    expect_equal(sz::equal_to_t {}(heap_key, "x"), false);
     expect_true(words_stl.find(grown_stl) != words_stl.end());
     expect_equal(words_stl.emplace(grown_stl, 9).second, false);
     expect_equal(words_stl.at(grown_stl), 7);
@@ -1340,7 +1340,7 @@ void test_stl_containers_unit() {
     // Empty keys are valid, and order before everything else.
     expect_true(sz::less {}("", "a"));
     expect_equal(sz::less {}("a", ""), false);
-    expect_true(sz::equal_to {}("", ""));
+    expect_true(sz::equal_to_t {}("", ""));
     sorted_words_sz.emplace(owned_(""), -1);
     expect_equal(sorted_words_sz.begin()->first, "");
     words_stl.emplace("", -1);

@@ -4695,13 +4695,13 @@ struct less {
  *
  *  Similar to <tt>std::equal_to&lt;std::string_view&gt;</tt>, but doesn't require including the heavy
  *  <tt>&lt;functional&gt;</tt> header. Can be used to combine STL classes with StringZilla logic, like:
- *  <tt>std::unordered_map&lt;std::string, int, sz::hash, sz::equal_to&gt;</tt>.
+ *  <tt>std::unordered_map&lt;std::string, int, sz::hash_t, sz::equal_to_t&gt;</tt>.
  *
  *  @see std::equal_to: https://en.cppreference.com/w/cpp/utility/functional/equal_to
  */
-struct equal_to {
+struct equal_to_t {
 
-    /** Lets hashed containers find owning keys by views, beside a transparent @ref hash. */
+    /** Lets hashed containers find owning keys by views, beside a transparent @ref hash_t. */
     using is_transparent = void;
     inline bool operator()(string_view_t a, string_view_t b) const noexcept { return a == b; }
 };
@@ -4711,15 +4711,20 @@ struct equal_to {
  *
  *  Similar to <tt>std::hash&lt;std::string_view&gt;</tt>, but doesn't require including the heavy <tt>&lt;functional&gt;</tt>
  *  header. Can be used to combine STL classes with StringZilla logic, like:
- *  <tt>std::unordered_map&lt;std::string, int, sz::hash, sz::equal_to&gt;</tt>.
+ *  <tt>std::unordered_map&lt;std::string, int, sz::hash_t, sz::equal_to_t&gt;</tt>.
  *
  *  @see std::hash: https://en.cppreference.com/w/cpp/utility/functional/hash
  */
-struct hash {
+struct hash_t {
 
-    /** Lets hashed containers find owning keys by views, beside a transparent @ref equal_to. */
+    /** Lets hashed containers find owning keys by views, beside a transparent @ref equal_to_t. */
     using is_transparent = void;
-    inline std::size_t operator()(string_view_t str) const noexcept { return str.hash(); }
+
+    /** Hashes @p text with seed zero through @c sz_hash_best, as @c text.hash() does. */
+    std::size_t operator()(string_view_t text) const noexcept {
+        return static_cast<std::size_t>(
+            best_result_<sz_hash_best, sz_hash_serial, sz_u64_t>(text.data(), text.size(), sz_u64_t {0}));
+    }
 };
 
 /** SFINAE-type used to infer the resulting type of concatenating multiple string together. */

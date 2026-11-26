@@ -90,7 +90,7 @@ static void test_string_hash() noexcept {
         expect_true(sz_hash_best(view.data(), view.size(), seed, &serial, sz_cap_serial_k, nullptr) == sz_success_k);
         expect_true(view.hash(seed) == serial);
     }
-    expect_true(text.hash() == view.hash() && sz::hash {}(view) == view.hash());
+    expect_true(text.hash() == view.hash() && sz::hash_t {}(view) == view.hash());
     expect_true(view.hash(0) != view.hash(42));
 }
 

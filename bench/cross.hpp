@@ -1489,7 +1489,7 @@ struct less_from_sz {
 /**
  *  @brief Helper function-like object comparing string-view convertible objects with StringZilla.
  *  @see Similar to `std::equal_to<std::string_view>`: https://en.cppreference.com/w/cpp/utility/functional/equal_to
- *  @note Unlike the @c sz::equal_to, the structure below supports different hardware backends.
+ *  @note Unlike the @c sz::equal_to_t, the structure below supports different hardware backends.
  */
 template <sz_kernel_equal_t equal_>
 struct equal_to_from_sz {
@@ -1504,7 +1504,7 @@ struct equal_to_from_sz {
 /**
  *  @brief Helper function-like object to hash string-view convertible objects with StringZilla.
  *  @see Similar to @c std::hash: https://en.cppreference.com/w/cpp/utility/functional/hash
- *  @note Unlike the @c sz::hash, the structure below supports different hardware backends.
+ *  @note Unlike the @c sz::hash_t, the structure below supports different hardware backends.
  */
 template <sz_kernel_hash_t hash_>
 struct hasher_from_sz {
