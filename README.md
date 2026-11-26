@@ -25,7 +25,7 @@ Reach for it from your language of choice:
 
 - 🐂 __[C](#c--c):__ Upgrade LibC's `<string.h>` to `<stringzilla/stringzilla.h>` in C 99
 - 🐉 __[C++](#c--c):__ Upgrade STL's `<string>` to `<stringzilla/stringzilla.hpp>` in C++ 20
-- 🧮 __[CUDA](https://github.com/ashvardanian/StringZilla/blob/main/include/stringzilla/README.md):__ Score batches on a device with engines built for its capabilities in CUDA C++ 20
+- 🧮 __[CUDA](https://github.com/ashvardanian/StringZilla/blob/main/c/README.md#engines--devices):__ Score batches on a device with engines built for its capabilities in CUDA C++ 20
 - 🐍 __[Python](#python):__ Upgrade your `str` to faster `String`
 - 🦀 __[Rust](#rust):__ Use the `StringZilla` traits crate
 - 🦫 __[Go](#go):__ Use the `StringZilla` cGo module
@@ -115,21 +115,7 @@ The Python package upgrades `str` and `bytes` with SIMD search, sorting, hashing
 
 ### C & C++
 
-Link `stringzilla::static` through CMake `FetchContent`, or `find_package(stringzilla)` an installed build, or go header-only in C &centerdot; guide: [`include/stringzilla/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/include/stringzilla/README.md)
-
-```c
-#include <stringzilla/stringzilla.h>
-sz_capability_t capabilities = sz_cap_serial_k;
-sz_capabilities_enabled_cpu(&capabilities); // what this CPU runs and this binary holds
-sz_cptr_t match = NULL;
-sz_find_best(haystack, h_length, "brown", 5, &match, capabilities, NULL); // pointer to the match, or NULL
-```
-
-```cpp
-#include <stringzilla/stringzilla.hpp>
-namespace sz = ashvardanian::stringzilla;
-sz::string_view_t("the quick brown fox").find("brown"); // 10
-```
+Link `stringzilla::static` from C or `stringzilla::cpp` from C++ through CMake `FetchContent`, or `find_package(stringzilla)` an installed build, or go header-only in C &centerdot; guides: [`c/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/c/README.md) and [`cpp/README.md`](https://github.com/ashvardanian/StringZilla/blob/main/cpp/README.md)
 
 The library covers search, hashing, sorting, comparison, set intersection, collection conversions like escaping, normalization and Arrow-compatible tapes, and lazy UTF-8 segmentation, plus the engines for edit distances, window overlap, and multi-pattern search, each with a host arm, a CUDA and ROCm one, and a Metal one.
 
