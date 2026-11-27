@@ -175,24 +175,23 @@ impl SubdocumentsEngine {
     /// Queues on the stream of `scope` the count of every document's nodes that some path selects,
     /// once per path, one count per document.
     ///
-    /// `counts` receives document `d` at `counts[d * counts_stride]`, the stride counting entries
-    /// rather than bytes and being at least one. A malformed document fails the call, and
-    /// `malformed_index` then names the first one once the scope joins.
+    /// `counts` holds one entry per document, refused with [`Status::UnexpectedDimensions`]
+    /// otherwise. A malformed document fails the call, and `malformed_index` then names the first
+    /// one once the scope joins.
     pub fn counts<'scope>(
         &'scope mut self,
         scope: &'scope Scope<'scope, '_>,
         documents: StringsView<'scope>,
-        counts: &'scope mut [usize],
-        counts_stride: usize,
+        counts: &'scope mut VectorSpan<'_, usize>,
         malformed_index: &'scope mut usize,
     ) -> Result<(), Status> {
         let stream = scope.stream_for(self.capability)?;
-        strided_column_check(documents.len(), counts.len(), counts_stride)?;
-        let output = counts.as_mut_ptr();
-        unsafe {
-            sz_subdocuments_counts(self, &documents.view, output, counts_stride, malformed_index, stream.as_raw())
+        if counts.dims() != documents.len() {
+            return Err(Status::UnexpectedDimensions);
         }
-        .check()
+        let (output, stride) = (counts.as_mut_ptr(), counts.stride_bytes() as usize);
+        unsafe { sz_subdocuments_counts(self, &documents.view, output, stride, malformed_index, stream.as_raw()) }
+            .check()
     }
 
     /// Queues on the stream of `scope` a report of every node of every document that some path

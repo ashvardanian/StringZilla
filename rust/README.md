@@ -7,7 +7,7 @@ It exposes its functions, traits, and engines directly at the crate root, coveri
 - __batch engines__ — Levenshtein distances, N-gram overlaps and MinHash sketches, and multi-pattern substring search, each a stateful cross-product engine prepared once from a batch of queries and reused across every later round.
 
 The crate is `no_std`-friendly and SIMD-accelerated; most of the single-string surface is exposed both as free functions and as ergonomic extension-trait methods on any `AsRef<[u8]>` — `&str`, `String`, `&[u8]`, `Vec<u8>`, `Cow<str>`, and more.
-The engines take slices of anything `AsRef<[u8]>` and write into caller-owned buffers at a caller-chosen stride, so a pipeline allocates once and reuses those buffers across every batch.
+The engines take slices of anything `AsRef<[u8]>` and write through spans over caller-owned buffers at caller-chosen byte strides, so a pipeline allocates once and reuses those buffers across every batch.
 
 ## Installation
 
@@ -700,43 +700,48 @@ fn new<Q: AsRef<[u8]>>(queries: &[Q], symbol: LevenshteinSymbol,
     stream: &Stream) -> Result<LevenshteinEngine, Status>;
 
 fn distances<'scope>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
-    candidates: StringsView<'scope>, bound: Option<usize>, distances: &'scope mut [usize],
-    distances_stride: usize) -> Result<(), Status>;
+    candidates: StringsView<'scope>, bound: Option<usize>,
+    distances: &'scope mut MatrixSpan<'_, usize>) -> Result<(), Status>;
 ```
 
 `LevenshteinSymbol::Bytes` counts bytes and `LevenshteinSymbol::Runes` counts UTF-8 runes, each maximal ill-formed subpart decoding to one `U+FFFD`; the two alphabets are one engine and one verb rather than two spellings.
 Costs are unit — one per substitution, insertion and deletion — and there are no gap costs and no substitution matrix.
 
-The output is a `[queries, candidates]` block the caller owns: query `q` against candidate `c` lands at `distances[q * distances_stride + c]`, the stride counting entries rather than bytes and being at least the candidate count.
-A stride wider than the candidate count is what lets one round fill a sub-block of a larger matrix.
+The output is a `[queries, candidates]` block the caller owns, a `MatrixSpan` over any slice, query `q` against candidate `c` landing at its entry `[q, c]`.
+`MatrixSpan::from_slice` lays a dense block over a slice, and `MatrixSpan::from_slice_strided` takes byte strides, so a row stride wider than the candidates is what lets one round fill a sub-block of a larger matrix.
+Both constructors prove once that the layout fits the slice, refusing it with `Status::UnexpectedDimensions` otherwise, so the verb only compares the shape.
 A `bound` of `Some(limit)` keeps a distance exact up to `limit` and reports `limit + 1` for every candidate past it, on every backend, so a round can stop early; `None` keeps every distance exact.
 
 ```rust
-use stringzilla::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, StringsView};
+use stringzilla::{Capabilities, LevenshteinEngine, LevenshteinSymbol, MatrixSpan, Stream, StringsView};
 
 let cpu = Stream::default(Capabilities::enabled_cpu());
 let mut engine = LevenshteinEngine::new(&["kitten", "saturday"], LevenshteinSymbol::Bytes, &cpu).unwrap();
 
-let mut distances = [0usize; 4];
+let mut storage = [0usize; 4];
+let mut distances = MatrixSpan::from_slice(&mut storage, [2, 2]).unwrap();
 let candidates = StringsView::from_slices(&["sitting", "sunday"]);
-cpu.scope(|scope| engine.distances(scope, candidates, None, &mut distances, 2)).unwrap();
-assert_eq!(distances[0], 3); // kitten vs sitting
-assert_eq!(distances[3], 3); // saturday vs sunday
+cpu.scope(|scope| engine.distances(scope, candidates, None, &mut distances)).unwrap();
+assert_eq!(storage, [3, 6, 6, 3]); // kitten vs sitting, saturday vs sunday
 
 // The same engine, a second round over an Arrow tape, no preparation repeated.
-let mut again = [0usize; 4];
+let mut distances = MatrixSpan::from_slice(&mut storage, [2, 2]).unwrap();
 let arrow = StringsView::from_u32_tape(b"mittenkitten", &[0, 6, 12]).unwrap();
-cpu.scope(|scope| engine.distances(scope, arrow, None, &mut again, 2)).unwrap();
-assert_eq!(again[..2], [1, 0]); // kitten vs mitten and kitten
+cpu.scope(|scope| engine.distances(scope, arrow, None, &mut distances)).unwrap();
+assert_eq!(storage[..2], [1, 0]); // kitten vs mitten and kitten
 
-// Bounded at 1, a candidate two edits away reports exactly 2.
-cpu.scope(|scope| engine.distances(scope, candidates, Some(1), &mut distances, 2)).unwrap();
-assert_eq!(distances[0], 2); // kitten vs sitting is 3, past the bound
+// Bounded at 1, into the left column of a `[2, 3]` block, a candidate two edits away reports exactly 2.
+let mut block = [0usize; 6];
+let mut distances = MatrixSpan::from_slice_strided(&mut block, [2, 1], [24, 8]).unwrap();
+let sitting = StringsView::from_slices(&["sitting"]);
+cpu.scope(|scope| engine.distances(scope, sitting, Some(1), &mut distances)).unwrap();
+assert_eq!(block, [2, 0, 0, 2, 0, 0]); // kitten vs sitting is 3, past the bound
 
 // Runes rather than bytes, for text where a codepoint is the unit.
 let mut unicode = LevenshteinEngine::new(&["café"], LevenshteinSymbol::Runes, &cpu).unwrap();
 let mut one = [0usize; 1];
-cpu.scope(|scope| unicode.distances(scope, StringsView::from_slices(&["cafe"]), None, &mut one, 1)).unwrap();
+let mut distances = MatrixSpan::from_slice(&mut one, [1, 1]).unwrap();
+cpu.scope(|scope| unicode.distances(scope, StringsView::from_slices(&["cafe"]), None, &mut distances)).unwrap();
 assert_eq!(one[0], 1);
 ```
 
@@ -751,41 +756,44 @@ fn new<Q: AsRef<[u8]>>(queries: &[Q], window_widths: &[usize], candidates_budget
     stream: &Stream) -> Result<NgramsEngine, Status>;
 
 fn overlaps<'scope>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
-    candidates: StringsView<'scope>, radius: Option<f32>, overlaps: &'scope mut [f32],
-    overlaps_query_stride: usize, overlaps_candidate_stride: usize) -> Result<(), Status>;
+    candidates: StringsView<'scope>, radius: Option<f32>,
+    shares: &'scope mut TensorSpan<'_, f32, 3>) -> Result<(), Status>;
 
 fn sketches<'scope>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
-    texts: StringsView<'scope>, sketches: &'scope mut [u8], slots: usize,
-    sketches_stride: usize) -> Result<(), Status>;
+    texts: StringsView<'scope>, sketches: &'scope mut MatrixSpan<'_, u8>) -> Result<(), Status>;
 ```
 
 Widths are in bytes and need not form a doubling chain, since a window hash comes from a prefix difference that costs one modular multiply-add at any width; a width past a text scores zero for every pair it spans.
-The output is a `[queries, candidates, widths]` block with the width axis unit-strided: share `[q, c, w]` lands at `overlaps[q * query_stride + c * candidate_stride + w]`, each in `[0, 1]`.
+The output is a `TensorSpan` of shape [queries, candidates, widths], share `[q, c, w]` landing at its entry `[q, c, w]`, each in `[0, 1]`, written by the engine itself on every backend.
 The score is asymmetric, since a candidate holding the whole query scores `1.0` however much more it holds, so swapping the two sides changes the answer.
 A `radius` of `Some(share)` is the share of the query's distinct N-grams, summed over every width, a pair may miss and still score exactly; a pair past it scores `0.0` at every width, on every backend, and `None` keeps every score exact.
 
-`sketches` writes `slots` bytes per text, so the share of unequal bytes between two texts estimates how far apart their window sets are by Jaccard index.
+`sketches` writes a `[texts, slots]` block, one row of slot bytes per text, so the share of unequal bytes between two texts estimates how far apart their window sets are by Jaccard index.
 An engine built from no queries only sketches, and sketches of different slot counts are unrelated, so only sketches of one count compare.
 
 ```rust
-use stringzilla::{Capabilities, Stream, StringsView, NgramsEngine};
+use stringzilla::{Capabilities, MatrixSpan, NgramsEngine, Stream, StringsView, TensorSpan};
 
 let cpu = Stream::default(Capabilities::enabled_cpu());
 let mut engine = NgramsEngine::new(&["the quick brown fox"], &[4, 8], 0, &cpu).unwrap();
 
-let mut overlaps = [0.0f32; 2];
+// 13 of the query's 16 distinct 4-grams and 9 of its 12 8-grams.
+let mut storage = [0.0f32; 2];
+let mut shares = TensorSpan::from_slice(&mut storage, [1, 1, 2]).unwrap();
 let candidates = StringsView::from_slices(&["the quick brown cat"]);
-cpu.scope(|scope| engine.overlaps(scope, candidates, None, &mut overlaps, 2, 2)).unwrap();
-assert!(overlaps.iter().all(|share| (0.0..=1.0).contains(share)));
+cpu.scope(|scope| engine.overlaps(scope, candidates, None, &mut shares)).unwrap();
+assert_eq!(storage, [13.0 / 16.0, 9.0 / 12.0]);
 
 // A pair missing more than a tenth of the query's N-grams scores zero at every width.
-cpu.scope(|scope| engine.overlaps(scope, candidates, Some(0.1), &mut overlaps, 2, 2)).unwrap();
-assert_eq!(overlaps, [0.0, 0.0]);
+let mut shares = TensorSpan::from_slice(&mut storage, [1, 1, 2]).unwrap();
+cpu.scope(|scope| engine.overlaps(scope, candidates, Some(0.1), &mut shares)).unwrap();
+assert_eq!(storage, [0.0, 0.0]);
 
-let mut sketches = [0u8; 2 * 256];
+let mut storage = [0u8; 2 * 256];
+let mut sketches = MatrixSpan::from_slice(&mut storage, [2, 256]).unwrap();
 let texts = StringsView::from_slices(&["hello world", "hello world"]);
-cpu.scope(|scope| engine.sketches(scope, texts, &mut sketches, 256, 256)).unwrap();
-assert_eq!(sketches[..256], sketches[256..]);
+cpu.scope(|scope| engine.sketches(scope, texts, &mut sketches)).unwrap();
+assert_eq!(storage[..256], storage[256..]);
 ```
 
 ## Multi-Pattern Search
@@ -799,7 +807,7 @@ fn new<N: AsRef<[u8]>>(needles: &[N], case_sensitivity: CaseSensitivity,
     haystacks_budget: usize, stream: &Stream) -> Result<SubstringsEngine, Status>;
 
 fn counts<'scope>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
-    haystacks: StringsView<'scope>, counts: &'scope mut [usize], counts_stride: usize) -> Result<(), Status>;
+    haystacks: StringsView<'scope>, counts: &'scope mut VectorSpan<'_, usize>) -> Result<(), Status>;
 fn find<'scope>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
     haystacks: StringsView<'scope>, matches: &'scope mut [Match],
     matches_offsets: &'scope mut [usize]) -> Result<(), Status>;
@@ -808,7 +816,7 @@ fn replace<'scope>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
     target: &'scope mut [u8], offsets: &'scope mut [usize]) -> Result<(), Status>;
 fn bm25_scores<'scope>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
     haystacks: StringsView<'scope>, document_lengths: Option<&'scope [f32]>, parameters: &'scope Bm25Params,
-    needle_weights: &'scope [f32], scores: &'scope mut [f32], scores_stride: usize) -> Result<(), Status>;
+    needle_weights: &'scope [f32], scores: &'scope mut VectorSpan<'_, f32>) -> Result<(), Status>;
 
 fn report(&self) -> SubstringsReport;
 ```
@@ -831,7 +839,7 @@ That is what lets one call with an empty output size the next one, with no walk 
 
 ```rust
 use stringzilla::{
-    Capabilities, CaseSensitivity, Stream, StringsView, SubstringsEngine, Match, SubstringsOverlapPolicy,
+    Capabilities, CaseSensitivity, Stream, StringsView, SubstringsEngine, Match, SubstringsOverlapPolicy, VectorSpan,
     SUBSTRINGS_HOT_STATES_AUTO, SUBSTRINGS_MATCHES_BUDGET_AUTO,
 };
 
@@ -848,9 +856,10 @@ let mut engine = SubstringsEngine::new(
 .unwrap();
 
 let documents = StringsView::from_slices(&["a catalog of cats", "nothing here"]);
-let mut counts = [0usize; 2];
-cpu.scope(|scope| engine.counts(scope, documents, &mut counts, 1)).unwrap();
-assert_eq!(counts, [3, 0]); // "catalog", the "cat" inside it, and the "cat" of "cats"
+let mut storage = [0usize; 2];
+let mut counts = VectorSpan::from_slice(&mut storage).unwrap();
+cpu.scope(|scope| engine.counts(scope, documents, &mut counts)).unwrap();
+assert_eq!(storage, [3, 0]); // "catalog", the "cat" inside it, and the "cat" of "cats"
 
 // `find` fills one boundary per haystack plus a final total, whether or not the matches fit.
 let mut matches = [Match::default(); 3];
@@ -876,7 +885,7 @@ A `target` too small is not an error either: `report().target_length` names the 
 
 ```rust
 use stringzilla::{Bm25Params, Capabilities, CaseSensitivity, Stream, StringsView, SubstringsEngine,
-                      SubstringsOverlapPolicy, SUBSTRINGS_HOT_STATES_AUTO, SUBSTRINGS_MATCHES_BUDGET_AUTO};
+                      SubstringsOverlapPolicy, VectorSpan, SUBSTRINGS_HOT_STATES_AUTO, SUBSTRINGS_MATCHES_BUDGET_AUTO};
 
 let cpu = Stream::default(Capabilities::enabled_cpu());
 let mut engine = SubstringsEngine::new(
@@ -891,11 +900,11 @@ let mut engine = SubstringsEngine::new(
 .unwrap();
 
 let documents = StringsView::from_slices(&["cat and dog", "nothing here"]);
-let mut scores = [0.0f32; 2];
+let mut storage = [0.0f32; 2];
+let mut scores = VectorSpan::from_slice(&mut storage).unwrap();
 let parameters = Bm25Params::normalized(10.0);
-cpu.scope(|scope| engine.bm25_scores(scope, documents, None, &parameters, &[1.0, 1.0], &mut scores, 1))
-    .unwrap();
-assert_eq!(scores[1], 0.0);
+cpu.scope(|scope| engine.bm25_scores(scope, documents, None, &parameters, &[1.0, 1.0], &mut scores)).unwrap();
+assert_eq!(storage[1], 0.0);
 
 // One replacement per needle: an empty target sizes the rewrite, a second scope performs it.
 let replacements = StringsView::from_slices(&["feline", "canine"]);
@@ -1052,18 +1061,21 @@ A device engine reads its rounds where they lie, so its candidates and its outpu
 The conversions of a column on a GPU stream, like `escape_in` or `normalize_in`, run on that GPU and write into the allocator they are given, which has to be one the GPU reaches.
 
 ```rust
-use stringzilla::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, Strings, StringsView, UnifiedAllocator};
+use stringzilla::{
+    Capabilities, LevenshteinEngine, LevenshteinSymbol, MatrixSpan, Stream, Strings, StringsView, UnifiedAllocator,
+};
 
 let cpu = Stream::default(Capabilities::enabled_cpu());
 let stream = Stream::new(Capabilities::enabled_cuda(0)?, 0)?;
 let unified = UnifiedAllocator::new(&stream);
 let candidates = Strings::copy_in(StringsView::from_slices(&["sitting", "kitten"]), unified, &cpu)?;
-let mut distances = Vec::new_in(unified);
-distances.resize(2, 0usize);
+let mut storage = Vec::new_in(unified);
+storage.resize(2, 0usize);
 
 let mut engine = LevenshteinEngine::new(&["kitten"], LevenshteinSymbol::Bytes, &stream)?;
-stream.scope(|scope| engine.distances(scope, candidates.view(), None, &mut distances, 2))?;
-assert_eq!(distances[..], [3, 0]);
+let mut distances = MatrixSpan::from_slice(&mut storage, [1, 2])?;
+stream.scope(|scope| engine.distances(scope, candidates.view(), None, &mut distances))?;
+assert_eq!(storage[..], [3, 0]);
 ```
 
 `stream.synchronize()` joins a stream outside any scope.

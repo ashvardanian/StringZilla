@@ -671,9 +671,9 @@ unsafe extern "C" {
         engine: *mut NgramsEngine,
         candidates: *const sz_strings_view_t,
         radius: f32,
-        matches: *mut u32,
-        matches_query_stride: sz_size_t,
-        matches_candidate_stride: sz_size_t,
+        shares: *mut f32,
+        shares_query_stride: sz_size_t,
+        shares_candidate_stride: sz_size_t,
         stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_ngrams_sketches(

@@ -126,10 +126,6 @@ impl Bm25Params {
 /// engine amortizes that across every later batch: a dictionary of thousands of terms costs one
 /// pass over a haystack rather than thousands.
 ///
-/// A GPU engine's verbs take haystacks, replacements and every buffer, weights and lengths
-/// included, in memory its device reaches, such as a [`Strings`] and a `Vec` in a
-/// [`UnifiedAllocator`].
-///
 /// The fields mirror `sz_substrings_engine_t` one for one and only `needles_count`,
 /// `overlap_policy` and `report` are read from Rust, so the layout is load-bearing and the engine
 /// travels to C by pointer. Owning raw pointers makes it neither `Send` nor `Sync`, which is what
@@ -140,7 +136,7 @@ impl Bm25Params {
 ///
 /// ```rust
 /// use stringzilla::{
-///     Capabilities, CaseSensitivity, Stream, StringsView, SubstringsEngine, SubstringsOverlapPolicy,
+///     Capabilities, CaseSensitivity, Stream, StringsView, SubstringsEngine, SubstringsOverlapPolicy, VectorSpan,
 ///     SUBSTRINGS_HOT_STATES_AUTO, SUBSTRINGS_MATCHES_BUDGET_AUTO,
 /// };
 ///
@@ -157,9 +153,10 @@ impl Bm25Params {
 /// .unwrap();
 ///
 /// let documents = StringsView::from_slices(&["a catalog of cats", "nothing here"]);
-/// let mut counts = [0usize; 2];
-/// cpu.scope(|scope| engine.counts(scope, documents, &mut counts, 1)).unwrap();
-/// assert_eq!(counts, [3, 0]); // "catalog", the "cat" inside it, and the "cat" of "cats"
+/// let mut storage = [0usize; 2];
+/// let mut counts = VectorSpan::from_slice(&mut storage).unwrap();
+/// cpu.scope(|scope| engine.counts(scope, documents, &mut counts)).unwrap();
+/// assert_eq!(storage, [3, 0]); // "catalog", the "cat" inside it, and the "cat" of "cats"
 /// ```
 #[repr(C)]
 #[allow(dead_code)] // Every member is the C side's to write; the layout is what Rust keeps.
@@ -266,21 +263,22 @@ impl SubstringsEngine {
     /// Queues on the stream of `scope` the count of every needle's matches in every haystack, one
     /// count per haystack.
     ///
-    /// `counts` receives haystack `h` at `counts[h * counts_stride]`, the stride counting entries
-    /// rather than bytes and being at least one, so a strided call writes one column of a
-    /// `[haystacks, vocabularies]` feature matrix. A stream of another group than the engine's is
-    /// refused with [`Status::DeviceMemoryMismatch`], here and by every verb below.
+    /// `counts` holds one entry per haystack, refused with [`Status::UnexpectedDimensions`]
+    /// otherwise, so a strided span writes one column of a `[haystacks, vocabularies]` feature
+    /// matrix. A stream of another group than the engine's is refused with
+    /// [`Status::DeviceMemoryMismatch`], here and by every verb below.
     pub fn counts<'scope>(
         &'scope mut self,
         scope: &'scope Scope<'scope, '_>,
         haystacks: StringsView<'scope>,
-        counts: &'scope mut [usize],
-        counts_stride: usize,
+        counts: &'scope mut VectorSpan<'_, usize>,
     ) -> Result<(), Status> {
         let stream = scope.stream_for(self.capability)?;
-        strided_column_check(haystacks.len(), counts.len(), counts_stride)?;
-        let output = counts.as_mut_ptr();
-        unsafe { sz_substrings_counts(self, &haystacks.view, output, counts_stride, stream.as_raw()) }.check()
+        if counts.dims() != haystacks.len() {
+            return Err(Status::UnexpectedDimensions);
+        }
+        let stride = counts.stride_bytes() as usize;
+        unsafe { sz_substrings_counts(self, &haystacks.view, counts.as_mut_ptr(), stride, stream.as_raw()) }.check()
     }
 
     /// Queues on the stream of `scope` a report of every match of every needle in every haystack,
@@ -355,9 +353,8 @@ impl SubstringsEngine {
     /// a needle nested in another, so the engine's own policy does not apply here.
     /// `document_lengths` is `None` to normalize by each haystack's byte length instead.
     ///
-    /// `scores` receives haystack `h` at `scores[h * scores_stride]`, on the same convention as
+    /// `scores` holds one entry per haystack, on the same convention as
     /// [`SubstringsEngine::counts`].
-    #[allow(clippy::too_many_arguments)] // The C verb's own arguments, plus the scope.
     pub fn bm25_scores<'scope>(
         &'scope mut self,
         scope: &'scope Scope<'scope, '_>,
@@ -365,14 +362,15 @@ impl SubstringsEngine {
         document_lengths: Option<&'scope [f32]>,
         parameters: &'scope Bm25Params,
         needle_weights: &'scope [f32],
-        scores: &'scope mut [f32],
-        scores_stride: usize,
+        scores: &'scope mut VectorSpan<'_, f32>,
     ) -> Result<(), Status> {
         if needle_weights.len() < self.needles_count() {
             return Err(Status::UnexpectedDimensions);
         }
         let stream = scope.stream_for(self.capability)?;
-        strided_column_check(haystacks.len(), scores.len(), scores_stride)?;
+        if scores.dims() != haystacks.len() {
+            return Err(Status::UnexpectedDimensions);
+        }
         let lengths = match document_lengths {
             Some(lengths) if lengths.len() < haystacks.len() => return Err(Status::UnexpectedDimensions),
             Some(lengths) => lengths.as_ptr(),
@@ -386,7 +384,7 @@ impl SubstringsEngine {
                 parameters as *const Bm25Params,
                 needle_weights.as_ptr(),
                 scores.as_mut_ptr(),
-                scores_stride,
+                scores.stride_bytes() as usize,
                 stream.as_raw(),
             )
         }
@@ -400,25 +398,36 @@ impl Drop for SubstringsEngine {
     }
 }
 
-/// Refuses an output that cannot hold one entry per haystack at `stride` entries apart.
-pub(crate) fn strided_column_check(haystacks: usize, entries: usize, stride: usize) -> Result<(), Status> {
-    if stride == 0 {
-        return Err(Status::UnexpectedDimensions);
-    }
-    let span = match haystacks {
-        0 => 0,
-        count => {
-            (count - 1).checked_mul(stride).and_then(|offset| offset.checked_add(1)).ok_or(Status::OverflowRisk)?
-        }
-    };
-    if entries < span {
-        return Err(Status::UnexpectedDimensions);
-    }
-    Ok(())
-}
-
 /// The C verbs read a null output as a pure size query, which an empty slice's dangling
 /// pointer is not.
 pub(crate) fn optional_mut_ptr<Element>(buffer: &mut [Element]) -> *mut Element {
     if buffer.is_empty() { core::ptr::null_mut() } else { buffer.as_mut_ptr() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Counts fill a strided column, one entry per haystack, and refuse a column of another length.
+    #[test]
+    fn counts_fill_a_strided_column() {
+        let cpu = Stream::default(Capabilities::enabled_cpu());
+        let mut engine = SubstringsEngine::new(
+            &["cat"],
+            CaseSensitivity::Cased,
+            SubstringsOverlapPolicy::Overlapping,
+            SUBSTRINGS_HOT_STATES_AUTO,
+            SUBSTRINGS_MATCHES_BUDGET_AUTO,
+            0,
+            &cpu,
+        )
+        .unwrap();
+        let haystacks = StringsView::from_slices(&["cat cat", "dog", "cat"]);
+        let mut storage = [usize::MAX; 5];
+        let mut counts = VectorSpan::from_slice_strided(&mut storage, 3, 2 * size_of::<usize>() as isize).unwrap();
+        cpu.scope(|scope| engine.counts(scope, haystacks, &mut counts)).unwrap();
+        assert_eq!(storage, [2, usize::MAX, 0, usize::MAX, 1]);
+        let mut counts = VectorSpan::from_slice(&mut storage[..2]).unwrap();
+        assert_eq!(cpu.scope(|scope| engine.counts(scope, haystacks, &mut counts)), Err(Status::UnexpectedDimensions));
+    }
 }

@@ -173,20 +173,21 @@ impl RegexEngine {
     /// Queues on the stream of `scope` the count of every haystack's leftmost-first matches, one
     /// count per haystack.
     ///
-    /// `counts` receives haystack `h` at `counts[h * counts_stride]`, the stride counting entries
-    /// rather than bytes and being at least one. A stream of another group than the engine's is
-    /// refused with [`Status::DeviceMemoryMismatch`], here and by every verb below.
+    /// `counts` holds one entry per haystack, refused with [`Status::UnexpectedDimensions`]
+    /// otherwise. A stream of another group than the engine's is refused with
+    /// [`Status::DeviceMemoryMismatch`], here and by every verb below.
     pub fn counts<'scope>(
         &'scope mut self,
         scope: &'scope Scope<'scope, '_>,
         haystacks: StringsView<'scope>,
-        counts: &'scope mut [usize],
-        counts_stride: usize,
+        counts: &'scope mut VectorSpan<'_, usize>,
     ) -> Result<(), Status> {
         let stream = scope.stream_for(self.capability)?;
-        strided_column_check(haystacks.len(), counts.len(), counts_stride)?;
-        let output = counts.as_mut_ptr();
-        unsafe { sz_regex_counts(self, &haystacks.view, output, counts_stride, stream.as_raw()) }.check()
+        if counts.dims() != haystacks.len() {
+            return Err(Status::UnexpectedDimensions);
+        }
+        let stride = counts.stride_bytes() as usize;
+        unsafe { sz_regex_counts(self, &haystacks.view, counts.as_mut_ptr(), stride, stream.as_raw()) }.check()
     }
 
     /// Queues on the stream of `scope` a report of every leftmost-first match, ascending by

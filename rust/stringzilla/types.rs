@@ -658,6 +658,10 @@ impl Capabilities {
 /// A stream of one capability group's device, where engines, [`StringsView`] conversions and
 /// [`UnifiedAllocator`] blocks queue work: a vendor's default when null, the CPU's always null.
 ///
+/// The verbs of an engine on a GPU stream take every input and output, weights and lengths
+/// included, in memory its device reaches, such as a [`Strings`] and a span over a `Vec` in a
+/// [`UnifiedAllocator`].
+///
 /// # Examples
 ///
 /// ```
@@ -734,14 +738,15 @@ impl Stream {
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, StringsView};
+    /// use stringzilla::{Capabilities, LevenshteinEngine, LevenshteinSymbol, MatrixSpan, Stream, StringsView};
     ///
     /// let stream = Stream::default(Capabilities::enabled_cpu());
     /// let mut engine = LevenshteinEngine::new(&["kitten"], LevenshteinSymbol::Bytes, &stream)?;
-    /// let mut distances = [0usize; 1];
+    /// let mut storage = [0usize; 1];
+    /// let mut distances = MatrixSpan::from_slice(&mut storage, [1, 1])?;
     /// let candidates = StringsView::from_slices(&["sitting"]);
-    /// stream.scope(|scope| engine.distances(scope, candidates, None, &mut distances, 1))?;
-    /// assert_eq!(distances[0], 3);
+    /// stream.scope(|scope| engine.distances(scope, candidates, None, &mut distances))?;
+    /// assert_eq!(storage[0], 3);
     /// # Ok::<(), stringzilla::Status>(())
     /// ```
     pub fn scope<'env, Output>(
@@ -794,6 +799,215 @@ impl Scope<'_, '_> {
     }
 }
 
+/// A mutable block of `RANK` axes over a borrowed slice, strided in bytes, its last axis dense.
+///
+/// Its constructors are the only proof that the layout fits the slice, so an engine verb compares
+/// the [`TensorSpan::shape`] alone before handing C the pointer and the strides.
+///
+/// The span borrows its slice, so it cannot outlive it:
+///
+/// ```rust,compile_fail,E0597
+/// use stringzilla::MatrixSpan;
+///
+/// let span = {
+///     let mut storage = [0usize; 6];
+///     MatrixSpan::from_slice(&mut storage, [2, 3]).unwrap()
+/// };
+/// assert_eq!(span.shape(), [2, 3]);
+/// ```
+pub struct TensorSpan<'a, Scalar, const RANK: usize> {
+    data: &'a mut [Scalar],
+    shape: [usize; RANK],
+    strides: [isize; RANK],
+}
+
+/// A [`TensorSpan`] of rows and columns.
+pub type MatrixSpan<'a, Scalar> = TensorSpan<'a, Scalar, 2>;
+
+impl<'a, Scalar, const RANK: usize> TensorSpan<'a, Scalar, RANK> {
+    /// A dense row-major block borrowing `data`, which must hold exactly the entries `shape` spans.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use stringzilla::{MatrixSpan, Status};
+    ///
+    /// let mut storage = [0usize; 6];
+    /// let span = MatrixSpan::from_slice(&mut storage, [2, 3])?;
+    /// assert_eq!(span.shape(), [2, 3]);
+    /// assert_eq!(span.stride_bytes(0), 24);
+    /// assert_eq!(MatrixSpan::from_slice(&mut storage, [2, 2]).err(), Some(Status::UnexpectedDimensions));
+    /// # Ok::<(), Status>(())
+    /// ```
+    pub fn from_slice(data: &'a mut [Scalar], shape: [usize; RANK]) -> Result<Self, Status> {
+        let entry_bytes = core::mem::size_of::<Scalar>();
+        let mut strides_bytes = [0isize; RANK];
+        let mut inner_entries: usize = 1;
+        for axis in (0..RANK).rev() {
+            strides_bytes[axis] = inner_entries
+                .checked_mul(entry_bytes)
+                .and_then(|bytes| isize::try_from(bytes).ok())
+                .ok_or(Status::OverflowRisk)?;
+            inner_entries = inner_entries.checked_mul(shape[axis]).ok_or(Status::OverflowRisk)?;
+        }
+        let length = data.len();
+        let span = Self::from_slice_strided(data, shape, strides_bytes)?;
+        if length != inner_entries {
+            return Err(Status::UnexpectedDimensions);
+        }
+        Ok(span)
+    }
+
+    /// A strided block borrowing `data`, for any layout whose byte strides are non-negative
+    /// multiples of the entry size, whose last axis steps exactly one entry, whose axes nest
+    /// without overlap, and whose last entry lies inside `data`.
+    ///
+    /// A layout that breaks one of those is refused with [`Status::UnexpectedDimensions`], and one
+    /// whose extent overflows `usize` with [`Status::OverflowRisk`].
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use stringzilla::{MatrixSpan, Status};
+    ///
+    /// // A 2×3 window into the left of a 2×4 row-major buffer.
+    /// let mut storage = [0.0f32; 8];
+    /// let span = MatrixSpan::from_slice_strided(&mut storage, [2, 3], [16, 4])?;
+    /// assert_eq!(span.shape(), [2, 3]);
+    /// let overlapping = MatrixSpan::from_slice_strided(&mut storage, [2, 3], [8, 4]);
+    /// assert_eq!(overlapping.err(), Some(Status::UnexpectedDimensions));
+    /// # Ok::<(), Status>(())
+    /// ```
+    pub fn from_slice_strided(
+        data: &'a mut [Scalar],
+        shape: [usize; RANK],
+        strides_bytes: [isize; RANK],
+    ) -> Result<Self, Status> {
+        let entry_bytes = core::mem::size_of::<Scalar>();
+        if strides_bytes.iter().any(|&stride| stride < 0 || !(stride as usize).is_multiple_of(entry_bytes)) {
+            return Err(Status::UnexpectedDimensions);
+        }
+        if let Some(last) = RANK.checked_sub(1)
+            && strides_bytes[last] != entry_bytes as isize
+        {
+            return Err(Status::UnexpectedDimensions);
+        }
+        let mut extent_bytes = entry_bytes;
+        if shape.contains(&0) {
+            extent_bytes = 0;
+        } else if let Some(last) = RANK.checked_sub(1) {
+            extent_bytes = shape[last].checked_mul(entry_bytes).ok_or(Status::OverflowRisk)?;
+            for axis in (0..last).rev().filter(|&axis| shape[axis] > 1) {
+                let stride_bytes = strides_bytes[axis] as usize;
+                if stride_bytes < extent_bytes {
+                    return Err(Status::UnexpectedDimensions);
+                }
+                extent_bytes = stride_bytes
+                    .checked_mul(shape[axis] - 1)
+                    .and_then(|outer| outer.checked_add(extent_bytes))
+                    .ok_or(Status::OverflowRisk)?;
+            }
+        }
+        if extent_bytes > core::mem::size_of_val(data) {
+            return Err(Status::UnexpectedDimensions);
+        }
+        Ok(TensorSpan { data, shape, strides: strides_bytes })
+    }
+
+    /// The extent of every axis.
+    pub fn shape(&self) -> [usize; RANK] {
+        self.shape
+    }
+
+    /// Bytes from one entry to the next along axis `dim`, never negative.
+    pub fn stride_bytes(&self, dim: usize) -> isize {
+        self.strides[dim]
+    }
+
+    /// The first entry, where C starts writing.
+    pub fn as_mut_ptr(&mut self) -> *mut Scalar {
+        self.data.as_mut_ptr()
+    }
+}
+
+/// A mutable column over a borrowed slice, its entries a fixed number of bytes apart.
+pub struct VectorSpan<'a, Scalar> {
+    data: &'a mut [Scalar],
+    dims: usize,
+    stride: isize,
+}
+
+impl<'a, Scalar> VectorSpan<'a, Scalar> {
+    /// A contiguous column over the whole of `data`, refusing a zero-sized `Scalar`, which has no
+    /// stride to step by.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use stringzilla::VectorSpan;
+    ///
+    /// let mut storage = [0usize; 3];
+    /// let span = VectorSpan::from_slice(&mut storage)?;
+    /// assert_eq!((span.dims(), span.stride_bytes()), (3, 8));
+    /// # Ok::<(), stringzilla::Status>(())
+    /// ```
+    pub fn from_slice(data: &'a mut [Scalar]) -> Result<Self, Status> {
+        let dims = data.len();
+        Self::from_slice_strided(data, dims, core::mem::size_of::<Scalar>() as isize)
+    }
+
+    /// A column of `dims` entries `stride_bytes` apart, a positive multiple of the entry size, the
+    /// last of them inside `data`.
+    ///
+    /// A layout that breaks one of those is refused with [`Status::UnexpectedDimensions`], and one
+    /// whose extent overflows `usize` with [`Status::OverflowRisk`].
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use stringzilla::{Status, VectorSpan};
+    ///
+    /// // Every other entry of a six-entry buffer, one column of a `[3, 2]` matrix.
+    /// let mut storage = [0.0f32; 6];
+    /// let span = VectorSpan::from_slice_strided(&mut storage, 3, 8)?;
+    /// assert_eq!(span.dims(), 3);
+    /// assert_eq!(VectorSpan::from_slice_strided(&mut storage, 4, 8).err(), Some(Status::UnexpectedDimensions));
+    /// # Ok::<(), Status>(())
+    /// ```
+    pub fn from_slice_strided(data: &'a mut [Scalar], dims: usize, stride_bytes: isize) -> Result<Self, Status> {
+        let entry_bytes = core::mem::size_of::<Scalar>();
+        if stride_bytes <= 0 || !(stride_bytes as usize).is_multiple_of(entry_bytes) {
+            return Err(Status::UnexpectedDimensions);
+        }
+        let extent_bytes = match dims {
+            0 => 0,
+            dims => (stride_bytes as usize)
+                .checked_mul(dims - 1)
+                .and_then(|outer| outer.checked_add(entry_bytes))
+                .ok_or(Status::OverflowRisk)?,
+        };
+        if extent_bytes > core::mem::size_of_val(data) {
+            return Err(Status::UnexpectedDimensions);
+        }
+        Ok(VectorSpan { data, dims, stride: stride_bytes })
+    }
+
+    /// Entries the column holds.
+    pub fn dims(&self) -> usize {
+        self.dims
+    }
+
+    /// Bytes from one entry to the next, always positive.
+    pub fn stride_bytes(&self) -> isize {
+        self.stride
+    }
+
+    /// The first entry, where C starts writing.
+    pub fn as_mut_ptr(&mut self) -> *mut Scalar {
+        self.data.as_mut_ptr()
+    }
+}
+
 /// Memory the host and the devices of one capability group both address, for the columns and the
 /// outputs of their engines.
 ///
@@ -806,19 +1020,22 @@ impl Scope<'_, '_> {
 /// # Examples
 ///
 /// ```no_run
-/// use stringzilla::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, Strings, StringsView, UnifiedAllocator};
+/// use stringzilla::{
+///     Capabilities, LevenshteinEngine, LevenshteinSymbol, MatrixSpan, Stream, Strings, StringsView, UnifiedAllocator,
+/// };
 ///
 /// let cpu = Stream::default(Capabilities::enabled_cpu());
 /// let stream = Stream::new(Capabilities::enabled_cuda(0)?, 0)?;
 /// let unified = UnifiedAllocator::new(&stream);
 /// // The host gathers the slices, which a GPU cannot read, into memory the GPU reaches.
 /// let candidates = Strings::copy_in(StringsView::from_slices(&["sitting", "kitten"]), unified, &cpu)?;
-/// let mut distances = Vec::new_in(unified);
-/// distances.resize(2, 0usize);
+/// let mut storage = Vec::new_in(unified);
+/// storage.resize(2, 0usize);
 ///
 /// let mut engine = LevenshteinEngine::new(&["kitten"], LevenshteinSymbol::Bytes, &stream)?;
-/// stream.scope(|scope| engine.distances(scope, candidates.view(), None, &mut distances, 2))?;
-/// assert_eq!(distances[..], [3, 0]);
+/// let mut distances = MatrixSpan::from_slice(&mut storage, [1, 2])?;
+/// stream.scope(|scope| engine.distances(scope, candidates.view(), None, &mut distances))?;
+/// assert_eq!(storage[..], [3, 0]);
 /// # Ok::<(), stringzilla::Status>(())
 /// ```
 #[derive(Clone, Copy, Debug)]
@@ -1117,6 +1334,52 @@ mod tests {
         assert_eq!(fruits[order[0]], "cherry");
     }
 
+    /// A dense block needs exactly its entries, and a shape whose extent overflows says so.
+    #[test]
+    fn dense_tensor_spans_need_exactly_their_entries() {
+        let mut storage = [0u8; 6];
+        let strides =
+            TensorSpan::from_slice(&mut storage, [1, 2, 3]).map(|span| [0, 1, 2].map(|dim| span.stride_bytes(dim)));
+        assert_eq!(strides, Ok([6, 3, 1]));
+        assert_eq!(TensorSpan::from_slice(&mut storage[..5], [1, 2, 3]).err(), Some(Status::UnexpectedDimensions));
+        assert_eq!(MatrixSpan::from_slice(&mut storage, [2, usize::MAX]).err(), Some(Status::OverflowRisk));
+    }
+
+    /// A strided block is refused for a negative stride, one splitting an entry, a last axis
+    /// stepping other than one entry, overlapping axes, or a last entry past the slice, and fits
+    /// exactly.
+    #[test]
+    fn strided_tensor_spans_refuse_layouts_that_do_not_fit() {
+        let mut storage = [0.0f32; 7];
+        let mut fits = |length: usize, shape: [usize; 2], strides: [isize; 2]| {
+            MatrixSpan::from_slice_strided(&mut storage[..length], shape, strides).map(|span| span.shape())
+        };
+        assert_eq!(fits(7, [2, 3], [16, 4]), Ok([2, 3]));
+        assert_eq!(fits(6, [2, 3], [16, 4]), Err(Status::UnexpectedDimensions));
+        for strides in [[-16, 4], [18, 4], [16, 8], [8, 4]] {
+            assert_eq!(fits(7, [2, 3], strides), Err(Status::UnexpectedDimensions));
+        }
+        assert_eq!(fits(0, [0, 3], [16, 4]), Ok([0, 3]));
+        assert_eq!(fits(7, [1, usize::MAX], [0, 4]), Err(Status::OverflowRisk));
+    }
+
+    /// A column is refused for a zero, negative or entry-splitting stride and a last entry past its
+    /// slice, and fits exactly.
+    #[test]
+    fn vector_spans_refuse_strides_that_do_not_fit() {
+        let mut storage = [0usize; 5];
+        let mut fits = |length: usize, dims: usize, stride: isize| {
+            VectorSpan::from_slice_strided(&mut storage[..length], dims, stride).map(|span| span.dims())
+        };
+        assert_eq!(fits(5, 3, 16), Ok(3));
+        assert_eq!(fits(4, 3, 16), Err(Status::UnexpectedDimensions));
+        for stride in [0, -8, 12] {
+            assert_eq!(fits(5, 1, stride), Err(Status::UnexpectedDimensions));
+        }
+        assert_eq!(fits(0, 0, 8), Ok(0));
+        assert_eq!(fits(5, usize::MAX, 16), Err(Status::OverflowRisk));
+    }
+
     /// A zero-sized allocation still satisfies the requested alignment.
     #[test]
     fn unified_allocator_aligns_an_empty_layout() {
@@ -1147,9 +1410,12 @@ mod tests {
         let mut from_arrow = [0usize; 4];
         let mut from_column = Vec::new_in(unified);
         from_column.resize(words.len(), usize::MAX);
-        cpu.scope(|scope| engine.distances(scope, slices, None, &mut from_slices, words.len())).unwrap();
-        cpu.scope(|scope| engine.distances(scope, arrow, None, &mut from_arrow, words.len())).unwrap();
-        cpu.scope(|scope| engine.distances(scope, column.view(), None, &mut from_column, words.len())).unwrap();
+        for (candidates, distances) in
+            [(slices, &mut from_slices[..]), (arrow, &mut from_arrow[..]), (column.view(), &mut from_column[..])]
+        {
+            let mut distances = MatrixSpan::from_slice(distances, [1, words.len()]).unwrap();
+            cpu.scope(|scope| engine.distances(scope, candidates, None, &mut distances)).unwrap();
+        }
         assert_eq!(from_arrow, from_slices);
         assert_eq!(from_column[..], from_slices);
     }
@@ -1160,10 +1426,11 @@ mod tests {
     fn scopes_refuse_engines_of_another_group() {
         let cpu = Stream::default(Capabilities::enabled_cpu());
         let mut engine = sz::LevenshteinEngine::new(&["kitten"], sz::LevenshteinSymbol::Bytes, &cpu).unwrap();
-        let mut distances = [0usize; 1];
+        let mut storage = [0usize; 1];
+        let mut distances = MatrixSpan::from_slice(&mut storage, [1, 1]).unwrap();
         let gpu = Stream::default(Capability::Metal.into());
         let candidates = sz::StringsView::from_slices(&["sitting"]);
-        let refused = gpu.scope(|scope| engine.distances(scope, candidates, None, &mut distances, 1));
+        let refused = gpu.scope(|scope| engine.distances(scope, candidates, None, &mut distances));
         assert_eq!(refused, Err(Status::DeviceMemoryMismatch));
     }
 
@@ -1187,19 +1454,23 @@ mod tests {
         let mut device_distances = Vec::new_in(unified);
         device_distances.resize(queries.len() * words.len(), usize::MAX);
 
+        let shape = [queries.len(), words.len()];
         let mut host = sz::LevenshteinEngine::new(&queries, sz::LevenshteinSymbol::Bytes, &cpu).unwrap();
         let mut host_distances = [0usize; 15];
         let mut column_distances = [0usize; 15];
-        cpu.scope(|scope| host.distances(scope, words, None, &mut host_distances, words.len())).unwrap();
-        cpu.scope(|scope| host.distances(scope, candidates.view(), None, &mut column_distances, words.len())).unwrap();
+        for (candidates, distances) in [(words, &mut host_distances), (candidates.view(), &mut column_distances)] {
+            let mut distances = MatrixSpan::from_slice(distances, shape).unwrap();
+            cpu.scope(|scope| host.distances(scope, candidates, None, &mut distances)).unwrap();
+        }
         assert_eq!(column_distances, host_distances);
 
         let mut device = sz::LevenshteinEngine::new(&queries, sz::LevenshteinSymbol::Bytes, &gpu).unwrap();
-        gpu.scope(|scope| device.distances(scope, candidates.view(), None, &mut device_distances, words.len()))
-            .unwrap();
+        let mut distances = MatrixSpan::from_slice(&mut device_distances, shape).unwrap();
+        gpu.scope(|scope| device.distances(scope, candidates.view(), None, &mut distances)).unwrap();
         assert_eq!(device_distances[..], host_distances[..]);
+        let mut distances = MatrixSpan::from_slice(&mut device_distances, shape).unwrap();
         assert_eq!(
-            gpu.scope(|scope| device.distances(scope, words, None, &mut device_distances, words.len())),
+            gpu.scope(|scope| device.distances(scope, words, None, &mut distances)),
             Err(Status::DeviceMemoryMismatch)
         );
     }

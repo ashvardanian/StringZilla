@@ -604,7 +604,7 @@ unsafe extern "C" fn free_in<A: Allocator>(
 /// # Examples
 ///
 /// ```
-/// use stringzilla::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Status, Stream, StringsView};
+/// use stringzilla::{Capabilities, LevenshteinEngine, LevenshteinSymbol, MatrixSpan, Status, Stream, StringsView};
 ///
 /// // An Arrow `String` array sliced from its second element, so its offsets start past zero.
 /// let (data, offsets) = (b"catsittingkitten", [3u32, 10, 16]);
@@ -614,9 +614,10 @@ unsafe extern "C" fn free_in<A: Allocator>(
 ///
 /// let cpu = Stream::default(Capabilities::enabled_cpu());
 /// let mut engine = LevenshteinEngine::new(&["kitten"], LevenshteinSymbol::Bytes, &cpu)?;
-/// let mut distances = [0usize; 2];
-/// cpu.scope(|scope| engine.distances(scope, candidates, None, &mut distances, 2))?;
-/// assert_eq!(distances, [3, 0]);
+/// let mut storage = [0usize; 2];
+/// let mut distances = MatrixSpan::from_slice(&mut storage, [1, 2])?;
+/// cpu.scope(|scope| engine.distances(scope, candidates, None, &mut distances))?;
+/// assert_eq!(storage, [3, 0]);
 /// # Ok::<(), stringzilla::Status>(())
 /// ```
 // A slice of views reaches C as an array of its `sz_strings_view_t`.
@@ -1597,10 +1598,11 @@ mod tests {
         assert_eq!(device_rows[..], host_rows[..]);
 
         let mut engine = sz::LevenshteinEngine::new(&["kitten"], sz::LevenshteinSymbol::Bytes, &gpu).unwrap();
-        let mut distances = Vec::new_in(unified);
-        distances.resize(words.len(), usize::MAX);
-        gpu.scope(|scope| engine.distances(scope, device_view, None, &mut distances, words.len())).unwrap();
-        assert_eq!(distances[4], 0);
+        let mut storage = Vec::new_in(unified);
+        storage.resize(words.len(), usize::MAX);
+        let mut distances = sz::MatrixSpan::from_slice(&mut storage, [1, words.len()]).unwrap();
+        gpu.scope(|scope| engine.distances(scope, device_view, None, &mut distances)).unwrap();
+        assert_eq!(storage[4], 0);
     }
 
     // endregion

@@ -27,9 +27,6 @@ pub enum LevenshteinSymbol {
 /// a one-shot distance repeats per pair is paid here exactly once. Construction also fixes the
 /// capability and, on a GPU, the launch geometry.
 ///
-/// A GPU engine's verbs take every input and output in memory its device reaches, such as a
-/// [`Strings`] and a `Vec` in a [`UnifiedAllocator`].
-///
 /// The fields mirror `sz_levenshtein_engine_t` one for one and only `count`, `symbol` and
 /// `capability` are read from Rust, so the layout is load-bearing and the engine travels to C by
 /// pointer. Owning raw pointers makes it neither `Send` nor `Sync`, which is what the C contract
@@ -39,25 +36,22 @@ pub enum LevenshteinSymbol {
 /// # Examples
 ///
 /// ```rust
-/// use stringzilla::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, StringsView};
+/// use stringzilla::{Capabilities, LevenshteinEngine, LevenshteinSymbol, MatrixSpan, Stream, StringsView};
 ///
 /// let cpu = Stream::default(Capabilities::enabled_cpu());
 /// let mut engine = LevenshteinEngine::new(&["kitten", "saturday"], LevenshteinSymbol::Bytes, &cpu).unwrap();
 ///
-/// // A `[queries, candidates]` block, query `q` starting at `q * stride`.
-/// let mut distances = [0usize; 4];
+/// // A `[queries, candidates]` block.
+/// let mut storage = [0usize; 4];
+/// let mut distances = MatrixSpan::from_slice(&mut storage, [2, 2]).unwrap();
 /// let candidates = StringsView::from_slices(&["sitting", "sunday"]);
-/// cpu.scope(|scope| engine.distances(scope, candidates, None, &mut distances, 2))
-///     .unwrap();
-/// assert_eq!(distances[0], 3); // kitten vs sitting
-/// assert_eq!(distances[3], 3); // saturday vs sunday
+/// cpu.scope(|scope| engine.distances(scope, candidates, None, &mut distances)).unwrap();
+/// assert_eq!(storage, [3, 6, 6, 3]); // kitten vs sitting, saturday vs sunday
 ///
 /// // A candidate past a bound of 1 reports exactly 2.
-/// let candidates = StringsView::from_slices(&["sitting", "sunday"]);
-/// cpu.scope(|scope| engine.distances(scope, candidates, Some(1), &mut distances, 2))
-///     .unwrap();
-/// assert_eq!(distances[0], 2);
-/// assert_eq!(distances[3], 2);
+/// let mut distances = MatrixSpan::from_slice(&mut storage, [2, 2]).unwrap();
+/// cpu.scope(|scope| engine.distances(scope, candidates, Some(1), &mut distances)).unwrap();
+/// assert_eq!(storage, [2, 2, 2, 2]);
 /// ```
 #[repr(C)]
 #[allow(dead_code)] // Every member is the C side's to write; the layout is what Rust keeps.
@@ -116,10 +110,10 @@ impl LevenshteinEngine {
     /// Queues on the stream of `scope` the edit distances from every prepared query to every
     /// candidate, on the capability the constructor fixed.
     ///
-    /// `distances` receives a `[queries, candidates]` block: query `q` against candidate `c` lands
-    /// at `distances[q * distances_stride + c]`, the stride counting entries rather than bytes and
-    /// being at least the candidate count. The round's scratch grows here when a batch needs more
-    /// than the last one did, and is never shrunk.
+    /// `distances` is a `[queries, candidates]` block, query `q` against candidate `c` landing at
+    /// its entry `[q, c]`, and any other shape is refused with [`Status::UnexpectedDimensions`].
+    /// The round's scratch grows here when a batch needs more than the last one did, and is never
+    /// shrunk.
     ///
     /// A `bound` of `Some(limit)` keeps a distance exact up to `limit` and reports `limit + 1` for
     /// every candidate past it, on every backend, which lets a round stop early. `None` keeps every
@@ -132,21 +126,10 @@ impl LevenshteinEngine {
         scope: &'scope Scope<'scope, '_>,
         candidates: StringsView<'scope>,
         bound: Option<usize>,
-        distances: &'scope mut [usize],
-        distances_stride: usize,
+        distances: &'scope mut MatrixSpan<'_, usize>,
     ) -> Result<(), Status> {
         let stream = scope.stream_for(self.capability)?;
-        if distances_stride < candidates.len() {
-            return Err(Status::UnexpectedDimensions);
-        }
-        let span = match self.count {
-            0 => 0,
-            count => (count - 1)
-                .checked_mul(distances_stride)
-                .and_then(|rows| rows.checked_add(candidates.len()))
-                .ok_or(Status::OverflowRisk)?,
-        };
-        if distances.len() < span {
+        if distances.shape() != [self.count, candidates.len()] {
             return Err(Status::UnexpectedDimensions);
         }
         unsafe {
@@ -157,7 +140,7 @@ impl LevenshteinEngine {
                 core::ptr::null(),
                 bound.unwrap_or(usize::MAX),
                 distances.as_mut_ptr(),
-                distances_stride,
+                distances.stride_bytes(0) as usize,
                 stream.as_raw(),
             )
         }
@@ -182,9 +165,10 @@ mod tests {
         let mut engine = LevenshteinEngine::new(&["kitten"], LevenshteinSymbol::Bytes, &cpu).unwrap();
         let candidates = StringsView::from_slices(&["kitten", "mitten", "mittens", "sitting"]);
         let distances_for = |engine: &mut LevenshteinEngine, bound: Option<usize>| {
-            let mut distances = [0usize; 4];
-            cpu.scope(|scope| engine.distances(scope, candidates, bound, &mut distances, 4)).unwrap();
-            distances
+            let mut storage = [0usize; 4];
+            let mut distances = MatrixSpan::from_slice(&mut storage, [1, 4]).unwrap();
+            cpu.scope(|scope| engine.distances(scope, candidates, bound, &mut distances)).unwrap();
+            storage
         };
         let exact = [0, 1, 2, 3];
         assert_eq!(distances_for(&mut engine, None), exact);
@@ -193,5 +177,19 @@ mod tests {
         assert_eq!(distances_for(&mut engine, Some(2)), exact);
         assert_eq!(distances_for(&mut engine, Some(1)), [0, 1, 2, 2]);
         assert_eq!(distances_for(&mut engine, Some(0)), [0, 1, 1, 1]);
+    }
+
+    /// A window into a wider block fills its own entries and leaves the rest untouched.
+    #[test]
+    fn distances_fill_a_window_of_a_wider_block() {
+        let cpu = Stream::default(Capabilities::enabled_cpu());
+        let mut engine = LevenshteinEngine::new(&["kitten", "saturday"], LevenshteinSymbol::Bytes, &cpu).unwrap();
+        let candidates = StringsView::from_slices(&["sitting", "sunday"]);
+        let entry_bytes = size_of::<usize>() as isize;
+        let mut storage = [usize::MAX; 6];
+        let mut distances =
+            MatrixSpan::from_slice_strided(&mut storage, [2, 2], [3 * entry_bytes, entry_bytes]).unwrap();
+        cpu.scope(|scope| engine.distances(scope, candidates, None, &mut distances)).unwrap();
+        assert_eq!(storage, [3, 6, usize::MAX, 6, 3, usize::MAX]);
     }
 }
