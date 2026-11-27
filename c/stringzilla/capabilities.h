@@ -897,7 +897,7 @@ typedef sz_status_t (*sz_kernel_ngrams_engine_init_t)(struct sz_ngrams_engine_t 
 
 /** Signature of every @c sz_ngrams_overlaps kernel. */
 typedef sz_status_t (*sz_kernel_ngrams_overlaps_t)(struct sz_ngrams_engine_t *, sz_strings_view_t const *, sz_f32_t,
-                                                   sz_u32_t *, sz_size_t, sz_size_t, sz_stream_t);
+                                                   sz_f32_t *, sz_size_t, sz_size_t, sz_stream_t);
 
 /** Signature of every @c sz_ngrams_sketches kernel. */
 typedef sz_status_t (*sz_kernel_ngrams_sketches_t)(struct sz_ngrams_engine_t *, sz_strings_view_t const *, sz_size_t,

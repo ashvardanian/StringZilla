@@ -587,7 +587,10 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_skylake_(sz_levenshtein_
                                                                  sz_levenshtein_decode_t_ decode) {
     sz_assert_((engine->capability & sz_cap_cpus_k) != 0 &&
                "A host tier never scores a device-prepared engine, whose head only its GPU tier reads");
-    if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
+    sz_size_t distances_stride_entries;
+    sz_status_t const strided = sz_stride_entries_(distances_stride, sizeof(sz_size_t), candidates->count,
+                                                   &distances_stride_entries);
+    if (strided != sz_success_k) return strided;
     sz_size_t const verticals_bytes = sz_levenshtein_verticals_bytes_skylake_(engine);
     sz_strings_view_t scored;
     sz_size_t const *candidate_order;
@@ -599,7 +602,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_skylake_(sz_levenshtein_
     for (sz_size_t index = 0; index != engine->count; ++index)
         sz_levenshtein_run_skylake_(engine, index, &scored, symbol_counts, candidate_order, bound,
                                     sz_levenshtein_u8x8_transpose_skylake_, verticals,
-                                    distances + index * distances_stride);
+                                    distances + index * distances_stride_entries);
     return sz_success_k;
 }
 

@@ -25,7 +25,7 @@
  *  @see https://ashvardanian.com/posts/stringwars-on-gpus/#52-bit-math-for-bioinformatics
  *
  *  The tables point inside their block by host address, turned into the kernel's own by
- *  @ref sz_reach_metal_ against the block's host address, while the texts' tape, the matches and
+ *  @ref sz_reach_metal_ against the block's host address, while the texts' tape, the shares and
  *  the sketches are bound directly. A round is one dispatch.
  */
 
@@ -59,8 +59,8 @@ struct sz_ngrams_overlaps_arguments_metal_t {
     ulong engine_host;
     ulong slots, slots_offsets, filters, distinct_counts, widths, powers, lengths;
     ulong queries_count, widths_count, candidates_count;
-    ulong matches_query_stride, matches_candidate_stride, staged_slots_count, hit_words_per_simdgroup,
-        candidates_layout, misses_bound;
+    ulong shares_query_stride, shares_candidate_stride, staged_slots_count, hit_words_per_simdgroup, candidates_layout,
+        misses_bound;
 };
 
 /** The sketches launch record, laid out as the host's record of the same name. */
@@ -416,14 +416,16 @@ inline void sz_ngrams_roll_walk_metal_(device uchar const *walk, ulong walk_byte
  *      and on return.
  *  @param[in] lane The calling lane within its group, below @p lanes.
  *  @param[in] lanes The group's lanes, one of 1, 2, 4, 8, 16 and 32, aligned within the simdgroup.
- *  @param[out] counts The pair's @b [widths_count] counts, written by lane zero, or null when only
- *      their sum is wanted.
+ *  @param[in] distinct_counts The query's distinct N-grams at each width, null when @p shares is.
+ *  @param[out] shares The pair's @b [widths_count] shares of @p distinct_counts, written by lane
+ *      zero, or null when only the count's sum is wanted.
  *  @return The count over every width, in every lane of the group.
  */
 template <typename slots_type_, typename hit_words_type_>
 inline ulong sz_ngrams_candidate_walk_metal_(thread sz_ngrams_query_metal_t const &query, slots_type_ slots,
                                              device uchar const *text, ulong length, hit_words_type_ hit_words,
-                                             uint lane, uint lanes, device uint *counts) {
+                                             uint lane, uint lanes, device uint const *distinct_counts,
+                                             device float *shares) {
     uint const per_walk = sz_ngrams_widths_per_walk_metal_k;
     ulong const run = sz_size_divide_round_up_metal_<ulong>(length, (ulong)lanes);
     ulong const run_begin = min((ulong)lane * run, length);
@@ -458,9 +460,11 @@ inline ulong sz_ngrams_candidate_walk_metal_(thread sz_ngrams_query_metal_t cons
         for (uint index = 0; index != per_walk; ++index) {
             if (index >= group_count) break;
             held += found[index];
-            if (!counts) continue;
+            if (!shares) continue;
             uint const total = sz_ngrams_lanes_sum_metal_(found[index], lanes);
-            if (lane == 0) counts[first_width + index] = total;
+            uint const distinct = distinct_counts[first_width + index];
+            if (lane == 0)
+                shares[first_width + index] = distinct ? precise::divide((float)total, (float)distinct) : 0.0f;
         }
     }
 
@@ -491,7 +495,7 @@ inline ulong sz_ngrams_candidate_walk_metal_(thread sz_ngrams_query_metal_t cons
 inline ulong sz_ngrams_candidate_matches_metal(thread sz_ngrams_query_metal_t const &query, device uchar const *text,
                                                ulong length, device atomic_uint *hit_words, uint lane, uint lanes) {
     return sz_ngrams_candidate_walk_metal_(query, query.slots, text, length, hit_words, lane, lanes,
-                                           (device uint *)nullptr);
+                                           (device uint const *)nullptr, (device float *)nullptr);
 }
 
 /**
@@ -506,7 +510,7 @@ inline ulong sz_ngrams_candidate_matches_metal(thread sz_ngrams_query_metal_t co
  */
 kernel void sz_ngrams_overlaps_metal_kernel_(
     device uchar *engine [[buffer(0)]], device uchar const *candidates [[buffer(1)]],
-    device uchar const *candidates_offsets [[buffer(2)]], device uint *matches [[buffer(3)]],
+    device uchar const *candidates_offsets [[buffer(2)]], device float *shares [[buffer(3)]],
     constant sz_ngrams_overlaps_arguments_metal_t &arguments [[buffer(4)]],
     threadgroup ulong *staged_slots [[threadgroup(0)]], uint2 group [[threadgroup_position_in_grid]],
     uint2 groups [[threadgroups_per_grid]], uint thread_index [[thread_index_in_threadgroup]],
@@ -550,8 +554,9 @@ kernel void sz_ngrams_overlaps_metal_kernel_(
         for (ulong candidate = simdgroup; candidate < tile_count; candidate += simdgroups) {
             device uchar const *const text = sz_strings_start_metal_(tape, tile_first + candidate);
             ulong const length = sz_strings_length_metal_(tape, tile_first + candidate);
-            device uint *const row = matches + query_index * arguments.matches_query_stride +
-                                     (tile_first + candidate) * arguments.matches_candidate_stride;
+            device float *const row = shares + query_index * arguments.shares_query_stride +
+                                      (tile_first + candidate) * arguments.shares_candidate_stride;
+            device uint const *const query_distinct_counts = distinct_counts + query_index * widths_count;
             ulong reachable = 0, index;
             for (index = 0; index != widths_count; ++index) {
                 ulong const width = widths[index];
@@ -561,12 +566,13 @@ kernel void sz_ngrams_overlaps_metal_kernel_(
             bool const reaches = query.distinct - min(query.distinct, reachable) <= bound;
             if (reaches && arguments.staged_slots_count)
                 held = sz_ngrams_candidate_walk_metal_(query, (threadgroup ulong const *)staged_slots, text, length,
-                                                       hit_words, lane, 32, row);
+                                                       hit_words, lane, 32, query_distinct_counts, row);
             else if (reaches)
-                held = sz_ngrams_candidate_walk_metal_(query, query_slots, text, length, hit_words, lane, 32, row);
-            // Lane zero wrote the counts, so lane zero alone overwrites a pair past its budget.
+                held = sz_ngrams_candidate_walk_metal_(query, query_slots, text, length, hit_words, lane, 32,
+                                                       query_distinct_counts, row);
+            // Lane zero wrote the shares, so lane zero alone overwrites a pair past its budget.
             bool const zeroes = lane == 0 && (!reaches || query.distinct - held > bound);
-            for (index = 0; zeroes && index != widths_count; ++index) row[index] = 0;
+            for (index = 0; zeroes && index != widths_count; ++index) row[index] = 0.0f;
         }
         // The next query restages the table these walks still read.
         threadgroup_barrier(mem_flags::mem_threadgroup);

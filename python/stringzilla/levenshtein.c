@@ -176,7 +176,7 @@ static PyObject *LevenshteinEngine_distances(LevenshteinEngine *self, PyObject *
     Py_buffer out_view;
     if (sz_py_export_output_buffer(out_obj, "out", (Py_ssize_t)sizeof(sz_size_t), 2, extents, &out_view, strides) != 0)
         return NULL;
-    if (strides[1] != 1) {
+    if (strides[1] != sizeof(sz_size_t)) {
         PyErr_SetString(PyExc_ValueError, "out must be contiguous along its candidate axis");
         PyBuffer_Release(&out_view);
         return NULL;

@@ -67,7 +67,8 @@ void test_subdocuments_unit() {
                      sz_success_k);
         std::vector<sz_size_t> counts(documents.size());
         std::vector<sz_u1x8_t> contained((documents.size() + 7) / 8, 0xFF);
-        expect_equal(sz_subdocuments_counts(&engine, &document_strings, counts.data(), 1, &malformed_index, nullptr),
+        expect_equal(sz_subdocuments_counts(&engine, &document_strings, counts.data(), sizeof(sz_size_t),
+                                            &malformed_index, nullptr),
                      sz_success_k);
         expect_equal(sz_subdocuments_contains(&engine, &document_strings, contained.data(), &malformed_index, nullptr),
                      sz_success_k);
@@ -83,7 +84,8 @@ void test_subdocuments_unit() {
         expect_equal(sz_subdocuments_contains(&engine, &broken_strings, &broken_contained, &malformed_index, nullptr),
                      sz_success_k);
         expect_equal(broken_contained, 1);
-        expect_equal(sz_subdocuments_counts(&engine, &broken_strings, counts.data(), 1, &malformed_index, nullptr),
+        expect_equal(sz_subdocuments_counts(&engine, &broken_strings, counts.data(), sizeof(sz_size_t),
+                                            &malformed_index, nullptr),
                      sz_invalid_syntax_k);
         sz_subdocuments_engine_free(&engine, nullptr);
     }
@@ -111,7 +113,8 @@ void test_subdocuments_unit() {
                     sz_subdocuments_engine_init(&engine, &path_strings, sz_subdocuments_json_k, options,
                                                 &malformed_index, sz::default_capabilities(), nullptr, nullptr),
                     sz_success_k);
-                expect_equal(sz_subdocuments_counts(&engine, &document_strings, &count, 1, &malformed_index, nullptr),
+                expect_equal(sz_subdocuments_counts(&engine, &document_strings, &count, sizeof(sz_size_t),
+                                                    &malformed_index, nullptr),
                              sz_success_k);
                 expect_equal(count, options == sz_subdocuments_options_none_k ? expected.repeated : expected.first);
                 sz_subdocuments_engine_free(&engine, nullptr);

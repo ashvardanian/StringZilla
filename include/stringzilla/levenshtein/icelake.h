@@ -759,7 +759,10 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_icelake(sz_levenshtein_engi
     if (engine->symbol != sz_levenshtein_bytes_k)
         return sz_levenshtein_distances_skylake_(engine, candidates, symbol_counts, order, bound, distances,
                                                  distances_stride, sz_utf8_decode_icelake_);
-    if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
+    sz_size_t distances_stride_entries;
+    sz_status_t const strided = sz_stride_entries_(distances_stride, sizeof(sz_size_t), candidates->count,
+                                                   &distances_stride_entries);
+    if (strided != sz_success_k) return strided;
     // Queries up to 16 symbols use 8-bit or 16-bit lanes; wider ones keep the Skylake verticals.
     sz_strings_view_t scored;
     sz_size_t const *candidate_order;
@@ -771,7 +774,7 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_icelake(sz_levenshtein_engi
         (sz_levenshtein_u64x8_vertical_skylake_t *)sz_levenshtein_engine_verticals_(engine);
     for (sz_size_t index = 0; index != engine->count; ++index)
         sz_levenshtein_run_icelake_(engine, index, &scored, symbol_counts, candidate_order, bound, verticals,
-                                    distances + index * distances_stride);
+                                    distances + index * distances_stride_entries);
     return sz_success_k;
 }
 

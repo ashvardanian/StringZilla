@@ -365,8 +365,6 @@
  *  That is fatal when the buffer held key material, so a scrub places ordinary wide stores and then
  *  this barrier, rather than paying for @c volatile on every byte - @c volatile also forbids
  *  vectorization, so a scrub written that way cannot use more than one byte per store.
- *
- *  @sa sz_do_not_optimize in <tt>types.hpp</tt>, its C++ read-side companion for a value, not a buffer.
  */
 #if defined(__GNUC__) || defined(__clang__)
 #define sz_keep_alive_(pointer) __asm__ __volatile__("" : : "r"(pointer) : "memory")
@@ -2492,6 +2490,16 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_size_divide_round_up(sz_size_t x, sz_size_t d
 /** Divides rounding up in 32 bits, for device code where the @c sz_size_t form costs registers. */
 STRINGZILLA_CONSTEXPR sz_u32_t sz_u32_divide_round_up(sz_u32_t x, sz_u32_t divisor) {
     return (x + divisor - 1) / divisor;
+}
+
+/** Turns a byte stride into entries, refusing one that splits an entry or spans fewer than
+ *  @p minimum_entries. */
+STRINGZILLA_CONSTEXPR sz_status_t sz_stride_entries_(sz_size_t stride_bytes, sz_size_t entry_bytes,
+                                                     sz_size_t minimum_entries, sz_size_t *stride_entries) {
+    if (stride_bytes % entry_bytes != 0 || stride_bytes / entry_bytes < minimum_entries)
+        return sz_unexpected_dimensions_k;
+    *stride_entries = stride_bytes / entry_bytes;
+    return sz_success_k;
 }
 
 /**

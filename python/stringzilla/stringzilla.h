@@ -607,7 +607,7 @@ extern int sz_py_export_engine_placement(PyObject *capabilities_object, PyObject
 
 /**
  *  @brief Binds @p object as a writable output of @p rank axes, each at least @p extents wide.
- *  @param[out] strides Entries from one index of each axis to the next, in items rather than bytes.
+ *  @param[out] strides Bytes from one index of each axis to the next, as the C verbs take them.
  *  @return 0 with @p view bound, or -1 with an exception set and nothing left to release.
  *  @note Checks no contiguity, so a verb taking no stride for an axis checks that axis itself.
  */

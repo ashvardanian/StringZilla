@@ -36,8 +36,8 @@ enum { sz_ngrams_blocks_per_multiprocessor_blackwell_k = 12 };
 static __global__ __launch_bounds__(
     sz_ngrams_candidates_per_block_cuda_k,
     sz_ngrams_blocks_per_multiprocessor_blackwell_k) void sz_ngrams_overlaps_blackwell_kernel_( //
-    sz_ngrams_engine_t engine, sz_strings_view_t candidates, sz_u32_t *matches, sz_size_t matches_query_stride,
-    sz_size_t matches_candidate_stride, sz_size_t staged_slots_count, sz_size_t hit_words_per_warp,
+    sz_ngrams_engine_t engine, sz_strings_view_t candidates, sz_f32_t *shares, sz_size_t shares_query_stride,
+    sz_size_t shares_candidate_stride, sz_size_t staged_slots_count, sz_size_t hit_words_per_warp,
     sz_u32_t misses_bound) {
     sz_simt_group_t const group = {32,
                                    threadIdx.x & 31u,
@@ -51,7 +51,7 @@ static __global__ __launch_bounds__(
                                    sz_i32_lanes_prefix_min_cuda_,
                                    sz_u64_lanes_sum_cuda_,
                                    sz_group_sync_cuda_};
-    sz_ngrams_overlaps_simt_(engine, candidates, matches, matches_query_stride, matches_candidate_stride,
+    sz_ngrams_overlaps_simt_(engine, candidates, shares, shares_query_stride, shares_candidate_stride,
                              staged_slots_count, hit_words_per_warp, misses_bound, &group);
 }
 
@@ -74,10 +74,10 @@ STRINGZILLA_API sz_status_t sz_ngrams_engine_init_blackwell(sz_ngrams_engine_t *
 
 STRINGZILLA_API sz_status_t sz_ngrams_overlaps_blackwell(sz_ngrams_engine_t *engine,
                                                          sz_strings_view_t const *candidates, sz_f32_t radius,
-                                                         sz_u32_t *matches, sz_size_t matches_query_stride,
-                                                         sz_size_t matches_candidate_stride, sz_stream_t stream) {
-    return sz_ngrams_overlaps_scoped_cuda_(engine, candidates, radius, matches, matches_query_stride,
-                                           matches_candidate_stride, (void const *)sz_ngrams_overlaps_blackwell_kernel_,
+                                                         sz_f32_t *shares, sz_size_t shares_query_stride,
+                                                         sz_size_t shares_candidate_stride, sz_stream_t stream) {
+    return sz_ngrams_overlaps_scoped_cuda_(engine, candidates, radius, shares, shares_query_stride,
+                                           shares_candidate_stride, (void const *)sz_ngrams_overlaps_blackwell_kernel_,
                                            stream);
 }
 

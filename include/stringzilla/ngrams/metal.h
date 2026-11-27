@@ -9,7 +9,7 @@
  *  @sa include/stringzilla/ngrams/simt.cuh, the CUDA sibling
  *
  *  The verbs keep the CUDA tier's shape, with an @c id<MTLCommandQueue> as the stream. Every block
- *  the kernels read, the tables, the texts' tapes, the matches and the sketches, must come from
+ *  the kernels read, the tables, the texts' tapes, the shares and the sketches, must come from
  *  @c sz_allocator_init_unified_metal on that stream's device; memory outside the device's registry
  *  draws @c sz_device_memory_mismatch_k.
  *
@@ -89,7 +89,7 @@ typedef struct {
     sz_u64_t engine_host;
     sz_u64_t slots, slots_offsets, filters, distinct_counts, widths, powers, lengths;
     sz_u64_t queries_count, widths_count, candidates_count;
-    sz_u64_t matches_query_stride, matches_candidate_stride, staged_slots_count, hit_words_per_simdgroup,
+    sz_u64_t shares_query_stride, shares_candidate_stride, staged_slots_count, hit_words_per_simdgroup,
         candidates_layout, misses_bound;
 } sz_ngrams_overlaps_arguments_metal_t;
 
@@ -190,22 +190,24 @@ STRINGZILLA_API sz_status_t sz_ngrams_engine_init_metal(sz_ngrams_engine_t *engi
 }
 
 STRINGZILLA_API sz_status_t sz_ngrams_overlaps_metal(sz_ngrams_engine_t *engine, sz_strings_view_t const *candidates,
-                                                     sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
-                                                     sz_size_t matches_candidate_stride, sz_stream_t stream) {
-    sz_status_t status = sz_ngrams_engine_strides_(engine, candidates->count, matches_query_stride,
-                                                   matches_candidate_stride);
+                                                     sz_f32_t radius, sz_f32_t *shares, sz_size_t shares_query_stride,
+                                                     sz_size_t shares_candidate_stride, sz_stream_t stream) {
+    sz_size_t query_stride_entries, candidate_stride_entries;
+    sz_status_t status = sz_ngrams_engine_strides_(engine, candidates->count, shares_query_stride,
+                                                   shares_candidate_stride, &query_stride_entries,
+                                                   &candidate_stride_entries);
     if (status != sz_success_k) return status;
     if (!candidates->count || !engine->count) return sz_success_k;
 
-    // The tables, the candidates' payload and offsets, and the matches, as the kernel numbers them.
+    // The tables, the candidates' payload and offsets, and the shares, as the kernel numbers them.
     sz_metal_bound_t buffers[4];
     sz_metal_call_t call;
     status = sz_device_enter_metal_(stream, &call);
     if (status != sz_success_k) return sz_metal_commit_(&call, status);
-    sz_size_t const matches_count = (engine->count - 1) * matches_query_stride +
-                                    (candidates->count - 1) * matches_candidate_stride + engine->widths_count;
+    sz_size_t const shares_count = (engine->count - 1) * query_stride_entries +
+                                   (candidates->count - 1) * candidate_stride_entries + engine->widths_count;
     if (!sz_metal_resolve_call_(&call, engine->memory, engine->memory_bytes, &buffers[0]) ||
-        !sz_metal_resolve_call_(&call, matches, matches_count * sizeof(sz_u32_t), &buffers[3]))
+        !sz_metal_resolve_call_(&call, shares, shares_count * sizeof(sz_f32_t), &buffers[3]))
         return sz_metal_commit_(&call, sz_device_memory_mismatch_k);
     status = sz_metal_tape_call_(&call, candidates, &buffers[1], &buffers[2]);
     if (status != sz_success_k) return sz_metal_commit_(&call, status);
@@ -220,8 +222,8 @@ STRINGZILLA_API sz_status_t sz_ngrams_overlaps_metal(sz_ngrams_engine_t *engine,
     arguments.powers = (sz_u64_t)engine->powers, arguments.lengths = (sz_u64_t)engine->lengths;
     arguments.queries_count = engine->count, arguments.widths_count = engine->widths_count;
     arguments.candidates_count = candidates->count;
-    arguments.matches_query_stride = matches_query_stride;
-    arguments.matches_candidate_stride = matches_candidate_stride;
+    arguments.shares_query_stride = query_stride_entries;
+    arguments.shares_candidate_stride = candidate_stride_entries;
     arguments.staged_slots_count = geometry->staged_slots_count;
     arguments.hit_words_per_simdgroup = geometry->hit_words_per_simdgroup;
     arguments.candidates_layout = (sz_u64_t)candidates->layout;

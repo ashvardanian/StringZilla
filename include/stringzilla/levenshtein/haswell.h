@@ -611,7 +611,10 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_haswell(sz_levenshtein_engi
     sz_assert_((engine->capability & sz_cap_cpus_k) != 0 &&
                "A host tier never scores a device-prepared engine, whose head only its GPU tier reads");
     enum { registers_k = sz_levenshtein_u64x4_registers_per_position_haswell_k };
-    if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
+    sz_size_t distances_stride_entries;
+    sz_status_t const strided = sz_stride_entries_(distances_stride, sizeof(sz_size_t), candidates->count,
+                                                   &distances_stride_entries);
+    if (strided != sz_success_k) return strided;
     sz_size_t const verticals_bytes = sz_levenshtein_engine_verticals_bytes_(
         registers_k, sz_levenshtein_engine_words_max_(engine), sizeof(sz_levenshtein_u64x4_vertical_haswell_t));
     sz_strings_view_t scored;
@@ -623,7 +626,7 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_haswell(sz_levenshtein_engi
         (sz_levenshtein_u64x4_vertical_haswell_t *)sz_levenshtein_engine_verticals_(engine);
     for (sz_size_t index = 0; index != engine->count; ++index)
         sz_levenshtein_run_haswell_(engine, index, &scored, symbol_counts, candidate_order, bound, verticals,
-                                    distances + index * distances_stride);
+                                    distances + index * distances_stride_entries);
     return sz_success_k;
 }
 

@@ -301,11 +301,11 @@ STRINGZILLA_API void sz_ngrams_engine_free(sz_ngrams_engine_t *engine, sz_stream
 }
 
 STRINGZILLA_API sz_status_t sz_ngrams_overlaps(sz_ngrams_engine_t *engine, sz_strings_view_t const *candidates,
-                                               sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
-                                               sz_size_t matches_candidate_stride, sz_stream_t stream) {
+                                               sz_f32_t radius, sz_f32_t *shares, sz_size_t shares_query_stride,
+                                               sz_size_t shares_candidate_stride, sz_stream_t stream) {
     sz_kernel_ngrams_overlaps_t const kernel = (sz_kernel_ngrams_overlaps_t)sz_kernel_pick_(
         engine->capability, sz_ngrams_overlaps_capabilities());
-    return kernel ? kernel(engine, candidates, radius, matches, matches_query_stride, matches_candidate_stride, stream)
+    return kernel ? kernel(engine, candidates, radius, shares, shares_query_stride, shares_candidate_stride, stream)
                   : sz_missing_kernel_k;
 }
 

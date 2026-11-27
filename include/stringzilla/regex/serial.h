@@ -5492,7 +5492,9 @@ STRINGZILLA_INLINE sz_status_t sz_regex_counts_with_(
     void (*fill_looks)(sz_cptr_t, sz_size_t, sz_u32_t const *, sz_u32_t, sz_u32_t *)) {
     sz_string_view_t views[64];
     sz_size_t matches_count = 0;
-    if (counts_stride == 0) return sz_unexpected_dimensions_k;
+    sz_size_t counts_stride_entries;
+    sz_status_t const strided = sz_stride_entries_(counts_stride, sizeof(sz_size_t), 1, &counts_stride_entries);
+    if (strided != sz_success_k) return strided;
     if (!engine->memory) return sz_missing_kernel_k;
     for (sz_size_t haystack_index = 0; haystack_index != haystacks->count; ++haystack_index) {
         sz_regex_walk_t walk;
@@ -5501,7 +5503,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_counts_with_(
         status = sz_regex_walk_scratch_(engine, views[haystack_index % 64].start, views[haystack_index % 64].length,
                                         rfind_live, find_escape, find_prefixes, fill_looks, 0, &walk);
         if (status != sz_success_k) return status;
-        counts[haystack_index * counts_stride] = sz_regex_walk_serial_(
+        counts[haystack_index * counts_stride_entries] = sz_regex_walk_serial_(
             engine, views[haystack_index % 64].start, views[haystack_index % 64].length, &walk, haystack_index,
             STRINGZILLA_NULL, 0, &matches_count);
     }

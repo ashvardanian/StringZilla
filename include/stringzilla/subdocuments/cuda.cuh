@@ -568,12 +568,14 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_counts_scoped_cuda_(
     sz_subdocuments_engine_t *engine, sz_strings_view_t const *documents, sz_size_t *counts, sz_size_t counts_stride,
     sz_size_t *malformed_index, sz_subdocuments_entry_points_cuda_t const *entry_points, sz_stream_t stream) {
     if (!engine->steps_count) return sz_missing_kernel_k;
-    if (!counts_stride) return sz_unexpected_dimensions_k;
+    sz_size_t counts_stride_entries;
+    sz_status_t const strided = sz_stride_entries_(counts_stride, sizeof(sz_size_t), 1, &counts_stride_entries);
+    if (strided != sz_success_k) return strided;
     if (!documents->count) return sz_success_k;
     if (!sz_strings_accessible_cuda_(documents) || !sz_memory_accessible_cuda_(counts))
         return sz_device_memory_mismatch_k;
-    return sz_subdocuments_walks_cuda_(engine, documents, STRINGZILLA_NULL, counts, counts_stride, STRINGZILLA_NULL, 0,
-                                       STRINGZILLA_NULL, malformed_index, entry_points, stream);
+    return sz_subdocuments_walks_cuda_(engine, documents, STRINGZILLA_NULL, counts, counts_stride_entries,
+                                       STRINGZILLA_NULL, 0, STRINGZILLA_NULL, malformed_index, entry_points, stream);
 }
 
 STRINGZILLA_INLINE sz_status_t sz_subdocuments_find_scoped_cuda_(

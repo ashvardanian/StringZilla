@@ -146,8 +146,10 @@ STRINGZILLA_API sz_status_t sz_subdocuments_contains(sz_subdocuments_engine_t *e
  *  @param[in] engine Compiled paths; the walk grows the engine's depth stack, so one engine serves
  *      one call at a time.
  *  @param[in] documents One document per string; their bytes are read in place and never copied.
- *  @param[out] counts The per-document counts, document d at <tt>counts[d * stride]</tt>.
- *  @param[in] counts_stride Entries from one document's count to the next, at least one.
+ *  @param[out] counts The per-document counts, document d starting @c d * @p counts_stride bytes
+ *      past @p counts.
+ *  @param[in] counts_stride Bytes from one document's count to the next, a nonzero multiple of
+ *      @c sizeof(sz_size_t).
  *  @param[out] malformed_index The first malformed document, on failure.
  *  @param[in] stream Null on the CPU.
  *
@@ -158,7 +160,7 @@ STRINGZILLA_API sz_status_t sz_subdocuments_contains(sz_subdocuments_engine_t *e
  *  it holds is validated.
  *
  *  @par Statuses:
- *  - @c sz_unexpected_dimensions_k @p counts_stride is zero.
+ *  - @c sz_unexpected_dimensions_k @p counts_stride is zero or not a whole number of entries.
  *  - @c sz_missing_kernel_k An empty engine.
  *  - @c sz_invalid_syntax_k A malformed document.
  */

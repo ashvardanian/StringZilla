@@ -134,7 +134,8 @@ void test_substrings_unit() {
                      sz_success_k);
         std::vector<sz_size_t> counts(haystacks.size());
         std::vector<sz_u1x8_t> contained((haystacks.size() + 7) / 8, 0xFF);
-        expect_equal(sz_substrings_counts(&engine, &haystack_strings, counts.data(), 1, nullptr), sz_success_k);
+        expect_equal(sz_substrings_counts(&engine, &haystack_strings, counts.data(), sizeof(sz_size_t), nullptr),
+                     sz_success_k);
         expect_equal(sz_substrings_contains(&engine, &haystack_strings, contained.data(), nullptr), sz_success_k);
         for (std::size_t index = 0; index != haystacks.size(); ++index)
             expect_equal((contained[index >> 3] >> (index & 7) & 1) != 0, counts[index] != 0);
@@ -220,17 +221,17 @@ void test_substrings_safety() {
         sz_f32_t score = -1;
         sz_substrings_bm25_t const meanless {1.2f, 0.75f, 0.0f};
         sz_substrings_bm25_t const unnormalized {1.2f, 0.0f, 0.0f};
-        expect_equal(
-            sz_substrings_bm25_scores(&engine, &haystack_strings, nullptr, &unnormalized, nullptr, &score, 1, nullptr),
-            sz_unexpected_dimensions_k);
-        expect_equal(
-            sz_substrings_bm25_scores(&engine, &haystack_strings, nullptr, &meanless, weights, &score, 1, nullptr),
-            sz_unexpected_dimensions_k);
+        expect_equal(sz_substrings_bm25_scores(&engine, &haystack_strings, nullptr, &unnormalized, nullptr, &score,
+                                               sizeof(sz_f32_t), nullptr),
+                     sz_unexpected_dimensions_k);
+        expect_equal(sz_substrings_bm25_scores(&engine, &haystack_strings, nullptr, &meanless, weights, &score,
+                                               sizeof(sz_f32_t), nullptr),
+                     sz_unexpected_dimensions_k);
         expect_equal(score, -1);
         // Without normalization the mean is never read: "ab" and "cd" once each, `tf·(k1+1)/(tf+k1)` = 1.
-        expect_equal(
-            sz_substrings_bm25_scores(&engine, &haystack_strings, nullptr, &unnormalized, weights, &score, 1, nullptr),
-            sz_success_k);
+        expect_equal(sz_substrings_bm25_scores(&engine, &haystack_strings, nullptr, &unnormalized, weights, &score,
+                                               sizeof(sz_f32_t), nullptr),
+                     sz_success_k);
         expect_near(score, 3.0f, 1e-6f);
     }
 

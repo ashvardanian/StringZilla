@@ -2414,7 +2414,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_regex_test_(sz_subdocuments_engin
     }
     haystack.start = buffer, haystack.length = tagged;
     sz_strings_from_string_views(&haystack, 1, &haystacks);
-    status = sz_regex_counts(&engine->regex, &haystacks, &count, 1, STRINGZILLA_NULL);
+    status = sz_regex_counts(&engine->regex, &haystacks, &count, sizeof(count), STRINGZILLA_NULL);
     *matched = count ? sz_true_k : sz_false_k;
     return status;
 }
@@ -3238,7 +3238,9 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_counts_with_(sz_subdocuments_engi
     sz_string_view_t views[64];
     sz_size_t document_index;
     if (!engine->steps_count) return sz_missing_kernel_k;
-    if (!counts_stride) return sz_unexpected_dimensions_k;
+    sz_size_t counts_stride_entries;
+    sz_status_t const strided = sz_stride_entries_(counts_stride, sizeof(sz_size_t), 1, &counts_stride_entries);
+    if (strided != sz_success_k) return strided;
     for (document_index = 0; document_index != documents->count; ++document_index) {
         sz_size_t counted = 0;
         sz_status_t status;
@@ -3263,7 +3265,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_counts_with_(sz_subdocuments_engi
         }
         if (status == sz_invalid_syntax_k) *malformed_index = document_index;
         if (status != sz_success_k) return status;
-        counts[document_index * counts_stride] = counted;
+        counts[document_index * counts_stride_entries] = counted;
     }
     return sz_success_k;
 }

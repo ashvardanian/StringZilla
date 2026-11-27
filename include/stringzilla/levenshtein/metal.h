@@ -317,7 +317,10 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_metal(sz_levenshtein_engine
                                                            sz_size_t bound, sz_size_t *distances,
                                                            sz_size_t distances_stride, sz_stream_t stream) {
     sz_unused_(symbol_counts), sz_unused_(order);
-    if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
+    sz_size_t distances_stride_entries;
+    sz_status_t const strided = sz_stride_entries_(distances_stride, sizeof(sz_size_t), candidates->count,
+                                                   &distances_stride_entries);
+    if (strided != sz_success_k) return strided;
     if (!candidates->count || !engine->count) return sz_success_k;
 
     // The engine's block, the candidates' payload and offsets, and the distances, in kernel order.
@@ -325,9 +328,10 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_metal(sz_levenshtein_engine
     sz_metal_call_t call;
     sz_status_t status = sz_device_enter_metal_(stream, &call);
     if (status != sz_success_k) return sz_metal_commit_(&call, status);
-    if (engine->count > 1 && distances_stride > (STRINGZILLA_SIZE_MAX - candidates->count) / (engine->count - 1))
+    if (engine->count > 1 &&
+        distances_stride_entries > (STRINGZILLA_SIZE_MAX - candidates->count) / (engine->count - 1))
         return sz_metal_commit_(&call, sz_unexpected_dimensions_k);
-    sz_size_t const distances_count = (engine->count - 1) * distances_stride + candidates->count;
+    sz_size_t const distances_count = (engine->count - 1) * distances_stride_entries + candidates->count;
     if (distances_count > STRINGZILLA_SIZE_MAX / sizeof(sz_size_t))
         return sz_metal_commit_(&call, sz_unexpected_dimensions_k);
     if (!sz_metal_resolve_call_(&call, engine->memory, engine->memory_bytes, &buffers[0]) ||
@@ -345,7 +349,7 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_metal(sz_levenshtein_engine
     arguments.engine_host = (sz_u64_t)engine->memory;
     arguments.masks = (sz_u64_t)engine->masks, arguments.masks_offsets = (sz_u64_t)engine->masks_offsets;
     arguments.symbol_to_class = (sz_u64_t)engine->symbol_to_class, arguments.lengths = (sz_u64_t)engine->lengths;
-    arguments.candidates_count = candidates->count, arguments.distances_stride = distances_stride;
+    arguments.candidates_count = candidates->count, arguments.distances_stride = distances_stride_entries;
     arguments.bound = bound;
     arguments.candidates_layout = (sz_u64_t)candidates->layout;
 

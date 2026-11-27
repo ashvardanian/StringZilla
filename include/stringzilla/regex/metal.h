@@ -211,7 +211,7 @@ typedef struct {
     sz_u64_t looks, starts, checkpoints;
     sz_u64_t slots, results, links, links_next, links_list, nexts, exits, exits_next, keep, walks;
     sz_u64_t haystacks_count, haystacks_layout, replacements_layout, slots_count;
-    sz_u64_t matches_capacity, target_capacity, counts_stride, pattern_index, verb;
+    sz_u64_t matches_capacity, target_capacity, counts_stride, contained_skew, pattern_index, verb;
     sz_u64_t segment, segment_begin, segment_end, chunk_width, chunk_shift, chunks_count, round, rounds, storing;
     sz_u64_t walks_count, walk_bytes, walk_sets, pike_slots, scan_count, scan_tiles, target, clear_words;
     sz_u64_t looks_begin, looks_end, looks_mask, set_words, bodies_begin, bodies_count;
@@ -1123,8 +1123,7 @@ STRINGZILLA_API sz_status_t sz_regex_contains_metal(sz_regex_engine_t *engine, s
     sz_regex_bind_unused_metal_(buffers);
 
     sz_regex_arguments_metal_(engine, haystacks, sz_regex_containing_metal_k, &arguments);
-    // A contains call has no counts' stride, which carries how far past a word the bitmap starts.
-    arguments.counts_stride = (sz_u64_t)((sz_size_t)contained % 4);
+    arguments.contained_skew = (sz_u64_t)((sz_size_t)contained % 4);
     // A byte-exact engine without lookarounds answers from the start-finding walk alone, each
     // haystack's walk stopping at its first match; any other runs the rounds, as the counts do.
     if (engine->case_sensitivity == sz_cased_k && !engine->lookarounds_count && engine->reverse_rows)
@@ -1145,20 +1144,22 @@ STRINGZILLA_API sz_status_t sz_regex_counts_metal(sz_regex_engine_t *engine, sz_
     sz_regex_arguments_metal_t arguments;
     sz_metal_call_t call;
     sz_status_t status;
-    if (!counts_stride) return sz_unexpected_dimensions_k;
+    sz_size_t counts_stride_entries;
+    sz_status_t const strided = sz_stride_entries_(counts_stride, sizeof(sz_size_t), 1, &counts_stride_entries);
+    if (strided != sz_success_k) return strided;
     if (!engine->memory) return sz_missing_kernel_k;
     if (!haystacks->count) return sz_success_k;
     if (haystacks->layout == sz_strings_accessor_k) return sz_device_memory_mismatch_k;
     status = sz_device_enter_metal_(stream, &call);
     if (status == sz_success_k) status = sz_regex_resident_metal_(engine, &call, haystacks, buffers);
     if (status != sz_success_k) return sz_metal_commit_(&call, status);
-    if (!sz_metal_resolve_call_(&call, counts, ((haystacks->count - 1) * counts_stride + 1) * sizeof(sz_size_t),
+    if (!sz_metal_resolve_call_(&call, counts, ((haystacks->count - 1) * counts_stride_entries + 1) * sizeof(sz_size_t),
                                 buffers + sz_regex_counts_buffer_metal_k))
         return sz_metal_commit_(&call, sz_device_memory_mismatch_k);
     sz_regex_bind_unused_metal_(buffers);
 
     sz_regex_arguments_metal_(engine, haystacks, sz_regex_counting_metal_k, &arguments);
-    arguments.counts_stride = counts_stride;
+    arguments.counts_stride = counts_stride_entries;
     status = sz_regex_rounds_metal_(engine, &call, buffers, haystacks, &arguments, stream);
     // The sweeps left running totals, which two dispatches of one grid difference,
     // the results being dead by now.

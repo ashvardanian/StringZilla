@@ -90,7 +90,8 @@ void test_regex_unit() {
                      sz_success_k);
         std::vector<sz_size_t> counts(haystacks.size());
         std::vector<sz_u1x8_t> contained((haystacks.size() + 7) / 8, 0xFF);
-        expect_equal(sz_regex_counts(&engine, &haystack_strings, counts.data(), 1, nullptr), sz_success_k);
+        expect_equal(sz_regex_counts(&engine, &haystack_strings, counts.data(), sizeof(sz_size_t), nullptr),
+                     sz_success_k);
         expect_equal(sz_regex_contains(&engine, &haystack_strings, contained.data(), nullptr), sz_success_k);
         for (std::size_t index = 0; index != haystacks.size(); ++index)
             expect_equal((contained[index >> 3] >> (index & 7) & 1) != 0, counts[index] != 0);

@@ -532,13 +532,13 @@ int sz_py_export_output_buffer(PyObject *object, char const *name, Py_ssize_t it
             PyBuffer_Release(view);
             return -1;
         }
-        // A stride the verb cannot express: it counts whole items forward, never bytes and never backwards.
-        if (view->strides[axis] < itemsize || view->strides[axis] % itemsize != 0) {
-            PyErr_Format(PyExc_ValueError, "%s axis %d must step whole items forward", name, axis);
+        // A stride the verb cannot express: it counts bytes forward, never backwards.
+        if (view->strides[axis] < itemsize) {
+            PyErr_Format(PyExc_ValueError, "%s axis %d must step forward", name, axis);
             PyBuffer_Release(view);
             return -1;
         }
-        strides[axis] = (sz_size_t)(view->strides[axis] / itemsize);
+        strides[axis] = (sz_size_t)view->strides[axis];
     }
     return 0;
 }

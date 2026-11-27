@@ -1114,20 +1114,23 @@ STRINGZILLA_INLINE sz_status_t sz_regex_counts_scoped_rocm_(sz_regex_engine_t *e
     unsigned grid;
     void *arguments[4];
     sz_status_t status;
-    if (!counts_stride) return sz_unexpected_dimensions_k;
+    sz_size_t counts_stride_entries;
+    sz_status_t const strided = sz_stride_entries_(counts_stride, sizeof(sz_size_t), 1, &counts_stride_entries);
+    if (strided != sz_success_k) return strided;
     if (!engine->memory) return sz_missing_kernel_k;
     if (!haystacks->count) return sz_success_k;
     if (haystacks->layout == sz_strings_accessor_k || !sz_regex_resident_rocm_(engine, haystacks) ||
         !sz_memory_accessible_rocm_(counts))
         return sz_device_memory_mismatch_k;
     sz_regex_round_init_rocm_(&round);
-    round.counts = counts, round.counts_stride = counts_stride;
+    round.counts = counts, round.counts_stride = counts_stride_entries;
     status = sz_regex_rounds_rocm_(engine, haystacks, &round, stream);
     if (status != sz_success_k) return status;
     // The sweeps left running totals, which two launches of one grid difference,
     // the results being dead by now.
     grid = sz_regex_grid_rocm_(haystacks_count), edges = (sz_size_t *)round.results;
-    arguments[0] = &counts, arguments[1] = &counts_stride, arguments[2] = &haystacks_count, arguments[3] = &edges;
+    arguments[0] = &counts, arguments[1] = &counts_stride_entries;
+    arguments[2] = &haystacks_count, arguments[3] = &edges;
     status = sz_regex_launch_rocm_((void const *)sz_regex_counts_edges_rocm_kernel_, grid, arguments, 0, stream);
     if (status != sz_success_k) return status;
     return sz_regex_launch_rocm_((void const *)sz_regex_counts_rocm_kernel_, grid, arguments, 0, stream);

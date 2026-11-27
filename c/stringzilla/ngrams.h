@@ -14,10 +14,10 @@
  *  @section ngrams_overlaps Overlaps
  *
  *  The overlap of a query with a candidate at a width is the share of the query's distinct N-grams
- *  that the candidate holds. Every query is filed once into one table of its distinct N-grams at
- *  every width, and every candidate streams through the tables, hashing its own N-grams and
- *  probing. Nothing is stored per candidate, so the candidates may change round to round while the
- *  queries and the widths stay.
+ *  that the candidate holds, which every backend divides and rounds to one @c f32 the same way.
+ *  Every query is filed once into one table of its distinct N-grams at every width, and every
+ *  candidate streams through the tables, hashing its own N-grams and probing. Nothing is stored per
+ *  candidate, so the candidates may change round to round while the queries and the widths stay.
  *
  *  @section ngrams_sketches Sketches
  *
@@ -98,17 +98,18 @@ STRINGZILLA_API sz_status_t sz_ngrams_engine_init(sz_ngrams_engine_t *engine, sz
 STRINGZILLA_API void sz_ngrams_engine_free(sz_ngrams_engine_t *engine, sz_stream_t stream);
 
 /**
- *  @brief Counts, per width, the distinct N-grams of every prepared query that every candidate
+ *  @brief Shares, per width, the distinct N-grams of every prepared query that every candidate
  *      holds, by the kernel of the capability @p engine was prepared for, exact within @p radius.
  *
- *  A count over the query's distinct N-grams at that width is the overlap, the share of the query
- *  the candidate holds. A batch of queries prepared once scores any number of candidate batches,
- *  and a host scratch block only grows, so a batch within the longest seen allocates nothing. A
- *  pair's misses are the query's distinct N-grams the candidate lacks, summed over every width,
- *  and its distance is those misses over the query's distinct N-grams in all. A pair within
- *  @p radius is counted exactly; a pair past it counts zero at every width, on every backend, or
- *  exactly when within rounding of the share, less than 2⁻²⁴ past it. A candidate with too few
- *  N-grams to come within that share is dropped from the two lengths alone, before a byte is read.
+ *  A pair's count over the query's distinct N-grams at that width is the overlap, the share of the
+ *  query the candidate holds, and a width where the query holds none shares zero. A batch of
+ *  queries prepared once scores any number of candidate batches, and a host scratch block only
+ *  grows, so a batch within the longest seen allocates nothing. A pair's misses are the query's
+ *  distinct N-grams the candidate lacks, summed over every width, and its distance is those misses
+ *  over the query's distinct N-grams in all. A pair within @p radius is shared exactly; a pair past
+ *  it shares zero at every width, on every backend, or exactly when within rounding of the share,
+ *  less than 2⁻²⁴ past it. A candidate with too few N-grams to come within that share is dropped
+ *  from the two lengths alone, before a byte is read.
  *
  *  @param[in] engine The prepared tables; a host scratch block grows here and is never shrunk. A
  *      device engine keeps no stream and its rounds keep no state, so any number of streams or
@@ -117,34 +118,35 @@ STRINGZILLA_API void sz_ngrams_engine_free(sz_ngrams_engine_t *engine, sz_stream
  *      the engine was built for: any layout on the CPU, and on a device a tape
  *      @ref sz_strings_to_tape_best wrote into a unified allocator.
  *  @param[in] radius The share of the query's distinct N-grams a pair may miss, in [0, 1]; 1 or
- *      more keeps every count exact.
- *  @param[out] matches Counts with a unit-strided width axis, laid out as shown below.
- *  @param[in] matches_query_stride Entries from one query's plane to the next, at least the
- *      candidates times @p matches_candidate_stride.
- *  @param[in] matches_candidate_stride Entries between candidate rows, at least the widths the
- *      engine was prepared at.
+ *      more keeps every share exact.
+ *  @param[out] shares Shares in [0, 1] with a unit-strided width axis, laid out as shown below.
+ *  @param[in] shares_query_stride Bytes from one query's plane to the next, a multiple of
+ *      @c sizeof(sz_f32_t) and at least the candidates times @p shares_candidate_stride.
+ *  @param[in] shares_candidate_stride Bytes between candidate rows, a multiple of
+ *      @c sizeof(sz_f32_t) and at least the bytes of the widths the engine was prepared at.
  *  @param[in] stream Null on the CPU. On a GPU, the stream to queue on, which also names the device
  *      the round runs on; null for the default.
  *
- *  @note Asymmetric: a candidate holding the whole query counts every distinct query window
- *      however much more it holds, so swapping sides changes the count.
- *  @note Never joins, so the caller joins @p stream before reading @p matches.
+ *  @note Asymmetric: a candidate holding the whole query shares all of it however much more it
+ *      holds, so swapping sides changes the share.
+ *  @note Never joins, so the caller joins @p stream before reading @p shares.
  *
- *  The count of query q, candidate c and width w sits at:
+ *  The share of query q, candidate c and width w sits this many bytes past @p shares:
  *
  *  @verbatim
- *  matches[q * matches_query_stride + c * matches_candidate_stride + w]
+ *  q * shares_query_stride + c * shares_candidate_stride + w * sizeof(sz_f32_t)
  *  @endverbatim
  *
  *  @par Statuses:
- *  - @c sz_unexpected_dimensions_k Either stride is under the axis it spans.
+ *  - @c sz_unexpected_dimensions_k Either stride is not a whole number of entries, or under the
+ *    axis it spans.
  *  - @c sz_missing_kernel_k An empty engine.
  *  - @c sz_device_memory_mismatch_k On a device, an engine, an output, an accessor, a tape or a
  *    stream the device of @p stream cannot use.
  */
 STRINGZILLA_API sz_status_t sz_ngrams_overlaps(sz_ngrams_engine_t *engine, sz_strings_view_t const *candidates,
-                                               sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
-                                               sz_size_t matches_candidate_stride, sz_stream_t stream);
+                                               sz_f32_t radius, sz_f32_t *shares, sz_size_t shares_query_stride,
+                                               sz_size_t shares_candidate_stride, sz_stream_t stream);
 
 /**
  *  @brief One MinHash sketch per text of @p texts, summarizing the set of its N-grams at the widths
@@ -223,9 +225,8 @@ STRINGZILLA_API sz_status_t sz_ngrams_engine_init_serial(sz_ngrams_engine_t *eng
                                                          sz_stream_t stream);
 /** @copydoc sz_ngrams_overlaps */
 STRINGZILLA_API sz_status_t sz_ngrams_overlaps_serial(sz_ngrams_engine_t *engine, sz_strings_view_t const *candidates,
-                                                      sz_f32_t radius, sz_u32_t *matches,
-                                                      sz_size_t matches_query_stride,
-                                                      sz_size_t matches_candidate_stride, sz_stream_t stream);
+                                                      sz_f32_t radius, sz_f32_t *shares, sz_size_t shares_query_stride,
+                                                      sz_size_t shares_candidate_stride, sz_stream_t stream);
 /** @copydoc sz_ngrams_sketches */
 STRINGZILLA_API sz_status_t sz_ngrams_sketches_serial(sz_ngrams_engine_t *engine, sz_strings_view_t const *texts,
                                                       sz_size_t slots, sz_u8_t *sketches, sz_size_t sketches_stride,
@@ -246,9 +247,8 @@ STRINGZILLA_API sz_status_t sz_ngrams_engine_init_haswell(sz_ngrams_engine_t *en
                                                           sz_stream_t stream);
 /** @copydoc sz_ngrams_overlaps */
 STRINGZILLA_API sz_status_t sz_ngrams_overlaps_haswell(sz_ngrams_engine_t *engine, sz_strings_view_t const *candidates,
-                                                       sz_f32_t radius, sz_u32_t *matches,
-                                                       sz_size_t matches_query_stride,
-                                                       sz_size_t matches_candidate_stride, sz_stream_t stream);
+                                                       sz_f32_t radius, sz_f32_t *shares, sz_size_t shares_query_stride,
+                                                       sz_size_t shares_candidate_stride, sz_stream_t stream);
 /** @copydoc sz_ngrams_sketches */
 STRINGZILLA_API sz_status_t sz_ngrams_sketches_haswell(sz_ngrams_engine_t *engine, sz_strings_view_t const *texts,
                                                        sz_size_t slots, sz_u8_t *sketches, sz_size_t sketches_stride,
@@ -270,9 +270,8 @@ STRINGZILLA_API sz_status_t sz_ngrams_engine_init_skylake(sz_ngrams_engine_t *en
                                                           sz_stream_t stream);
 /** @copydoc sz_ngrams_overlaps */
 STRINGZILLA_API sz_status_t sz_ngrams_overlaps_skylake(sz_ngrams_engine_t *engine, sz_strings_view_t const *candidates,
-                                                       sz_f32_t radius, sz_u32_t *matches,
-                                                       sz_size_t matches_query_stride,
-                                                       sz_size_t matches_candidate_stride, sz_stream_t stream);
+                                                       sz_f32_t radius, sz_f32_t *shares, sz_size_t shares_query_stride,
+                                                       sz_size_t shares_candidate_stride, sz_stream_t stream);
 /** @copydoc sz_ngrams_sketches */
 STRINGZILLA_API sz_status_t sz_ngrams_sketches_skylake(sz_ngrams_engine_t *engine, sz_strings_view_t const *texts,
                                                        sz_size_t slots, sz_u8_t *sketches, sz_size_t sketches_stride,
@@ -294,8 +293,8 @@ STRINGZILLA_API sz_status_t sz_ngrams_engine_init_neon(sz_ngrams_engine_t *engin
                                                        sz_stream_t stream);
 /** @copydoc sz_ngrams_overlaps */
 STRINGZILLA_API sz_status_t sz_ngrams_overlaps_neon(sz_ngrams_engine_t *engine, sz_strings_view_t const *candidates,
-                                                    sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
-                                                    sz_size_t matches_candidate_stride, sz_stream_t stream);
+                                                    sz_f32_t radius, sz_f32_t *shares, sz_size_t shares_query_stride,
+                                                    sz_size_t shares_candidate_stride, sz_stream_t stream);
 /** @copydoc sz_ngrams_sketches */
 STRINGZILLA_API sz_status_t sz_ngrams_sketches_neon(sz_ngrams_engine_t *engine, sz_strings_view_t const *texts,
                                                     sz_size_t slots, sz_u8_t *sketches, sz_size_t sketches_stride,
@@ -317,9 +316,9 @@ STRINGZILLA_API sz_status_t sz_ngrams_engine_init_powervsx(sz_ngrams_engine_t *e
                                                            sz_allocator_t *allocator, sz_stream_t stream);
 /** @copydoc sz_ngrams_overlaps */
 STRINGZILLA_API sz_status_t sz_ngrams_overlaps_powervsx(sz_ngrams_engine_t *engine, sz_strings_view_t const *candidates,
-                                                        sz_f32_t radius, sz_u32_t *matches,
-                                                        sz_size_t matches_query_stride,
-                                                        sz_size_t matches_candidate_stride, sz_stream_t stream);
+                                                        sz_f32_t radius, sz_f32_t *shares,
+                                                        sz_size_t shares_query_stride,
+                                                        sz_size_t shares_candidate_stride, sz_stream_t stream);
 /** @copydoc sz_ngrams_sketches */
 STRINGZILLA_API sz_status_t sz_ngrams_sketches_powervsx(sz_ngrams_engine_t *engine, sz_strings_view_t const *texts,
                                                         sz_size_t slots, sz_u8_t *sketches, sz_size_t sketches_stride,
@@ -334,8 +333,8 @@ STRINGZILLA_API sz_status_t sz_ngrams_engine_init_cuda(sz_ngrams_engine_t *engin
                                                        sz_stream_t stream);
 /** @copydoc sz_ngrams_overlaps */
 STRINGZILLA_API sz_status_t sz_ngrams_overlaps_cuda(sz_ngrams_engine_t *engine, sz_strings_view_t const *candidates,
-                                                    sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
-                                                    sz_size_t matches_candidate_stride, sz_stream_t stream);
+                                                    sz_f32_t radius, sz_f32_t *shares, sz_size_t shares_query_stride,
+                                                    sz_size_t shares_candidate_stride, sz_stream_t stream);
 /** @copydoc sz_ngrams_sketches */
 STRINGZILLA_API sz_status_t sz_ngrams_sketches_cuda(sz_ngrams_engine_t *engine, sz_strings_view_t const *texts,
                                                     sz_size_t slots, sz_u8_t *sketches, sz_size_t sketches_stride,
@@ -350,9 +349,8 @@ STRINGZILLA_API sz_status_t sz_ngrams_engine_init_ampere(sz_ngrams_engine_t *eng
                                                          sz_stream_t stream);
 /** @copydoc sz_ngrams_overlaps */
 STRINGZILLA_API sz_status_t sz_ngrams_overlaps_ampere(sz_ngrams_engine_t *engine, sz_strings_view_t const *candidates,
-                                                      sz_f32_t radius, sz_u32_t *matches,
-                                                      sz_size_t matches_query_stride,
-                                                      sz_size_t matches_candidate_stride, sz_stream_t stream);
+                                                      sz_f32_t radius, sz_f32_t *shares, sz_size_t shares_query_stride,
+                                                      sz_size_t shares_candidate_stride, sz_stream_t stream);
 /** @copydoc sz_ngrams_sketches */
 STRINGZILLA_API sz_status_t sz_ngrams_sketches_ampere(sz_ngrams_engine_t *engine, sz_strings_view_t const *texts,
                                                       sz_size_t slots, sz_u8_t *sketches, sz_size_t sketches_stride,
@@ -369,8 +367,8 @@ STRINGZILLA_API sz_status_t sz_ngrams_engine_init_blackwell(sz_ngrams_engine_t *
 /** @copydoc sz_ngrams_overlaps */
 STRINGZILLA_API sz_status_t sz_ngrams_overlaps_blackwell(sz_ngrams_engine_t *engine,
                                                          sz_strings_view_t const *candidates, sz_f32_t radius,
-                                                         sz_u32_t *matches, sz_size_t matches_query_stride,
-                                                         sz_size_t matches_candidate_stride, sz_stream_t stream);
+                                                         sz_f32_t *shares, sz_size_t shares_query_stride,
+                                                         sz_size_t shares_candidate_stride, sz_stream_t stream);
 /** @copydoc sz_ngrams_sketches */
 STRINGZILLA_API sz_status_t sz_ngrams_sketches_blackwell(sz_ngrams_engine_t *engine, sz_strings_view_t const *texts,
                                                          sz_size_t slots, sz_u8_t *sketches, sz_size_t sketches_stride,
@@ -385,8 +383,8 @@ STRINGZILLA_API sz_status_t sz_ngrams_engine_init_rocm(sz_ngrams_engine_t *engin
                                                        sz_stream_t stream);
 /** @copydoc sz_ngrams_overlaps */
 STRINGZILLA_API sz_status_t sz_ngrams_overlaps_rocm(sz_ngrams_engine_t *engine, sz_strings_view_t const *candidates,
-                                                    sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
-                                                    sz_size_t matches_candidate_stride, sz_stream_t stream);
+                                                    sz_f32_t radius, sz_f32_t *shares, sz_size_t shares_query_stride,
+                                                    sz_size_t shares_candidate_stride, sz_stream_t stream);
 /** @copydoc sz_ngrams_sketches */
 STRINGZILLA_API sz_status_t sz_ngrams_sketches_rocm(sz_ngrams_engine_t *engine, sz_strings_view_t const *texts,
                                                     sz_size_t slots, sz_u8_t *sketches, sz_size_t sketches_stride,
@@ -401,8 +399,8 @@ STRINGZILLA_API sz_status_t sz_ngrams_engine_init_cdna3(sz_ngrams_engine_t *engi
                                                         sz_stream_t stream);
 /** @copydoc sz_ngrams_overlaps */
 STRINGZILLA_API sz_status_t sz_ngrams_overlaps_cdna3(sz_ngrams_engine_t *engine, sz_strings_view_t const *candidates,
-                                                     sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
-                                                     sz_size_t matches_candidate_stride, sz_stream_t stream);
+                                                     sz_f32_t radius, sz_f32_t *shares, sz_size_t shares_query_stride,
+                                                     sz_size_t shares_candidate_stride, sz_stream_t stream);
 /** @copydoc sz_ngrams_sketches */
 STRINGZILLA_API sz_status_t sz_ngrams_sketches_cdna3(sz_ngrams_engine_t *engine, sz_strings_view_t const *texts,
                                                      sz_size_t slots, sz_u8_t *sketches, sz_size_t sketches_stride,
@@ -417,8 +415,8 @@ STRINGZILLA_API sz_status_t sz_ngrams_engine_init_cdna4(sz_ngrams_engine_t *engi
                                                         sz_stream_t stream);
 /** @copydoc sz_ngrams_overlaps */
 STRINGZILLA_API sz_status_t sz_ngrams_overlaps_cdna4(sz_ngrams_engine_t *engine, sz_strings_view_t const *candidates,
-                                                     sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
-                                                     sz_size_t matches_candidate_stride, sz_stream_t stream);
+                                                     sz_f32_t radius, sz_f32_t *shares, sz_size_t shares_query_stride,
+                                                     sz_size_t shares_candidate_stride, sz_stream_t stream);
 /** @copydoc sz_ngrams_sketches */
 STRINGZILLA_API sz_status_t sz_ngrams_sketches_cdna4(sz_ngrams_engine_t *engine, sz_strings_view_t const *texts,
                                                      sz_size_t slots, sz_u8_t *sketches, sz_size_t sketches_stride,
@@ -433,8 +431,8 @@ STRINGZILLA_API sz_status_t sz_ngrams_engine_init_cdna5(sz_ngrams_engine_t *engi
                                                         sz_stream_t stream);
 /** @copydoc sz_ngrams_overlaps */
 STRINGZILLA_API sz_status_t sz_ngrams_overlaps_cdna5(sz_ngrams_engine_t *engine, sz_strings_view_t const *candidates,
-                                                     sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
-                                                     sz_size_t matches_candidate_stride, sz_stream_t stream);
+                                                     sz_f32_t radius, sz_f32_t *shares, sz_size_t shares_query_stride,
+                                                     sz_size_t shares_candidate_stride, sz_stream_t stream);
 /** @copydoc sz_ngrams_sketches */
 STRINGZILLA_API sz_status_t sz_ngrams_sketches_cdna5(sz_ngrams_engine_t *engine, sz_strings_view_t const *texts,
                                                      sz_size_t slots, sz_u8_t *sketches, sz_size_t sketches_stride,
@@ -449,8 +447,8 @@ STRINGZILLA_API sz_status_t sz_ngrams_engine_init_metal(sz_ngrams_engine_t *engi
                                                         sz_stream_t stream);
 /** @copydoc sz_ngrams_overlaps */
 STRINGZILLA_API sz_status_t sz_ngrams_overlaps_metal(sz_ngrams_engine_t *engine, sz_strings_view_t const *candidates,
-                                                     sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
-                                                     sz_size_t matches_candidate_stride, sz_stream_t stream);
+                                                     sz_f32_t radius, sz_f32_t *shares, sz_size_t shares_query_stride,
+                                                     sz_size_t shares_candidate_stride, sz_stream_t stream);
 /** @copydoc sz_ngrams_sketches */
 STRINGZILLA_API sz_status_t sz_ngrams_sketches_metal(sz_ngrams_engine_t *engine, sz_strings_view_t const *texts,
                                                      sz_size_t slots, sz_u8_t *sketches, sz_size_t sketches_stride,
@@ -501,10 +499,10 @@ STRINGZILLA_API void sz_ngrams_engine_free(sz_ngrams_engine_t *engine, sz_stream
 }
 
 STRINGZILLA_API sz_status_t sz_ngrams_overlaps(sz_ngrams_engine_t *engine, sz_strings_view_t const *candidates,
-                                               sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
-                                               sz_size_t matches_candidate_stride, sz_stream_t stream) {
-    sz_unused_(engine), sz_unused_(candidates), sz_unused_(radius), sz_unused_(matches),
-        sz_unused_(matches_query_stride), sz_unused_(matches_candidate_stride), sz_unused_(stream);
+                                               sz_f32_t radius, sz_f32_t *shares, sz_size_t shares_query_stride,
+                                               sz_size_t shares_candidate_stride, sz_stream_t stream) {
+    sz_unused_(engine), sz_unused_(candidates), sz_unused_(radius), sz_unused_(shares), sz_unused_(shares_query_stride),
+        sz_unused_(shares_candidate_stride), sz_unused_(stream);
     return sz_missing_library_k;
 }
 

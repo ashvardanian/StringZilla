@@ -2537,9 +2537,11 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_init_cpu_(
     return status;
 }
 
-/** Refuses an output stride that cannot address one entry per haystack. */
-STRINGZILLA_CONSTEXPR sz_status_t sz_substrings_stride_check_(sz_size_t stride) {
-    return stride == 0 ? sz_unexpected_dimensions_k : sz_success_k;
+/** Turns an output byte stride into entries, refusing one that cannot address one entry per
+ *  haystack. */
+STRINGZILLA_CONSTEXPR sz_status_t sz_substrings_stride_check_(sz_size_t stride, sz_size_t entry_bytes,
+                                                              sz_size_t *stride_entries) {
+    return sz_stride_entries_(stride, entry_bytes, 1, stride_entries);
 }
 
 /** Per-haystack containment through @p walks, which is every CPU tier's containment verb. */
@@ -2571,7 +2573,8 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_counts_with_(sz_substrings_engine_t
     sz_substrings_report_t *const report = sz_substrings_report_(engine);
     sz_substrings_ring_t ring;
     sz_size_t haystack_index, total = 0;
-    sz_status_t const checked = sz_substrings_stride_check_(counts_stride);
+    sz_size_t counts_stride_entries;
+    sz_status_t const checked = sz_substrings_stride_check_(counts_stride, sizeof(sz_size_t), &counts_stride_entries);
     if (checked != sz_success_k) return checked;
     sz_substrings_ring_bind_(engine, &ring);
     sz_substrings_report_clear_(report);
@@ -2593,7 +2596,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_counts_with_(sz_substrings_engine_t
                                  &sz_substrings_tally_report_, &tally);
             counted = tally.count;
         }
-        counts[haystack_index * counts_stride] = counted;
+        counts[haystack_index * counts_stride_entries] = counted;
         total += counted;
     }
     report->matches_emitted = total, report->matches_stored = total;
@@ -2803,14 +2806,15 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_with_(
     sz_size_t const needles_count = engine->needles_count;
     sz_u32_t *const counters = (sz_u32_t *)((sz_u8_t *)engine->scratch + arena.bm25_counts);
     sz_substrings_frequencies_t frequencies;
-    sz_size_t haystack_index, needle_index;
+    sz_size_t haystack_index, needle_index, scores_stride_entries;
     sz_status_t checked = sz_substrings_bm25_check(parameters, needle_weights);
-    if (checked == sz_success_k) checked = sz_substrings_stride_check_(scores_stride);
+    if (checked == sz_success_k)
+        checked = sz_substrings_stride_check_(scores_stride, sizeof(sz_f32_t), &scores_stride_entries);
     if (checked != sz_success_k) return checked;
     sz_substrings_report_clear_(sz_substrings_report_(engine));
     if (needles_count == 0) {
         for (haystack_index = 0; haystack_index != haystacks->count; ++haystack_index)
-            scores[haystack_index * scores_stride] = 0;
+            scores[haystack_index * scores_stride_entries] = 0;
         return sz_success_k;
     }
     for (needle_index = 0; needle_index != needles_count; ++needle_index) counters[needle_index] = 0;
@@ -2825,8 +2829,8 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_with_(
         sz_f64_t const norm = sz_substrings_bm25_norm(
             parameters, document_lengths ? (sz_f64_t)document_lengths[haystack_index] : (sz_f64_t)length);
         sz_substrings_bm25_count_(engine, walks, haystack, length, &frequencies);
-        scores[haystack_index * scores_stride] = (sz_f32_t)sz_substrings_bm25_total_(parameters, norm, needle_weights,
-                                                                                     &frequencies);
+        scores[haystack_index * scores_stride_entries] = (sz_f32_t)sz_substrings_bm25_total_(
+            parameters, norm, needle_weights, &frequencies);
     }
     return sz_success_k;
 }

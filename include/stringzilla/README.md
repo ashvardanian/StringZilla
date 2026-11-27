@@ -89,11 +89,6 @@ __`STRINGZILLA_WITH_LIBC`__:
 > Both the library and the C headers can be built without LibC.
 > This may affect the type resolution system on obscure hardware platforms.
 
-__`STRINGZILLA_WITH_STL`__:
-
-> When using the C++ interface one can disable implicit conversions from `std::string` to `sz::string_t` and back.
-> If not needed, the `<string>` and `<string_view>` headers will be excluded, reducing compilation time.
-
 __`STRINGZILLA_BUILD_SHARED`, `STRINGZILLA_BUILD_TEST`, `STRINGZILLA_BUILD_BENCH`, `STRINGZILLA_MARCH`__ for CMake users:
 
 > When compiling the tests and benchmarks, you can explicitly set the target hardware architecture.

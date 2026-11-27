@@ -254,8 +254,8 @@ STRINGZILLA_DEVICE sz_bool_t sz_substrings_bm25_finish_simt_(sz_strings_view_t h
  *  @param[in] sums Each haystack's fixed-point sum of the table's terms.
  *  @param[in] overflowed Each haystack's flag, set where one of its needles found no slot in the
  *      table, so its sum is partial.
- *  @param[in] scores_stride Entries from one haystack's score to the next, so one launch
- *      writes one column.
+ *  @param[in] scores_stride Entries from one haystack's score to the next, as the host turned the
+ *      caller's bytes into, so one launch writes one column.
  *
  *  A block whose haystacks the table held whole stages nothing. Where a batch holds too few
  *  haystacks to fill the device, Hopper's tier walks each missed one with a cluster of blocks.

@@ -221,11 +221,13 @@ STRINGZILLA_DEVICE int sz_ngrams_candidate_clear_simt(sz_ngrams_query_t const *q
     return cleared != 0;
 }
 
-/** One pair's walk for the overlaps kernels: the shares summed over @p group , per-width counts
- *  into @p counts by lane zero, and the words cleared before the group returns. */
+/** One pair's walk for the overlaps kernels: the lanes' counts summed over @p group , per-width
+ *  shares of the query's @p distinct_counts into @p shares by lane zero, and the words cleared
+ *  before the group returns. */
 STRINGZILLA_DEVICE sz_size_t sz_ngrams_candidate_walk_simt_(sz_ngrams_query_t const *query, sz_cptr_t text,
                                                             sz_size_t length, sz_u32_t *hit_words,
-                                                            sz_simt_group_t const *group, sz_u32_t *counts) {
+                                                            sz_simt_group_t const *group,
+                                                            sz_u32_t const *distinct_counts, sz_f32_t *shares) {
     unsigned const lane = group->lane, lanes = group->lanes;
     sz_size_t const query_length = query->length;
     sz_size_t const held = (sz_size_t)group->sum(
@@ -243,7 +245,8 @@ STRINGZILLA_DEVICE sz_size_t sz_ngrams_candidate_walk_simt_(sz_ngrams_query_t co
             found += sz_u32_popcount_simt_(atomicOr(hit_words + word, 0u) & mask);
         }
         sz_u32_t const total = (sz_u32_t)group->sum(found);
-        if (lane == 0) counts[index] = total;
+        sz_u32_t const distinct = distinct_counts[index];
+        if (lane == 0) shares[index] = distinct ? (sz_f32_t)total / (sz_f32_t)distinct : 0.0f;
         base += bits;
     }
     return group->any(sz_ngrams_candidate_clear_simt(query, hit_words, lane, lanes)) ? held : 0;
@@ -252,7 +255,8 @@ STRINGZILLA_DEVICE sz_size_t sz_ngrams_candidate_walk_simt_(sz_ngrams_query_t co
 /** Scores one candidate against a prepared query into @p row , zeros past @p bound misses. */
 STRINGZILLA_DEVICE void sz_ngrams_pair_overlaps_simt_(sz_ngrams_query_t const *query, sz_size_t bound, sz_cptr_t text,
                                                       sz_size_t length, sz_u32_t *hit_words,
-                                                      sz_simt_group_t const *group, sz_u32_t *row) {
+                                                      sz_simt_group_t const *group, sz_u32_t const *distinct_counts,
+                                                      sz_f32_t *row) {
     sz_size_t reachable = 0, index;
     for (index = 0; index != query->widths_count; ++index) {
         sz_size_t const width = query->widths[index];
@@ -261,10 +265,10 @@ STRINGZILLA_DEVICE void sz_ngrams_pair_overlaps_simt_(sz_ngrams_query_t const *q
     sz_size_t held = 0;
     sz_bool_t const reaches = query->distinct - sz_min_of_two(query->distinct, reachable) <= bound ? sz_true_k
                                                                                                    : sz_false_k;
-    if (reaches) held = sz_ngrams_candidate_walk_simt_(query, text, length, hit_words, group, row);
-    // Lane zero wrote the counts, so lane zero alone overwrites a pair past its budget.
+    if (reaches) held = sz_ngrams_candidate_walk_simt_(query, text, length, hit_words, group, distinct_counts, row);
+    // Lane zero wrote the shares, so lane zero alone overwrites a pair past its budget.
     if (group->lane == 0 && (!reaches || query->distinct - held > bound))
-        for (index = 0; index != query->widths_count; ++index) row[index] = 0;
+        for (index = 0; index != query->widths_count; ++index) row[index] = 0.0f;
 }
 
 /**
@@ -284,8 +288,8 @@ STRINGZILLA_DEVICE void sz_ngrams_pair_overlaps_simt_(sz_ngrams_query_t const *q
  *  @param[in] group The calling warp's lane steps, from the vendor's kernel.
  */
 STRINGZILLA_DEVICE void sz_ngrams_overlaps_simt_(sz_ngrams_engine_t engine, sz_strings_view_t candidates,
-                                                 sz_u32_t *matches, sz_size_t matches_query_stride,
-                                                 sz_size_t matches_candidate_stride, sz_size_t staged_slots_count,
+                                                 sz_f32_t *shares, sz_size_t shares_query_stride,
+                                                 sz_size_t shares_candidate_stride, sz_size_t staged_slots_count,
                                                  sz_size_t hit_words_per_warp, sz_u32_t misses_bound,
                                                  sz_simt_group_t const *group) {
     extern __shared__ sz_u64_t sz_ngrams_shared_simt_[];
@@ -313,9 +317,10 @@ STRINGZILLA_DEVICE void sz_ngrams_overlaps_simt_(sz_ngrams_engine_t engine, sz_s
             for (sz_size_t candidate = threadIdx.x / 32; group->any(candidate < tile_count); candidate += warps) {
                 sz_cptr_t const text = sz_strings_start_simt_(candidates, tile_first + candidate);
                 sz_size_t const length = sz_strings_length_simt_(candidates, tile_first + candidate);
-                sz_u32_t *const row = matches + query_index * matches_query_stride +
-                                      (tile_first + candidate) * matches_candidate_stride;
-                sz_ngrams_pair_overlaps_simt_(&query, bound, text, length, hit_words, group, row);
+                sz_f32_t *const row = shares + query_index * shares_query_stride +
+                                      (tile_first + candidate) * shares_candidate_stride;
+                sz_ngrams_pair_overlaps_simt_(&query, bound, text, length, hit_words, group,
+                                              engine.distinct_counts + query_index * engine.widths_count, row);
             }
             // The next query restages the table these walks still read.
             __syncthreads();

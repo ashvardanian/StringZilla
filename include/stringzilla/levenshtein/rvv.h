@@ -350,7 +350,10 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_rvv(sz_levenshtein_engine_t
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_assert_((engine->capability & sz_cap_cpus_k) != 0 &&
                "A host tier never scores a device-prepared engine, whose head only its GPU tier reads");
-    if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
+    sz_size_t distances_stride_entries;
+    sz_status_t const strided = sz_stride_entries_(distances_stride, sizeof(sz_size_t), candidates->count,
+                                                   &distances_stride_entries);
+    if (strided != sz_success_k) return strided;
     sz_size_t const lanes = sz_levenshtein_u64m2_lanes_rvv_();
     sz_size_t const words_max = sz_levenshtein_engine_words_max_(engine);
     // The transposes ride past the verticals, as their rows widen with the vector length.
@@ -366,7 +369,7 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_rvv(sz_levenshtein_engine_t
     sz_u32_t *const transpose_classes = (sz_u32_t *)(verticals + words_max * 2 * lanes);
     for (sz_size_t index = 0; index != engine->count; ++index)
         sz_levenshtein_run_rvv_(engine, index, &scored, symbol_counts, candidate_order, bound, lanes, verticals,
-                                transpose_classes, distances + index * distances_stride);
+                                transpose_classes, distances + index * distances_stride_entries);
     return sz_success_k;
 }
 

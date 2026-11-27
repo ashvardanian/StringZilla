@@ -691,11 +691,15 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_rocm_(sz_levenshtein_eng
                                                               sz_size_t distances_stride, sz_size_t bound,
                                                               sz_levenshtein_entry_points_rocm_t const *entry_points,
                                                               sz_stream_t stream) {
-    if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
+    sz_size_t distances_stride_entries;
+    sz_status_t const strided = sz_stride_entries_(distances_stride, sizeof(sz_size_t), candidates->count,
+                                                   &distances_stride_entries);
+    if (strided != sz_success_k) return strided;
     if (candidates->count == 0 || engine->count == 0) return sz_success_k;
-    if (engine->count > 1 && distances_stride > (STRINGZILLA_SIZE_MAX - candidates->count) / (engine->count - 1))
+    if (engine->count > 1 &&
+        distances_stride_entries > (STRINGZILLA_SIZE_MAX - candidates->count) / (engine->count - 1))
         return sz_unexpected_dimensions_k;
-    if ((engine->count - 1) * distances_stride + candidates->count > STRINGZILLA_SIZE_MAX / sizeof(sz_size_t))
+    if ((engine->count - 1) * distances_stride_entries + candidates->count > STRINGZILLA_SIZE_MAX / sizeof(sz_size_t))
         return sz_unexpected_dimensions_k;
 
     if (!sz_memory_accessible_rocm_(engine->memory)) return sz_device_memory_mismatch_k;
@@ -721,12 +725,13 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_rocm_(sz_levenshtein_eng
         candidate_order = storage + sz_levenshtein_length_keys_simt_k;
     }
     if (status == sz_success_k)
-        status = sz_levenshtein_rounds_rocm_(engine, candidates, distances, distances_stride, bound, candidate_order,
-                                             entry_points, stream);
+        status = sz_levenshtein_rounds_rocm_(engine, candidates, distances, distances_stride_entries, bound,
+                                             candidate_order, entry_points, stream);
     if (storage && hipFreeAsync(storage, (hipStream_t)stream) != hipSuccess && status == sz_success_k)
         status = sz_device_code_mismatch_k;
     if (status != sz_success_k) return status;
-    return sz_levenshtein_long_rocm_(engine, candidates, distances, distances_stride, bound, entry_points, stream);
+    return sz_levenshtein_long_rocm_(engine, candidates, distances, distances_stride_entries, bound, entry_points,
+                                     stream);
 }
 
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_scoped_rocm_(

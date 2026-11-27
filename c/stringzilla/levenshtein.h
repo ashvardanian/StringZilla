@@ -94,9 +94,10 @@ STRINGZILLA_API void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine,
  *      orders and counts candidates itself, reads neither.
  *  @param[in] bound The largest distance reported exactly; a candidate past it reports
  *      @p bound + 1 on every backend. @c STRINGZILLA_SIZE_MAX keeps every distance exact.
- *  @param[out] distances The @b [count, candidates] distances, query @c q at
- *      <tt>distances[q * stride + c]</tt>, device-reachable on a device.
- *  @param[in] distances_stride Entries from one query's row to the next, at least the count.
+ *  @param[out] distances The @b [count, candidates] distances, the row of query @c q starting
+ *      @c q * @p distances_stride bytes past @p distances, device-reachable on a device.
+ *  @param[in] distances_stride Bytes from one query's row to the next, a multiple of
+ *      @c sizeof(sz_size_t) and at least the candidates' bytes.
  *  @param[in] stream Null on the CPU. On a GPU, the stream to queue on, which also names the device
  *      the round runs on; null for the default.
  *
@@ -104,7 +105,8 @@ STRINGZILLA_API void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine,
  *      joins, so the caller joins @p stream before reading @p distances.
  *
  *  @par Statuses:
- *  - @c sz_unexpected_dimensions_k @p distances_stride is under the candidate count.
+ *  - @c sz_unexpected_dimensions_k @p distances_stride is not a whole number of entries, or under
+ *    the candidates' bytes.
  *  - @c sz_missing_kernel_k An empty engine.
  *  - @c sz_device_memory_mismatch_k On a device, an engine, an output, an accessor, a tape or a
  *    stream the device of @p stream cannot use.

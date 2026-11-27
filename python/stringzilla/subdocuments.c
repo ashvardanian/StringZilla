@@ -295,7 +295,7 @@ static PyObject *SubdocumentsEngine_find(SubdocumentsEngine *self, PyObject *con
         if (sz_py_export_output_buffer(matches_object, "matches", (Py_ssize_t)sizeof(sz_size_t), 2, matches_extents,
                                        &matches_view, matches_strides) != 0)
             return NULL;
-        if (matches_strides[0] != 4 || matches_strides[1] != 1) {
+        if (matches_strides[0] != 4 * sizeof(sz_size_t) || matches_strides[1] != sizeof(sz_size_t)) {
             PyErr_SetString(PyExc_ValueError, "matches rows must be contiguous, four fields wide");
             PyBuffer_Release(&matches_view);
             return NULL;
@@ -313,7 +313,7 @@ static PyObject *SubdocumentsEngine_find(SubdocumentsEngine *self, PyObject *con
         if (have_matches) PyBuffer_Release(&matches_view);
         return NULL;
     }
-    if (offsets_strides[0] != 1) {
+    if (offsets_strides[0] != sizeof(sz_size_t)) {
         PyErr_SetString(PyExc_ValueError, "offsets must be contiguous");
         PyBuffer_Release(&offsets_view);
         if (have_matches) PyBuffer_Release(&matches_view);

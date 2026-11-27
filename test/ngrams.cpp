@@ -39,9 +39,9 @@ static sz_status_t ngrams_engine_init_dispatched_(sz_ngrams_engine_t *engine, sz
 static ngrams_backend_t const ngrams_dispatched {
     "dispatched", ngrams_engine_init_dispatched_, sz_ngrams_overlaps, sz_ngrams_sketches, nullptr, nullptr};
 
-/** One pair through the dispatched engine at one width, asserting the literal @p expected count. */
+/** One pair through the dispatched engine at one width, asserting the literal @p expected share. */
 static void check_ngrams_pair_(std::string const &query, std::string const &candidate, std::size_t width,
-                               sz_u32_t expected) {
+                               sz_f32_t expected) {
     handle_checked_heap_t heap;
     std::vector<std::string> const queries = {query}, candidates = {candidate};
     sz_strings_view_t const query_strings = strings_from_(queries);
@@ -50,18 +50,19 @@ static void check_ngrams_pair_(std::string const &query, std::string const &cand
     expect_equal(sz_ngrams_engine_init(&engine, &query_strings, &width, 1, 0, sz::default_capabilities(),
                                        &heap.allocator, nullptr),
                  sz_success_k);
-    sz_u32_t matches = 0xFFFFFFFFu;
-    expect_equal(sz_ngrams_overlaps(&engine, &candidate_strings, 1.0f, &matches, 1, 1, nullptr), sz_success_k);
+    sz_f32_t share = -1.0f;
+    expect_equal(sz_ngrams_overlaps(&engine, &candidate_strings, 1.0f, &share, sizeof(share), sizeof(share), nullptr),
+                 sz_success_k);
     sz_ngrams_engine_free(&engine, nullptr);
     expect_equal(heap.live_allocations, 0);
-    expect_equal(matches, expected);
+    expect_equal(share, expected);
 }
 
 #pragma endregion Helpers
 
 #pragma region Unit
 
-/** Known answers: capacities, strides, counts readable off the texts, and the accessors a kit
+/** Known answers: capacities, strides, shares readable off the texts, and the accessors a kit
  *  probes a host engine's tables with. */
 void test_ngrams_unit() {
     // Identical texts share every distinct window, disjoint alphabets share none, and a candidate
@@ -78,56 +79,59 @@ void test_ngrams_unit() {
     expect_equal(sz_ngrams_engine_init(&engine, &query_strings, widths.data(), widths.size(), 0,
                                        sz::default_capabilities(), &heap.allocator, nullptr),
                  sz_success_k);
-    sz_u32_t matches[4 * 7];
-    expect_equal(sz_ngrams_overlaps(&engine, &candidate_strings, 1.0f, matches, 4 * 7, 7, nullptr), sz_success_k);
+    sz_f32_t shares[4 * 7];
+    expect_equal(sz_ngrams_overlaps(&engine, &candidate_strings, 1.0f, shares, 4 * 7 * sizeof(sz_f32_t),
+                                    7 * sizeof(sz_f32_t), nullptr),
+                 sz_success_k);
+    sz_u32_t const the_counts[7] = {3, 2, 1, 0, 0, 0, 0};
     for (std::size_t width_index = 0; width_index != widths.size(); ++width_index) {
         std::set<std::string> distinct;
         for (std::size_t first = 0; first + widths[width_index] <= fox.size(); ++first)
             distinct.insert(fox.substr(first, widths[width_index]));
-        expect_equal(matches[0 * 7 + width_index], distinct.size());
+        expect_equal(shares[0 * 7 + width_index], 1.0f);
         expect_equal(engine.distinct_counts[width_index], distinct.size());
-        expect_equal(matches[1 * 7 + width_index], 0);
-        expect_equal(matches[3 * 7 + width_index], 0);
+        expect_equal(shares[1 * 7 + width_index], 0.0f);
+        expect_equal(shares[2 * 7 + width_index], (sz_f32_t)the_counts[width_index] / (sz_f32_t)distinct.size());
+        expect_equal(shares[3 * 7 + width_index], 0.0f);
     }
-    expect_true(matches[2 * 7 + 0] == 3 && matches[2 * 7 + 1] == 2 && matches[2 * 7 + 2] == 1);
-    for (std::size_t width_index = 3; width_index != widths.size(); ++width_index)
-        expect_equal(matches[2 * 7 + width_index], 0);
 
-    // A candidate stride wider than the widths leaves the gap it names alone, and every count lands
+    // A candidate stride wider than the widths leaves the gap it names alone, and every share lands
     // where it says, read this time from a tape of the same candidates.
     std::string payload;
     std::vector<sz_u32_t> offsets;
     sz_strings_view_t const candidate_tape = strings_tape_from_(candidates, payload, offsets);
-    sz_u32_t padded[4 * 9];
-    for (sz_u32_t &slot : padded) slot = 0xFFFFFFFFu;
-    expect_equal(sz_ngrams_overlaps(&engine, &candidate_tape, 1.0f, padded, 4 * 9, 9, nullptr), sz_success_k);
+    sz_f32_t padded[4 * 9];
+    for (sz_f32_t &slot : padded) slot = -1.0f;
+    expect_equal(sz_ngrams_overlaps(&engine, &candidate_tape, 1.0f, padded, 4 * 9 * sizeof(sz_f32_t),
+                                    9 * sizeof(sz_f32_t), nullptr),
+                 sz_success_k);
     for (std::size_t candidate = 0; candidate != candidates.size(); ++candidate) {
         for (std::size_t width_index = 0; width_index != widths.size(); ++width_index)
-            expect_equal(padded[candidate * 9 + width_index], matches[candidate * 7 + width_index]);
-        expect_true(padded[candidate * 9 + 7] == 0xFFFFFFFFu && padded[candidate * 9 + 8] == 0xFFFFFFFFu);
+            expect_equal(padded[candidate * 9 + width_index], shares[candidate * 7 + width_index]);
+        expect_true(padded[candidate * 9 + 7] == -1.0f && padded[candidate * 9 + 8] == -1.0f);
     }
     sz_ngrams_engine_free(&engine, nullptr);
 
     // "aaaa" holds one distinct window at width one, which "ab" holds; "ab" holds two, of which
     // "aaaa" holds one.
-    check_ngrams_pair_("aaaa", "ab", 1, 1);
-    check_ngrams_pair_("ab", "aaaa", 1, 1);
+    check_ngrams_pair_("aaaa", "ab", 1, 1.0f);
+    check_ngrams_pair_("ab", "aaaa", 1, 1.0f / 2.0f);
 
     // A candidate holding the whole query holds all 9 of its distinct N-grams at width three and
     // all 7 at five.
-    check_ngrams_pair_("quick brown", "the quick brown fox", 3, 9);
-    check_ngrams_pair_("quick brown", "the quick brown fox", 5, 7);
+    check_ngrams_pair_("quick brown", "the quick brown fox", 3, 9.0f / 9.0f);
+    check_ngrams_pair_("quick brown", "the quick brown fox", 5, 7.0f / 7.0f);
 
     // "abcabcabc" repeats 3 distinct N-grams "abc", "bca", "cab": "abc" holds 1, "xabcax" holds
     // "abc" and "bca", and "abcabcabc" as a candidate against "abc" counts its one window once.
-    check_ngrams_pair_("abcabcabc", "abc", 3, 1);
-    check_ngrams_pair_("abcabcabc", "xabcax", 3, 2);
-    check_ngrams_pair_("abc", "abcabcabc", 3, 1);
+    check_ngrams_pair_("abcabcabc", "abc", 3, 1.0f / 3.0f);
+    check_ngrams_pair_("abcabcabc", "xabcax", 3, 2.0f / 3.0f);
+    check_ngrams_pair_("abc", "abcabcabc", 3, 1.0f);
 
     // An empty side has no N-grams, on either side or both.
-    check_ngrams_pair_("", "abc", 1, 0);
-    check_ngrams_pair_("abc", "", 1, 0);
-    check_ngrams_pair_("", "", 1, 0);
+    check_ngrams_pair_("", "abc", 1, 0.0f);
+    check_ngrams_pair_("abc", "", 1, 0.0f);
+    check_ngrams_pair_("", "", 1, 0.0f);
 
     // The scalar helpers against their definitions.
     std::uint64_t power = 1;

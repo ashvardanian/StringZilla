@@ -831,7 +831,9 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_counts_cuda_(sz_substrings_engine_t
     sz_size_t haystacks_count = haystacks->count;
     void *arguments[4];
     sz_status_t status;
-    if (!counts_stride) return sz_unexpected_dimensions_k;
+    sz_size_t counts_stride_entries;
+    sz_status_t const strided = sz_substrings_stride_check_(counts_stride, sizeof(sz_size_t), &counts_stride_entries);
+    if (strided != sz_success_k) return strided;
     if (!haystacks->count) return sz_success_k;
     if (!sz_substrings_resident_cuda_(engine, haystacks)) return sz_device_memory_mismatch_k;
     if (!sz_memory_accessible_cuda_(counts)) return sz_device_memory_mismatch_k;
@@ -840,7 +842,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_counts_cuda_(sz_substrings_engine_t
                                       &round, entry_points, stream);
     if (status != sz_success_k) return status;
 
-    arguments[0] = &round.haystack_offsets, arguments[1] = &counts, arguments[2] = &counts_stride;
+    arguments[0] = &round.haystack_offsets, arguments[1] = &counts, arguments[2] = &counts_stride_entries;
     arguments[3] = &haystacks_count;
     return sz_substrings_launch_cuda_(entry_points->counts, sz_substrings_grid_cuda_(haystacks_count), arguments, 0,
                                       stream);
@@ -1027,7 +1029,9 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_cuda_(
     void *arguments[12];
     sz_status_t status = sz_substrings_bm25_check(parameters, needle_weights);
     if (status != sz_success_k) return status;
-    if (!scores_stride) return sz_unexpected_dimensions_k;
+    sz_size_t scores_stride_entries;
+    sz_status_t const strided = sz_substrings_stride_check_(scores_stride, sizeof(sz_f32_t), &scores_stride_entries);
+    if (strided != sz_success_k) return strided;
     if (!haystacks->count) return sz_success_k;
     if (!sz_substrings_resident_cuda_(engine, haystacks)) return sz_device_memory_mismatch_k;
     if (!sz_memory_accessible_cuda_(scores)) return sz_device_memory_mismatch_k;
@@ -1076,7 +1080,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_cuda_(
     parameters_copy = *parameters;
     arguments[0] = &engine_copy, arguments[1] = &haystacks_copy, arguments[2] = &document_lengths;
     arguments[3] = &parameters_copy, arguments[4] = &needle_weights, arguments[5] = &overflow_rows;
-    arguments[6] = &scores, arguments[7] = &scores_stride, arguments[8] = &staged_accepts_words;
+    arguments[6] = &scores, arguments[7] = &scores_stride_entries, arguments[8] = &staged_accepts_words;
     arguments[9] = &staged_count, arguments[10] = &sums, arguments[11] = &overflowed;
     grid.x = (unsigned)blocks, grid.y = 1, grid.z = 1;
     block.x = sz_substrings_threads_per_block_simt_k, block.y = 1, block.z = 1;

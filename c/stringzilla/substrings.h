@@ -125,14 +125,16 @@ STRINGZILLA_API sz_status_t sz_substrings_contains(sz_substrings_engine_t *engin
  *  @param[in] haystacks The texts to search; their bytes are read in place and never copied. Any
  *      layout on the CPU, and on a device a tape @ref sz_strings_to_tape_best wrote into a unified
  *      allocator, as every verb takes its haystacks and replacements.
- *  @param[out] counts The per-haystack counts, haystack h at <tt>counts[h * stride]</tt>.
- *  @param[in] counts_stride Entries from one haystack's count to the next, at least one, so a
- *      strided call writes one column of a @b [haystacks, vocabularies] feature matrix.
+ *  @param[out] counts The per-haystack counts, haystack h starting @c h * @p counts_stride bytes
+ *      past @p counts.
+ *  @param[in] counts_stride Bytes from one haystack's count to the next, a nonzero multiple of
+ *      @c sizeof(sz_size_t), so a strided call can write one column of a feature matrix of
+ *      @b [haystacks, vocabularies] counts.
  *  @param[in] stream Null on the CPU. On a GPU, the stream to queue on, which also names the device
  *      the round runs on; null for the default.
  *
  *  @par Statuses:
- *  - @c sz_unexpected_dimensions_k @p counts_stride is zero.
+ *  - @c sz_unexpected_dimensions_k @p counts_stride is zero or not a whole number of entries.
  *  - @c sz_missing_kernel_k An empty engine.
  *  - @c sz_device_memory_mismatch_k A device got an argument or a @p stream it cannot use.
  */
@@ -205,13 +207,16 @@ STRINGZILLA_API sz_status_t sz_substrings_replace(sz_substrings_engine_t *engine
  *      @c average_document_length, or @c STRINGZILLA_NULL to use each haystack's byte length.
  *  @param[in] parameters BM25's continuous parameters.
  *  @param[in] needle_weights One weight per needle of the engine.
- *  @param[out] scores The per-haystack scores, haystack h at <tt>scores[h * stride]</tt>.
- *  @param[in] scores_stride Entries from one haystack's score to the next, at least one, so a
- *      strided call writes one column of a @b [haystacks, vocabularies] feature matrix.
+ *  @param[out] scores The per-haystack scores, haystack h starting @c h * @p scores_stride bytes
+ *      past @p scores.
+ *  @param[in] scores_stride Bytes from one haystack's score to the next, a nonzero multiple of
+ *      @c sizeof(sz_f32_t), so a strided call can write one column of a feature matrix of
+ *      @b [haystacks, vocabularies] scores.
  *  @param[in] stream As @ref sz_substrings_counts takes it.
  *
  *  The arguments are invalid when @p needle_weights is @c STRINGZILLA_NULL, @p scores_stride is
- *  zero, or @c length_normalization is positive while @c average_document_length is not.
+ *  zero or not a whole number of entries, or @c length_normalization is positive while
+ *  @c average_document_length is not.
  *
  *  @par Statuses:
  *  - @c sz_unexpected_dimensions_k Invalid arguments, as above.

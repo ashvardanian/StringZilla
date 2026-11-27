@@ -360,14 +360,13 @@ STRINGZILLA_INLINE void sz_ngrams_round_haswell_(sz_ngrams_engine_t *engine, sz_
 }
 
 STRINGZILLA_API sz_status_t sz_ngrams_overlaps_haswell(sz_ngrams_engine_t *engine, sz_strings_view_t const *candidates,
-                                                       sz_f32_t radius, sz_u32_t *matches,
-                                                       sz_size_t matches_query_stride,
-                                                       sz_size_t matches_candidate_stride, sz_stream_t stream) {
+                                                       sz_f32_t radius, sz_f32_t *shares, sz_size_t shares_query_stride,
+                                                       sz_size_t shares_candidate_stride, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_ngrams_round_t round;
     sz_size_t longest_candidate = 0;
-    sz_status_t const prepared = sz_ngrams_overlaps_round_(engine, candidates, radius, matches, matches_query_stride,
-                                                           matches_candidate_stride, sz_ngrams_interleaved_chains_k,
+    sz_status_t const prepared = sz_ngrams_overlaps_round_(engine, candidates, radius, shares, shares_query_stride,
+                                                           shares_candidate_stride, sz_ngrams_interleaved_chains_k,
                                                            stream, &round, &longest_candidate);
     if (prepared != sz_success_k) return prepared;
     sz_ngrams_round_haswell_(engine, candidates, longest_candidate, &round);
@@ -383,7 +382,7 @@ STRINGZILLA_API sz_status_t sz_ngrams_sketch_haswell(sz_cptr_t text, sz_size_t l
     sz_size_t const step = sz_ngrams_f64x4_positions_per_step_haswell_k;
     sz_size_t const chains = sz_ngrams_interleaved_chains_k, block = sz_ngrams_sketch_block_k;
     sz_f64_t powers[sz_ngrams_widths_max_k];
-    sz_f64_t prefixes[sz_ngrams_interleaved_chains_k][sz_ngrams_sketch_block_k + sz_ngrams_sketch_reach_k];
+    sz_f64_t prefixes[sz_ngrams_interleaved_chains_k][(sz_size_t)sz_ngrams_sketch_block_k + sz_ngrams_sketch_reach_k];
     sz_u32_t residues[sz_ngrams_sketch_block_k];
     sz_size_t const reach = sz_ngrams_sketch_reach_(length, widths, widths_count, powers);
 

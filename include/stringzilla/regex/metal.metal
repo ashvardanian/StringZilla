@@ -224,7 +224,7 @@ struct sz_regex_arguments_metal_t {
     ulong looks, starts, checkpoints;
     ulong slots, results, links, links_next, links_list, nexts, exits, exits_next, keep, walks;
     ulong haystacks_count, haystacks_layout, replacements_layout, slots_count;
-    ulong matches_capacity, target_capacity, counts_stride, pattern_index, verb;
+    ulong matches_capacity, target_capacity, counts_stride, contained_skew, pattern_index, verb;
     ulong segment, segment_begin, segment_end, chunk_width, chunk_shift, chunks_count, round, rounds, storing;
     ulong walks_count, walk_bytes, walk_sets, pike_slots, scan_count, scan_tiles, target, clear_words;
     ulong looks_begin, looks_end, looks_mask, set_words, bodies_begin, bodies_count;
@@ -697,13 +697,12 @@ inline void sz_regex_boundary_store_metal_(constant sz_regex_arguments_metal_t &
  *      @c sz_regex_contained_set_simt_ does: an atomic OR into the aligned word holding it where
  *      that word lies inside the bitmap, else into the @p carry 's edges.
  *
- *  The bitmap starts as many bytes past a 4-byte boundary as the record's @c counts_stride holds,
- *  which a contains call has no use for, as the bitmap takes the counts' slot and the host reads
- *  the bytes off its address, which MSL takes of no device pointer.
+ *  The bitmap starts as many bytes past a 4-byte boundary as the record's @c contained_skew holds,
+ *  as the host reads the bytes off its address, which MSL takes of no device pointer.
  */
 inline void sz_regex_contained_set_metal_(constant sz_regex_arguments_metal_t &arguments,
                                           device sz_regex_carry_metal_t *carry, device uchar *contained, ulong index) {
-    ulong const skew = arguments.counts_stride;
+    ulong const skew = arguments.contained_skew;
     ulong const end = skew + sz_size_divide_round_up_metal_<ulong>(arguments.haystacks_count, 8);
     ulong const address = skew + index / 8, word = address & ~3ul;
     uint const bit = 1u << (address % 4 * 8 + index % 8);
@@ -718,7 +717,7 @@ inline void sz_regex_contained_set_metal_(constant sz_regex_arguments_metal_t &a
  *  @c sz_regex_contained_edges_simt_ does. */
 inline void sz_regex_contained_edges_metal_(constant sz_regex_arguments_metal_t &arguments,
                                             device sz_regex_carry_metal_t const *carry, device uchar *contained) {
-    ulong const skew = arguments.counts_stride;
+    ulong const skew = arguments.contained_skew;
     ulong const end = skew + sz_size_divide_round_up_metal_<ulong>(arguments.haystacks_count, 8);
     uint const head = carry->contained_edges[0], tail = carry->contained_edges[1];
     ulong address = skew;

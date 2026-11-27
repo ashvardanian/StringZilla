@@ -126,23 +126,24 @@ This prime's weight is twenty-four, which `test/ngrams.cpp` certifies by the sam
 
 ## Window Widths
 
-Every width's distinct query N-grams share one table: the step primitives are told a width and know nothing about why, while the engine takes the whole `window_widths` list at construction and `sz_ngrams_overlaps` answers one match count per query per candidate per width.
+Every width's distinct query N-grams share one table: the step primitives are told a width and know nothing about why, while the engine takes the whole `window_widths` list at construction and `sz_ngrams_overlaps` answers one `f32` share per query per candidate per width.
 A slot keys a window by its hash and its width's index, so a candidate window hash only ever meets the query's N-grams of its own width.
-What to do with those counts — weight them, or pick one per pair from the two texts' lengths — stays with the caller.
+What to do with those shares — weight them, or pick one per pair from the two texts' lengths — stays with the caller.
 
 The GPU engines take every width the host ones do.
 CUDA and ROCm lanes take whole aligned words of a candidate and hash each window starting in them straight from those words: up to eight bytes are one integer reduced once, and a wider window folds four more bytes per reduction, so no lane rolls a chain or primes one.
 Metal rolls every width's window hash through each lane's stretch in registers, eight widths together.
 
 A width's count is the query's distinct N-grams the candidate holds, each counted once however often either side repeats it.
+Its share is that count over the query's distinct N-grams at the width, or zero where the query holds none, and every backend writes it at the store as one correctly rounded `f32` division: both operands are integers of at most 2²⁴, exact in `f32`, and Metal divides with `precise::divide`, as its shaders compile with fast math.
 A pair's distance is its misses, the query's distinct N-grams the candidate lacks summed over every width, over the query's distinct N-grams in all.
 A radius on `sz_ngrams_overlaps` is an `f32` share in `[0, 1]` that gives each pair its own budget of misses, so a long pair never loosens a short one's.
 Each call rounds the share up to 24 fractional bits once, and a pair's budget is that times the query's distinct N-grams, shifted down by 24, so pruning stays in integers on GPUs without FP64.
-Pairs within the share count exactly and pairs past it count zero at every width, on every backend, except that a pair less than 2⁻²⁴ past it may still count exactly.
-Every backend rounds alike, so a caller ranking by distance gets the same answer whatever ran it.
+Pairs within the radius share exactly and pairs past it share zero at every width, on every backend, except that a pair less than 2⁻²⁴ past it may still share exactly.
+Every backend rounds alike, so the shares match bit for bit and a caller ranking by distance gets the same answer whatever ran it.
 The host sweeps probe every window of a candidate once per query, a hit marking the query window's first byte so repeats count once, and the lengths alone rule out a candidate with too few N-grams to reach the budget before a window is probed.
 The GPU engines take every width in one bounded launch and give each candidate a warp, zeroing a pair past its budget once it is counted.
-Metal skips the walk of a pair its lengths rule out and zeroes the rest past their budgets as it copies the counts out.
+Metal skips the walk of a pair its lengths rule out and zeroes the rest past their budgets as it copies the shares out.
 
 The width above which spurious window matches become rare follows from the alphabet's collision entropy $H_2$, the Rényi entropy of order two, in bits per symbol:
 

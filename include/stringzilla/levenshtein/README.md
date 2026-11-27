@@ -1,6 +1,6 @@
 # Levenshtein: Edit Distances Under Unit Costs
 
-This directory holds the kernels behind `sz_levenshtein_distances`, which scores a prepared batch of queries against a batch of candidates into a strided `[queries, candidates]` matrix, on the host or enqueued on a device's stream.
+This directory holds the kernels behind `sz_levenshtein_distances`, which scores a prepared batch of queries against a batch of candidates into a `[queries, candidates]` matrix whose rows step by a byte stride, on the host or enqueued on a device's stream.
 A batch is prepared by `sz_levenshtein_engine_init` for the best capability of a mask and the device its stream names, over bytes or over UTF-8 runes as `sz_levenshtein_symbol_t` spells it, and released by `sz_levenshtein_engine_free`.
 The operation has a serial baseline plus per-ISA SIMD backends — `haswell`, `skylake`, `icelake` on x86, `neon` on Arm, `rvv` on RISC-V and `powervsx` on Power — and `cuda`, `rocm` and `metal` backends on the device.
 The CUDA and ROCm kernels share `simt.cuh`, each vendor launches them from its own host code in `cuda.cuh` and `rocm.cuh`, which `src/capabilities/cuda.cu` and `src/capabilities/rocm.hip` compile into the library, and the Metal ones live in `metal.h` with the `metal.metal` shaders, which `src/capabilities/metal.c` compiles.

@@ -453,18 +453,20 @@ STRINGZILLA_API sz_status_t sz_substrings_counts_metal(sz_substrings_engine_t *e
     sz_substrings_arguments_metal_t arguments;
     sz_metal_call_t call;
     sz_status_t status;
-    if (!counts_stride) return sz_unexpected_dimensions_k;
+    sz_size_t counts_stride_entries;
+    sz_status_t const strided = sz_substrings_stride_check_(counts_stride, sizeof(sz_size_t), &counts_stride_entries);
+    if (strided != sz_success_k) return strided;
     if (!haystacks->count) return sz_success_k;
     status = sz_device_enter_metal_(stream, &call);
     if (status == sz_success_k) status = sz_substrings_resident_metal_(engine, &call, haystacks, buffers);
     if (status != sz_success_k) return sz_metal_commit_(&call, status);
-    if (!sz_metal_resolve_call_(&call, counts, ((haystacks->count - 1) * counts_stride + 1) * sizeof(sz_size_t),
+    if (!sz_metal_resolve_call_(&call, counts, ((haystacks->count - 1) * counts_stride_entries + 1) * sizeof(sz_size_t),
                                 buffers + sz_substrings_counts_buffer_metal_k))
         return sz_metal_commit_(&call, sz_device_memory_mismatch_k);
 
     sz_substrings_arguments_metal_(engine, haystacks, &arguments);
     status = sz_substrings_walk_metal_(engine, &call, buffers, haystacks, sz_false_k, STRINGZILLA_NULL, &arguments);
-    arguments.counts_stride = counts_stride;
+    arguments.counts_stride = counts_stride_entries;
     if (status == sz_success_k)
         status = sz_substrings_encode_metal_(&call, buffers, "sz_substrings_counts_metal_kernel_", &arguments,
                                              sz_substrings_groups_metal_(haystacks->count));
@@ -578,7 +580,9 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_metal(sz_substrings_engine
     sz_metal_call_t call;
     sz_status_t status = sz_substrings_bm25_check(parameters, needle_weights);
     if (status != sz_success_k) return status;
-    if (!scores_stride) return sz_unexpected_dimensions_k;
+    sz_size_t scores_stride_entries;
+    sz_status_t const strided = sz_substrings_stride_check_(scores_stride, sizeof(sz_f32_t), &scores_stride_entries);
+    if (strided != sz_success_k) return strided;
     if (!haystacks->count) return sz_success_k;
     if (engine->scratch_bytes < full_arena.total) {
         void *const scratch = engine->allocator.allocate(full_arena.total, engine->allocator.handle, stream);
@@ -591,7 +595,7 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_metal(sz_substrings_engine
     status = sz_device_enter_metal_(stream, &call);
     if (status == sz_success_k) status = sz_substrings_resident_metal_(engine, &call, haystacks, buffers);
     if (status != sz_success_k) return sz_metal_commit_(&call, status);
-    if (!sz_metal_resolve_call_(&call, scores, ((haystacks->count - 1) * scores_stride + 1) * sizeof(sz_f32_t),
+    if (!sz_metal_resolve_call_(&call, scores, ((haystacks->count - 1) * scores_stride_entries + 1) * sizeof(sz_f32_t),
                                 buffers + sz_substrings_scores_buffer_metal_k))
         return sz_metal_commit_(&call, sz_device_memory_mismatch_k);
     if (!sz_metal_resolve_call_(&call, needle_weights, engine->needles_count * sizeof(sz_f32_t),
@@ -605,7 +609,7 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_metal(sz_substrings_engine
     sz_substrings_arguments_metal_(engine, haystacks, &arguments);
     arguments.overflow_rows = (sz_u64_t)((char *)engine->scratch + arena.overflow_rows);
     arguments.document_lengths = (sz_u64_t)document_lengths;
-    arguments.scores_stride = scores_stride, arguments.tally_hashed = hashed;
+    arguments.scores_stride = scores_stride_entries, arguments.tally_hashed = hashed;
     arguments.saturation = parameters->term_frequency_saturation;
     arguments.normalization = parameters->length_normalization;
     arguments.average_length = parameters->average_document_length;

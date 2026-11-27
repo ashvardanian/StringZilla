@@ -27,8 +27,8 @@ extern "C" {
 #if STRINGZILLA_TARGET_CDNA4
 
 static __global__ void __launch_bounds__(sz_ngrams_candidates_per_block_rocm_k)
-    sz_ngrams_overlaps_cdna4_kernel_(sz_ngrams_engine_t engine, sz_strings_view_t candidates, sz_u32_t *matches,
-                                     sz_size_t matches_query_stride, sz_size_t matches_candidate_stride,
+    sz_ngrams_overlaps_cdna4_kernel_(sz_ngrams_engine_t engine, sz_strings_view_t candidates, sz_f32_t *shares,
+                                     sz_size_t shares_query_stride, sz_size_t shares_candidate_stride,
                                      sz_size_t staged_slots_count, sz_size_t hit_words_per_warp,
                                      sz_u32_t misses_bound) {
     sz_simt_group_t const group = {32,
@@ -43,7 +43,7 @@ static __global__ void __launch_bounds__(sz_ngrams_candidates_per_block_rocm_k)
                                    sz_i32_lanes_prefix_min_rocm_,
                                    sz_u64_lanes_sum_rocm_,
                                    sz_group_sync_rocm_};
-    sz_ngrams_overlaps_simt_(engine, candidates, matches, matches_query_stride, matches_candidate_stride,
+    sz_ngrams_overlaps_simt_(engine, candidates, shares, shares_query_stride, shares_candidate_stride,
                              staged_slots_count, hit_words_per_warp, misses_bound, &group);
 }
 
@@ -63,10 +63,10 @@ STRINGZILLA_API sz_status_t sz_ngrams_engine_init_cdna4(sz_ngrams_engine_t *engi
 }
 
 STRINGZILLA_API sz_status_t sz_ngrams_overlaps_cdna4(sz_ngrams_engine_t *engine, sz_strings_view_t const *candidates,
-                                                     sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
-                                                     sz_size_t matches_candidate_stride, sz_stream_t stream) {
-    return sz_ngrams_overlaps_scoped_rocm_(engine, candidates, radius, matches, matches_query_stride,
-                                           matches_candidate_stride, (void const *)sz_ngrams_overlaps_cdna4_kernel_,
+                                                     sz_f32_t radius, sz_f32_t *shares, sz_size_t shares_query_stride,
+                                                     sz_size_t shares_candidate_stride, sz_stream_t stream) {
+    return sz_ngrams_overlaps_scoped_rocm_(engine, candidates, radius, shares, shares_query_stride,
+                                           shares_candidate_stride, (void const *)sz_ngrams_overlaps_cdna4_kernel_,
                                            stream);
 }
 

@@ -136,13 +136,15 @@ STRINGZILLA_API sz_status_t sz_regex_contains(sz_regex_engine_t *engine, sz_stri
  *  @param[in] engine A compiled vocabulary, whose round scratch grows to the longest haystack.
  *  @param[in] haystacks The texts to search, in any layout; their bytes are read in place.
  *      Malformed UTF-8 is searched as is: no class or literal matches a malformed byte.
- *  @param[out] counts The per-haystack counts, haystack h at <tt>counts[h * stride]</tt>.
- *  @param[in] counts_stride Entries from one haystack's count to the next, at least one, so a
- *      strided call writes one column of a @b [haystacks, vocabularies] feature matrix.
+ *  @param[out] counts The per-haystack counts, haystack h starting @c h * @p counts_stride bytes
+ *      past @p counts.
+ *  @param[in] counts_stride Bytes from one haystack's count to the next, a nonzero multiple of
+ *      @c sizeof(sz_size_t), so a strided call can write one column of a feature matrix of
+ *      @b [haystacks, vocabularies] counts.
  *  @param[in] stream Null on the CPU, or the device stream the call is enqueued on.
  *
  *  @par Statuses:
- *  - @c sz_unexpected_dimensions_k @p counts_stride is zero.
+ *  - @c sz_unexpected_dimensions_k @p counts_stride is zero or not a whole number of entries.
  *  - @c sz_missing_kernel_k An empty engine.
  *  - @c sz_device_memory_mismatch_k A @p stream the engine's capability cannot use.
  */

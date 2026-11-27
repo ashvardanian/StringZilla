@@ -554,6 +554,7 @@ printf("%.*s\n", (int)string_length, string_start);
 ## Engines & Devices
 
 The three engine families prepare a batch of queries once and score it against many batches of candidates, writing into a strided block the caller supplies rather than allocating one per round.
+Every output stride counts bytes, as NumKong's do, and a stride that splits an entry answers `sz_unexpected_dimensions_k`.
 Each init takes the mask, the allocator and a stream last, and each round is a single verb with no `_best` twin, as the engine already holds the capability its init picked:
 
 ```c
@@ -583,7 +584,8 @@ sz_strings_to_tape_best(&host_candidates, NULL, host_candidates.count, &unified,
 sz_strings_view_t candidates;
 sz_strings_from_span(&tape, &candidates);
 sz_levenshtein_engine_init(&engine, &queries, sz_levenshtein_bytes_k, caps, NULL, stream);
-sz_levenshtein_distances(&engine, &candidates, NULL, NULL, STRINGZILLA_SIZE_MAX, distances, candidates.count, stream);
+sz_levenshtein_distances(&engine, &candidates, NULL, NULL, STRINGZILLA_SIZE_MAX, distances,
+                         candidates.count * sizeof(sz_size_t), stream);
 sz_stream_synchronize_best(caps, stream);
 sz_levenshtein_engine_free(&engine, stream);
 sz_strings_span_free(&tape, &unified, stream);

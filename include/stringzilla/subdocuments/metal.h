@@ -674,11 +674,13 @@ STRINGZILLA_API sz_status_t sz_subdocuments_counts_metal(sz_subdocuments_engine_
                                                          sz_size_t counts_stride, sz_size_t *malformed_index,
                                                          sz_stream_t stream) {
     if (!engine->steps_count) return sz_missing_kernel_k;
-    if (!counts_stride) return sz_unexpected_dimensions_k;
+    sz_size_t counts_stride_entries;
+    sz_status_t const strided = sz_stride_entries_(counts_stride, sizeof(sz_size_t), 1, &counts_stride_entries);
+    if (strided != sz_success_k) return strided;
     if (!documents->count) return sz_success_k;
     if (documents->layout == sz_strings_accessor_k) return sz_device_memory_mismatch_k;
-    return sz_subdocuments_walks_metal_(engine, documents, STRINGZILLA_NULL, counts, counts_stride, STRINGZILLA_NULL, 0,
-                                        STRINGZILLA_NULL, malformed_index, stream);
+    return sz_subdocuments_walks_metal_(engine, documents, STRINGZILLA_NULL, counts, counts_stride_entries,
+                                        STRINGZILLA_NULL, 0, STRINGZILLA_NULL, malformed_index, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_subdocuments_find_metal(sz_subdocuments_engine_t *engine,

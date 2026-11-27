@@ -163,25 +163,6 @@ static char const doc_NgramsEngine_overlaps[] =                                 
     "  >>> out[0, 0, 0]\n"                                                                           //
     "  1.0";
 
-/** Turns the counts in @p out into shares in place: each width's count over the query's distinct
- *  N-grams at that width, zero where the query has none. */
-static void NgramsEngine_shares_(sz_ngrams_engine_t const *engine, sz_size_t candidates_count, void *out,
-                                 sz_size_t const *strides) {
-    for (sz_size_t candidate = 0; candidate != candidates_count; ++candidate)
-        for (sz_size_t query = 0; query != engine->count; ++query) {
-            char *const row = (char *)out + (query * strides[0] + candidate * strides[1]) * sizeof(sz_f32_t);
-            sz_u32_t const *const distinct_counts = engine->distinct_counts + query * engine->widths_count;
-            for (sz_size_t index = 0; index != engine->widths_count; ++index) {
-                sz_u32_t matches;
-                memcpy(&matches, row + index * sizeof(sz_f32_t), sizeof(matches));
-                sz_f32_t const share = distinct_counts[index]
-                                           ? (sz_f32_t)((sz_f64_t)matches / (sz_f64_t)distinct_counts[index])
-                                           : 0.0f;
-                memcpy(row + index * sizeof(sz_f32_t), &share, sizeof(share));
-            }
-        }
-}
-
 static PyObject *NgramsEngine_overlaps(NgramsEngine *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                        PyObject *args_names_tuple) {
     if (positional_args_count < 1 || positional_args_count > 2) {
@@ -242,7 +223,7 @@ static PyObject *NgramsEngine_overlaps(NgramsEngine *self, PyObject *const *args
     if (sz_py_export_output_buffer(out_object, "out", (Py_ssize_t)sizeof(sz_f32_t), 3, extents, &out_view, strides) !=
         0)
         return NULL;
-    if (strides[2] != 1) {
+    if (strides[2] != sizeof(sz_f32_t)) {
         PyErr_SetString(PyExc_ValueError, "out must be contiguous along its width axis");
         PyBuffer_Release(&out_view);
         return NULL;
@@ -256,11 +237,10 @@ static PyObject *NgramsEngine_overlaps(NgramsEngine *self, PyObject *const *args
         self->engine.widths_count != extents[2])
         status = sz_unexpected_dimensions_k;
     else {
-        status = sz_ngrams_overlaps(&self->engine, &candidates, radius, (sz_u32_t *)out_view.buf, strides[0],
+        status = sz_ngrams_overlaps(&self->engine, &candidates, radius, (sz_f32_t *)out_view.buf, strides[0],
                                     strides[1], stream);
         if (status == sz_success_k && (capability & sz_cap_gpus_k))
             status = sz_stream_synchronize_best(capability, stream);
-        if (status == sz_success_k) NgramsEngine_shares_(&self->engine, candidates.count, out_view.buf, strides);
     }
     sz_py_mutex_unlock_(&self->mutex);
     Py_END_ALLOW_THREADS;
