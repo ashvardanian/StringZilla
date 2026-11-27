@@ -1,5 +1,5 @@
 """Capability tests: the sz.capabilities_{detected,compiled,enabled}_{cpu,cuda,rocm,metal} producers,
-the sz.stream_{init,free}_{cuda,rocm,metal} producers, configure_thread_cpu, Strings.copy and
+the sz.stream_{init,free}_{cuda,rocm,metal} producers, configure_thread_cpu, Strings.copy, copy and
 synchronize.
 
 Capabilities are reported along two independent axes, `detected` (what a device can execute) and
@@ -174,6 +174,45 @@ def test_cpu_copies_read_like_their_strings():
     assert sz.synchronize(capabilities, stream=None) is None
     with pytest.raises(TypeError):
         sz.Strings(texts).copy()
+
+
+def test_cpu_copies_of_buffers_are_writable_bytes():
+    """`sz.copy` for the CPU owns the bytes of any buffer, which the host and a host engine write in place."""
+    capabilities = sz.capabilities_enabled_cpu()
+    source = bytearray(b"kitten")
+    copied = sz.copy(source, capabilities)
+    assert isinstance(copied, sz.UnifiedBuffer)
+    assert bytes(sz.copy(b"kitten", capabilities)) == b"kitten"
+    view = memoryview(copied)
+    assert not view.readonly
+    view[0] = ord("m")
+    assert bytes(copied) == b"mitten"
+    assert source == b"kitten", "the copy owns its bytes"
+    assert bytes(sz.copy(b"", capabilities)) == b""
+    assert len(memoryview(sz.copy(bytearray(), capabilities))) == 0
+
+    texts = ["kitten", "sitting"]
+    distances = sz.copy(bytearray(len(texts) * 8), capabilities)
+    sz.LevenshteinEngine(sz.Strings(["kitten"])).distances(
+        sz.Strings(texts), memoryview(distances).cast("Q", (1, len(texts)))
+    )
+    assert memoryview(distances).cast("Q").tolist() == [0, 3]
+
+    with pytest.raises(TypeError):
+        sz.copy(b"kitten", "cpu")
+    with pytest.raises(TypeError):
+        sz.copy(b"kitten")
+    with pytest.raises(TypeError):
+        sz.copy("kitten", capabilities)
+
+
+@pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
+def test_cpu_copies_of_arrays_follow_c_order():
+    """A strided array is copied in C order, so the bytes read back as the array it views."""
+    transposed = np.arange(12, dtype=np.uint32).reshape(3, 4).T
+    copied = sz.copy(transposed, sz.capabilities_enabled_cpu())
+    assert np.frombuffer(copied, dtype=np.uint32).reshape(4, 3).tolist() == transposed.tolist()
+    assert np.frombuffer(sz.copy(np.empty(0), sz.capabilities_enabled_cpu()), dtype=np.uint8).size == 0
 
 
 def test_levenshtein_bound_clips_distances_past_it():

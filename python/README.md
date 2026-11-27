@@ -314,7 +314,7 @@ assert sz.String("abc").decode() == "abc"
   This differs from Python's built-in `hash()`, which returns a platform-dependent `Py_hash_t`.
 - `sz.hash_multiseed(text, seeds, out=None)` — hash one string under many seeds at once.
   `seeds` is a contiguous buffer of `uint64`, such as a `numpy.uint64` array or `array('Q', ...)`; plain `int` lists are not accepted.
-  Returns a tuple of ints, or fills the optional contiguous `uint64` `out` buffer in place and returns `None`.
+  Returns a tuple of ints, or fills the optional contiguous uint64 buffer `out` in place and returns `None`.
   This is much faster than looping `hash` for short strings under many seeds, and is useful for feature hashing, Count-Min sketches, Bloom/cuckoo filters, and MinHash/LSH.
 - `sz.bytesum(text)` — additive checksum of the individual byte values, as an `int`.
 - `sz.sha256(text)` — 32-byte SHA-256 digest as `bytes`.
@@ -382,7 +382,7 @@ Lanes are workers rather than messages: `lanes[i]` reads one as a `Sha256`, and 
 
 `sz.hmac_sha256(key, message, out=None)` takes either one message or a collection, authenticating a batch of tokens sharing a secret through the same kernels.
 
-Both accept a `Strings`, read in place, and an `out` buffer of bytes — a `(count, 32)` `numpy.uint8` matrix receives one digest per row with no allocation, since that is byte-for-byte the layout the kernel writes.
+Both accept a `Strings`, read in place, and an `out` buffer of bytes — a NumPy uint8 matrix of shape `(count, 32)` receives one digest per row with no allocation, since that is byte-for-byte the layout the kernel writes.
 The GIL is released around the kernel, so several threads digest concurrently.
 
 Lanes advance in lockstep within a group, so a group costs as much as its longest message.
@@ -711,7 +711,8 @@ gpu = sz.capabilities_enabled_cuda(0)
 stream = sz.stream_init_cuda(0)
 engine = sz.LevenshteinEngine(sz.Strings(["kitten", "saturday"]), capabilities=gpu, stream=stream)
 candidates = sz.Strings(["sitting", "sunday"]).copy(gpu, stream)
-engine.distances(candidates, unified_out, stream=stream)
+unified_out = sz.copy(bytearray(2 * 2 * 8), gpu, stream)
+engine.distances(candidates, memoryview(unified_out).cast("Q", (2, 2)), stream=stream)
 sz.synchronize(gpu, stream)  # before `unified_out` is read or `candidates` dropped
 sz.stream_free_cuda(stream)
 ```
@@ -720,6 +721,14 @@ A device round enqueues and returns, so its `out` buffer has to be memory the de
 A plain NumPy array is host memory and is refused; a NumPy array over a `cudaMallocManaged` allocation works.
 `SubstringsEngine.report` is written by the device too, so it obeys the same rule.
 A host engine ignores `stream`, imposes no such requirement, and has always finished writing by the time it answers.
+
+### Unified Memory
+
+No verb allocates, so unified memory comes only from an explicit copy.
+`sz.copy(buffer, capabilities, stream=None)` copies any buffer into a new block of that memory and returns a writable `sz.UnifiedBuffer`, freed with it.
+For CPU capabilities the block sits on the host heap, so a host engine reads it like any other buffer.
+Metal memory never crosses libraries, as NumKong and StringZilla each keep their own registry of unified blocks.
+So a block from a NumKong copy is unreachable for a StringZilla Metal engine, and a StringZilla block for a NumKong one.
 
 ## Unicode Segmentation
 

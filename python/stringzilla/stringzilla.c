@@ -415,6 +415,127 @@ static PyObject *module_synchronize(PyObject *unused_module, PyObject *const *ar
     Py_RETURN_NONE;
 }
 
+/** Bytes in the unified memory of one capability group, made by @c copy, freed by @c allocator. */
+typedef struct {
+    PyObject ob_base;
+
+    /** The first byte, or null when empty. */
+    sz_ptr_t data;
+    sz_size_t length;
+    sz_allocator_t allocator;
+} UnifiedBuffer;
+
+static void UnifiedBuffer_dealloc(UnifiedBuffer *self) {
+    // A null stream, as `Strings` frees its copies, since the block's own stream may be gone.
+    if (self->data) self->allocator.free(self->data, self->length, self->allocator.handle, NULL);
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+static int UnifiedBuffer_getbuffer(UnifiedBuffer *self, Py_buffer *view, int flags) {
+    return PyBuffer_FillInfo(view, (PyObject *)self, self->data, (Py_ssize_t)self->length, 0, flags);
+}
+
+static PyBufferProcs UnifiedBuffer_as_buffer = {
+    .bf_getbuffer = (getbufferproc)UnifiedBuffer_getbuffer,
+};
+
+static char const doc_UnifiedBuffer[] =                                                             //
+    "Writable bytes in the unified memory of one capability group, which only `copy` makes.\n\n"    //
+    "Engines of those capabilities read and write it in place, and the host reads and writes it\n"  //
+    "through `memoryview`, cast to the shape a verb takes. The block is freed with the object.\n\n" //
+    "Example:\n"                                                                                    //
+    "    >>> distances = sz.copy(bytearray(16), sz.capabilities_enabled_cpu())\n"                   //
+    "    >>> memoryview(distances).cast('Q', (1, 2)).tolist()\n"                                    //
+    "    [[0, 0]]";
+
+static PyTypeObject UnifiedBufferType = {
+    PyVarObject_HEAD_INIT(NULL, 0) //
+        .tp_name = "stringzilla.UnifiedBuffer",
+    .tp_doc = doc_UnifiedBuffer,
+    .tp_basicsize = sizeof(UnifiedBuffer),
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_dealloc = (destructor)UnifiedBuffer_dealloc,
+    .tp_as_buffer = &UnifiedBuffer_as_buffer,
+};
+
+static char const doc_copy[] =                                                                         //
+    "Copy any buffer into a new block of the unified memory of `capabilities`, in C order.\n\n"        //
+    "No verb allocates, so this is where memory a GPU engine reads or writes comes from: the host\n"   //
+    "heap for CPU capabilities, managed memory on CUDA and ROCm, a shared buffer on Metal.\n\n"        //
+    "Args:\n"                                                                                          //
+    "    buffer (Buffer): Any object exporting the buffer protocol, like bytes or a NumPy array.\n"    //
+    "    capabilities (Capability): A producer's mask, which names the vendor.\n"                      //
+    "    stream (int, optional): A stream of that vendor as an integer, naming the device the block\n" //
+    "        is made on, or None for the default.\n\n"                                                 //
+    "Returns:\n"                                                                                       //
+    "    UnifiedBuffer: The bytes of `buffer`, writable, owning their block.\n\n"                      //
+    "Raises:\n"                                                                                        //
+    "    RuntimeError: This build lacks the vendor, or its device does not answer.\n"                  //
+    "    MemoryError: The block could not be allocated.\n\n"                                           //
+    "Example:\n"                                                                                       //
+    "    >>> bytes(sz.copy(b'kitten', sz.capabilities_enabled_cpu()))\n"                               //
+    "    b'kitten'\n\n"                                                                                //
+    "Signature:\n"                                                                                     //
+    "    >>> def copy(buffer, capabilities, stream=None) -> sz.UnifiedBuffer: ...";
+
+static PyObject *module_copy(PyObject *unused_module, PyObject *const *args, Py_ssize_t positional_args_count,
+                             PyObject *args_names_tuple) {
+    sz_unused_(unused_module);
+    if (positional_args_count > 3) {
+        PyErr_Format(PyExc_TypeError, "copy() takes at most 3 positional arguments, got %zd", positional_args_count);
+        return NULL;
+    }
+    PyObject *buffer_object = positional_args_count > 0 ? args[0] : NULL;
+    PyObject *capabilities_object = positional_args_count > 1 ? args[1] : NULL;
+    PyObject *stream_object = positional_args_count > 2 ? args[2] : NULL;
+    Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_GET_SIZE(args_names_tuple) : 0;
+    for (Py_ssize_t keyword_index = 0; keyword_index < args_names_count; ++keyword_index) {
+        PyObject *const key = PyTuple_GET_ITEM(args_names_tuple, keyword_index);
+        PyObject **slot = PyUnicode_CompareWithASCIIString(key, "buffer") == 0         ? &buffer_object
+                          : PyUnicode_CompareWithASCIIString(key, "capabilities") == 0 ? &capabilities_object
+                          : PyUnicode_CompareWithASCIIString(key, "stream") == 0       ? &stream_object
+                                                                                       : NULL;
+        if (!slot) return PyErr_Format(PyExc_TypeError, "copy() got an unexpected keyword argument '%U'", key);
+        if (*slot) return PyErr_Format(PyExc_TypeError, "copy() got multiple values for argument '%U'", key);
+        *slot = args[positional_args_count + keyword_index];
+    }
+    if (!buffer_object || !capabilities_object) {
+        PyErr_Format(PyExc_TypeError, "copy() missing required argument '%s'",
+                     buffer_object ? "capabilities" : "buffer");
+        return NULL;
+    }
+    unsigned long long const bits = PyLong_AsUnsignedLongLong(capabilities_object);
+    if (bits == (unsigned long long)-1 && PyErr_Occurred()) return NULL;
+    sz_stream_t stream = NULL;
+    if (sz_py_export_stream(stream_object, &stream) != 0) return NULL;
+
+    Py_buffer source;
+    if (PyObject_GetBuffer(buffer_object, &source, PyBUF_FULL_RO) != 0) return NULL;
+    UnifiedBuffer *result = PyObject_New(UnifiedBuffer, &UnifiedBufferType);
+    if (!result) {
+        PyBuffer_Release(&source);
+        return NULL;
+    }
+    result->data = NULL, result->length = (sz_size_t)source.len;
+    sz_status_t status;
+    Py_BEGIN_ALLOW_THREADS;
+    status = sz_allocator_init_unified_best(&result->allocator, (sz_capability_t)bits);
+    if (status == sz_success_k && result->length) {
+        result->data = (sz_ptr_t)result->allocator.allocate(result->length, result->allocator.handle, stream);
+        if (!result->data) status = sz_bad_alloc_k;
+    }
+    Py_END_ALLOW_THREADS;
+    int failed = status != sz_success_k;
+    if (failed) sz_py_raise_status(status, "copy()");
+    else if (result->length) failed = PyBuffer_ToContiguous(result->data, &source, source.len, 'C');
+    PyBuffer_Release(&source);
+    if (failed) {
+        Py_DECREF(result);
+        return NULL;
+    }
+    return (PyObject *)result;
+}
+
 /** Builds the @c Capability IntFlag with one member per CPU capability, each spelled as the C
  *  library spells it, or returns @c NULL. */
 static PyObject *capability_type_new_(void) {
@@ -675,6 +796,7 @@ static PyMethodDef stringzilla_methods[] = {
     {"stream_init_metal", stream_init_metal, METH_O, doc_stream_init_gpu},
     {"stream_free_metal", stream_free_metal, METH_O, doc_stream_free_gpu},
     {"synchronize", (PyCFunction)module_synchronize, STRINGZILLA_METHOD_FLAGS, doc_synchronize},
+    {"copy", (PyCFunction)module_copy, STRINGZILLA_METHOD_FLAGS, doc_copy},
 
     {NULL, NULL, 0, NULL}};
 
@@ -703,6 +825,7 @@ static struct {
     {"String", &StringType},
     {"File", &FileType},
     {"Strings", &StringsType},
+    {"UnifiedBuffer", &UnifiedBufferType},
     {"FindSplits", &FindSplitsType},
     {"Utf8SplitNewlines", &Utf8SplitNewlinesType},
     {"Utf8Newlines", &Utf8NewlinesType},

@@ -1572,6 +1572,48 @@ def synchronize(capabilities: Capability, stream: int | None = None) -> None:
         >>> def synchronize(capabilities, stream=None) -> None: ...
     """
 
+@final
+class UnifiedBuffer:
+    """Writable bytes in the unified memory of one capability group, which only `copy` makes.
+
+    Engines of those capabilities read and write it in place, and the host reads and writes it
+    through `memoryview`, cast to the shape a verb takes. The block is freed with the object.
+
+    Example:
+        >>> distances = sz.copy(bytearray(16), sz.capabilities_enabled_cpu())
+        >>> memoryview(distances).cast('Q', (1, 2)).tolist()
+        [[0, 0]]
+    """
+
+    def __buffer__(self, flags: int, /) -> memoryview: ...
+
+def copy(buffer: _Buffer, capabilities: Capability, stream: int | None = None) -> UnifiedBuffer:
+    """Copy any buffer into a new block of the unified memory of `capabilities`, in C order.
+
+    No verb allocates, so this is where memory a GPU engine reads or writes comes from: the host
+    heap for CPU capabilities, managed memory on CUDA and ROCm, a shared buffer on Metal.
+
+    Args:
+        buffer (Buffer): Any object exporting the buffer protocol, like bytes or a NumPy array.
+        capabilities (Capability): A producer's mask, which names the vendor.
+        stream (int, optional): A stream of that vendor as an integer, naming the device the block
+            is made on, or None for the default.
+
+    Returns:
+        UnifiedBuffer: The bytes of `buffer`, writable, owning their block.
+
+    Raises:
+        RuntimeError: This build lacks the vendor, or its device does not answer.
+        MemoryError: The block could not be allocated.
+
+    Example:
+        >>> bytes(sz.copy(b'kitten', sz.capabilities_enabled_cpu()))
+        b'kitten'
+
+    Signature:
+        >>> def copy(buffer, capabilities, stream=None) -> sz.UnifiedBuffer: ...
+    """
+
 # endregion Runtime Dispatch
 
 # region Unicode Segmentation
