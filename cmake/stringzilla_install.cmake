@@ -74,9 +74,11 @@ if (STRINGZILLA_INSTALL)
     # Every installed library belongs to an `EXPORT` set - a `.so` with no imported target leaves consumers
     # hand-rolling `find_library`.
     # Destinations come from the `GNUInstallDirs` defaults, so each call names only its target and export set.
-    install(TARGETS stringzilla_abi stringzilla_cpp stringzilla_header stringzilla_static EXPORT stringzillaTargets)
-    if (TARGET stringzilla_shared)
-        install(TARGETS stringzilla_shared EXPORT stringzillaTargets)
+    # Without `STRINGZILLA_BUILD_LIBRARIES`, the install carries the header targets alone; the SDK links the archive, so
+    # it installs only beside the libraries.
+    install(TARGETS stringzilla_abi stringzilla_types stringzilla_header EXPORT stringzillaTargets)
+    if (STRINGZILLA_BUILD_LIBRARIES)
+        install(TARGETS stringzilla_cpp ${stringzilla_libraries_} EXPORT stringzillaTargets)
     endif ()
 
     install(
@@ -100,10 +102,13 @@ if (STRINGZILLA_INSTALL)
             DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/stringzilla
     )
 
-    # The three header roots merge into one `stringzilla/` folder. `c/module.modulemap` stays out: SwiftPM reads it from
-    # the artifact `stringzilla_swift` packs, and at an installed include root Clang treats it as authoritative for the
-    # whole prefix.
-    install(DIRECTORY c/stringzilla include/stringzilla cpp/stringzilla DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+    # The C and kernel header roots merge into one `stringzilla/` folder, and the SDK keeps a root of its own, which only
+    # `stringzilla::cpp` names. `c/module.modulemap` stays out: SwiftPM reads it from the artifact `stringzilla_swift`
+    # packs, and at an installed include root Clang treats it as authoritative for the whole prefix.
+    install(DIRECTORY c/stringzilla include/stringzilla DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+    if (STRINGZILLA_BUILD_LIBRARIES)
+        install(DIRECTORY cpp/stringzilla DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/stringzilla-cpp)
+    endif ()
     install(DIRECTORY src/ DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/src)
 
     # A `.pc` for the consumers CMake never reaches - cgo among them. Spelling the prefix against `${pcfiledir}` keeps it
@@ -126,6 +131,13 @@ if (STRINGZILLA_INSTALL)
             set(stringzilla_pc_includedir_ "${CMAKE_INSTALL_INCLUDEDIR}")
         else ()
             set(stringzilla_pc_includedir_ "\${prefix}/${CMAKE_INSTALL_INCLUDEDIR}")
+        endif ()
+        # The SDK root and the library join the header root only where the libraries install.
+        set(stringzilla_pc_cflags_ "-I\${includedir}")
+        set(stringzilla_pc_libs_ "")
+        if (STRINGZILLA_BUILD_LIBRARIES)
+            string(APPEND stringzilla_pc_cflags_ " -I\${includedir}/stringzilla-cpp")
+            set(stringzilla_pc_libs_ "-L\${libdir} -lstringzilla_shared")
         endif ()
 
         configure_file(cmake/stringzilla.pc.in "${CMAKE_CURRENT_BINARY_DIR}/stringzilla.pc" @ONLY)

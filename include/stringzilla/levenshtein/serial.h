@@ -14,7 +14,7 @@
 #define STRINGZILLA_LEVENSHTEIN_SERIAL_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/capabilities.h"      // `sz_capability_t`, `sz_cap_cpus_k`
+#include "stringzilla/capabilities.h"      // `sz_cap_cpus_k`
 #include "stringzilla/utf8_runes/serial.h" // `sz_rune_decode`, `sz_utf8_first_continuation_ok_`
 
 #ifdef __cplusplus
@@ -64,12 +64,6 @@ enum { sz_levenshtein_byte_classes_k = 256 };
 /** Words a class row is padded to: a warp's width, so a lane reading its own word skewed owns
  *  its own bank. */
 enum { sz_levenshtein_words_stride_k = 32 };
-
-/** Words a query of @p length symbols spans - every class's row holds that many, one
- *  bit per symbol. */
-STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_query_words(sz_size_t length) {
-    return length / 64 + (length % 64 != 0);
-}
 
 /** Words from one class's mask row to the next: the query's words, padded
  *  to @c sz_levenshtein_words_stride_k. */
@@ -433,9 +427,6 @@ STRINGZILLA_INLINE sz_size_t sz_levenshtein_transpose_runes(sz_levenshtein_query
 /** Symbols one side of a tile of the device wavefront spans. */
 enum { sz_levenshtein_tile_side_k = 128 };
 
-/** Maximum query words held in registers by the fixed-width GPU kernels. */
-enum { sz_levenshtein_gpu_words_max_k = 256 };
-
 /** Lanes a warped candidate is spread across, which is a warp or a simdgroup, and the query words
  *  one lane keeps verticals for, so a warp at its widest reaches the family's word limit. */
 enum {
@@ -572,53 +563,6 @@ STRINGZILLA_INLINE sz_u64_t sz_levenshtein_octet_(sz_cptr_t text, sz_size_t leng
 #pragma endregion Generic Internal Helpers
 
 #pragma region Cross Product Engine
-
-/**
- *  @brief A batch of prepared queries, the block it lives in, and the round's scratch beside it.
- *
- *  The first four members are @ref sz_levenshtein_query_t in tensor form: every query's mask plane
- *  back to back, which a kernel indexes by arithmetic where an array of structs would need a
- *  pointer chase. The launch geometry lives in @c memory 's head, which only the tier named by
- *  @c capability reads.
- */
-typedef struct sz_levenshtein_engine_t {
-
-    /** Every query's mask plane, back to back, @c masks_offsets addressing them. */
-    sz_u64_t const *masks;
-
-    /** The @b [count+1] word offsets into @c masks, the last being its length. */
-    sz_size_t const *masks_offsets;
-
-    /** The mask row each symbol reads, laid out as @c symbol spells it. */
-    void const *symbol_to_class;
-
-    /** The @b [count] symbols each query spans, which seeds its score bit. */
-    sz_u32_t const *lengths;
-
-    /** Queries prepared, which is the first axis of every output. */
-    sz_size_t count;
-
-    /** The alphabet the batch was prepared over, and how to read the class map. */
-    sz_levenshtein_symbol_t symbol;
-
-    /** The capability whose init kernel prepared the batch, which picks every round's kernel. */
-    sz_capability_t capability;
-
-    /** What built both blocks below and what grows the second. */
-    sz_allocator_t allocator;
-
-    /** The batch's block, fixed for the engine's life, its head tier-private. */
-    void *memory;
-
-    /** Bytes of that block. */
-    sz_size_t memory_bytes;
-
-    /** The round's block, grown by a compute verb and never shrunk. */
-    void *scratch;
-
-    /** Bytes of that block, zero until the first round sizes it. */
-    sz_size_t scratch_bytes;
-} sz_levenshtein_engine_t;
 
 /** One query's shape, measured before the block that holds it exists. */
 typedef struct sz_levenshtein_engine_shape_t {

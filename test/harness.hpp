@@ -100,8 +100,8 @@
 #include <fmt/ranges.h>
 #include <fmt/std.h>
 
-#include "stringzilla/metal.h" // The Metal layer the Metal suites drive
-#include "stringzilla/types.hpp"
+#include "stringzilla/metal.h"     // The Metal layer the Metal suites drive
+#include "stringzilla/strings.hpp" // `strings`, `strings_view_t`, `unified_alloc`
 
 #if STRINGZILLA_OS_WINDOWS_
 #include <io.h> // `_write`
@@ -342,6 +342,21 @@ inline std::optional<std::vector<device_selection_t>> parse_devices(std::string_
         text.remove_prefix(comma + 1);
     } while (!text.empty());
     return std::nullopt;
+}
+
+/** Whether the runtime of @p device answers and holds its ordinal, asked through the C queries, so
+ *  header-only runners check devices as linked ones do. */
+inline sz_status_t check_device(device_selection_t device) noexcept {
+    sz_size_t count = 1;
+    sz_status_t status = sz_success_k;
+    switch (device.backend) {
+    case sz::device_kind_t::cpu_k: break;
+    case sz::device_kind_t::cuda_k: status = sz_count_devices_cuda(&count); break;
+    case sz::device_kind_t::rocm_k: status = sz_count_devices_rocm(&count); break;
+    case sz::device_kind_t::metal_k: status = sz_count_devices_metal(&count); break;
+    }
+    if (status != sz_success_k) return status;
+    return device.ordinal < count ? sz_success_k : sz_missing_gpu_k;
 }
 
 /** What a run reads: the common settings, how hard to push and how to treat failures and skips,
@@ -817,8 +832,11 @@ sz_status_t call_best(sz_capability_t capabilities, arguments_types_... argument
 /** The dispatch point @p best_ in the shape of its capability kernels, over the CPU capabilities
  *  this process enables: callable like them, and convertible to their function pointers. */
 template <auto best_>
-inline constexpr auto cpu_best =
-    [](auto... arguments) noexcept { return call_best<best_>(default_capabilities(), arguments...); };
+inline constexpr auto cpu_best = [](auto... arguments) noexcept {
+    sz_capability_t enabled = 0;
+    sz_capabilities_enabled_cpu(&enabled);
+    return call_best<best_>(enabled, arguments...);
+};
 
 /** Calls @p kernel, a CPU capability kernel or a @c cpu_best, whose result is the out-parameter
  *  just before the stream; checks that it succeeded and returns that result. */
@@ -858,7 +876,7 @@ inline sz_allocator_t device_arena_policy_(device_arena_t &arena) {
 }
 
 struct device_backend_t {
-    sz::device_t selected = sz::device_t::cpu();
+    device_selection_t selected {sz::device_kind_t::cpu_k, 0};
     sz_capability_t capabilities = 0;
     sz_stream_t stream = nullptr;
 
@@ -1211,8 +1229,8 @@ inline char const *status_name(status_t s) noexcept {
     }
 }
 
-inline void print(sz::device_t const &device) {
-    fmt::println("Device: {}:{}", device_name(device.kind()), device.ordinal());
+inline void print(device_selection_t const &device) {
+    fmt::println("Device: {}:{}", device_name(device.backend), device.ordinal);
 }
 
 #pragma region Test Runner
@@ -1271,6 +1289,7 @@ void test_arithmetic_unit();
 void test_strings_view_unit();
 void test_strings_columns_unit();
 void test_allocator_unit();
+void test_device_unit();
 void test_byteset_unit();
 
 #pragma endregion Basic Utilities

@@ -6,7 +6,7 @@
  */
 #define STRINGZILLA_HEADER_ONLY 1
 #define STRINGZILLA_ARCH_X8664_ICELAKE_ 1
-#include <stringzilla/hash/icelake.h>
+#include "stringzilla/hash.h" // the hub, whose header-only tail defines the tier
 
 int main(void) {
     // Past 64 bytes the kernel takes its 512-bit VAES loop; shorter ones stay in 128-bit registers.

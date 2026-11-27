@@ -4,6 +4,50 @@
  *  @date September 29, 2026
  *  @brief The @c rocm kernels and the ROCm device exports, defined once for the library.
  */
+#include "stringzilla/rocm.cuh" // `sz_count_devices_rocm_`, `hipFuncGetAttributes`
+
+/*  One kernel of each ROCm unit, which a device runs only where it loads it: this unit's own probe,
+ *  defined below its kernels, and one from each tier unit. */
+static void const *sz_probe_rocm_(void);
+extern "C" void const *sz_probe_cdna3_(void);
+extern "C" void const *sz_probe_cdna4_(void);
+extern "C" void const *sz_probe_cdna5_(void);
+
+/** Whether ROCm device @p ordinal loads @p kernel, as the runtime fails where no code object in the
+ *  binary runs there. */
+static sz_status_t sz_kernel_loads_rocm_(sz_size_t ordinal, void const *kernel, sz_bool_t *loads) {
+    int previous = 0;
+    hipFuncAttributes attributes;
+    *loads = sz_false_k;
+    if (ordinal >= sz_count_devices_rocm_()) return sz_missing_gpu_k;
+    if (hipGetDevice(&previous) != hipSuccess || hipSetDevice((int)ordinal) != hipSuccess) {
+        [[maybe_unused]] hipError_t const cleared = hipGetLastError();
+        return sz_device_code_mismatch_k;
+    }
+    *loads = hipFuncGetAttributes(&attributes, kernel) == hipSuccess ? sz_true_k : sz_false_k;
+    [[maybe_unused]] hipError_t const cleared = hipGetLastError(), restored = hipSetDevice(previous);
+    return sz_success_k;
+}
+
+/*  Above the lines turning the tiers off for this unit's kernels, so the build's verdicts pick the
+ *  tier units to ask about. */
+STRINGZILLA_API sz_status_t sz_capabilities_compiled_rocm(sz_size_t ordinal, sz_capability_t *capabilities) {
+    sz_bool_t loads;
+    sz_status_t const status = sz_kernel_loads_rocm_(ordinal, sz_probe_rocm_(), &loads);
+    *capabilities = sz_cap_rocm_k * loads;
+    if (status != sz_success_k) return status;
+#if STRINGZILLA_TARGET_CDNA3
+    sz_kernel_loads_rocm_(ordinal, sz_probe_cdna3_(), &loads), *capabilities |= sz_cap_cdna3_k * loads;
+#endif
+#if STRINGZILLA_TARGET_CDNA4
+    sz_kernel_loads_rocm_(ordinal, sz_probe_cdna4_(), &loads), *capabilities |= sz_cap_cdna4_k * loads;
+#endif
+#if STRINGZILLA_TARGET_CDNA5
+    sz_kernel_loads_rocm_(ordinal, sz_probe_cdna5_(), &loads), *capabilities |= sz_cap_cdna5_k * loads;
+#endif
+    return sz_success_k;
+}
+
 #undef STRINGZILLA_TARGET_CDNA3
 #define STRINGZILLA_TARGET_CDNA3 0
 #undef STRINGZILLA_TARGET_CDNA4
@@ -71,20 +115,4 @@ STRINGZILLA_API sz_status_t sz_stream_synchronize_rocm(sz_stream_t stream) {
 }
 
 /** The kernel @c sz_capabilities_compiled_rocm asks the runtime to load. */
-extern "C" void const *sz_probe_rocm_(void) { return (void const *)&sz_strings_scan_local_rocm_kernel_; }
-
-/** Whether ROCm device @p ordinal loads @p kernel, as the runtime fails where no code object in the
- *  binary runs there. */
-extern "C" sz_status_t sz_kernel_loads_rocm_(sz_size_t ordinal, void const *kernel, sz_bool_t *loads) {
-    int previous = 0;
-    hipFuncAttributes attributes;
-    *loads = sz_false_k;
-    if (ordinal >= sz_count_devices_rocm_()) return sz_missing_gpu_k;
-    if (hipGetDevice(&previous) != hipSuccess || hipSetDevice((int)ordinal) != hipSuccess) {
-        [[maybe_unused]] hipError_t const cleared = hipGetLastError();
-        return sz_device_code_mismatch_k;
-    }
-    *loads = hipFuncGetAttributes(&attributes, kernel) == hipSuccess ? sz_true_k : sz_false_k;
-    [[maybe_unused]] hipError_t const cleared = hipGetLastError(), restored = hipSetDevice(previous);
-    return sz_success_k;
-}
+static void const *sz_probe_rocm_(void) { return (void const *)&sz_strings_scan_local_rocm_kernel_; }

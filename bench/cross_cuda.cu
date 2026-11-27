@@ -4,7 +4,7 @@
  *  @date September 29, 2026
  *  @brief GPU engine benchmarks - the CUDA kernels against the CPU tiers this build carries.
  */
-#include "stringzilla/stringzilla.hpp" // `strings<>::view`, which `types.hpp` only declares
+#include "stringzilla/strings.hpp" // `strings<>::view`
 
 #include "harness.hpp"
 
@@ -15,13 +15,13 @@
 
 namespace ashvardanian::stringzilla::bench {
 
-int bench_cross_cuda(environment_t &env, std::size_t ordinal) {
+void bench_cross_cuda(environment_t &env, std::size_t ordinal) {
 #if STRINGZILLA_ARCH_CUDA_
-    auto const selected = sz::device_t::make(sz::device_kind_t::cuda_k, ordinal);
-    if (selected.status != status_t::success_k) throw std::runtime_error("The requested device is unavailable.");
+    device_selection_t const selected {sz::device_kind_t::cuda_k, ordinal};
+    if (check_device(selected) != sz_success_k) throw std::runtime_error("The requested device is unavailable.");
     stream_t stream(ordinal, sz_stream_init_cuda, sz_stream_free_cuda);
     device_backend_t runtime;
-    runtime.selected = selected.value;
+    runtime.selected = selected;
     runtime.stream = stream.handle;
     if (sz_capabilities_detected_cuda(ordinal, &runtime.capabilities) != sz_success_k)
         throw std::runtime_error("Device capabilities could not be queried.");
@@ -46,7 +46,6 @@ int bench_cross_cuda(environment_t &env, std::size_t ordinal) {
     runtime.threads_per_multiprocessor = sz_device_threads_per_multiprocessor_cuda_();
     sz_device_leave_cuda_(caller);
     fmt::println("Device: cuda:{} ({} multiprocessors)", ordinal, runtime.multiprocessors.value_or(0));
-    int result = 0;
 #if STRINGZILLA_TARGET_CUDA
     simt_backend_t const backend {"cuda",
                                   runtime,
@@ -71,7 +70,7 @@ int bench_cross_cuda(environment_t &env, std::size_t ordinal) {
                                   sz_utf8_norm_cuda,
                                   sz_sha256_multistate_update_cuda,
                                   sz_sha256_multistate_digest_cuda};
-    result += bench_cross_simt(env, backend);
+    bench_cross_simt(env, backend);
 #else
     sz_unused_(env);
 #endif
@@ -100,7 +99,7 @@ int bench_cross_cuda(environment_t &env, std::size_t ordinal) {
                                      sz_utf8_norm_cuda,
                                      sz_sha256_multistate_update_cuda,
                                      sz_sha256_multistate_digest_cuda};
-        result += bench_cross_simt_engines(env, ampere);
+        bench_cross_simt_engines(env, ampere);
     }
 #endif
 #if STRINGZILLA_TARGET_HOPPER
@@ -128,7 +127,7 @@ int bench_cross_cuda(environment_t &env, std::size_t ordinal) {
                                      sz_utf8_norm_cuda,
                                      sz_sha256_multistate_update_cuda,
                                      sz_sha256_multistate_digest_cuda};
-        result += bench_cross_simt_searches(env, hopper);
+        bench_cross_simt_searches(env, hopper);
     }
 #endif
 #if STRINGZILLA_TARGET_BLACKWELL
@@ -156,14 +155,12 @@ int bench_cross_cuda(environment_t &env, std::size_t ordinal) {
                                         sz_utf8_norm_cuda,
                                         sz_sha256_multistate_update_cuda,
                                         sz_sha256_multistate_digest_cuda};
-        result += bench_cross_simt_levenshtein_ngrams(env, blackwell);
+        bench_cross_simt_levenshtein_ngrams(env, blackwell);
     }
 #endif
-    return result;
 #else
     sz_unused_(env);
     sz_unused_(ordinal);
-    return 0;
 #endif
 }
 } // namespace ashvardanian::stringzilla::bench

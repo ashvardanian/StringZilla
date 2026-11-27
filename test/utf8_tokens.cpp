@@ -9,22 +9,20 @@
 #undef STRINGZILLA_DEBUG
 #define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
-/*  Make sure to include the StringZilla headers before anything else, to intercept missing
- *  `#include` directives and other issues. */
-#include <stringzilla/stringzilla.h>   // Primary C API
-#include <stringzilla/stringzilla.hpp> // C++ string class replacement
-
 #if defined(__SANITIZE_ADDRESS__)
 #include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
 #endif
 
-#include <cstdio> // `stderr`
+#include <cstdio>  // `stderr`
 #include <cstring> // `std::memcpy`
 
 #include <string> // Baseline
 #include <vector> // `std::vector`
 
 #include <fmt/format.h>
+
+#include "stringzilla/stringzilla.h"   // Primary C API
+#include "stringzilla/stringzilla.hpp" // C++ string class replacement
 
 #include "cross.hpp" // `check_utf8_tokens_unit_`, `check_utf8_delimiters_unit_`, `utf8_tokens_backend_t`
 
@@ -56,7 +54,7 @@ void test_utf8_tokens_unit() {
     // Split by Unicode newlines
     {
         auto lines = [](sz::string_view_t t) {
-            return t.utf8_split_newlines().template to<std::vector<std::string>>();
+            return sz::utf8_split_newlines(t).template to<std::vector<std::string>>();
         };
 
         // Basic newline types
@@ -168,14 +166,14 @@ void test_utf8_tokens_unit() {
         sz::string_t multiline;
         expect_true(sz::succeeded(multiline.assign("a\nb\nc")));
         {
-            auto l = multiline.utf8_split_newlines().template to<std::vector<std::string>>();
+            auto l = sz::utf8_split_newlines(multiline).template to<std::vector<std::string>>();
             expect_true(l.size() == 3 && l[1] == "b");
         }
 
         sz::string_t words_str;
         expect_true(sz::succeeded(words_str.assign("foo bar baz")));
         {
-            auto w = words_str.utf8_split_whitespaces().template to<std::vector<std::string>>();
+            auto w = sz::utf8_split_whitespaces(words_str).template to<std::vector<std::string>>();
             expect_true(w.size() == 3 && w[2] == "baz");
         }
     }
@@ -184,12 +182,12 @@ void test_utf8_tokens_unit() {
     {
         // `utf8_newlines` on "a\nb\r\nc": the "\n" and "\r\n".
         {
-            auto n = sz::string_view_t("a\nb\r\nc").utf8_newlines().template to<std::vector<std::string>>();
+            auto n = sz::utf8_newlines(sz::string_view_t("a\nb\r\nc")).template to<std::vector<std::string>>();
             expect_true(n.size() == 2 && n[0] == "\n" && n[1] == "\r\n");
         }
         // `utf8_whitespaces` on "a b  c": each whitespace codepoint is its own delimiter (runs are not coalesced).
         {
-            auto w = sz::string_view_t("a b  c").utf8_whitespaces().template to<std::vector<std::string>>();
+            auto w = sz::utf8_whitespaces(sz::string_view_t("a b  c")).template to<std::vector<std::string>>();
             expect_true(w.size() == 3 && w[0] == " " && w[1] == " " && w[2] == " ");
         }
     }
@@ -200,7 +198,7 @@ void test_utf8_tokens_unit() {
              {sz::string_view_t("Hi, world"), sz::string_view_t("a\nb\nc"), sz::string_view_t("  x  "),
               sz::string_view_t(""), sz::string_view_t("plain")}) {
             std::string rejoined;
-            for (auto piece : input.utf8_split_whitespaces().with_separators())
+            for (auto piece : sz::utf8_split_whitespaces(input).with_separators())
                 rejoined.append(piece.data(), piece.size());
             {
                 std::string round = rejoined;
@@ -213,8 +211,9 @@ void test_utf8_tokens_unit() {
     {
         // Whitespace tokens across a double space: "a  b" → "a", "b" (the empty middle dropped).
         {
-            auto t =
-                sz::string_view_t("a  b").utf8_split_whitespaces().skip_empty().template to<std::vector<std::string>>();
+            auto t = sz::utf8_split_whitespaces(sz::string_view_t("a  b"))
+                         .skip_empty()
+                         .template to<std::vector<std::string>>();
             expect_true(t.size() == 2 && t[0] == "a" && t[1] == "b");
         }
     }
@@ -233,7 +232,7 @@ void test_utf8_tokens_scripts_unit() {
     // Split by Unicode whitespace (25 total Unicode White_Space characters)
     {
         auto words = [](sz::string_view_t t) {
-            return t.utf8_split_whitespaces().template to<std::vector<std::string>>();
+            return sz::utf8_split_whitespaces(t).template to<std::vector<std::string>>();
         };
 
         // Basic ASCII whitespace (6 single-byte chars)
@@ -501,7 +500,7 @@ void test_utf8_tokens_scripts_unit() {
             std::string long_ws;
             for (int i = 0; i < 100; ++i) long_ws += " ";
             expect_equal(
-                sz::string_view_t(long_ws).utf8_split_whitespaces().template to<std::vector<std::string>>().size(),
+                sz::utf8_split_whitespaces(sz::string_view_t(long_ws)).template to<std::vector<std::string>>().size(),
                 101);
         } // 100 spaces = 101 empty segments
 
@@ -509,9 +508,10 @@ void test_utf8_tokens_scripts_unit() {
             std::string long_mixed;
             for (int i = 0; i < 50; ++i) long_mixed += "word ";
             long_mixed.pop_back(); // Remove trailing space
-            expect_equal(
-                sz::string_view_t(long_mixed).utf8_split_whitespaces().template to<std::vector<std::string>>().size(),
-                50); // 50 words
+            expect_equal(sz::utf8_split_whitespaces(sz::string_view_t(long_mixed))
+                             .template to<std::vector<std::string>>()
+                             .size(),
+                         50); // 50 words
         }
     }
 }
@@ -548,27 +548,26 @@ void test_utf8_delimiters_unit() {
     {
         // "Hi, world" → delimiters at ',' (byte 2) and ' ' (byte 3): segments "Hi", "", "world".
         {
-            auto d = sz::string_view_t("Hi, world").utf8_split_delimiters().template to<std::vector<std::string>>();
+            auto d = sz::utf8_split_delimiters(sz::string_view_t("Hi, world")).template to<std::vector<std::string>>();
             expect_true(d.size() == 3 && d[0] == "Hi" && d[2] == "world");
         }
         // U+2014 EM DASH (E2 80 94) is a delimiter: "a—b" → "a", "b".
         {
-            auto e = sz::string_view_t("a\xE2\x80\x94" // the next fragment starts with a hex digit
-                                       "b")
-                         .utf8_split_delimiters()
+            auto e = sz::utf8_split_delimiters(
+                         sz::string_view_t("a\xE2\x80\x94" // the next fragment starts with a hex digit
+                                           "b"))
                          .skip_empty()
                          .template to<std::vector<std::string>>();
             expect_true(e.size() == 2 && e[0] == "a" && e[1] == "b");
         }
         // The kernel-named accessor yields the delimiter runs themselves, not the segments between.
         {
-            auto r = sz::string_view_t("Hi, world").utf8_delimiters().template to<std::vector<std::string>>();
+            auto r = sz::utf8_delimiters(sz::string_view_t("Hi, world")).template to<std::vector<std::string>>();
             expect_true(r.size() == 2 && r[0] == "," && r[1] == " ");
         }
         // `.skip_empty()` drops the empty field between ',' and ' ': "Hi", "world".
         {
-            auto s = sz::string_view_t("Hi, world")
-                         .utf8_split_delimiters()
+            auto s = sz::utf8_split_delimiters(sz::string_view_t("Hi, world"))
                          .skip_empty()
                          .template to<std::vector<std::string>>();
             expect_true(s.size() == 2 && s[0] == "Hi" && s[1] == "world");

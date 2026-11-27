@@ -18,7 +18,7 @@
 #include <string_view> // `std::string_view`
 #include <vector>      // `std::vector`
 
-#include <stringzilla/substrings.h> // `sz_substrings_*`
+#include "stringzilla/substrings.h" // `sz_substrings_*`
 
 #include "harness.hpp"
 
@@ -253,29 +253,26 @@ struct substrings_dictionary_t {
     substrings_dictionary_t &operator=(substrings_dictionary_t const &) = delete;
 };
 
-struct substrings_engine_t {
-    sz_substrings_engine_t engine {};
-    sz_stream_t stream = nullptr;
+/** Compiles @p dictionary under @p policy through @p init, the one kernel a row times. */
+template <typename init_type_>
+substrings_prepared_t compiled_substrings(substrings_dictionary_t const &dictionary,
+                                          sz_substrings_overlap_policy_t policy, init_type_ init,
+                                          sz_allocator_t allocator, sz_size_t matches_budget = 0,
+                                          sz_size_t haystacks_budget = 0, sz_stream_t stream = nullptr) {
+    substrings_prepared_t engine;
+    sz_strings_view_t const needles = dictionary.needle_strings();
+    if (init(&engine.raw(), &needles, dictionary.sensitivity, policy, STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO,
+             matches_budget, haystacks_budget, &allocator, stream) != sz_success_k)
+        throw std::runtime_error("The vocabulary would not compile.");
+    return engine;
+}
 
-    template <typename init_type_>
-    substrings_engine_t(substrings_dictionary_t const &dictionary, sz_substrings_overlap_policy_t policy,
-                        init_type_ init, sz_allocator_t allocator, sz_size_t matches_budget = 0,
-                        sz_size_t haystacks_budget = 0, sz_stream_t stream = nullptr)
-        : stream(stream) {
-        sz_strings_view_t const needles = dictionary.needle_strings();
-        if (init(&engine, &needles, dictionary.sensitivity, policy, STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO,
-                 matches_budget, haystacks_budget, &allocator, stream) != sz_success_k)
-            throw std::runtime_error("The vocabulary would not compile.");
-    }
-    substrings_engine_t(substrings_engine_t const &) = delete;
-    substrings_engine_t &operator=(substrings_engine_t const &) = delete;
-    ~substrings_engine_t() noexcept { sz_substrings_engine_free(&engine, stream); }
-    void join() const {
-        if (engine.capability & sz_cap_gpus_k)
-            if (sz_stream_synchronize_best(engine.capability, stream) != sz_success_k)
-                throw std::runtime_error("The substring stream would not synchronize.");
-    }
-};
+/** Waits for the rounds an engine of @p capability queued on @p stream, if a device runs them. */
+inline void join_engine(sz_capability_t capability, sz_stream_t stream) {
+    if (capability & sz_cap_gpus_k)
+        if (sz_stream_synchronize_best(capability, stream) != sz_success_k)
+            throw std::runtime_error("The engine's stream would not synchronize.");
+}
 
 /** Host views of the corpus, copied into a resident tape by device benchmarks. */
 struct substrings_corpus_t {
@@ -326,7 +323,7 @@ template <typename function_type_>
 struct substrings_counts_from_sz {
 
     /** The compiled vocabulary this arm walks, policy included. */
-    substrings_engine_t &engine;
+    substrings_prepared_t &engine;
     function_type_ counts_kernel;
 
     /** The haystacks one round walks. */
@@ -342,28 +339,32 @@ struct substrings_counts_from_sz {
     pinned_vector<sz_size_t> counts;
     std::optional<std::reference_wrapper<device_backend_t const>> runtime;
 
-    substrings_counts_from_sz(function_type_ kernel, substrings_engine_t &engine, substrings_corpus_t const &corpus,
+    /** The stream the engine was compiled on, which every round queues on. */
+    sz_stream_t stream;
+
+    substrings_counts_from_sz(function_type_ kernel, substrings_prepared_t &engine, substrings_corpus_t const &corpus,
                               sz_strings_view_t const &haystacks,
                               std::optional<std::reference_wrapper<device_backend_t const>> runtime = {})
-        : engine(engine), counts_kernel(kernel), corpus(corpus), haystacks(haystacks), runtime(runtime) {
+        : engine(engine), counts_kernel(kernel), corpus(corpus), haystacks(haystacks), runtime(runtime),
+          stream(runtime ? runtime->get().stream : nullptr) {
         bool const separate = runtime && runtime->get().separate();
         counts = pinned_vector<sz_size_t>(
             corpus.views.size(), 0,
-            pinned_alloc<sz_size_t>(separate ? runtime->get().pinned : engine.engine.allocator, engine.stream));
+            pinned_alloc<sz_size_t>(separate ? runtime->get().pinned : engine.raw().allocator, stream));
         if (!separate) return;
-        device_counts = device_vector<sz_size_t>(device_alloc<sz_size_t>(runtime->get().device, engine.stream));
+        device_counts = device_vector<sz_size_t>(device_alloc<sz_size_t>(runtime->get().device, stream));
         if (device_counts.resize_uninitialized(corpus.views.size()) != sz::status_t::success_k)
             throw std::runtime_error("The device would not hold the counts.");
     }
 
     call_result_t operator()(std::size_t) {
-        if (counts_kernel(&engine.engine, &haystacks, device_counts.size() == 0 ? counts.data() : device_counts.data(),
-                          1, engine.stream) != sz_success_k)
+        if (counts_kernel(&engine.raw(), &haystacks, device_counts.size() == 0 ? counts.data() : device_counts.data(),
+                          sizeof(sz_size_t), stream) != sz_success_k)
             throw std::runtime_error("The counting round failed.");
         if (device_counts.size() != 0 &&
             copy_device_to_host(device_counts, std::span<sz_size_t>(counts), runtime->get()) != sz_success_k)
             throw std::runtime_error("The counts would not come back.");
-        engine.join();
+        join_engine(engine.raw().capability, stream);
         check_value_t mixed = 0;
         for (sz_size_t const count : counts) mixed = mixed * 31u + (check_value_t)count;
         return corpus.round(mixed);
@@ -375,7 +376,7 @@ template <typename function_type_>
 struct substrings_find_from_sz {
 
     /** The compiled vocabulary this arm walks, policy included. */
-    substrings_engine_t &engine;
+    substrings_prepared_t &engine;
     function_type_ find_kernel;
 
     /** The haystacks one round walks. */
@@ -387,33 +388,36 @@ struct substrings_find_from_sz {
     /** @b [haystacks + 1] boundaries into @c matches. */
     unified_vector<sz_size_t> offsets;
 
+    /** The stream the engine was compiled on, which every round queues on. */
+    sz_stream_t stream;
+
     /** Sized by a size query, so a round never grows it. */
     unified_vector<sz_match_t> matches;
     bool sized = false;
 
-    substrings_find_from_sz(function_type_ kernel, substrings_engine_t &engine, substrings_corpus_t const &corpus,
-                            sz_strings_view_t const &haystacks)
+    substrings_find_from_sz(function_type_ kernel, substrings_prepared_t &engine, substrings_corpus_t const &corpus,
+                            sz_strings_view_t const &haystacks, sz_stream_t stream = nullptr)
         : engine(engine), find_kernel(kernel), corpus(corpus), haystacks(haystacks),
-          offsets(corpus.views.size() + 1, unified_alloc<sz_size_t>(engine.engine.allocator, engine.stream)),
-          matches(unified_alloc<sz_match_t>(engine.engine.allocator, engine.stream)) {}
+          offsets(corpus.views.size() + 1, unified_alloc<sz_size_t>(engine.raw().allocator, stream)), stream(stream),
+          matches(unified_alloc<sz_match_t>(engine.raw().allocator, stream)) {}
 
     /** The size query, a whole walk, run once the filter keeps the row. */
     void preprocess() {
         if (sized) return;
-        if (find_kernel(&engine.engine, &haystacks, nullptr, 0, offsets.data(), engine.stream) != sz_success_k)
+        if (find_kernel(&engine.raw(), &haystacks, nullptr, 0, offsets.data(), stream) != sz_success_k)
             throw std::runtime_error("The reporting round could not be sized.");
-        engine.join();
+        join_engine(engine.raw().capability, stream);
         // The boundaries name the survivors, which a cover thins below what the sizing walk emitted.
         matches.resize(offsets[corpus.views.size()]);
         sized = true;
     }
 
     call_result_t operator()(std::size_t) {
-        if (find_kernel(&engine.engine, &haystacks, matches.data(), matches.size(), offsets.data(), engine.stream) !=
+        if (find_kernel(&engine.raw(), &haystacks, matches.data(), matches.size(), offsets.data(), stream) !=
             sz_success_k)
             throw std::runtime_error("The reporting round failed.");
-        engine.join();
-        return corpus.round((check_value_t)engine.engine.report->matches_stored);
+        join_engine(engine.raw().capability, stream);
+        return corpus.round((check_value_t)engine.raw().report->matches_stored);
     }
 };
 
@@ -422,7 +426,7 @@ template <typename function_type_>
 struct substrings_replace_from_sz {
 
     /** The compiled vocabulary this arm walks, policy included. */
-    substrings_engine_t &engine;
+    substrings_prepared_t &engine;
     function_type_ replace_kernel;
 
     /** The haystacks one round walks. */
@@ -437,33 +441,37 @@ struct substrings_replace_from_sz {
     /** @b [haystacks + 1] rewritten boundaries, the last the total. */
     unified_vector<sz_size_t> offsets;
 
+    /** The stream the engine was compiled on, which every round queues on. */
+    sz_stream_t stream;
+
     /** Sized by a size query, so a round never grows it. */
     unified_vector<char> tape;
     bool sized = false;
 
-    substrings_replace_from_sz(function_type_ kernel, substrings_engine_t &engine, substrings_corpus_t const &corpus,
-                               sz_strings_view_t const &haystacks, sz_strings_view_t const &replacements)
+    substrings_replace_from_sz(function_type_ kernel, substrings_prepared_t &engine, substrings_corpus_t const &corpus,
+                               sz_strings_view_t const &haystacks, sz_strings_view_t const &replacements,
+                               sz_stream_t stream = nullptr)
         : engine(engine), replace_kernel(kernel), corpus(corpus), haystacks(haystacks), replacements(replacements),
-          offsets(corpus.views.size() + 1, unified_alloc<sz_size_t>(engine.engine.allocator, engine.stream)),
-          tape(unified_alloc<char>(engine.engine.allocator, engine.stream)) {}
+          offsets(corpus.views.size() + 1, unified_alloc<sz_size_t>(engine.raw().allocator, stream)), stream(stream),
+          tape(unified_alloc<char>(engine.raw().allocator, stream)) {}
 
     /** The size query, a whole walk, run once the filter keeps the row. */
     void preprocess() {
         if (sized) return;
-        if (replace_kernel(&engine.engine, &haystacks, &replacements, nullptr, 0, offsets.data(), engine.stream) !=
+        if (replace_kernel(&engine.raw(), &haystacks, &replacements, nullptr, 0, offsets.data(), stream) !=
             sz_success_k)
             throw std::runtime_error("The rewriting round could not be sized.");
-        engine.join();
-        tape.resize(engine.engine.report->target_length);
+        join_engine(engine.raw().capability, stream);
+        tape.resize(engine.raw().report->target_length);
         sized = true;
     }
 
     call_result_t operator()(std::size_t) {
-        if (replace_kernel(&engine.engine, &haystacks, &replacements, tape.data(), tape.size(), offsets.data(),
-                           engine.stream) != sz_success_k)
+        if (replace_kernel(&engine.raw(), &haystacks, &replacements, tape.data(), tape.size(), offsets.data(),
+                           stream) != sz_success_k)
             throw std::runtime_error("The rewriting round failed.");
-        engine.join();
-        return corpus.round((check_value_t)engine.engine.report->target_length);
+        join_engine(engine.raw().capability, stream);
+        return corpus.round((check_value_t)engine.raw().report->target_length);
     }
 };
 
@@ -472,7 +480,7 @@ template <typename function_type_>
 struct substrings_bm25_from_sz {
 
     /** The compiled vocabulary, which is the query. */
-    substrings_engine_t &engine;
+    substrings_prepared_t &engine;
     function_type_ scores_kernel;
 
     /** The haystacks one round scores. */
@@ -494,33 +502,37 @@ struct substrings_bm25_from_sz {
     pinned_vector<sz_f32_t> scores;
     std::optional<std::reference_wrapper<device_backend_t const>> runtime;
 
-    substrings_bm25_from_sz(function_type_ kernel, substrings_engine_t &engine, substrings_corpus_t const &corpus,
+    /** The stream the engine was compiled on, which every round queues on. */
+    sz_stream_t stream;
+
+    substrings_bm25_from_sz(function_type_ kernel, substrings_prepared_t &engine, substrings_corpus_t const &corpus,
                             sz_strings_view_t const &haystacks,
                             std::optional<std::reference_wrapper<device_backend_t const>> runtime = {})
         : engine(engine), scores_kernel(kernel), corpus(corpus), haystacks(haystacks), parameters {1.2f, 0.75f, 0},
-          weights(engine.engine.needles_count, 1.0f, unified_alloc<sz_f32_t>(engine.engine.allocator, engine.stream)),
-          runtime(runtime) {
+          weights(engine.raw().needles_count, 1.0f,
+                  unified_alloc<sz_f32_t>(engine.raw().allocator, runtime ? runtime->get().stream : nullptr)),
+          runtime(runtime), stream(runtime ? runtime->get().stream : nullptr) {
         std::size_t const bytes = corpus.bytes();
         parameters.average_document_length = (sz_f32_t)bytes / (sz_f32_t)max_of<std::size_t>(corpus.views.size(), 1);
         bool const separate = runtime && runtime->get().separate();
         scores = pinned_vector<sz_f32_t>(
             corpus.views.size(), 0.0f,
-            pinned_alloc<sz_f32_t>(separate ? runtime->get().pinned : engine.engine.allocator, engine.stream));
+            pinned_alloc<sz_f32_t>(separate ? runtime->get().pinned : engine.raw().allocator, stream));
         if (!separate) return;
-        device_scores = device_vector<sz_f32_t>(device_alloc<sz_f32_t>(runtime->get().device, engine.stream));
+        device_scores = device_vector<sz_f32_t>(device_alloc<sz_f32_t>(runtime->get().device, stream));
         if (device_scores.resize_uninitialized(corpus.views.size()) != sz::status_t::success_k)
             throw std::runtime_error("The device would not hold the scores.");
     }
 
     call_result_t operator()(std::size_t) {
-        if (scores_kernel(&engine.engine, &haystacks, nullptr, &parameters, weights.data(),
-                          device_scores.size() == 0 ? scores.data() : device_scores.data(), 1,
-                          engine.stream) != sz_success_k)
+        if (scores_kernel(&engine.raw(), &haystacks, nullptr, &parameters, weights.data(),
+                          device_scores.size() == 0 ? scores.data() : device_scores.data(), sizeof(sz_f32_t),
+                          stream) != sz_success_k)
             throw std::runtime_error("The scoring round failed.");
         if (device_scores.size() != 0 &&
             copy_device_to_host(device_scores, std::span<sz_f32_t>(scores), runtime->get()) != sz_success_k)
             throw std::runtime_error("The scores would not come back.");
-        engine.join();
+        join_engine(engine.raw().capability, stream);
         // Backends round their sums differently, so the check is which haystacks scored rather than how much.
         check_value_t scored = 0;
         for (sz_f32_t const score : scores) scored += score > 0;

@@ -68,8 +68,8 @@ void test_hash_unit() {
     expect_equal(kernel_result<sz_u64_t>(cpu_best<sz_hash_best>, fox, fox_length, 0u), fox_hash); // Deterministic
     expect_equal(kernel_result<sz_u64_t>(sz_hash_serial, fox, fox_length, 0u), fox_hash);         // Dispatch == serial
     expect_true(kernel_result<sz_u64_t>(cpu_best<sz_hash_best>, fox, fox_length, 1u) !=
-                fox_hash);                                             // Seed changes output
-    expect_equal(sz::string_view_t(fox, fox_length).hash(), fox_hash); // C++ wrapper
+                fox_hash);                                                // Seed changes output
+    expect_equal(sz::hash(sz::string_view_t(fox, fox_length)), fox_hash); // C++ wrapper
     check_hash_unit_(cpu_best<sz_hash_best>);
 
     // The hash must also read past an interior NUL, and agree with serial when it does.

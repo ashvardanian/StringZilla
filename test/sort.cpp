@@ -155,7 +155,8 @@ void test_sort_unit() {
                   [&](sz_size_t first, sz_size_t second) { return shared_prefix[first] < shared_prefix[second]; });
         auto const [ascending_order, ascending_status] = sz::argsort(shared_prefix);
         auto const [folded_order, folded_status] = sz::argsort_utf8_uncased(shared_prefix);
-        auto const [descending_order, descending_status] = sz::argsort(shared_prefix, 0, true);
+        auto const [descending_order, descending_status] = sz::argsort(shared_prefix, 0,
+                                                                       sort_direction_t::descending_k);
         expect_true(sz::succeeded(ascending_status) && sz::succeeded(folded_status) &&
                     sz::succeeded(descending_status));
         expect_equal(ascending_order, expected);
@@ -400,7 +401,6 @@ void test_sort_reference_equivalence() {
         }
         return order.size() == mixed_count;
     };
-    enum class sort_direction_t : bool { ascending_k, descending_k };
     auto reference_order = [&](std::vector<std::string> const &keys, sort_direction_t direction) {
         order_t reference(mixed_count);
         std::iota(reference.begin(), reference.end(), 0u);
@@ -414,7 +414,7 @@ void test_sort_reference_equivalence() {
 
     // Ascending and descending must match a byte-key stable sort exactly.
     auto const [ascending_order, ascending_status] = sz::argsort(mixed);
-    auto const [descending_order, descending_status] = sz::argsort(mixed, 0, true);
+    auto const [descending_order, descending_status] = sz::argsort(mixed, 0, sort_direction_t::descending_k);
     expect_true(sz::succeeded(ascending_status) && sz::succeeded(descending_status));
     expect_true(is_permutation(ascending_order), "argsort output is not a permutation");
     expect_equal(ascending_order, reference_order(mixed, sort_direction_t::ascending_k),
@@ -425,8 +425,7 @@ void test_sort_reference_equivalence() {
     // Top-K must reproduce the value-prefix of the full sort and stay a permutation.
     for (std::size_t top_count : {std::size_t(1), std::size_t(50), std::size_t(777), mixed_count}) {
         for (sort_direction_t direction : {sort_direction_t::ascending_k, sort_direction_t::descending_k}) {
-            bool const reverse = direction == sort_direction_t::descending_k;
-            auto const [got, top_status] = sz::argsort(mixed, top_count, reverse);
+            auto const [got, top_status] = sz::argsort(mixed, top_count, direction);
             expect_true(sz::succeeded(top_status));
             order_t const reference = reference_order(mixed, direction);
             expect_true(is_permutation(got), "Top-K argsort output is not a permutation");
@@ -440,7 +439,8 @@ void test_sort_reference_equivalence() {
     std::vector<std::string> folded(mixed_count);
     for (std::size_t i = 0; i < mixed_count; ++i) folded[i] = fold_string(mixed[i]);
     auto const [folded_ascending_order, folded_ascending_status] = sz::argsort_utf8_uncased(mixed);
-    auto const [folded_descending_order, folded_descending_status] = sz::argsort_utf8_uncased(mixed, 0, true);
+    auto const [folded_descending_order, folded_descending_status] = sz::argsort_utf8_uncased(
+        mixed, 0, sort_direction_t::descending_k);
     expect_true(sz::succeeded(folded_ascending_status) && sz::succeeded(folded_descending_status));
     expect_equal(folded_ascending_order, reference_order(folded, sort_direction_t::ascending_k),
                  "Ascending uncased argsort disagrees with the folded stable-sort reference");

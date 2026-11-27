@@ -25,8 +25,7 @@
 #define STRINGZILLA_UTF8_UNCASED_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/capabilities.h"        // `sz_capability_t`
-#include "stringzilla/utf8_uncased/serial.h" // `sz_utf8_uncased_needle_t`
+#include "stringzilla/capabilities.h" // `sz_kernel_kind_t`, `sz_kernel_punned_t`
 
 #ifdef __cplusplus
 extern "C" {
@@ -414,8 +413,8 @@ STRINGZILLA_API sz_status_t sz_utf8_find_cased_powervsx(sz_cptr_t text, sz_size_
 
 /*  Header-only builds define each kernel inline from its tier header, while the library defines
  *  every kernel once, in its capability's unit under `src/capabilities/`. */
-#include "stringzilla/utf8_uncased/serial.h"
 #if STRINGZILLA_HEADER_ONLY
+#include "stringzilla/utf8_uncased/serial.h"
 #include "stringzilla/utf8_uncased/icelake.h"
 #include "stringzilla/utf8_uncased/haswell.h"
 #include "stringzilla/utf8_uncased/neon.h"

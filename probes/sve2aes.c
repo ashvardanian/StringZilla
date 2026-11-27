@@ -6,7 +6,7 @@
  */
 #define STRINGZILLA_HEADER_ONLY 1
 #define STRINGZILLA_ARCH_ARM64_SVE2AES_ 1
-#include <stringzilla/hash/sve2aes.h>
+#include "stringzilla/hash.h" // the hub, whose header-only tail defines the tier
 
 int main(void) {
     // Up to 16 bytes the kernel runs SVE2 AES, where longer inputs take the NEON AES one.

@@ -1,5 +1,5 @@
 /**
- *  @file cpp/stringzilla/types.hpp
+ *  @file include/stringzilla/types.hpp
  *  @author Ash Vardanian
  *  @date March 28, 2025
  *  @brief Shared definitions for the StringZilla C++ library.
@@ -13,60 +13,22 @@
  *  - @c ssize_t, @c ptr_t, @c cptr_t - address-related types.
  *  - @c status_t, @c bool_t, @c ordering_t, @c rune_t, @c rune_length_t, @c error_cost_t - logic.
  *
- *  The header also provides @c strings_view_t, a borrowed column of strings in any layout of
- *  @c sz_strings_view_t, and these higher-level types:
+ *  The header also provides these higher-level types:
  *
  *  - @c std::span<value_type> - a view to a contiguous memory block of @c value_type elements.
  *  - @c dummy_alloc<value_type> - a dummy memory allocator shaped like @c std::allocator.
  *  - <tt>vector&lt;value_type, allocator_type&gt;</tt> - owning storage with fallible allocation.
- *  - @c strings<allocator_type> - an owned column of strings, an @c sz_strings_span_t tape.
  */
 #ifndef STRINGZILLA_TYPES_HPP_
 #define STRINGZILLA_TYPES_HPP_
 
 #include "stringzilla/types.h"
-#include "stringzilla/capabilities.h" // `sz_capabilities_enabled_cpu`, `sz_capabilities_enabled_cuda`
-#include "stringzilla/strings.h"
-
-/** When set to 1, the library will include the C++ STL headers and implement automatic conversion
- *  from and to @c std::string_view and @c std::basic_string<any_allocator>. */
-#if !defined(STRINGZILLA_WITH_STL)
-#define STRINGZILLA_WITH_STL (1) // true or false
-#endif
+#include "stringzilla/capabilities.h" // `sz_cap_serial_k`
 
 #if STRINGZILLA_CXX_STANDARD_ < 202002L
 #error "StringZilla's C++ interface requires C++20; the C interface in `stringzilla.h` has no such floor."
 #endif
 
-#if defined(_MSC_VER)
-#define STRINGZILLA_INLINE_ __forceinline
-#elif defined(__GNUC__) || defined(__clang__)
-#define STRINGZILLA_INLINE_ inline __attribute__((always_inline))
-#else
-#define STRINGZILLA_INLINE_ inline
-#endif
-
-#if defined(_MSC_VER)
-#define STRINGZILLA_NOINLINE_ __declspec(noinline)
-#elif defined(__GNUC__) || defined(__clang__)
-#define STRINGZILLA_NOINLINE_ __attribute__((noinline))
-#else
-#define STRINGZILLA_NOINLINE_
-#endif
-
-/** @c noipa disables interprocedural optimization across the function boundary - strictly stronger
- *  than @c noinline, which only forbids inlining. It is the durable guard against GCC's @c -O3
- *  miscompile of a by-value return that gets folded into a same-TU caller, where a @c status_t
- *  engine return reads back as garbage when the callee is folded into a large benchmark TU. Clang
- *  has no such miscompile and no @c noipa attribute, and NVCC rejects it on device code, so both
- *  fall back to @c noinline. */
-#if defined(__GNUC__) && !defined(__clang__) && !STRINGZILLA_ARCH_CUDA_
-#define STRINGZILLA_NOIPA_ __attribute__((noipa))
-#else
-#define STRINGZILLA_NOIPA_ STRINGZILLA_NOINLINE_
-#endif
-
-#if STRINGZILLA_WITH_STL
 #include <initializer_list> // `std::initializer_list` is only ~100 LOC
 #include <iterator>         // `std::random_access_iterator_tag` pulls 20K LOC
 #include <limits>           // `std::numeric_limits`
@@ -75,33 +37,9 @@
 #include <span>             // `std::span`
 #include <type_traits>      // `std::is_const_v`, `std::is_arithmetic_v`, `std::is_trivially_destructible`
 #include <utility>          // `std::move`
-#endif
 
 namespace ashvardanian {
 namespace stringzilla {
-
-/**
- *  @brief Forces the compiler to materialize @p value rather than fold or elide it across an
- *      optimization boundary - the read-side companion to @c STRINGZILLA_NOIPA_.
- *
- *  Mirrors Google Benchmark's @c DoNotOptimize; use it on a status/result just before
- *  returning it from a @c STRINGZILLA_NOIPA_ public entry point so the value survives a
- *  same-TU caller's interprocedural rewrite.
- *
- *  @sa sz_keep_alive_ in <tt>types.h</tt>, the C-callable sibling that pins stores to a buffer rather than
- *      a value, for the C headers, which cannot instantiate a template.
- */
-template <typename value_type_>
-STRINGZILLA_INLINE_ void sz_do_not_optimize(value_type_ &value) noexcept {
-#if defined(__clang__)
-    asm volatile("" : "+r,m"(value) : : "memory");
-#elif defined(__GNUC__)
-    asm volatile("" : "+m,r"(value) : : "memory");
-#else
-    volatile value_type_ sink = value;
-    sz_unused_(sink);
-#endif
-}
 
 using i8_t = sz_i8_t;
 using u8_t = sz_u8_t;
@@ -116,11 +54,6 @@ using byte_t = sz_byte_t;
 using rune_t = sz_rune_t;
 
 using ssize_t = sz_ssize_t;
-
-/** A size or offset deliberately held in 32 bits, where the narrower arithmetic is cheaper -
- *  GPU address math above all. Every use pairs with a range check at the site that
- *  establishes the bound. */
-using small_size_t = sz_u32_t;
 
 using f32_t = float;
 using f64_t = double;
@@ -162,14 +95,9 @@ constexpr value_type_ max_of(value_type_ first, value_type_ second) noexcept {
  *  @brief Why a call failed, in the vocabulary the C ABI and every binding share.
  *
  *  Every enumerator takes its value from @c sz_status_t in @c types.h, so the C++ mirror and the
- *  ABI cannot drift, and the crossing is a cast rather than a table.
- *
- *  Statuses fall into four categories, with no interruptions to report. Resources: @c bad_alloc_k,
- *  @c missing_gpu_k, @c device_code_mismatch_k, @c missing_kernel_k and @c missing_library_k.
- *  Input: @c invalid_utf8_k, @c contains_duplicates_k, @c unexpected_dimensions_k,
- *  @c device_memory_mismatch_k and @c authentication_failed_k. State: @c overflow_risk_k. Defects:
- *  @c unknown_k. Any verb that allocates, binds a device or touches a file may also return a
- *  Resources status. A verb's own block lists only what its contract adds.
+ *  ABI cannot drift, and the crossing is a cast rather than a table. Any verb that allocates, binds
+ *  a device or touches a file may also return @c bad_alloc_k or a device status, so a verb's own
+ *  block lists only what its contract adds.
  */
 enum class [[nodiscard]] status_t : int {
 
@@ -209,6 +137,9 @@ enum class [[nodiscard]] status_t : int {
     /** A dispatch point or finder called from a header-only build, which links no library. */
     missing_library_k = sz_missing_library_k,
 
+    /** A pattern, path or document breaking its grammar, or using a construct no automaton runs. */
+    invalid_syntax_k = sz_invalid_syntax_k,
+
     /** A failure no other status describes. */
     unknown_k = sz_status_unknown_k,
 };
@@ -232,18 +163,6 @@ struct [[nodiscard]] expected {
     explicit operator bool() const noexcept { return succeeded(status); }
 };
 
-/** The borrowing face of @ref expected for reference results: there is no null
- *  reference, so the borrow is stored as an address and @c value() binds it only on
- *  @c success_k. */
-template <typename value_type_>
-struct [[nodiscard]] expected<value_type_ &> {
-    value_type_ *borrowed;
-    status_t status;
-
-    value_type_ &value() const noexcept { return *borrowed; }
-    explicit operator bool() const noexcept { return succeeded(status); }
-};
-
 #pragma endregion Status
 
 #pragma region Devices
@@ -251,119 +170,16 @@ struct [[nodiscard]] expected<value_type_ &> {
 /** Which runtime a device belongs to, as the <tt>sz_&lt;kind&gt;_*</tt> C functions name it. */
 enum class device_kind_t : int { cpu_k, cuda_k, rocm_k, metal_k };
 
-/** One device StringZilla runs kernels on: the host CPU, or a GPU by its runtime's own ordinal. */
-class device_t {
-    device_kind_t kind_;
-    std::size_t ordinal_;
-
-    constexpr device_t(device_kind_t kind, std::size_t ordinal) noexcept : kind_(kind), ordinal_(ordinal) {}
-
-  public:
-    /** The host CPU, which every build has. */
-    static constexpr device_t cpu() noexcept { return {device_kind_t::cpu_k, 0}; }
-
-    /** How many devices of @p kind the process sees: one CPU, or @c missing_gpu_k and zero GPUs. */
-    static expected<std::size_t> count(device_kind_t kind) noexcept {
-        sz_size_t count = 1;
-        sz_status_t status = sz_success_k;
-        switch (kind) {
-        case device_kind_t::cpu_k: break;
-        case device_kind_t::cuda_k: status = sz_count_devices_cuda(&count); break;
-        case device_kind_t::rocm_k: status = sz_count_devices_rocm(&count); break;
-        case device_kind_t::metal_k: status = sz_count_devices_metal(&count); break;
-        }
-        return {static_cast<std::size_t>(count), static_cast<status_t>(status)};
-    }
-
-    /** Device @p ordinal of @p kind, or @c missing_gpu_k past the last one. */
-    static expected<device_t> make(device_kind_t kind, std::size_t ordinal) noexcept {
-        expected<std::size_t> const devices = count(kind);
-        status_t const status = devices && ordinal >= devices.value ? status_t::missing_gpu_k : devices.status;
-        return {device_t {kind, ordinal}, status};
-    }
-
-    constexpr device_kind_t kind() const noexcept { return kind_; }
-    constexpr std::size_t ordinal() const noexcept { return ordinal_; }
-
-    /** What this device runs, whether or not this binary holds kernels for it; zero on failure. */
-    expected<sz_capability_t> capabilities_detected() const noexcept {
-        sz_capability_t capabilities = 0;
-        sz_status_t status = sz_success_k;
-        switch (kind_) {
-        case device_kind_t::cpu_k: status = sz_capabilities_detected_cpu(&capabilities); break;
-        case device_kind_t::cuda_k: status = sz_capabilities_detected_cuda(ordinal_, &capabilities); break;
-        case device_kind_t::rocm_k: status = sz_capabilities_detected_rocm(ordinal_, &capabilities); break;
-        case device_kind_t::metal_k: status = sz_capabilities_detected_metal(ordinal_, &capabilities); break;
-        }
-        return {capabilities, static_cast<status_t>(status)};
-    }
-
-    /** What this binary holds kernels for that this device runs; zero on failure. */
-    expected<sz_capability_t> capabilities_compiled() const noexcept {
-        sz_capability_t capabilities = 0;
-        sz_status_t status = sz_success_k;
-        switch (kind_) {
-        case device_kind_t::cpu_k: status = sz_capabilities_compiled_cpu(&capabilities); break;
-        case device_kind_t::cuda_k: status = sz_capabilities_compiled_cuda(ordinal_, &capabilities); break;
-        case device_kind_t::rocm_k: status = sz_capabilities_compiled_rocm(ordinal_, &capabilities); break;
-        case device_kind_t::metal_k: status = sz_capabilities_compiled_metal(ordinal_, &capabilities); break;
-        }
-        return {capabilities, static_cast<status_t>(status)};
-    }
-
-    /** Both at once: the mask for this device's dispatch points; zero on failure. */
-    expected<sz_capability_t> capabilities_enabled() const noexcept {
-        sz_capability_t capabilities = 0;
-        sz_status_t status = sz_success_k;
-        switch (kind_) {
-        case device_kind_t::cpu_k: status = sz_capabilities_enabled_cpu(&capabilities); break;
-        case device_kind_t::cuda_k: status = sz_capabilities_enabled_cuda(ordinal_, &capabilities); break;
-        case device_kind_t::rocm_k: status = sz_capabilities_enabled_rocm(ordinal_, &capabilities); break;
-        case device_kind_t::metal_k: status = sz_capabilities_enabled_metal(ordinal_, &capabilities); break;
-        }
-        return {capabilities, static_cast<status_t>(status)};
-    }
-
-    /** Prepares the calling thread for the CPU kernels of @p capabilities; GPUs have no such
-     *  kernels, so they report @c missing_kernel_k. */
-    status_t configure_thread(sz_capability_t capabilities) const noexcept {
-        if (kind_ != device_kind_t::cpu_k) return status_t::missing_kernel_k;
-        return static_cast<status_t>(sz_configure_thread_cpu(capabilities));
-    }
-};
-
-/** The mask every wrapper dispatches over by default: the CPU's enabled capabilities, as
- *  @c device_t::cpu().capabilities_enabled() reports them, or none in header-only builds, whose
- *  dispatch points are stubs, so every wrapper runs the serial reference instead. */
-inline sz_capability_t default_capabilities() noexcept {
-#if STRINGZILLA_HEADER_ONLY
-    return 0;
-#else
-    sz_capability_t capabilities = 0;
-    return sz_capabilities_enabled_cpu(&capabilities) == sz_success_k ? capabilities : sz_cap_serial_k;
-#endif
-}
-
-/** Calls the dispatch point @p best_ over a non-zero @p capabilities, or its serial twin @p serial_
- *  over an empty one, the mask of header-only builds, whose dispatch points are stubs. */
-template <auto best_, auto serial_, typename... arguments_types_>
-sz_status_t dispatch_(sz_capability_t capabilities, sz_stream_t stream, arguments_types_... arguments) noexcept {
-    return capabilities ? best_(arguments..., capabilities, stream) : serial_(arguments..., stream);
+/** Bytes a strided output touches, @p count entries @p stride bytes apart and @p entry_bytes long,
+ *  saturating at @c SIZE_MAX, which no span holds, so an overflow reads as too short. */
+constexpr std::size_t strided_bytes_(std::size_t count, std::size_t stride, std::size_t entry_bytes) noexcept {
+    std::size_t const saturated = (std::numeric_limits<std::size_t>::max)();
+    if (count == 0 || entry_bytes == 0) return 0;
+    if (stride && count - 1 > (saturated - entry_bytes) / stride) return saturated;
+    return (count - 1) * stride + entry_bytes;
 }
 
 #pragma endregion Devices
-
-/**
- *  @brief A trivial function object for uniform character substitution costs in
- *      Levenshtein-like similarity algorithms.
- *
- *  @sa error_costs_32x32_t
- */
-struct error_costs_unary_t {
-    constexpr error_cost_t operator()(char a, char b) const noexcept { return a == b ? 0 : 1; }
-    constexpr error_cost_t operator()(sz_rune_t a, sz_rune_t b) const noexcept { return a == b ? 0 : 1; }
-    constexpr error_cost_magnitude_t magnitude() const noexcept { return 1; }
-};
 
 template <typename value_type_>
 struct dummy_alloc {
@@ -456,9 +272,7 @@ struct indexed_container_iterator {
     using reference = value_t; // ! As our view returns by value
     using pointer = void;      // ! Not providing direct pointer semantics
 
-#if STRINGZILLA_WITH_STL
     using iterator_category = std::random_access_iterator_tag;
-#endif
 
   private:
     container_t const *parent_;
@@ -556,8 +370,6 @@ struct indexed_container_iterator {
     }
 };
 
-#pragma region String Collections
-
 /** Allocates @p n bytes through the C++ allocator behind @p allocator_state, reading its throw as
  *  null, so the C side reports @c bad_alloc_k rather than unwinding through its frames. */
 template <typename allocator_type_>
@@ -600,300 +412,6 @@ inline status_t with_allocator_(allocator_type_ &allocator, allocator_callback_ 
     return static_cast<status_t>(callback(c_allocator));
 }
 
-template <typename>
-class string_slice;
-template <typename>
-class string;
-class byteset_t;
-class look_up_table_t;
-
-using string_span_t = string_slice<char>;
-using string_view_t = string_slice<char const>;
-
-template <typename allocator_type_>
-struct strings;
-
-/**
- *  @brief A borrowed column in any layout of @c sz_strings_view_t, the twin of @c string_view_t.
- *
- *  Every conversion reads the whole column into a fresh @c strings, whose blocks come from
- *  the given allocator, and leaves it empty on failure.
- */
-struct strings_view_t {
-    using value_type = string_view_t;
-    using iterator = indexed_container_iterator<strings_view_t>;
-
-    /** The C view every member reads. */
-    sz_strings_view_t raw;
-
-    /** Wraps a C view, like one over records or NUL-padded rows. */
-    explicit strings_view_t(sz_strings_view_t raw) noexcept : raw(raw) {}
-
-    /** An Apache Arrow @c String column: string i is <tt>[offsets[i], offsets[i + 1])</tt> of @p data. */
-    strings_view_t(char const *data, sz_u32_t const *offsets, std::size_t count) noexcept : raw {} {
-        raw.layout = sz_strings_u32_tape_k, raw.count = count;
-        raw.data.u32_tape.data = data, raw.data.u32_tape.offsets = offsets;
-    }
-
-    /** An Apache Arrow @c LargeString column, the same with 64-bit offsets. */
-    strings_view_t(char const *data, sz_u64_t const *offsets, std::size_t count) noexcept : raw {} {
-        raw.layout = sz_strings_u64_tape_k, raw.count = count;
-        raw.data.u64_tape.data = data, raw.data.u64_tape.offsets = offsets;
-    }
-
-    /** Views @p strings through an accessor, copying no bytes, so they must outlive the view. */
-    strings_view_t(std::span<string_view_t const> strings) noexcept;
-
-    /** Views the tape of @p strings. */
-    template <typename allocator_type_>
-    strings_view_t(strings<allocator_type_> const &strings) noexcept : strings_view_t(strings.view()) {}
-
-    std::size_t size() const noexcept { return raw.count; }
-    bool empty() const noexcept { return raw.count == 0; }
-    string_view_t operator[](std::size_t index) const noexcept;
-    iterator begin() const noexcept { return {*this, 0}; }
-    iterator end() const noexcept { return {*this, size()}; }
-
-    /**
-     *  @brief Finds @p needle in every string, like a @c LIKE '%needle%' filter over a column.
-     *  @param[in] needle The bytes to look for.
-     *  @param[out] positions The offset of each string's first match, or @c STRINGZILLA_SIZE_MAX.
-     *  @param[in] capabilities Capabilities to pick from.
-     *  @param[in] stream Null on the CPU, or the stream of the device @p capabilities describes.
-     *
-     *  @sa sz_find_strings_best
-     *
-     *  @par Statuses:
-     *  - @c unexpected_dimensions_k @p positions is too short.
-     */
-    status_t find(string_view_t needle, std::span<std::size_t> positions,
-                  sz_capability_t capabilities = default_capabilities(), sz_stream_t stream = nullptr) const noexcept;
-
-    /**
-     *  @brief Hashes every string under one @p seed, each as @c string_view_t::hash would.
-     *
-     *  @sa sz_hash_strings_best
-     *
-     *  @par Statuses:
-     *  - @c unexpected_dimensions_k @p hashes is too short.
-     */
-    status_t hashes(std::span<u64_t> hashes, u64_t seed = 0, sz_capability_t capabilities = default_capabilities(),
-                    sz_stream_t stream = nullptr) const noexcept;
-
-    /**
-     *  @brief Validates every string as UTF-8 and, unless @p runes is empty, counts its runes.
-     *  @param[out] runes Empty, or each string's runes, unspecified from the first ill-formed one.
-     *  @param[out] malformed_index The first ill-formed string, or @c size() if none is ill-formed.
-     *  @param[in] capabilities Capabilities to pick from.
-     *  @param[in] stream Null on the CPU, or the stream of the device @p capabilities describes.
-     *
-     *  @sa sz_utf8_count_strings_best
-     *
-     *  @par Statuses:
-     *  - @c invalid_utf8_k A string is ill-formed.
-     *  - @c unexpected_dimensions_k @p runes is too short.
-     */
-    status_t utf8_count(std::span<std::size_t> runes, std::size_t &malformed_index,
-                        sz_capability_t capabilities = default_capabilities(),
-                        sz_stream_t stream = nullptr) const noexcept;
-
-    /**
-     *  @brief Writes every string into a NUL-padded row of @p width bytes, truncating longer ones.
-     *  @return The length of the longest string, to retry with wider rows, or
-     *      @c unexpected_dimensions_k when @p rows holds fewer than @c size() rows.
-     *  @sa sz_strings_to_rows_best
-     */
-    expected<std::size_t> to_rows(std::span<char> rows, std::size_t width,
-                                  sz_capability_t capabilities = default_capabilities(),
-                                  sz_stream_t stream = nullptr) const noexcept {
-        if (raw.count && rows.size() / raw.count < width) return {0, status_t::unexpected_dimensions_k};
-        sz_strings_rows_t const destination {.data = rows.data(), .stride = width, .width = width};
-        sz_size_t longest = 0;
-        sz_status_t const status = dispatch_<sz_strings_to_rows_best, sz_strings_to_rows_serial>(
-            capabilities, stream, &raw, nullptr, raw.count, &destination, &longest);
-        return {longest, static_cast<status_t>(status)};
-    }
-
-    /**
-     *  @brief Copies every string into one tape, whatever the layout.
-     *  @sa sz_strings_to_tape_best
-     */
-    template <typename allocator_type_ = heap_alloc<char>>
-    expected<strings<allocator_type_>> gather(allocator_type_ allocator = {},
-                                              sz_capability_t capabilities = default_capabilities(),
-                                              sz_stream_t stream = nullptr) const noexcept {
-        expected<strings<allocator_type_>> result {strings<allocator_type_>(allocator), status_t::success_k};
-        result.status = with_allocator_(result.value.allocator, [&](sz_allocator_t &c_allocator) {
-            return dispatch_<sz_strings_to_tape_best, sz_strings_to_tape_serial>(
-                capabilities, stream, &raw, nullptr, raw.count, &c_allocator, &result.value.raw);
-        });
-        return result;
-    }
-
-    /**
-     *  @brief Escapes every string for @p kind, like JSON or CSV.
-     *  @sa sz_strings_escape_best
-     */
-    template <typename allocator_type_ = heap_alloc<char>>
-    expected<strings<allocator_type_>> escape(sz_escape_kind_t kind, allocator_type_ allocator = {},
-                                              sz_capability_t capabilities = default_capabilities(),
-                                              sz_stream_t stream = nullptr) const noexcept {
-        expected<strings<allocator_type_>> result {strings<allocator_type_>(allocator), status_t::success_k};
-        result.status = with_allocator_(result.value.allocator, [&](sz_allocator_t &c_allocator) {
-            return dispatch_<sz_strings_escape_best, sz_strings_escape_serial>(
-                capabilities, stream, &raw, nullptr, raw.count, kind, &c_allocator, &result.value.raw);
-        });
-        return result;
-    }
-
-    /**
-     *  @brief Unescapes every string from @p kind, checking all of them before writing any.
-     *  @param[in] kind The text format the strings are in.
-     *  @param[out] malformed_index The first malformed string, set on @c invalid_utf8_k.
-     *  @param[in] allocator Source of the result's blocks.
-     *  @param[in] capabilities Capabilities to pick from.
-     *  @param[in] stream Null on the CPU, or the stream of the device @p capabilities describes.
-     *  @sa sz_strings_unescape_best
-     */
-    template <typename allocator_type_ = heap_alloc<char>>
-    expected<strings<allocator_type_>> unescape(sz_escape_kind_t kind, std::size_t &malformed_index,
-                                                allocator_type_ allocator = {},
-                                                sz_capability_t capabilities = default_capabilities(),
-                                                sz_stream_t stream = nullptr) const noexcept {
-        expected<strings<allocator_type_>> result {strings<allocator_type_>(allocator), status_t::success_k};
-        result.status = with_allocator_(result.value.allocator, [&](sz_allocator_t &c_allocator) {
-            return dispatch_<sz_strings_unescape_best, sz_strings_unescape_serial>(capabilities, stream, &raw, nullptr,
-                                                                                   raw.count, kind, &c_allocator,
-                                                                                   &result.value.raw, &malformed_index);
-        });
-        return result;
-    }
-
-    /**
-     *  @brief Maps every byte through @p table, like @c tolower does.
-     *  @sa sz_strings_lookup_best
-     */
-    template <typename allocator_type_ = heap_alloc<char>>
-    expected<strings<allocator_type_>> lookup(look_up_table_t const &table, allocator_type_ allocator = {},
-                                              sz_capability_t capabilities = default_capabilities(),
-                                              sz_stream_t stream = nullptr) const noexcept;
-
-    /**
-     *  @brief Brings every string into the Unicode @p form, like NFC.
-     *  @sa sz_strings_normalize_best
-     */
-    template <typename allocator_type_ = heap_alloc<char>>
-    expected<strings<allocator_type_>> normalize(sz_normal_form_t form, allocator_type_ allocator = {},
-                                                 sz_capability_t capabilities = default_capabilities(),
-                                                 sz_stream_t stream = nullptr) const noexcept {
-        expected<strings<allocator_type_>> result {strings<allocator_type_>(allocator), status_t::success_k};
-        result.status = with_allocator_(result.value.allocator, [&](sz_allocator_t &c_allocator) {
-            return dispatch_<sz_strings_normalize_best, sz_strings_normalize_serial>(
-                capabilities, stream, &raw, nullptr, raw.count, form, &c_allocator, &result.value.raw);
-        });
-        return result;
-    }
-
-    /**
-     *  @brief Joins every string with @p between into one, like Python's <tt>str.join</tt>.
-     *  @sa sz_strings_join_best
-     */
-    template <typename allocator_type_ = std::allocator<char>>
-    expected<string<allocator_type_>> join(string_view_t between, allocator_type_ allocator = {},
-                                           sz_capability_t capabilities = default_capabilities(),
-                                           sz_stream_t stream = nullptr) const noexcept;
-
-    /**
-     *  @brief Writes row r of @p columns as
-     *      <tt>frames[0] + columns[0][r] + frames[1] + … + frames[n]</tt>, with @p between between rows,
-     *      like CSV lines or JSON arrays.
-     *
-     *  @sa sz_strings_join_best
-     *
-     *  @par Statuses:
-     *  - @c unexpected_dimensions_k Uneven columns or @p frames is not one longer.
-     */
-    template <typename allocator_type_ = std::allocator<char>>
-    static expected<string<allocator_type_>> join(std::span<sz_strings_view_t const> columns,
-                                                  std::span<sz_string_view_t const> frames, string_view_t between,
-                                                  allocator_type_ allocator = {},
-                                                  sz_capability_t capabilities = default_capabilities(),
-                                                  sz_stream_t stream = nullptr) noexcept;
-};
-
-/**
- *  @brief An owned column: the C span and the allocator its blocks came from, the twin of
- *      @c string.
- *
- *  Only the conversions of @c strings_view_t and the splits fill one, so it never grows and moves
- *  without copies.
- *  Its offsets are 32-bit while the payload fits in 4 GiB and 64-bit beyond.
- */
-template <typename allocator_type_ = heap_alloc<char>>
-struct strings {
-    using allocator_type = allocator_type_;
-    using value_type = string_view_t;
-    using iterator = indexed_container_iterator<strings>;
-
-    /** The tape, zeroed while empty. */
-    sz_strings_span_t raw {};
-
-    /** Where both blocks of @c raw come from and return to. */
-    allocator_type_ allocator {};
-
-    strings() noexcept = default;
-    explicit strings(allocator_type_ allocator) noexcept : allocator(allocator) {}
-    strings(strings const &) = delete;
-    strings &operator=(strings const &) = delete;
-    strings(strings &&other) noexcept : raw(other.raw), allocator(std::move(other.allocator)) { other.raw = {}; }
-    strings &operator=(strings &&other) noexcept {
-        if (this == &other) return *this;
-        release_();
-        raw = other.raw, allocator = std::move(other.allocator);
-        other.raw = {};
-        return *this;
-    }
-    ~strings() noexcept { release_(); }
-
-    std::size_t size() const noexcept { return raw.count; }
-    bool empty() const noexcept { return raw.count == 0; }
-    string_view_t operator[](std::size_t index) const noexcept;
-    iterator begin() const noexcept { return {*this, 0}; }
-    iterator end() const noexcept { return {*this, size()}; }
-
-    strings_view_t view() const noexcept;
-
-    /**
-     *  @brief Splits @p text at the bytes of @p delimiters into its parts, like <tt>bytes.split</tt>.
-     *  @sa sz_strings_split_best
-     */
-    static expected<strings> split(string_view_t text, byteset_t const &delimiters, sz_split_kind_t kind,
-                                   allocator_type_ allocator = {},
-                                   sz_capability_t capabilities = default_capabilities(),
-                                   sz_stream_t stream = nullptr) noexcept;
-
-    /**
-     *  @brief Splits @p text into lines without their breaks, like <tt>str.splitlines</tt>.
-     *  @sa sz_strings_split_lines_best
-     */
-    static expected<strings> split_lines(string_view_t text, allocator_type_ allocator = {},
-                                         sz_capability_t capabilities = default_capabilities(),
-                                         sz_stream_t stream = nullptr) noexcept;
-
-  private:
-    void release_() noexcept {
-        [[maybe_unused]] status_t const status = with_allocator_(allocator, [&](sz_allocator_t &c_allocator) {
-            sz_strings_span_free(&raw, &c_allocator, nullptr);
-            return sz_success_k;
-        });
-    }
-};
-
-/** The owned column on the heap, the twin of @c string_t. */
-using strings_t = strings<>;
-
-#pragma endregion String Collections
-
 template <typename first_, typename second_>
 struct is_same_type;
 
@@ -905,113 +423,6 @@ struct is_same_type<first_, first_> {
 template <typename first_, typename second_>
 struct is_same_type {
     static constexpr bool value = false;
-};
-
-struct cpu_specs_t {
-    std::size_t l1_bytes = 32 * 1024;       // ? typically around 32 KB
-    std::size_t l2_bytes = 256 * 1024;      // ? typically around 256 KB
-    std::size_t l3_bytes = 8 * 1024 * 1024; // ? typically around 8 MB
-    std::size_t cache_line_width = 64;      // ? 64 bytes on x86, sometimes 128 on ARM
-    std::size_t cores_per_socket = 1;       // ? at least 1 core
-    std::size_t sockets = 1;                // ? at least 1 socket
-
-    std::size_t cores_total() const noexcept { return cores_per_socket * sockets; }
-};
-
-/**
- *  @brief Specifications of a typical NVIDIA GPU, such as A100 or H100.
- *  @note We recommend compiling the code for the 90a compute capability, the newest
- *      with specialized optimizations.
- *  @sa pack_sm_code, cores_per_multiprocessor
- */
-struct gpu_specs_t {
-    std::size_t vram_bytes = 40ul * 1024 * 1024 * 1024; // ? On A100 it's 40 GB
-    std::size_t l2_bytes = 40ul * 1024 * 1024;          // ? On A100 it's 40 MB, shared by every multiprocessor
-    std::size_t constant_memory_bytes = 64 * 1024;      // ? On A100 it's 64 KB
-    std::size_t shared_memory_bytes = 192 * 1024 * 108; // ? On A100 it's 192 KB per SM
-    std::size_t streaming_multiprocessors = 108;        // ? On A100
-    std::size_t cuda_cores = 6912;                      // ? On A100 for f32/i32 logic
-    std::size_t reserved_memory_per_block = 1024;       // ? Typically, 1 KB per block is reserved for bookkeeping
-    std::size_t warp_size = 32;                         // ? Warp size is 32 threads on practically all GPUs
-    std::size_t max_blocks_per_multiprocessor = 0;      // ? Maximum number of blocks per SM
-    std::size_t sm_code = 0;                            // ? Compute capability code, e.g. 90a for Hopper (H100)
-
-    inline std::size_t shared_memory_per_multiprocessor() const noexcept {
-        return shared_memory_bytes / streaming_multiprocessors;
-    }
-
-    /**
-     *  @brief Converts a compute capability (major, minor) to a single numeric code.
-     *
-     *  - 7.0, 7.2 is Volta, like V100                  - maps to 70, 72
-     *  - 7.5 is Turing, like RTX 2080 Ti               - maps to 75
-     *  - 8.0, 8.6, 8.7 is Ampere, like A100, RTX 3090  - maps to 80, 86, 87
-     *  - 8.9 is Ada Lovelace, like RTX 4090            - maps to 89
-     *  - 9.0 is Hopper, like H100                      - maps to 90
-     *  - 12.0, 12.1 is Blackwell, like B200            - maps to 120, 121
-     */
-    inline static std::size_t pack_sm_code(int major, int minor) noexcept {
-        return static_cast<std::size_t>((major * 10) + minor);
-    }
-
-    /**
-     *  @brief Looks up hardware specs for a given compute capability (major, minor), used to
-     *      populate the @c cuda_cores property.
-     *  @param[in] sm The compute capability code obtained from <tt>pack_sm_code(major, minor)</tt>.
-     */
-    inline static std::size_t cores_per_multiprocessor(std::size_t sm) noexcept {
-        typedef struct {
-            std::size_t sm;
-            std::size_t cores;
-        } generation_to_core_count;
-        generation_to_core_count generations_to_core_counts[] = {
-            // Kepler architecture (2012-2014)
-            {pack_sm_code(3, 0), 192}, // Capability 3.0 (GK104 - GTX 680, GTX 770)
-            {pack_sm_code(3, 5), 192}, // Capability 3.5 (GK110 - GTX 780 Ti, GTX Titan, Tesla K20/K40)
-            {pack_sm_code(3, 7), 192}, // Capability 3.7 (GK210 - Tesla K80)
-
-            // Maxwell architecture (2014-2016)
-            {pack_sm_code(5, 0), 128}, // Capability 5.0 (GM107/GM108 - GTX 750/750 Ti, GTX 850M/860M)
-            {pack_sm_code(5, 2), 128}, // Capability 5.2 (GM200/GM204/GM206 - GTX 980/970, Titan X)
-            {pack_sm_code(5, 3), 128}, // Capability 5.3 (GM20B - Jetson TX1, Tegra X1)
-
-            // Pascal architecture (2016-2018)
-            {pack_sm_code(6, 0), 64},  // Capability 6.0 (GP100 - Tesla P100) - HPC focused, different SM design
-            {pack_sm_code(6, 1), 128}, // Capability 6.1 (GP102/GP104/GP106/GP107 - GTX 1080/1070/1060/1050, Titan X/Xp)
-            {pack_sm_code(6, 2), 128}, // Capability 6.2 (GP10B - Jetson TX2, Tegra X2)
-
-            // Volta architecture (2017-2018)
-            {pack_sm_code(7, 0), 64}, // Capability 7.0 (GV100 - Tesla V100, Titan V) - Tensor Core architecture
-            {pack_sm_code(7, 2), 64}, // Capability 7.2 (GV11B - Jetson AGX Xavier, Tegra Xavier)
-
-            // Turing architecture (2018-2020)
-            {pack_sm_code(7, 5), 64}, // Capability 7.5 (TU102/TU104/TU106/TU116/TU117 - RTX 20xx, GTX 16xx)
-
-            // Ampere architecture (2020-2022)
-            {pack_sm_code(8, 0), 64},  // Capability 8.0 (GA100 - A100) - HPC focused
-            {pack_sm_code(8, 6), 128}, // Capability 8.6 (GA102/GA104/GA106/GA107 - RTX 3090/3080/3070/3060)
-            {pack_sm_code(8, 7), 128}, // Capability 8.7 (GA10B - Jetson AGX Orin, Tegra Orin)
-
-            // Ada Lovelace architecture (2022-2023)
-            {pack_sm_code(8, 9), 128}, // Capability 8.9 (AD102/AD103/AD104/AD106/AD107 - RTX 40xx)
-
-            // Hopper architecture (2022-2024)
-            {pack_sm_code(9, 0), 128}, // Capability 9.0 (GH100 - H100, H200)
-
-            // Blackwell architecture (2024+)
-            {pack_sm_code(12, 0), 128}, // Capability 12.0 (GB100 - B100)
-            {pack_sm_code(12, 1), 128}, // Capability 12.1 (GB200 - B200)
-
-            {0, 0}};
-
-        std::size_t index = 0;
-        for (; generations_to_core_counts[index].sm != 0; ++index)
-            if (generations_to_core_counts[index].sm == sm) return generations_to_core_counts[index].cores;
-
-        // If exact match not found, return the most recent known architecture's core count
-        // This provides forward compatibility for newer architectures
-        return (index > 0) ? generations_to_core_counts[index - 1].cores : 128;
-    }
 };
 
 /**
@@ -1030,60 +441,6 @@ template <typename scalar_type_>
 constexpr scalar_type_ round_up_to_multiple(scalar_type_ x, scalar_type_ divisor) {
     sz_assert_(divisor > 0 && "Divisor must be positive");
     return divide_round_up(x, divisor) * divisor;
-}
-
-/**
- *  @brief The number of significant bits in @p x, or zero when @p x is zero.
- *
- *  Widens to @c u64_t first, so one body serves every unsigned width - shifting a 32-bit value by
- *  32 would be undefined even on a branch that never runs.
- *
- *  @note Unrolled rather than delegating to @c sz_u64_clz, which is an intrinsic wrapper and
- *      not @c constexpr.
- */
-template <typename scalar_type_>
-constexpr int bit_width(scalar_type_ x) noexcept {
-    static_assert(std::is_unsigned<scalar_type_>::value, "Value type must be unsigned integer");
-    u64_t wide = (u64_t)x;
-    int width = 0;
-    if (wide >> 32) { width += 32, wide >>= 32; }
-    if (wide >> 16) { width += 16, wide >>= 16; }
-    if (wide >> 8) { width += 8, wide >>= 8; }
-    if (wide >> 4) { width += 4, wide >>= 4; }
-    if (wide >> 2) { width += 2, wide >>= 2; }
-    if (wide >> 1) { width += 1, wide >>= 1; }
-    return width + (int)(wide != 0);
-}
-
-/**
- *  @brief Exact ⌊√x⌋ over integers, without floating-point arithmetic and without a loop.
- *
- *  Seeds a power of two at or above the root, then runs five Newton steps: each doubles the count
- *  of correct bits, and a 64-bit input has a 32-bit root, so 1 → 2 → 4 → 8 → 16 → 32 covers every
- *  width. Newton converges from above, so one clamp lands on the floor. Unlike @c std::sqrt, it is
- *  @c constexpr, which keeps it callable from CUDA device code.
- */
-template <typename scalar_type_>
-constexpr scalar_type_ integer_square_root(scalar_type_ x) noexcept {
-    static_assert(std::is_unsigned<scalar_type_>::value, "Value type must be unsigned integer");
-    static_assert(sizeof(scalar_type_) <= sizeof(u64_t), "Newton ladder is sized for at most 64-bit inputs");
-    if (x <= 1) return x;
-    u64_t const wide = (u64_t)x;
-    u64_t guess = (u64_t)1 << ((bit_width(wide) + 1) / 2);
-    guess = (guess + wide / guess) / 2;
-    guess = (guess + wide / guess) / 2;
-    guess = (guess + wide / guess) / 2;
-    guess = (guess + wide / guess) / 2;
-    guess = (guess + wide / guess) / 2;
-    return (scalar_type_)(guess > wide / guess ? guess - 1 : guess);
-}
-
-/** Equivalent to <tt>(condition &#63; value : 0)</tt>, but avoids branching. */
-template <typename value_type_>
-constexpr value_type_ non_zero_if(value_type_ value, value_type_ condition) noexcept {
-    static_assert(std::is_unsigned<value_type_>::value, "Value type must be unsigned integer");
-    sz_assert_((condition == 0 || condition == 1) && "Condition must be either 0 or 1 unsigned integer");
-    return value * condition;
 }
 
 /** Analog to @c std::swap from <tt>&lt;utility&gt;</tt>, but also generates device code, unlike STL. */
@@ -1389,7 +746,7 @@ class vector {
  *  Nullable allocator for @ref strings and @ref vector.
  *  @p capabilities_ picks the default vendor; an initialized C allocator can select it at runtime.
  *  The allocator handle and stream must outlive its allocations; a null stream uses the vendor's
- *  default device. Failure returns null; @c make reports initialization errors.
+ *  default device. Failure returns null; @c make_unified_alloc reports initialization errors.
  *
  *  @tparam capabilities_ One device's capabilities, like @c sz_cap_cuda_k.
  */
@@ -1412,13 +769,6 @@ struct unified_alloc {
     };
 
     constexpr unified_alloc() noexcept = default;
-    static expected<unified_alloc> make(sz_stream_t stream = nullptr) noexcept {
-        sz_allocator_t policy {};
-        sz_status_t status = sz_success_k;
-        if constexpr (capabilities_ == sz_cap_serial_k) status = sz_allocator_init_heap(&policy);
-        else status = sz_allocator_init_unified_best(&policy, capabilities_);
-        return {unified_alloc(policy, stream), static_cast<status_t>(status)};
-    }
     constexpr unified_alloc(sz_allocator_t const &unified, sz_stream_t stream = nullptr) noexcept
         : unified(unified), stream(stream) {}
     template <typename other_value_type_, sz_capability_t other_capabilities_>

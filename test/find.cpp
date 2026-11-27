@@ -62,10 +62,10 @@ static compare_backend_t const compare_dispatched {"dispatched", cpu_best<sz_equ
  */
 static void check_find_views_unit_(sz::string_view_t haystack, sz::string_view_t needle, sz_size_t forward_offset,
                                    sz_size_t backward_offset) {
-    expect_equal(haystack.find(needle),
+    expect_equal(sz::find(haystack, needle),
                  forward_offset == STRINGZILLA_SIZE_MAX ? sz::string_view_t::npos : forward_offset,
                  "sz::string_view_t::find must agree with the C API's forward offset");
-    expect_equal(haystack.rfind(needle),
+    expect_equal(sz::rfind(haystack, needle),
                  backward_offset == STRINGZILLA_SIZE_MAX ? sz::string_view_t::npos : backward_offset,
                  "sz::string_view_t::rfind must agree with the C API's backward offset");
 }

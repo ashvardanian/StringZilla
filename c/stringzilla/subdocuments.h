@@ -35,23 +35,7 @@
 #define STRINGZILLA_SUBDOCUMENTS_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/capabilities.h" // `sz_capability_t`
-
-/** The array positions one selector picks, RFC 9535's <tt>[begin:end:step]</tt>, an index @c n being
- *  <tt>[n:n+1:1]</tt>, or <tt>[-1::1]</tt> for the last element; negative bounds count from the array's end. */
-typedef struct sz_subdocuments_slice_t {
-
-    /** The first position, or 2⁵³ past the end that a negative step walks from when omitted. */
-    sz_i64_t begin;
-
-    /** The position the slice stops before, or 2⁵³ past the end its step walks to when omitted. */
-    sz_i64_t end;
-
-    /** Distance between selected positions, negative walking backward; zero selects none. */
-    sz_i64_t step;
-} sz_subdocuments_slice_t;
-
-#include "stringzilla/subdocuments/serial.h" // `sz_subdocuments_engine_t`
+#include "stringzilla/capabilities.h" // `sz_kernel_kind_t`, `sz_kernel_punned_t`
 
 #ifdef __cplusplus
 extern "C" {
@@ -592,6 +576,7 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_kernel(sz_kernel_kind_t kind, s
 #pragma endregion Core API
 
 #if STRINGZILLA_HEADER_ONLY
+#include "stringzilla/subdocuments/serial.h"
 #include "stringzilla/subdocuments/haswell.h"
 #include "stringzilla/subdocuments/icelake.h"
 #include "stringzilla/subdocuments/neon.h"

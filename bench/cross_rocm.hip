@@ -12,13 +12,13 @@
 #endif
 
 namespace ashvardanian::stringzilla::bench {
-int bench_cross_rocm(environment_t &env, std::size_t ordinal) {
+void bench_cross_rocm(environment_t &env, std::size_t ordinal) {
 #if STRINGZILLA_ARCH_ROCM_
-    auto const selected = sz::device_t::make(sz::device_kind_t::rocm_k, ordinal);
-    if (selected.status != status_t::success_k) throw std::runtime_error("The requested device is unavailable.");
+    device_selection_t const selected {sz::device_kind_t::rocm_k, ordinal};
+    if (check_device(selected) != sz_success_k) throw std::runtime_error("The requested device is unavailable.");
     stream_t stream(ordinal, sz_stream_init_rocm, sz_stream_free_rocm);
     device_backend_t runtime;
-    runtime.selected = selected.value;
+    runtime.selected = selected;
     runtime.stream = stream.handle;
     if (sz_capabilities_detected_rocm(ordinal, &runtime.capabilities) != sz_success_k)
         throw std::runtime_error("Device capabilities could not be queried.");
@@ -43,7 +43,6 @@ int bench_cross_rocm(environment_t &env, std::size_t ordinal) {
     runtime.threads_per_multiprocessor = sz_device_threads_per_multiprocessor_rocm_();
     sz_device_leave_rocm_(caller);
     fmt::println("Device: rocm:{} ({} multiprocessors)", ordinal, runtime.multiprocessors.value_or(0));
-    int result = 0;
 #if STRINGZILLA_TARGET_ROCM
     simt_backend_t const backend {"rocm",
                                   runtime,
@@ -68,7 +67,7 @@ int bench_cross_rocm(environment_t &env, std::size_t ordinal) {
                                   sz_utf8_norm_rocm,
                                   sz_sha256_multistate_update_rocm,
                                   sz_sha256_multistate_digest_rocm};
-    result += bench_cross_simt(env, backend);
+    bench_cross_simt(env, backend);
 #else
     sz_unused_(env);
 #endif
@@ -97,7 +96,7 @@ int bench_cross_rocm(environment_t &env, std::size_t ordinal) {
                                     sz_utf8_norm_rocm,
                                     sz_sha256_multistate_update_rocm,
                                     sz_sha256_multistate_digest_rocm};
-        result += bench_cross_simt_levenshtein_ngrams(env, cdna3);
+        bench_cross_simt_levenshtein_ngrams(env, cdna3);
     }
 #endif
 #if STRINGZILLA_TARGET_CDNA4
@@ -125,7 +124,7 @@ int bench_cross_rocm(environment_t &env, std::size_t ordinal) {
                                     sz_utf8_norm_rocm,
                                     sz_sha256_multistate_update_rocm,
                                     sz_sha256_multistate_digest_rocm};
-        result += bench_cross_simt_levenshtein_ngrams(env, cdna4);
+        bench_cross_simt_levenshtein_ngrams(env, cdna4);
     }
 #endif
 #if STRINGZILLA_TARGET_CDNA5
@@ -153,14 +152,12 @@ int bench_cross_rocm(environment_t &env, std::size_t ordinal) {
                                     sz_utf8_norm_rocm,
                                     sz_sha256_multistate_update_rocm,
                                     sz_sha256_multistate_digest_rocm};
-        result += bench_cross_simt_levenshtein_ngrams(env, cdna5);
+        bench_cross_simt_levenshtein_ngrams(env, cdna5);
     }
 #endif
-    return result;
 #else
     sz_unused_(env);
     sz_unused_(ordinal);
-    return 0;
 #endif
 }
 } // namespace ashvardanian::stringzilla::bench

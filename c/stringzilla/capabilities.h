@@ -18,59 +18,12 @@
 
 #include "stringzilla/types.h" // `sz_u64_t`, `sz_status_t`, `STRINGZILLA_TARGET_*`
 
-/* On Apple Silicon, @c mrs is not allowed in user-space, so we need to use the @c sysctl API */
-#if STRINGZILLA_OS_APPLE_
-#include <sys/sysctl.h>
-#endif
-
-/* On Linux and FreeBSD Arm, the kernel reports through @c AT_HWCAP whether it emulates @c mrs reads
- * of the ID registers, so nothing has to trap to find out. */
-#if STRINGZILLA_ARCH_ARM64_ && (STRINGZILLA_OS_LINUX_ || STRINGZILLA_OS_FREEBSD_) && STRINGZILLA_WITH_LIBC
-#include <sys/auxv.h> // `getauxval`, `elf_aux_info`, `AT_HWCAP`
-#endif
-
-/* On 64-bit RISC-V we probe HWCAP via the auxiliary vector and vector sub-extensions via the
- * Linux @c riscv_hwprobe syscall; FreeBSD lacks it and uses @c elf_aux_info for base RVV only. */
-#if STRINGZILLA_ARCH_RISCV64_ && STRINGZILLA_WITH_LIBC
-#if STRINGZILLA_OS_LINUX_
-#include <sys/auxv.h>    // `getauxval`, `AT_HWCAP`
-#include <sys/syscall.h> // `SYS_riscv_hwprobe`
-#include <unistd.h>      // `syscall`
-#elif STRINGZILLA_OS_FREEBSD_
-#include <sys/auxv.h> // `elf_aux_info`, `AT_HWCAP`
-#endif
-#endif
-
-/* On LoongArch and IBM POWER the SIMD extensions are likewise reported through the aux vector. */
-#if (STRINGZILLA_ARCH_LOONGARCH64_ || STRINGZILLA_ARCH_PPC64_) && STRINGZILLA_WITH_LIBC
-#if STRINGZILLA_OS_LINUX_
-#include <sys/auxv.h> // `getauxval`, `AT_HWCAP`, `AT_HWCAP2`
-#elif STRINGZILLA_OS_FREEBSD_
-#include <sys/auxv.h> // `elf_aux_info`, `AT_HWCAP`, `AT_HWCAP2`
-#endif
-#endif
-
-/* On Windows Arm, we use IsProcessorFeaturePresent API for capability detection */
-#if STRINGZILLA_OS_WINDOWS_ && STRINGZILLA_ARCH_ARM64_
-#if !defined(_WINSOCKAPI_)
-#include <winsock2.h> // First, so `<windows.h>` leaves out Winsock 1.1, which a later `<winsock2.h>` collides with
-#endif
-#include <windows.h>
-#endif
-
-#if STRINGZILLA_ARCH_METAL_
-#include "stringzilla/metal.h" // `sz_metal_list_devices_`, `sz_metal_device_`
-#endif
-
 /** Buffer size @c sz_capabilities_name never overruns, including its null terminator. */
 #define STRINGZILLA_CAPABILITIES_NAME_CAPACITY 256
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/** 64-bit bitmask of the capabilities of one device. */
-typedef sz_u64_t sz_capability_t;
 
 /** Serial (non-SIMD) fallback capability. Always available. */
 #define sz_cap_serial_k ((sz_capability_t)1)
@@ -857,6 +810,28 @@ typedef sz_status_t (*sz_kernel_strings_normalize_t)(sz_strings_view_t const *, 
                                                      sz_normal_form_t, sz_allocator_t *, sz_strings_span_t *,
                                                      sz_stream_t);
 
+/** Signature of the @c sz_strings_escape_best kernels. */
+typedef sz_status_t (*sz_kernel_strings_escape_t)(sz_strings_view_t const *, sz_size_t const *, sz_size_t,
+                                                  sz_escape_kind_t, sz_allocator_t *, sz_strings_span_t *, sz_stream_t);
+
+/** Signature of the @c sz_strings_unescape_best kernels. */
+typedef sz_status_t (*sz_kernel_strings_unescape_t)(sz_strings_view_t const *, sz_size_t const *, sz_size_t,
+                                                    sz_escape_kind_t, sz_allocator_t *, sz_strings_span_t *,
+                                                    sz_size_t *, sz_stream_t);
+
+/** Signature of the @c sz_strings_split_best kernels. */
+typedef sz_status_t (*sz_kernel_strings_split_t)(sz_cptr_t, sz_size_t, sz_byteset_t const *, sz_split_kind_t,
+                                                 sz_allocator_t *, sz_strings_span_t *, sz_stream_t);
+
+/** Signature of the @c sz_strings_split_lines_best kernels. */
+typedef sz_status_t (*sz_kernel_strings_split_lines_t)(sz_cptr_t, sz_size_t, sz_allocator_t *, sz_strings_span_t *,
+                                                       sz_stream_t);
+
+/** Signature of the @c sz_strings_join_best kernels. */
+typedef sz_status_t (*sz_kernel_strings_join_t)(sz_strings_view_t const *, sz_size_t, sz_size_t,
+                                                sz_string_view_t const *, sz_string_view_t, sz_ptr_t, sz_size_t *,
+                                                sz_stream_t);
+
 /** Signature of the @c sz_find_byte_best and @c sz_rfind_byte_best kernels. */
 typedef sz_status_t (*sz_kernel_find_byte_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_cptr_t *, sz_stream_t);
 
@@ -977,372 +952,6 @@ typedef sz_status_t (*sz_kernel_subdocuments_find_t)(struct sz_subdocuments_engi
 /** Any kernel, cast back to its signature before the call. */
 typedef void (*sz_kernel_punned_t)(void);
 
-/** Returns the capabilities the compiler's own flags guarantee, for the platforms whose OS cannot
- *  be asked. An engine validates a WebAssembly module whole, so there they are what it holds. */
-STRINGZILLA_CONSTEXPR sz_capability_t sz_capabilities_implied_cpu_(void) {
-    sz_capability_t capabilities = sz_cap_serial_k;
-#if defined(__ARM_NEON)
-    capabilities |= sz_cap_neon_k;
-#endif
-#if defined(__ARM_FEATURE_AES) || defined(__ARM_FEATURE_CRYPTO)
-    capabilities |= sz_cap_neonaes_k;
-#endif
-#if defined(__ARM_FEATURE_SHA2) || defined(__ARM_FEATURE_CRYPTO)
-    capabilities |= sz_cap_neonsha_k;
-#endif
-#if defined(__ARM_FEATURE_SVE)
-    capabilities |= sz_cap_sve_k;
-#endif
-#if defined(__ARM_FEATURE_SVE2)
-    capabilities |= sz_cap_sve2_k;
-#endif
-#if defined(__ARM_FEATURE_SVE2AES) || defined(__ARM_FEATURE_SVE2_AES)
-    capabilities |= sz_cap_sve2aes_k;
-#endif
-#if defined(__riscv_vector)
-    capabilities |= sz_cap_rvv_k;
-#endif
-#if defined(__riscv_vector) && defined(__riscv_zvkned) && defined(__riscv_zvknhb) && defined(__riscv_zvkg)
-    capabilities |= sz_cap_rvvcrypto_k;
-#endif
-#if defined(__loongarch_asx)
-    capabilities |= sz_cap_loongsonasx_k;
-#endif
-#if defined(__POWER9_VECTOR__)
-    capabilities |= sz_cap_powervsx_k;
-#endif
-#if defined(__wasm_simd128__)
-    capabilities |= sz_cap_v128_k;
-#endif
-#if defined(__wasm_relaxed_simd__)
-    capabilities |= sz_cap_v128relaxed_k;
-#endif
-    return capabilities;
-}
-
-/*  The detectors below report the full hardware capability set, independent of which
- *  `STRINGZILLA_TARGET_*` kits this build compiled in: @c sz_capabilities_enabled_cpu ANDs their
- *  result with the compile-time mask anyway, and the instructions involved are unconditionally
- *  safe. @c cpuid is baseline x86-64 with @c xgetbv behind the OSXSAVE check, and the Arm @c mrs
- *  reads run only once the kernel says it emulates them. Keeping detection unconditional lets even
- *  a serial-only build report what this machine runs. */
-
-#if STRINGZILLA_ARCH_ARM64_
-
-/** The capabilities of the current 64-bit Arm CPU. */
-STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_arm64_(void) {
-#if STRINGZILLA_OS_APPLE_
-
-    // On Apple Silicon, `mrs` is not allowed in user-space, so we need to use the `sysctl` API.
-    uint32_t supports_neon = 0;
-    uint32_t supports_neonaes = 0;
-    uint32_t supports_neonsha = 0;
-    size_t size = sizeof(supports_neon);
-    // Every Apple arm64 core has NEON, AES and SHA2, so a denied sysctl keeps them.
-    if (sysctlbyname("hw.optional.neon", &supports_neon, &size, NULL, 0) != 0) supports_neon = 1;
-    if (sysctlbyname("hw.optional.arm.FEAT_AES", &supports_neonaes, &size, NULL, 0) != 0) supports_neonaes = 1;
-    if (sysctlbyname("hw.optional.arm.FEAT_SHA256", &supports_neonsha, &size, NULL, 0) != 0) supports_neonsha = 1;
-
-    // The `+crypto` in both tiers' targets enables AES and SHA2 together.
-    return (sz_capability_t)(                                         //
-        (sz_cap_neon_k * (supports_neon)) |                           //
-        (sz_cap_neonaes_k * (supports_neonaes && supports_neonsha)) | //
-        (sz_cap_neonsha_k * (supports_neonaes && supports_neonsha)) | //
-        (sz_cap_serial_k));
-
-#elif (STRINGZILLA_OS_LINUX_ || STRINGZILLA_OS_FREEBSD_) && STRINGZILLA_WITH_LIBC
-
-    unsigned long const hwcap_cpuid = 1ul << 11; // HWCAP_CPUID: the kernel emulates EL0 reads of the ID registers
-#if STRINGZILLA_OS_LINUX_
-    unsigned long hwcap = getauxval(AT_HWCAP);
-#else
-    unsigned long hwcap = 0;
-    elf_aux_info(AT_HWCAP, &hwcap, sizeof(hwcap));
-#endif
-    if (!(hwcap & hwcap_cpuid)) return sz_capabilities_implied_cpu_();
-
-    // Each raw `mrs` writes x0, as older assemblers reject the symbolic names of the SVE registers.
-    unsigned long id_aa64isar0_el1 = 0, id_aa64pfr0_el1 = 0, id_aa64zfr0_el1 = 0;
-    __asm__ __volatile__(".inst 0xD5380600\n\tmov %0, x0" : "=r"(id_aa64isar0_el1) : : "x0"); // ID_AA64ISAR0_EL1
-    __asm__ __volatile__(".inst 0xD5380400\n\tmov %0, x0" : "=r"(id_aa64pfr0_el1) : : "x0");  // ID_AA64PFR0_EL1
-
-    // AdvSIMD, bits [23:20] of ID_AA64PFR0_EL1, reads 0b1111 on the R-profile CPUs that lack NEON.
-    unsigned supports_neon = ((id_aa64pfr0_el1 >> 20) & 0xF) != 0xF;
-    // AES, bits [7:4], and SHA2, bits [15:12], of ID_AA64ISAR0_EL1.
-    unsigned supports_neonaes = ((id_aa64isar0_el1 >> 4) & 0xF) >= 1;
-    unsigned supports_neonsha = ((id_aa64isar0_el1 >> 12) & 0xF) >= 1;
-    // SVE, bits [35:32] of ID_AA64PFR0_EL1, gates ID_AA64ZFR0_EL1: SVEver in [3:0], AES in [7:4].
-    unsigned supports_sve = ((id_aa64pfr0_el1 >> 32) & 0xF) >= 1;
-    if (supports_sve)
-        __asm__ __volatile__(".inst 0xD5380480\n\tmov %0, x0" : "=r"(id_aa64zfr0_el1) : : "x0"); // ID_AA64ZFR0_EL1
-    unsigned supports_sve2 = ((id_aa64zfr0_el1) & 0xF) >= 1;
-    unsigned supports_sve2aes = ((id_aa64zfr0_el1 >> 4) & 0xF) >= 1;
-
-    // The `+crypto` in the NEON and SVE2 AES tiers' targets enables AES and SHA2 together.
-    unsigned supports_crypto = supports_neonaes && supports_neonsha;
-    return (sz_capability_t)(                                                         //
-        (sz_cap_neon_k * (supports_neon)) |                                           //
-        (sz_cap_neonaes_k * (supports_crypto)) |                                      //
-        (sz_cap_neonsha_k * (supports_crypto)) |                                      //
-        (sz_cap_sve_k * (supports_sve)) |                                             //
-        (sz_cap_sve2_k * (supports_sve2)) |                                           //
-        (sz_cap_sve2aes_k * (supports_sve2 && supports_sve2aes && supports_crypto)) | //
-        (sz_cap_serial_k));
-
-#elif STRINGZILLA_OS_WINDOWS_
-
-    // On Windows ARM, use the `IsProcessorFeaturePresent` API for capability detection.
-    // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-isprocessorfeaturepresent
-    unsigned supports_neon = IsProcessorFeaturePresent(PF_ARM_V8_INSTRUCTIONS_AVAILABLE);
-    unsigned supports_crypto = IsProcessorFeaturePresent(PF_ARM_V8_CRYPTO_INSTRUCTIONS_AVAILABLE);
-
-    return (sz_capability_t)(                    //
-        (sz_cap_neon_k * (supports_neon)) |      //
-        (sz_cap_neonaes_k * (supports_crypto)) | //
-        (sz_cap_neonsha_k * (supports_crypto)) | //
-        (sz_cap_serial_k));
-
-#else
-    return sz_capabilities_implied_cpu_();
-#endif
-}
-
-#endif // STRINGZILLA_ARCH_ARM64_
-
-#if STRINGZILLA_ARCH_X8664_
-
-/** The capabilities of the current x86-64 CPU, as far as the OS saves the registers they use. */
-STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_x8664_(void) {
-
-    /// The states of 4 registers populated for a specific "cpuid" assembly call
-    union four_registers_t {
-        int array[4];
-        struct separate_t {
-            unsigned eax, ebx, ecx, edx;
-        } named;
-    } info0, info1, info7, info_extended;
-
-    // Every x86-64 CPU has leaf 0x80000001, as it reports long mode itself.
-#if defined(_MSC_VER) && !defined(__clang__)
-    __cpuidex(info0.array, 0, 0);
-    __cpuidex(info1.array, 1, 0);
-    __cpuidex(info7.array, 7, 0);
-    __cpuidex(info_extended.array, 0x80000001, 0);
-#else
-    __asm__ __volatile__( //
-        "cpuid"
-        : "=a"(info0.named.eax), "=b"(info0.named.ebx), "=c"(info0.named.ecx), "=d"(info0.named.edx)
-        : "a"(0), "c"(0));
-    __asm__ __volatile__( //
-        "cpuid"
-        : "=a"(info1.named.eax), "=b"(info1.named.ebx), "=c"(info1.named.ecx), "=d"(info1.named.edx)
-        : "a"(1), "c"(0));
-    __asm__ __volatile__( //
-        "cpuid"
-        : "=a"(info7.named.eax), "=b"(info7.named.ebx), "=c"(info7.named.ecx), "=d"(info7.named.edx)
-        : "a"(7), "c"(0));
-    __asm__ __volatile__( //
-        "cpuid"
-        : "=a"(info_extended.named.eax), "=b"(info_extended.named.ebx), "=c"(info_extended.named.ecx),
-          "=d"(info_extended.named.edx)
-        : "a"(0x80000001), "c"(0));
-#endif
-
-    // Querying a leaf above the highest supported one returns the highest leaf's data, not zeros,
-    // so on early x86-64 parts (max basic leaf below 7) the "leaf 7" registers would hold unrelated
-    // bits. The AVX family is already masked by the XGETBV/OSXSAVE chain below, but SHA-NI and BMI
-    // are read from leaf 7 unmasked, so the whole leaf is zeroed when it does not exist.
-    if (info0.named.eax < 7) info7.named.eax = info7.named.ebx = info7.named.ecx = info7.named.edx = 0;
-
-    // Gate AVX/AVX-512 on OS-enabled extended state (XGETBV)
-    unsigned has_osxsave = (info1.named.ecx & (1u << 27)) != 0; // OSXSAVE
-    unsigned has_avx = (info1.named.ecx & (1u << 28)) != 0;     // AVX
-
-    unsigned long long xcr0 = 0;
-    if (has_osxsave) {
-#if defined(_MSC_VER) && !defined(__clang__)
-        xcr0 = _xgetbv(0);
-#else
-        unsigned eax, edx;
-        __asm__ __volatile__(".byte 0x0f, 0x01, 0xd0" : "=a"(eax), "=d"(edx) : "c"(0)); // xgetbv
-        xcr0 = ((unsigned long long)edx << 32) | eax;
-#endif
-    }
-
-    unsigned os_avx_enabled = has_osxsave && has_avx && ((xcr0 & 0x6u) == 0x6u); // XMM+YMM
-    unsigned os_avx512_enabled = os_avx_enabled && ((xcr0 & 0xE0u) == 0xE0u);    // OPMASK+ZMM
-
-    // Check for AVX2/AVX-512 (Function ID 7), masked by OS state
-    // https://github.com/llvm/llvm-project/blob/50598f0ff44f3a4e75706f8c53f3380fe7faa896/clang/lib/Headers/cpuid.h#L148
-    unsigned supports_avx2 = os_avx_enabled && ((info7.named.ebx & 0x00000020u) != 0);
-    unsigned supports_fma = os_avx_enabled && ((info1.named.ecx & 0x00001000u) != 0);
-    unsigned supports_avx512f = os_avx512_enabled && ((info7.named.ebx & 0x00010000u) != 0);
-    unsigned supports_avx512dq = os_avx512_enabled && ((info7.named.ebx & 0x00020000u) != 0);
-    unsigned supports_avx512bw = os_avx512_enabled && ((info7.named.ebx & 0x40000000u) != 0);
-    unsigned supports_avx512vl = os_avx512_enabled && ((info7.named.ebx & 0x80000000u) != 0);
-    unsigned supports_avx512vbmi = os_avx512_enabled && ((info7.named.ecx & 0x00000002u) != 0);
-    unsigned supports_avx512vbmi2 = os_avx512_enabled && ((info7.named.ecx & 0x00000040u) != 0);
-    unsigned supports_avx512vnni = os_avx512_enabled && ((info7.named.ecx & 0x00000800u) != 0);
-    unsigned supports_vaes = os_avx512_enabled && ((info7.named.ecx & 0x00000200u) != 0);
-    unsigned supports_vpclmulqdq = os_avx512_enabled && ((info7.named.ecx & 0x00000400u) != 0);
-
-    // SSE, AES-NI, CLMUL, SHA-NI and the bit-manipulation sets, from leaves 1, 7 and 0x80000001
-    unsigned supports_sse3 = ((info1.named.ecx & 0x00000001u) != 0);
-    unsigned supports_ssse3 = ((info1.named.ecx & 0x00000200u) != 0);
-    unsigned supports_sse41 = ((info1.named.ecx & 0x00080000u) != 0);
-    unsigned supports_sse42 = ((info1.named.ecx & 0x00100000u) != 0);
-    unsigned supports_popcnt = ((info1.named.ecx & 0x00800000u) != 0);
-    unsigned supports_aesni = ((info1.named.ecx & 0x02000000u) != 0);
-    unsigned supports_pclmul = ((info1.named.ecx & 0x00000002u) != 0);
-    unsigned supports_shani = ((info7.named.ebx & 0x20000000u) != 0); // SHA-NI bit 29 in EBX from CPUID(7,0)
-    unsigned supports_bmi1 = ((info7.named.ebx & 0x00000008u) != 0);
-    unsigned supports_bmi2 = ((info7.named.ebx & 0x00000100u) != 0);
-    unsigned supports_lzcnt = ((info_extended.named.ecx & 0x00000020u) != 0);
-
-    // A tier needs every feature its target pragmas and flags enable, even beyond its namesake CPU.
-    unsigned supports_westmere = supports_sse42 && supports_aesni && supports_pclmul;
-    unsigned supports_goldmont = supports_sse3 && supports_ssse3 && supports_sse41 && supports_shani;
-    unsigned supports_haswell = supports_avx2 && supports_fma && supports_bmi1 && supports_bmi2 && supports_popcnt &&
-                                supports_lzcnt && supports_pclmul;
-    unsigned supports_skylake = supports_avx2 && supports_avx512f && supports_avx512vl && supports_avx512bw &&
-                                supports_avx512dq && supports_bmi1 && supports_bmi2 && supports_popcnt &&
-                                supports_lzcnt && supports_aesni;
-    unsigned supports_icelake = supports_skylake && supports_avx512vbmi && supports_avx512vbmi2 &&
-                                supports_avx512vnni && supports_vaes && supports_pclmul && supports_vpclmulqdq &&
-                                supports_shani;
-
-    return (sz_capability_t)(                       //
-        (sz_cap_westmere_k * (supports_westmere)) | //
-        (sz_cap_goldmont_k * (supports_goldmont)) | //
-        (sz_cap_haswell_k * (supports_haswell)) |   //
-        (sz_cap_skylake_k * (supports_skylake)) |   //
-        (sz_cap_icelake_k * (supports_icelake)) |   //
-        (sz_cap_serial_k));
-}
-
-#endif // STRINGZILLA_ARCH_X8664_
-
-#if STRINGZILLA_ARCH_RISCV64_
-
-/** The capabilities of the current 64-bit RISC-V CPU. */
-STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_riscv64_(void) {
-#if STRINGZILLA_OS_LINUX_ && STRINGZILLA_WITH_LIBC
-
-    // The base "V" extension is reported through the auxiliary vector, but the individual
-    // vector sub-extensions (vector crypto, bf16, …) are only exposed through the
-    // `riscv_hwprobe(2)` syscall, introduced in Linux 6.4. Values as in `asm/hwprobe.h`.
-    unsigned long const hwcap_isa_v = 1ul << ('V' - 'A'); // COMPAT_HWCAP_ISA_V, RVV 1.0
-    long const riscv_hwprobe = 258;                       // __NR_riscv_hwprobe
-    long const hwprobe_extensions_key = 4;                // RISCV_HWPROBE_KEY_IMA_EXT_0
-    unsigned long long const hwprobe_zvkg = 1ull << 20;   // RISCV_HWPROBE_EXT_ZVKG, vector GHASH
-    unsigned long long const hwprobe_zvkned = 1ull << 21; // RISCV_HWPROBE_EXT_ZVKNED, vector AES
-    unsigned long long const hwprobe_zvknhb = 1ull << 23; // RISCV_HWPROBE_EXT_ZVKNHB, vector SHA-2
-    unsigned long hwcap = getauxval(AT_HWCAP);
-    sz_capability_t caps = sz_cap_serial_k;
-    if (hwcap & hwcap_isa_v) {
-        caps = (sz_capability_t)(caps | sz_cap_rvv_k);
-        struct {
-            long long key;
-            unsigned long long value;
-        } pairs[1];
-        pairs[0].key = hwprobe_extensions_key;
-        pairs[0].value = 0;
-        // `long syscall(SYS_riscv_hwprobe, pairs, pair_count, cpu_count, cpus, flags)`.
-        long const probed = syscall(riscv_hwprobe, pairs, (unsigned long)1, (unsigned long)0, (void *)0,
-                                    (unsigned long)0);
-        // RVA23 sells AES and SHA-2 only inside `Zvkng`, which bundles GHASH, so one capability
-        // covers all three.
-        if (probed == 0 && (pairs[0].value & hwprobe_zvkned) && (pairs[0].value & hwprobe_zvknhb) &&
-            (pairs[0].value & hwprobe_zvkg))
-            caps = (sz_capability_t)(caps | sz_cap_rvvcrypto_k);
-    }
-    return caps;
-
-#elif STRINGZILLA_OS_FREEBSD_ && STRINGZILLA_WITH_LIBC
-
-    // FreeBSD exposes HWCAP through `elf_aux_info`, but lacks the Linux `riscv_hwprobe`
-    // syscall, so the vector crypto sub-extensions stay compile-time only here.
-    unsigned long const hwcap_isa_v = 1ul << ('V' - 'A'); // COMPAT_HWCAP_ISA_V, RVV 1.0
-    unsigned long hwcap = 0;
-    elf_aux_info(AT_HWCAP, &hwcap, sizeof(hwcap));
-    sz_capability_t caps = sz_cap_serial_k;
-    if (hwcap & hwcap_isa_v) caps = (sz_capability_t)(caps | sz_cap_rvv_k);
-    return caps;
-
-#else
-    return sz_capabilities_implied_cpu_();
-#endif
-}
-
-#endif // STRINGZILLA_ARCH_RISCV64_
-
-#if STRINGZILLA_ARCH_LOONGARCH64_
-
-/** The capabilities of the current LoongArch CPU. */
-STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_loongarch64_(void) {
-#if STRINGZILLA_OS_LINUX_ && STRINGZILLA_WITH_LIBC
-
-    unsigned long const hwcap_loongarch_lasx = 1ul << 5; // HWCAP_LOONGARCH_LASX, 256-bit SIMD implying LSX
-    unsigned long hwcap = getauxval(AT_HWCAP);
-    return (sz_capability_t)((sz_cap_loongsonasx_k * ((hwcap & hwcap_loongarch_lasx) != 0)) | sz_cap_serial_k);
-
-#else
-    return sz_capabilities_implied_cpu_();
-#endif
-}
-
-#endif // STRINGZILLA_ARCH_LOONGARCH64_
-
-#if STRINGZILLA_ARCH_PPC64_
-
-/** The capabilities of the current IBM POWER CPU. */
-STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_power64_(void) {
-#if (STRINGZILLA_OS_LINUX_ || STRINGZILLA_OS_FREEBSD_) && STRINGZILLA_WITH_LIBC
-
-    // The `powervsx` kernels target POWER9 (`-mcpu=power9`), so both facts are required.
-    unsigned long const hwcap_ppc_vsx = 0x00000080ul;        // PPC_FEATURE_HAS_VSX, in AT_HWCAP
-    unsigned long const hwcap2_ppc_arch_3_00 = 0x00800000ul; // PPC_FEATURE2_ARCH_3_00, in AT_HWCAP2: POWER9
-    unsigned long hwcap = 0, hwcap2 = 0;
-#if STRINGZILLA_OS_LINUX_
-    hwcap = getauxval(AT_HWCAP);
-    hwcap2 = getauxval(AT_HWCAP2);
-#else
-    elf_aux_info(AT_HWCAP, &hwcap, sizeof(hwcap));
-    elf_aux_info(AT_HWCAP2, &hwcap2, sizeof(hwcap2));
-#endif
-    unsigned const supports_powervsx = ((hwcap & hwcap_ppc_vsx) != 0) && ((hwcap2 & hwcap2_ppc_arch_3_00) != 0);
-    return (sz_capability_t)((sz_cap_powervsx_k * supports_powervsx) | sz_cap_serial_k);
-
-#else
-    return sz_capabilities_implied_cpu_();
-#endif
-}
-
-#endif // STRINGZILLA_ARCH_PPC64_
-
-/** Prepares the calling thread for @p capabilities, behind @c sz_configure_thread_cpu. */
-STRINGZILLA_INLINE sz_status_t sz_configure_thread_cpu_(sz_capability_t capabilities) {
-    sz_unused_(capabilities);
-    return sz_success_k;
-}
-
-/** The capabilities of the current CPU, whatever this binary compiled in. */
-STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_cpu_(void) {
-#if STRINGZILLA_ARCH_X8664_
-    return sz_capabilities_detected_x8664_();
-#elif STRINGZILLA_ARCH_ARM64_
-    return sz_capabilities_detected_arm64_();
-#elif STRINGZILLA_ARCH_RISCV64_
-    return sz_capabilities_detected_riscv64_();
-#elif STRINGZILLA_ARCH_LOONGARCH64_
-    return sz_capabilities_detected_loongarch64_();
-#elif STRINGZILLA_ARCH_PPC64_
-    return sz_capabilities_detected_power64_();
-#else
-    return sz_capabilities_implied_cpu_();
-#endif
-}
-
 /*  CPU capabilities, reported along two independent axes and the mask dispatch uses by default:
  *
  *  - @b sz_capabilities_detected_cpu() — what this CPU can execute, from CPUID or HWCAP, or where
@@ -1422,41 +1031,6 @@ STRINGZILLA_API sz_size_t sz_capabilities_name(sz_capability_t capabilities, cha
 STRINGZILLA_API sz_status_t sz_find_kernel_punned(sz_kernel_kind_t kind, sz_capability_t capabilities,
                                                   sz_kernel_punned_t *kernel, sz_capability_t *capability);
 
-/*  The library detects once per process; header-only builds ask on every call. */
-#if STRINGZILLA_HEADER_ONLY
-
-STRINGZILLA_API sz_status_t sz_find_kernel_punned(sz_kernel_kind_t kind, sz_capability_t capabilities,
-                                                  sz_kernel_punned_t *kernel, sz_capability_t *capability) {
-    sz_unused_(kind), sz_unused_(capabilities);
-    *kernel = STRINGZILLA_NULL, *capability = 0;
-    return sz_missing_library_k;
-}
-
-STRINGZILLA_API sz_status_t sz_capabilities_detected_cpu(sz_capability_t *capabilities) {
-    *capabilities = sz_capabilities_detected_cpu_();
-    return sz_success_k;
-}
-STRINGZILLA_API sz_status_t sz_capabilities_compiled_cpu(sz_capability_t *capabilities) {
-    *capabilities = sz_capabilities_compiled_cpu_mask();
-    return sz_success_k;
-}
-STRINGZILLA_API sz_status_t sz_capabilities_enabled_cpu(sz_capability_t *capabilities) {
-    *capabilities = sz_capabilities_detected_cpu_() & sz_capabilities_compiled_cpu_mask();
-    return sz_success_k;
-}
-
-/** @copydoc sz_configure_thread_cpu */
-STRINGZILLA_API sz_status_t sz_configure_thread_cpu(sz_capability_t capabilities) {
-    return sz_configure_thread_cpu_(capabilities);
-}
-
-/** @copydoc sz_capabilities_name */
-STRINGZILLA_API sz_size_t sz_capabilities_name(sz_capability_t capabilities, char *buffer, sz_size_t capacity) {
-    return sz_capabilities_name_(capabilities, buffer, capacity);
-}
-
-#endif // STRINGZILLA_HEADER_ONLY
-
 /**
  *  @brief Waits for everything enqueued on @p stream, after which what its rounds wrote is readable
  *      from the host.
@@ -1473,93 +1047,14 @@ STRINGZILLA_API sz_status_t sz_stream_synchronize_best(sz_capability_t capabilit
 /** @copydoc sz_stream_synchronize_best */
 STRINGZILLA_API sz_status_t sz_stream_synchronize_serial(sz_stream_t stream);
 
-#if STRINGZILLA_ARCH_CUDA_
 /** @copydoc sz_stream_synchronize_best */
 STRINGZILLA_API sz_status_t sz_stream_synchronize_cuda(sz_stream_t stream);
-#endif
 
-#if STRINGZILLA_ARCH_ROCM_
 /** @copydoc sz_stream_synchronize_best */
 STRINGZILLA_API sz_status_t sz_stream_synchronize_rocm(sz_stream_t stream);
-#endif
 
-#if STRINGZILLA_ARCH_METAL_
 /** @copydoc sz_stream_synchronize_best */
 STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(sz_stream_t stream);
-#endif
-
-/*  The CUDA and ROCm producers answer from their runtimes in `cuda.cuh` and `rocm.cuh`, which only
- *  their own compilers reach; Metal's answer from here, behind the switch the build stamps. */
-
-/** How many Metal devices the system lists, or zero. */
-STRINGZILLA_INLINE sz_size_t sz_count_devices_metal_(void) {
-#if STRINGZILLA_ARCH_METAL_
-    return sz_metal_list_devices_();
-#else
-    return 0;
-#endif
-}
-
-/** The capabilities Metal device @p ordinal runs, in the order the system lists them. The baseline
- *  needs Apple7, whose threadgroup atomics and simdgroup scans the kernels use. */
-STRINGZILLA_INLINE sz_status_t sz_capabilities_detected_metal_(sz_size_t ordinal, sz_capability_t *capabilities) {
-    *capabilities = 0;
-    if (ordinal >= sz_count_devices_metal_()) return sz_missing_gpu_k;
-#if STRINGZILLA_ARCH_METAL_
-    void *const metal_device = sz_metal_device_(ordinal);
-    if (!metal_device) return sz_device_code_mismatch_k;
-    SEL const supports = sel_registerName("supportsFamily:");
-    sz_size_t const apple7 = 1007; // `MTLGPUFamilyApple7`
-    if (((signed char (*)(void *, SEL, sz_size_t))objc_msgSend)(metal_device, supports, apple7))
-        *capabilities = sz_cap_metal_k;
-    sz_metal_do_(metal_device, "release");
-#endif
-    return sz_success_k;
-}
-
-/** Opens a command queue on Metal device @p ordinal, in the order the system lists them. */
-STRINGZILLA_INLINE sz_status_t sz_stream_init_metal_(sz_size_t ordinal, sz_stream_t *stream) {
-    *stream = STRINGZILLA_NULL;
-    if (ordinal >= sz_count_devices_metal_()) return sz_missing_gpu_k;
-#if STRINGZILLA_ARCH_METAL_
-    void *const metal_device = sz_metal_device_(ordinal);
-    if (!metal_device) return sz_device_code_mismatch_k;
-    *stream = sz_metal_get_(metal_device, "newCommandQueue");
-    sz_metal_do_(metal_device, "release");
-    if (!*stream) return sz_bad_alloc_k;
-#endif
-    return sz_success_k;
-}
-
-/** Waits for @p stream, so its command buffers and the frees deferred behind it drain, then
- *  releases it; a null stream is the default one, which is only waited for. */
-STRINGZILLA_INLINE sz_status_t sz_stream_free_metal_(sz_stream_t stream) {
-#if STRINGZILLA_ARCH_METAL_
-    sz_status_t const status = sz_stream_synchronize_metal(stream);
-    sz_metal_do_(stream, "release");
-    return status;
-#else
-    sz_unused_(stream);
-    return sz_missing_gpu_k;
-#endif
-}
-
-/** The CUDA capabilities this binary holds kernels for. */
-STRINGZILLA_CONSTEXPR sz_capability_t sz_capabilities_compiled_cuda_(void) {
-    return sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
-           sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER | sz_cap_blackwell_k * STRINGZILLA_TARGET_BLACKWELL;
-}
-
-/** The ROCm capabilities this binary holds kernels for. */
-STRINGZILLA_CONSTEXPR sz_capability_t sz_capabilities_compiled_rocm_(void) {
-    return sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM | sz_cap_cdna3_k * STRINGZILLA_TARGET_CDNA3 |
-           sz_cap_cdna4_k * STRINGZILLA_TARGET_CDNA4 | sz_cap_cdna5_k * STRINGZILLA_TARGET_CDNA5;
-}
-
-/** The Metal capabilities this binary holds kernels for. */
-STRINGZILLA_CONSTEXPR sz_capability_t sz_capabilities_compiled_metal_(void) {
-    return sz_cap_metal_k * STRINGZILLA_TARGET_METAL;
-}
 
 /*  GPU capabilities, per vendor, of one device named by its runtime's own ordinal: the index that
  *  @c cudaSetDevice or @c hipSetDevice takes, or the position in Metal's device list. Each vendor
@@ -1579,7 +1074,11 @@ STRINGZILLA_CONSTEXPR sz_capability_t sz_capabilities_compiled_metal_(void) {
  *  A CUDA or ROCm unit holds code for the architectures CMake compiled it for, and a device runs a
  *  capability only where its runtime loads that unit's kernels: @b sz_capabilities_compiled_cuda()
  *  asks @c cudaFuncGetAttributes about one kernel of each unit, and the ROCm twin asks
- *  @c hipFuncGetAttributes. */
+ *  @c hipFuncGetAttributes.
+ *
+ *  Every vendor's queries are declared in every build. A library without a vendor answers them with
+ *  @c sz_missing_gpu_k, and a header-only unit with @c sz_missing_library_k, even compiled by nvcc,
+ *  hipcc or against Metal, as only the library counts and probes devices. */
 
 /**
  *  @brief Counts the CUDA devices the process sees.
@@ -1717,107 +1216,160 @@ STRINGZILLA_API sz_status_t sz_stream_init_metal(sz_size_t ordinal, sz_stream_t 
 /** Waits for a queue of @ref sz_stream_init_metal, then releases it. */
 STRINGZILLA_API sz_status_t sz_stream_free_metal(sz_stream_t stream);
 
-#if STRINGZILLA_HEADER_ONLY
+#ifdef __cplusplus
+} // extern "C"
+#endif
 
-/*  Compiled for CUDA or ROCm, the producers come from `cuda.cuh` or `rocm.cuh`, included below. */
-#if !STRINGZILLA_ARCH_CUDA_
+/*  Header-only units define every export here, after the declarations and outside `extern "C"`, as
+ *  the runtimes the vendor headers include declare templates. The CPU is asked on every call, and
+ *  every GPU query answers `sz_missing_library_k`, as only the library probes devices. */
+#if STRINGZILLA_HEADER_ONLY
+#include "stringzilla/cpu.h"    // `sz_capabilities_detected_cpu_`
+#include "stringzilla/cuda.cuh" // CUDA device primitives, for the header-only kernels
+#include "stringzilla/rocm.cuh" // ROCm device primitives, for the header-only kernels
+#include "stringzilla/metal.h"  // Metal runtime calls, for the header-only kernels
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+STRINGZILLA_API sz_status_t sz_find_kernel_punned(sz_kernel_kind_t kind, sz_capability_t capabilities,
+                                                  sz_kernel_punned_t *kernel, sz_capability_t *capability) {
+    sz_unused_(kind), sz_unused_(capabilities);
+    *kernel = STRINGZILLA_NULL, *capability = 0;
+    return sz_missing_library_k;
+}
+
+STRINGZILLA_API sz_status_t sz_capabilities_detected_cpu(sz_capability_t *capabilities) {
+    *capabilities = sz_capabilities_detected_cpu_();
+    return sz_success_k;
+}
+STRINGZILLA_API sz_status_t sz_capabilities_compiled_cpu(sz_capability_t *capabilities) {
+    *capabilities = sz_capabilities_compiled_cpu_mask();
+    return sz_success_k;
+}
+STRINGZILLA_API sz_status_t sz_capabilities_enabled_cpu(sz_capability_t *capabilities) {
+    *capabilities = sz_capabilities_detected_cpu_() & sz_capabilities_compiled_cpu_mask();
+    return sz_success_k;
+}
+
+/** @copydoc sz_configure_thread_cpu */
+STRINGZILLA_API sz_status_t sz_configure_thread_cpu(sz_capability_t capabilities) {
+    return sz_configure_thread_cpu_(capabilities);
+}
+
+/** @copydoc sz_capabilities_name */
+STRINGZILLA_API sz_size_t sz_capabilities_name(sz_capability_t capabilities, char *buffer, sz_size_t capacity) {
+    return sz_capabilities_name_(capabilities, buffer, capacity);
+}
+
 STRINGZILLA_API sz_status_t sz_count_devices_cuda(sz_size_t *count) {
     *count = 0;
-    return sz_missing_gpu_k;
+    return sz_missing_library_k;
 }
 STRINGZILLA_API sz_status_t sz_capabilities_detected_cuda(sz_size_t ordinal, sz_capability_t *capabilities) {
     sz_unused_(ordinal);
     *capabilities = 0;
-    return sz_missing_gpu_k;
+    return sz_missing_library_k;
+}
+STRINGZILLA_API sz_status_t sz_capabilities_compiled_cuda(sz_size_t ordinal, sz_capability_t *capabilities) {
+    sz_unused_(ordinal);
+    *capabilities = 0;
+    return sz_missing_library_k;
+}
+STRINGZILLA_API sz_status_t sz_capabilities_enabled_cuda(sz_size_t ordinal, sz_capability_t *capabilities) {
+    sz_unused_(ordinal);
+    *capabilities = 0;
+    return sz_missing_library_k;
 }
 STRINGZILLA_API sz_status_t sz_stream_init_cuda(sz_size_t ordinal, sz_stream_t *stream) {
     sz_unused_(ordinal);
     *stream = STRINGZILLA_NULL;
-    return sz_missing_gpu_k;
+    return sz_missing_library_k;
 }
 STRINGZILLA_API sz_status_t sz_stream_free_cuda(sz_stream_t stream) {
     sz_unused_(stream);
-    return sz_missing_gpu_k;
+    return sz_missing_library_k;
 }
-#endif // !STRINGZILLA_ARCH_CUDA_
-STRINGZILLA_API sz_status_t sz_capabilities_compiled_cuda(sz_size_t ordinal, sz_capability_t *capabilities) {
-    sz_status_t const status = sz_capabilities_detected_cuda(ordinal, capabilities);
-    *capabilities = status == sz_success_k ? sz_capabilities_compiled_cuda_() : 0;
-    return status;
+STRINGZILLA_API sz_status_t sz_stream_synchronize_cuda(sz_stream_t stream) {
+    sz_unused_(stream);
+    return sz_missing_library_k;
 }
-STRINGZILLA_API sz_status_t sz_capabilities_enabled_cuda(sz_size_t ordinal, sz_capability_t *capabilities) {
-    sz_status_t const status = sz_capabilities_detected_cuda(ordinal, capabilities);
-    *capabilities &= sz_capabilities_compiled_cuda_();
-    return status;
-}
-#if !STRINGZILLA_ARCH_ROCM_
+
 STRINGZILLA_API sz_status_t sz_count_devices_rocm(sz_size_t *count) {
     *count = 0;
-    return sz_missing_gpu_k;
+    return sz_missing_library_k;
 }
 STRINGZILLA_API sz_status_t sz_capabilities_detected_rocm(sz_size_t ordinal, sz_capability_t *capabilities) {
     sz_unused_(ordinal);
     *capabilities = 0;
-    return sz_missing_gpu_k;
+    return sz_missing_library_k;
+}
+STRINGZILLA_API sz_status_t sz_capabilities_compiled_rocm(sz_size_t ordinal, sz_capability_t *capabilities) {
+    sz_unused_(ordinal);
+    *capabilities = 0;
+    return sz_missing_library_k;
+}
+STRINGZILLA_API sz_status_t sz_capabilities_enabled_rocm(sz_size_t ordinal, sz_capability_t *capabilities) {
+    sz_unused_(ordinal);
+    *capabilities = 0;
+    return sz_missing_library_k;
 }
 STRINGZILLA_API sz_status_t sz_stream_init_rocm(sz_size_t ordinal, sz_stream_t *stream) {
     sz_unused_(ordinal);
     *stream = STRINGZILLA_NULL;
-    return sz_missing_gpu_k;
+    return sz_missing_library_k;
 }
 STRINGZILLA_API sz_status_t sz_stream_free_rocm(sz_stream_t stream) {
     sz_unused_(stream);
-    return sz_missing_gpu_k;
+    return sz_missing_library_k;
 }
-#endif // !STRINGZILLA_ARCH_ROCM_
-STRINGZILLA_API sz_status_t sz_capabilities_compiled_rocm(sz_size_t ordinal, sz_capability_t *capabilities) {
-    sz_status_t const status = sz_capabilities_detected_rocm(ordinal, capabilities);
-    *capabilities = status == sz_success_k ? sz_capabilities_compiled_rocm_() : 0;
-    return status;
+STRINGZILLA_API sz_status_t sz_stream_synchronize_rocm(sz_stream_t stream) {
+    sz_unused_(stream);
+    return sz_missing_library_k;
 }
-STRINGZILLA_API sz_status_t sz_capabilities_enabled_rocm(sz_size_t ordinal, sz_capability_t *capabilities) {
-    sz_status_t const status = sz_capabilities_detected_rocm(ordinal, capabilities);
-    *capabilities &= sz_capabilities_compiled_rocm_();
-    return status;
-}
+
 STRINGZILLA_API sz_status_t sz_count_devices_metal(sz_size_t *count) {
-    *count = sz_count_devices_metal_();
-    return *count ? sz_success_k : sz_missing_gpu_k;
+    *count = 0;
+    return sz_missing_library_k;
 }
 STRINGZILLA_API sz_status_t sz_capabilities_detected_metal(sz_size_t ordinal, sz_capability_t *capabilities) {
-    return sz_capabilities_detected_metal_(ordinal, capabilities);
+    sz_unused_(ordinal);
+    *capabilities = 0;
+    return sz_missing_library_k;
 }
 STRINGZILLA_API sz_status_t sz_capabilities_compiled_metal(sz_size_t ordinal, sz_capability_t *capabilities) {
+    sz_unused_(ordinal);
     *capabilities = 0;
-    if (ordinal >= sz_count_devices_metal_()) return sz_missing_gpu_k;
-    *capabilities = sz_capabilities_compiled_metal_();
-    return sz_success_k;
+    return sz_missing_library_k;
 }
 STRINGZILLA_API sz_status_t sz_capabilities_enabled_metal(sz_size_t ordinal, sz_capability_t *capabilities) {
-    sz_status_t const status = sz_capabilities_detected_metal_(ordinal, capabilities);
-    *capabilities &= sz_capabilities_compiled_metal_();
-    return status;
+    sz_unused_(ordinal);
+    *capabilities = 0;
+    return sz_missing_library_k;
 }
 STRINGZILLA_API sz_status_t sz_stream_init_metal(sz_size_t ordinal, sz_stream_t *stream) {
-    return sz_stream_init_metal_(ordinal, stream);
+    sz_unused_(ordinal);
+    *stream = STRINGZILLA_NULL;
+    return sz_missing_library_k;
 }
-STRINGZILLA_API sz_status_t sz_stream_free_metal(sz_stream_t stream) { return sz_stream_free_metal_(stream); }
+STRINGZILLA_API sz_status_t sz_stream_free_metal(sz_stream_t stream) {
+    sz_unused_(stream);
+    return sz_missing_library_k;
+}
+STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(sz_stream_t stream) {
+    sz_unused_(stream);
+    return sz_missing_library_k;
+}
 
 STRINGZILLA_API sz_status_t sz_stream_synchronize_best(sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }
 
-#endif // STRINGZILLA_HEADER_ONLY
-
 #ifdef __cplusplus
 } // extern "C"
 #endif
-
-/*  After the declarations they define, outside `extern "C"`, as the runtimes declare templates. */
-#if STRINGZILLA_HEADER_ONLY
-#include "stringzilla/cuda.cuh"
-#include "stringzilla/rocm.cuh"
-#endif
+#endif // STRINGZILLA_HEADER_ONLY
 
 #endif // STRINGZILLA_CAPABILITIES_H_

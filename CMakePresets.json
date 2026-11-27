@@ -78,7 +78,7 @@
       "cacheVariables": {
         "STRINGZILLA_BUILD_TEST": "OFF",
         "STRINGZILLA_BUILD_BENCH": "OFF",
-        "STRINGZILLA_BUILD_SHARED": "ON"
+        "STRINGZILLA_BUILD_LIBRARIES": "ON"
       }
     },
     {
@@ -88,7 +88,7 @@
       "cacheVariables": {
         "STRINGZILLA_BUILD_TEST": "OFF",
         "STRINGZILLA_BUILD_BENCH": "OFF",
-        "STRINGZILLA_BUILD_SHARED": "OFF",
+        "STRINGZILLA_BUILD_LIBRARIES": "OFF",
         "STRINGZILLA_BUILD_SWIFT": "ON",
         "CMAKE_OSX_DEPLOYMENT_TARGET": "26.0"
       }
@@ -147,13 +147,13 @@
       "name": "wasm32_wasi",
       "inherits": "cross",
       "toolchainFile": "${sourceDir}/cmake/toolchain-wasm32-wasi.cmake",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "STRINGZILLA_BUILD_SHARED": "OFF" }
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "STRINGZILLA_BUILD_LIBRARIES": "OFF" }
     },
     {
       "name": "wasm32_wasi_threads",
       "inherits": "cross",
       "toolchainFile": "${sourceDir}/cmake/toolchain-wasm32-wasi-threads.cmake",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "STRINGZILLA_BUILD_SHARED": "OFF" }
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "STRINGZILLA_BUILD_LIBRARIES": "OFF" }
     },
     {
       "name": "wasm32_emscripten",
@@ -166,7 +166,7 @@
         "STRINGZILLA_MARCH": "v128",
         "STRINGZILLA_BUILD_TEST": "OFF",
         "STRINGZILLA_BUILD_BENCH": "OFF",
-        "STRINGZILLA_BUILD_SHARED": "OFF"
+        "STRINGZILLA_BUILD_LIBRARIES": "OFF"
       }
     },
     {
@@ -192,7 +192,7 @@
         "ANDROID_PLATFORM": "android-28",
         "STRINGZILLA_BUILD_TEST": "OFF",
         "STRINGZILLA_BUILD_BENCH": "OFF",
-        "STRINGZILLA_BUILD_SHARED": "ON"
+        "STRINGZILLA_BUILD_LIBRARIES": "ON"
       }
     },
     {
@@ -201,7 +201,7 @@
       "displayName": "Windows x64 - Visual Studio 2026",
       "generator": "Visual Studio 18 2026",
       "architecture": "x64",
-      "cacheVariables": { "STRINGZILLA_BUILD_SHARED": "ON" }
+      "cacheVariables": { "STRINGZILLA_BUILD_LIBRARIES": "ON" }
     },
     {
       "name": "msvc2026_arm64",
@@ -209,7 +209,7 @@
       "displayName": "Windows ARM64 - Visual Studio 2026",
       "generator": "Visual Studio 18 2026",
       "architecture": "ARM64",
-      "cacheVariables": { "STRINGZILLA_BUILD_SHARED": "ON" }
+      "cacheVariables": { "STRINGZILLA_BUILD_LIBRARIES": "ON" }
     },
     {
       "name": "machine",
@@ -220,7 +220,7 @@
         "CMAKE_CUDA_HOST_COMPILER": "clang++",
         "STRINGZILLA_BUILD_TEST": "OFF",
         "STRINGZILLA_BUILD_BENCH": "OFF",
-        "STRINGZILLA_BUILD_SHARED": "ON",
+        "STRINGZILLA_BUILD_LIBRARIES": "ON",
         "STRINGZILLA_MULTIVERSIONED": "OFF"
       }
     },

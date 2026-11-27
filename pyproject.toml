@@ -54,7 +54,7 @@ wheel.packages = []
 
 [tool.scikit-build.cmake.define]
 STRINGZILLA_BUILD_PYTHON = "ON"
-STRINGZILLA_BUILD_SHARED = "OFF"
+STRINGZILLA_BUILD_LIBRARIES = "OFF"
 STRINGZILLA_INSTALL = "OFF"
 STRINGZILLA_MARCH = { default = "", env = "STRINGZILLA_MARCH" }
 

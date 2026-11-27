@@ -470,7 +470,7 @@ static PyObject *Utf8UncasedMatchesType_next(Utf8UncasedMatches *self) {
     // A zero-width match steps one codepoint too, so an empty needle stops after matching the end.
     if (self->include_overlapping || match_length == 0) {
         sz_size_t const remaining = (sz_size_t)(self->haystack_end - match);
-        sz_size_t const step = sz_utf8_lead_length_(*(sz_u8_t const *)match);
+        sz_size_t const step = sz_utf8_lead_length(*(sz_u8_t const *)match);
         self->current = remaining ? match + (step < remaining ? step : remaining) : NULL;
     }
     else { self->current = match + match_length; }

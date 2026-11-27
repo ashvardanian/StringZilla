@@ -31,78 +31,13 @@
 #define STRINGZILLA_STRINGS_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/capabilities.h" // `sz_capability_t`
+#include "stringzilla/capabilities.h" // `sz_kernel_kind_t`, `sz_kernel_punned_t`
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #pragma region Core API
-
-/** The text formats that the escape and unescape families convert strings to and from. */
-typedef enum sz_escape_kind_t {
-
-    /** RFC 8259 string bodies: <tt>\\"</tt>, <tt>\\\\</tt>, short forms like <tt>\\n</tt>, and <tt>\\u00XX</tt> for other bytes
-     *  below 0x20. */
-    sz_escape_json_k = 0,
-
-    /** Two lowercase hexadecimal digits per byte, decoding either case. */
-    sz_escape_hex_k = 1,
-
-    /** HTML and XML text and attribute values: <tt>&amp;amp;</tt>, <tt>&amp;lt;</tt>, <tt>&amp;gt;</tt>, <tt>&amp;quot;</tt> and <tt>&amp;#39;</tt>. */
-    sz_escape_html_k = 2,
-
-    /** RFC 3986 percent-encoding of every byte outside <tt>A-Z a-z 0-9 - _ ~</tt> and the dot. */
-    sz_escape_url_k = 3,
-
-    /** Terminal-safe logs: short forms like <tt>\\n</tt>, <tt>\\\\</tt> and <tt>\\"</tt>, <tt>\\xHH</tt> for other C0 control
-     *  bytes, DEL and ill-formed UTF-8, and <tt>\\uXXXX</tt> for C1 controls and the bidirectional
-     *  overrides U+202A to U+202E and U+2066 to U+2069, which reorder what a reader sees. */
-    sz_escape_console_k = 4,
-
-    /** RFC 4180 fields, quoted only when holding a comma, a quote, CR or LF, with every inner
-     *  quote doubled. */
-    sz_escape_csv_k = 5,
-
-    /** RFC 8259 string bodies in ASCII alone, as Python's <tt>json.dumps</tt> writes them by default:
-     *  every codepoint outside printable ASCII without a short form, DEL included, becomes
-     *  <tt>\\uXXXX</tt>, a surrogate pair beyond the Basic Multilingual Plane, and every ill-formed byte
-     *  becomes the escape of U+FFFD. */
-    sz_escape_json_ascii_k = 6,
-} sz_escape_kind_t;
-
-/** Signature of the @c sz_strings_escape_best kernels, kept beside the enum it takes. */
-typedef sz_status_t (*sz_kernel_strings_escape_t)(sz_strings_view_t const *, sz_size_t const *, sz_size_t,
-                                                  sz_escape_kind_t, sz_allocator_t *, sz_strings_span_t *, sz_stream_t);
-
-/** Signature of the @c sz_strings_unescape_best kernels, kept beside the enum it takes. */
-typedef sz_status_t (*sz_kernel_strings_unescape_t)(sz_strings_view_t const *, sz_size_t const *, sz_size_t,
-                                                    sz_escape_kind_t, sz_allocator_t *, sz_strings_span_t *,
-                                                    sz_size_t *, sz_stream_t);
-
-/** How a split ends its parts. */
-typedef enum sz_split_kind_t {
-
-    /** Every delimiter ends a part, so neighbouring delimiters leave empty parts, as
-     *  <tt>str.split(sep)</tt> does. */
-    sz_split_each_k = 0,
-
-    /** A run of delimiters ends one part and empty parts are skipped, as <tt>str.split()</tt> does. */
-    sz_split_runs_k = 1,
-} sz_split_kind_t;
-
-/** Signature of the @c sz_strings_split_best kernels, kept beside the enum it takes. */
-typedef sz_status_t (*sz_kernel_strings_split_t)(sz_cptr_t, sz_size_t, sz_byteset_t const *, sz_split_kind_t,
-                                                 sz_allocator_t *, sz_strings_span_t *, sz_stream_t);
-
-/** Signature of the @c sz_strings_split_lines_best kernels. */
-typedef sz_status_t (*sz_kernel_strings_split_lines_t)(sz_cptr_t, sz_size_t, sz_allocator_t *, sz_strings_span_t *,
-                                                       sz_stream_t);
-
-/** Signature of the @c sz_strings_join_best kernels. */
-typedef sz_status_t (*sz_kernel_strings_join_t)(sz_strings_view_t const *, sz_size_t, sz_size_t,
-                                                sz_string_view_t const *, sz_string_view_t, sz_ptr_t, sz_size_t *,
-                                                sz_stream_t);
 
 /**
  *  @brief Gathers <tt>strings[order[i]]</tt>, or the first @p count strings without @p order, into a tape.
@@ -1092,28 +1027,22 @@ STRINGZILLA_API sz_status_t sz_allocator_init_pinned_best(sz_allocator_t *alloca
 /** @copydoc sz_allocator_init_unified_best */
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_serial(sz_allocator_t *allocator);
 
-#if STRINGZILLA_ARCH_CUDA_
 /** @copydoc sz_allocator_init_unified_best */
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_cuda(sz_allocator_t *allocator);
 /** @copydoc sz_allocator_init_device_best */
 STRINGZILLA_API sz_status_t sz_allocator_init_device_cuda(sz_allocator_t *allocator);
 /** @copydoc sz_allocator_init_pinned_best */
 STRINGZILLA_API sz_status_t sz_allocator_init_pinned_cuda(sz_allocator_t *allocator);
-#endif
 
-#if STRINGZILLA_ARCH_ROCM_
 /** @copydoc sz_allocator_init_unified_best */
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_rocm(sz_allocator_t *allocator);
 /** @copydoc sz_allocator_init_device_best */
 STRINGZILLA_API sz_status_t sz_allocator_init_device_rocm(sz_allocator_t *allocator);
 /** @copydoc sz_allocator_init_pinned_best */
 STRINGZILLA_API sz_status_t sz_allocator_init_pinned_rocm(sz_allocator_t *allocator);
-#endif
 
-#if STRINGZILLA_ARCH_METAL_
 /** @copydoc sz_allocator_init_unified_best */
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_metal(sz_allocator_t *allocator);
-#endif
 
 #pragma endregion Memory Management
 
@@ -1309,6 +1238,41 @@ STRINGZILLA_API sz_status_t sz_allocator_init_device_best(sz_allocator_t *alloca
 
 STRINGZILLA_API sz_status_t sz_allocator_init_pinned_best(sz_allocator_t *allocator, sz_capability_t capabilities) {
     sz_unused_(allocator), sz_unused_(capabilities);
+    return sz_missing_library_k;
+}
+
+STRINGZILLA_API sz_status_t sz_allocator_init_unified_cuda(sz_allocator_t *allocator) {
+    sz_unused_(allocator);
+    return sz_missing_library_k;
+}
+
+STRINGZILLA_API sz_status_t sz_allocator_init_device_cuda(sz_allocator_t *allocator) {
+    sz_unused_(allocator);
+    return sz_missing_library_k;
+}
+
+STRINGZILLA_API sz_status_t sz_allocator_init_pinned_cuda(sz_allocator_t *allocator) {
+    sz_unused_(allocator);
+    return sz_missing_library_k;
+}
+
+STRINGZILLA_API sz_status_t sz_allocator_init_unified_rocm(sz_allocator_t *allocator) {
+    sz_unused_(allocator);
+    return sz_missing_library_k;
+}
+
+STRINGZILLA_API sz_status_t sz_allocator_init_device_rocm(sz_allocator_t *allocator) {
+    sz_unused_(allocator);
+    return sz_missing_library_k;
+}
+
+STRINGZILLA_API sz_status_t sz_allocator_init_pinned_rocm(sz_allocator_t *allocator) {
+    sz_unused_(allocator);
+    return sz_missing_library_k;
+}
+
+STRINGZILLA_API sz_status_t sz_allocator_init_unified_metal(sz_allocator_t *allocator) {
+    sz_unused_(allocator);
     return sz_missing_library_k;
 }
 

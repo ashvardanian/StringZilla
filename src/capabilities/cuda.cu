@@ -4,6 +4,51 @@
  *  @date September 29, 2026
  *  @brief The @c cuda kernels and the CUDA device exports, defined once for the library.
  */
+#include "stringzilla/cuda.cuh" // `sz_count_devices_cuda_`, `cudaFuncGetAttributes`
+
+/*  One kernel of each CUDA unit, which a device runs only where it loads it: this unit's own probe,
+ *  defined below its kernels, and one from each tier unit. */
+static void const *sz_probe_cuda_(void);
+extern "C" void const *sz_probe_ampere_(void);
+extern "C" void const *sz_probe_hopper_(void);
+extern "C" void const *sz_probe_blackwell_(void);
+
+/** Whether CUDA device @p ordinal loads @p kernel, as the runtime fails where no code in the binary
+ *  runs there. */
+static sz_status_t sz_kernel_loads_cuda_(sz_size_t ordinal, void const *kernel, sz_bool_t *loads) {
+    int previous = 0;
+    cudaFuncAttributes attributes;
+    *loads = sz_false_k;
+    if (ordinal >= sz_count_devices_cuda_()) return sz_missing_gpu_k;
+    if (cudaGetDevice(&previous) != cudaSuccess || cudaSetDevice((int)ordinal) != cudaSuccess) {
+        cudaGetLastError();
+        return sz_device_code_mismatch_k;
+    }
+    *loads = cudaFuncGetAttributes(&attributes, kernel) == cudaSuccess ? sz_true_k : sz_false_k;
+    cudaGetLastError();
+    cudaSetDevice(previous);
+    return sz_success_k;
+}
+
+/*  Above the lines turning the tiers off for this unit's kernels, so the build's verdicts pick the
+ *  tier units to ask about. */
+STRINGZILLA_API sz_status_t sz_capabilities_compiled_cuda(sz_size_t ordinal, sz_capability_t *capabilities) {
+    sz_bool_t loads;
+    sz_status_t const status = sz_kernel_loads_cuda_(ordinal, sz_probe_cuda_(), &loads);
+    *capabilities = sz_cap_cuda_k * loads;
+    if (status != sz_success_k) return status;
+#if STRINGZILLA_TARGET_AMPERE
+    sz_kernel_loads_cuda_(ordinal, sz_probe_ampere_(), &loads), *capabilities |= sz_cap_ampere_k * loads;
+#endif
+#if STRINGZILLA_TARGET_HOPPER
+    sz_kernel_loads_cuda_(ordinal, sz_probe_hopper_(), &loads), *capabilities |= sz_cap_hopper_k * loads;
+#endif
+#if STRINGZILLA_TARGET_BLACKWELL
+    sz_kernel_loads_cuda_(ordinal, sz_probe_blackwell_(), &loads), *capabilities |= sz_cap_blackwell_k * loads;
+#endif
+    return sz_success_k;
+}
+
 #undef STRINGZILLA_TARGET_AMPERE
 #define STRINGZILLA_TARGET_AMPERE 0
 #undef STRINGZILLA_TARGET_HOPPER
@@ -71,21 +116,4 @@ STRINGZILLA_API sz_status_t sz_stream_synchronize_cuda(sz_stream_t stream) {
 }
 
 /** The kernel @c sz_capabilities_compiled_cuda asks the runtime to load. */
-extern "C" void const *sz_probe_cuda_(void) { return (void const *)&sz_strings_scan_local_cuda_kernel_; }
-
-/** Whether CUDA device @p ordinal loads @p kernel, as the runtime fails where no code in the binary
- *  runs there. */
-extern "C" sz_status_t sz_kernel_loads_cuda_(sz_size_t ordinal, void const *kernel, sz_bool_t *loads) {
-    int previous = 0;
-    cudaFuncAttributes attributes;
-    *loads = sz_false_k;
-    if (ordinal >= sz_count_devices_cuda_()) return sz_missing_gpu_k;
-    if (cudaGetDevice(&previous) != cudaSuccess || cudaSetDevice((int)ordinal) != cudaSuccess) {
-        cudaGetLastError();
-        return sz_device_code_mismatch_k;
-    }
-    *loads = cudaFuncGetAttributes(&attributes, kernel) == cudaSuccess ? sz_true_k : sz_false_k;
-    cudaGetLastError();
-    cudaSetDevice(previous);
-    return sz_success_k;
-}
+static void const *sz_probe_cuda_(void) { return (void const *)&sz_strings_scan_local_cuda_kernel_; }

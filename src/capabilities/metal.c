@@ -22,9 +22,6 @@
 #include "stringzilla/utf8_norm/metal.h"
 #include "stringzilla/utf8_uncased_fold/metal.h"
 
-/*  `build.rs` compiles every `.c` under `c/`, so without Metal this unit defines nothing. */
-#if STRINGZILLA_ARCH_METAL_
-
 STRINGZILLA_API sz_metal_context_t *sz_metal_contexts_(os_unfair_lock_t *contexts_lock) {
     static sz_metal_context_t contexts[sz_metal_contexts_max_k];
     static os_unfair_lock lock;
@@ -33,12 +30,20 @@ STRINGZILLA_API sz_metal_context_t *sz_metal_contexts_(os_unfair_lock_t *context
 }
 
 STRINGZILLA_API sz_status_t sz_count_devices_metal(sz_size_t *count) {
-    *count = sz_count_devices_metal_();
+    *count = sz_metal_list_devices_();
     return *count ? sz_success_k : sz_missing_gpu_k;
 }
 
 STRINGZILLA_API sz_status_t sz_capabilities_detected_metal(sz_size_t ordinal, sz_capability_t *capabilities) {
     return sz_capabilities_detected_metal_(ordinal, capabilities);
+}
+
+/** Every listed device compiles the embedded source, so each holds the one Metal capability. */
+STRINGZILLA_API sz_status_t sz_capabilities_compiled_metal(sz_size_t ordinal, sz_capability_t *capabilities) {
+    *capabilities = 0;
+    if (ordinal >= sz_metal_list_devices_()) return sz_missing_gpu_k;
+    *capabilities = sz_cap_metal_k;
+    return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_stream_init_metal(sz_size_t ordinal, sz_stream_t *stream) {
@@ -54,5 +59,3 @@ STRINGZILLA_API sz_status_t sz_allocator_init_unified_metal(sz_allocator_t *allo
 STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(sz_stream_t stream) {
     return sz_stream_synchronize_metal_(stream);
 }
-
-#endif // STRINGZILLA_ARCH_METAL_

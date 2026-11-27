@@ -189,7 +189,7 @@ assert(hex.count == 64)
 
 ## Devices and Capabilities
 
-Every call runs on the CPU and dispatches to the best kernel of `Device.cpu.capabilitiesEnabled`, a `Capabilities` `OptionSet`:
+Every call runs on the CPU and dispatches to the best kernel of `Device.cpu.capabilitiesEnabled`, a `Capabilities` option set:
 
 ```swift
 import StringZilla

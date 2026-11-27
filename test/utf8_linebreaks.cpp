@@ -32,12 +32,12 @@ void test_utf8_linebreaks_unit() {
 
     // C++ range wrapper known-answer: the view must faithfully expose the kernel's segments.
     std::vector<std::string> const wrapped =
-        sz::string_view_t("a\nb").utf8_linebreaks().template to<std::vector<std::string>>();
+        sz::utf8_linebreaks(sz::string_view_t("a\nb")).template to<std::vector<std::string>>();
     expect_true(wrapped.size() == 2 && wrapped[0] == "a\n" && wrapped[1] == "b", "C++ utf8_linebreaks range");
 
     // Line-break counts for the shared prose fixtures; per-fixture rationale lives in test/utf8.hpp.
     auto count_linebreaks = [](std::string_view text) {
-        return sz::string_view_t(text).utf8_linebreaks().template to<std::vector<std::string>>().size();
+        return sz::utf8_linebreaks(sz::string_view_t(text)).template to<std::vector<std::string>>().size();
     };
     expect_equal(count_linebreaks(utf8_prose_hotel_review()), 45, "hotel_review linebreaks");
     expect_equal(count_linebreaks(utf8_prose_science_abstract()), 43, "science_abstract linebreaks");

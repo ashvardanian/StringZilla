@@ -392,7 +392,7 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init_metal(
     if (status == sz_success_k) status = sz_stream_synchronize_metal_(call.queue);
     if (status != sz_success_k) return sz_metal_commit_(&call, status);
     if (allocator) unified = *allocator;
-    else sz_allocator_init_unified_metal(&unified);
+    else sz_allocator_init_unified_metal_(&unified);
     if (!matches_budget) matches_budget = (sz_size_t)sz_substrings_gpu_matches_budget_default_k;
     if (!haystacks_budget) haystacks_budget = (sz_size_t)sz_substrings_gpu_haystacks_budget_default_k;
     status = sz_substrings_engine_compile_(needles, case_sensitivity, overlap_policy, hot_states, matches_budget,

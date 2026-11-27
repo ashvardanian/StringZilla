@@ -207,7 +207,7 @@ void bench_strings_normalize(environment_t const &env, corpus_t const &corpus, s
                                                                      std::string_view line) mutable {
             scratch.resize(max_of(scratch.size(), line.size() * sz_utf8_norm_decomp_max_k));
             sz_size_t written = 0;
-            if (sz_utf8_norm_best(line.data(), line.size(), form, scratch.data(), &written, sz::default_capabilities(),
+            if (sz_utf8_norm_best(line.data(), line.size(), form, scratch.data(), &written, cpu_capabilities_enabled(),
                                   nullptr) != sz_success_k)
                 throw std::runtime_error("A line would not normalize.");
             output.append(scratch.data(), written);

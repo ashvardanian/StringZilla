@@ -44,7 +44,8 @@ void bench_subdocuments(environment_t &env) {
     substrings_corpus_t const staged(subdocuments_documents(corpus));
     fmt::println("Starting path query benchmarks over {} documents...", staged.views.size());
     for (vocabulary_t const &vocabulary : subdocuments_vocabularies(format)) {
-        subdocuments_engine_t engine(vocabulary, format, subdocuments_engine_init_cpu_, allocator);
+        subdocuments_prepared_t engine = compiled_subdocuments(vocabulary, format, subdocuments_engine_init_cpu_,
+                                                               allocator);
         std::string const label = vocabulary.label;
         print(bench_unary(env, corpus, "sz_subdocuments_counts" + label,
                           subdocuments_counts_from_sz {sz_subdocuments_counts, engine, staged, staged.haystacks()}));

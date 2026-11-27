@@ -37,9 +37,7 @@
 #define STRINGZILLA_SUBSTRINGS_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/capabilities.h" // `sz_capability_t`
-#include "stringzilla/metal.h"
-#include "stringzilla/substrings/serial.h" // `sz_substrings_engine_t`, `sz_match_t`
+#include "stringzilla/capabilities.h" // `sz_kernel_kind_t`, `sz_kernel_punned_t`
 
 #ifdef __cplusplus
 extern "C" {
@@ -836,6 +834,7 @@ STRINGZILLA_API sz_status_t sz_substrings_find_kernel(sz_kernel_kind_t kind, sz_
 #pragma endregion Core API
 
 #if STRINGZILLA_HEADER_ONLY
+#include "stringzilla/substrings/serial.h"
 #include "stringzilla/substrings/haswell.h"
 #include "stringzilla/substrings/icelake.h"
 #include "stringzilla/substrings/neon.h"

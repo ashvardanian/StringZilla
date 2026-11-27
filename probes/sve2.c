@@ -6,7 +6,7 @@
  */
 #define STRINGZILLA_HEADER_ONLY 1
 #define STRINGZILLA_ARCH_ARM64_SVE2_ 1
-#include <stringzilla/find/sve2.h>
+#include "stringzilla/find.h" // the hub, whose header-only tail defines the tier
 
 /** Passes vectors between calls as the uncased kernels do, which LLVM 20 can't emit for Mach-O. */
 __attribute__((target("+sve+sve2"), noinline)) svuint8_t sz_probe_increment_(svuint8_t bytes) {

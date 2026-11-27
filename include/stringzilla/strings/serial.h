@@ -13,13 +13,11 @@
  *
  *  @sa c/stringzilla/strings.h
  */
-/*  Above the guard: entered first, this body must finish before the hub includes the tiers. */
-#include "stringzilla/strings.h"
-
 #ifndef STRINGZILLA_STRINGS_SERIAL_H_
 #define STRINGZILLA_STRINGS_SERIAL_H_
 
 #include "stringzilla/types.h"
+#include "stringzilla/capabilities.h"      // `sz_kernel_utf8_norm_t`
 #include "stringzilla/find/serial.h"       // `sz_find_byteset_serial_`, `sz_equal_serial_`
 #include "stringzilla/utf8_runes/serial.h" // `sz_rune_decode`, `sz_rune_encode`
 #include "stringzilla/utf8_norm/serial.h"  // `sz_utf8_norm_serial`, `sz_utf8_norm_decomp_max_k`

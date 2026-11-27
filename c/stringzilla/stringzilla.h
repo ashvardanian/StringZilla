@@ -104,8 +104,6 @@
 #include "stringzilla/utf8_uncased.h"      // `sz_utf8_uncased_{search,order}_best`, `sz_utf8_find_cased_best`
 #include "stringzilla/utf8_norm.h"         // `sz_utf8_norm_best`, `sz_utf8_find_denormalized_best`
 
-#include "stringzilla/small_string.h" // `sz_string_t`, `sz_string_init`, `sz_string_free`
-
 #ifdef __cplusplus
 extern "C" {
 #endif

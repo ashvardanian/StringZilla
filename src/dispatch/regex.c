@@ -5,6 +5,7 @@
  *  @brief The regular expression engine's dispatch points, their lists and finder.
  */
 #include "stringzilla/regex.h"
+#include "stringzilla/regex/serial.h" // `sz_regex_engine_free_`
 
 #include "dispatch.h"
 
@@ -16,7 +17,7 @@ static sz_capability_kernels_t const *sz_regex_engine_init_capabilities(void) {
         above_k = (sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
                    sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
                    sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
-                  !STRINGZILLA_MULTIVERSIONED
+        !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -38,7 +39,7 @@ static sz_capability_kernels_t const *sz_regex_engine_init_capabilities(void) {
         cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
                          sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
                         !STRINGZILLA_MULTIVERSIONED) >>
-                       48
+        48
     };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
@@ -90,7 +91,7 @@ static sz_capability_kernels_t const *sz_regex_contains_capabilities(void) {
         above_k = (sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
                    sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
                    sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
-                  !STRINGZILLA_MULTIVERSIONED
+        !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -112,7 +113,7 @@ static sz_capability_kernels_t const *sz_regex_contains_capabilities(void) {
         cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
                          sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
                         !STRINGZILLA_MULTIVERSIONED) >>
-                       48
+        48
     };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
@@ -164,7 +165,7 @@ static sz_capability_kernels_t const *sz_regex_counts_capabilities(void) {
         above_k = (sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
                    sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
                    sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
-                  !STRINGZILLA_MULTIVERSIONED
+        !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -186,7 +187,7 @@ static sz_capability_kernels_t const *sz_regex_counts_capabilities(void) {
         cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
                          sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
                         !STRINGZILLA_MULTIVERSIONED) >>
-                       48
+        48
     };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
@@ -236,7 +237,7 @@ static sz_capability_kernels_t const *sz_regex_find_capabilities(void) {
         above_k = (sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
                    sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
                    sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
-                  !STRINGZILLA_MULTIVERSIONED
+        !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -258,7 +259,7 @@ static sz_capability_kernels_t const *sz_regex_find_capabilities(void) {
         cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
                          sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
                         !STRINGZILLA_MULTIVERSIONED) >>
-                       48
+        48
     };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
@@ -307,7 +308,7 @@ static sz_capability_kernels_t const *sz_regex_replace_capabilities(void) {
         above_k = (sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
                    sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
                    sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
-                  !STRINGZILLA_MULTIVERSIONED
+        !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -329,7 +330,7 @@ static sz_capability_kernels_t const *sz_regex_replace_capabilities(void) {
         cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
                          sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
                         !STRINGZILLA_MULTIVERSIONED) >>
-                       48
+        48
     };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
@@ -379,7 +380,7 @@ static sz_capability_kernels_t const *sz_regex_extract_capabilities(void) {
         above_k = (sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
                    sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
                    sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
-                  !STRINGZILLA_MULTIVERSIONED
+        !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -401,7 +402,7 @@ static sz_capability_kernels_t const *sz_regex_extract_capabilities(void) {
         cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
                          sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
                         !STRINGZILLA_MULTIVERSIONED) >>
-                       48
+        48
     };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,

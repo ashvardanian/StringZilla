@@ -23,8 +23,8 @@ using namespace ashvardanian::stringzilla::bench;
 
 namespace ashvardanian::stringzilla::bench {
 
-std::vector<sz::device_t> select_devices(std::optional<std::vector<device_selection_t>> const &requested) {
-    std::vector<sz::device_t> devices;
+std::vector<device_selection_t> select_devices(std::optional<std::vector<device_selection_t>> const &requested) {
+    std::vector<device_selection_t> devices;
     if constexpr (STRINGZILLA_HEADER_ONLY) {
         if (requested) {
             fmt::println(stderr, "This header-only executable accepts only CPU workloads");
@@ -34,19 +34,19 @@ std::vector<sz::device_t> select_devices(std::optional<std::vector<device_select
     }
     if (requested) {
         for (device_selection_t const &selection : *requested) {
-            auto const device = sz::device_t::make(selection.backend, selection.ordinal);
-            if (!device) {
+            sz_status_t const status = check_device(selection);
+            if (status != sz_success_k) {
                 fmt::println(stderr, "Device {}:{} is unavailable (status {})", device_name(selection.backend),
-                             selection.ordinal, static_cast<int>(device.status));
+                             selection.ordinal, static_cast<int>(status));
                 std::exit(1);
             }
-            devices.push_back(device.value);
+            devices.push_back(selection);
         }
     }
     else {
         for (sz::device_kind_t kind :
              {sz::device_kind_t::cuda_k, sz::device_kind_t::rocm_k, sz::device_kind_t::metal_k})
-            if (auto device = sz::device_t::make(kind, 0)) devices.push_back(device.value);
+            if (check_device({kind, 0}) == sz_success_k) devices.push_back({kind, 0});
     }
     return devices;
 }
@@ -86,16 +86,14 @@ int main(int argc, char **argv) {
         bench_cross_ppc64(env);
         bench_cross_wasm(env);
         if constexpr (!STRINGZILLA_HEADER_ONLY) {
-            int failures = 0;
-            for (sz::device_t device : devices) {
-                switch (device.kind()) {
-                case sz::device_kind_t::cuda_k: failures += bench_cross_cuda(env, device.ordinal()); break;
-                case sz::device_kind_t::rocm_k: failures += bench_cross_rocm(env, device.ordinal()); break;
-                case sz::device_kind_t::metal_k: failures += bench_cross_metal(env, device.ordinal()); break;
+            for (device_selection_t device : devices) {
+                switch (device.backend) {
+                case sz::device_kind_t::cuda_k: bench_cross_cuda(env, device.ordinal); break;
+                case sz::device_kind_t::rocm_k: bench_cross_rocm(env, device.ordinal); break;
+                case sz::device_kind_t::metal_k: bench_cross_metal(env, device.ordinal); break;
                 case sz::device_kind_t::cpu_k: break;
                 }
             }
-            if (failures != 0) return 1;
         }
     }
     catch (std::exception const &e) {

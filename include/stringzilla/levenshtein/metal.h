@@ -240,7 +240,7 @@ STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_metal(sz_levenshtein_engi
     }
     sz_allocator_t unified;
     if (allocator) unified = *allocator;
-    else sz_allocator_init_unified_metal(&unified);
+    else sz_allocator_init_unified_metal_(&unified);
     sz_size_t const buckets_bound = sz_min_of_two(sz_levenshtein_query_words(longest),
                                                   (sz_size_t)sz_levenshtein_gpu_words_max_k);
     sz_size_t const head_bytes = sz_levenshtein_head_bytes_metal_(queries->count, buckets_bound);

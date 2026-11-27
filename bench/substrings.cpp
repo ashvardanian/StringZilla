@@ -86,15 +86,16 @@ void bench_substrings_slice(environment_t const &env, corpus_t const &corpus, su
         return;
     }
     {
-        substrings_engine_t probe(dictionary, sz_substrings_overlapping_k, substrings_engine_init_cpu_, allocator);
+        substrings_prepared_t probe = compiled_substrings(dictionary, sz_substrings_overlapping_k,
+                                                          substrings_engine_init_cpu_, allocator);
         fmt::println("Vocabulary {} holds {} needles over {} states, {} of them hot.", suffix.c_str(),
-                     dictionary.needles.size(), probe.engine.state_count, probe.engine.hot_count);
+                     dictionary.needles.size(), probe.raw().state_count, probe.raw().hot_count);
     }
 
     print(bench_unary(env, corpus, "sz_substrings_engine_init" + suffix,
                       substrings_build_from_sz {dictionary, env.machine.enabled}));
     for (sz_substrings_overlap_policy_t const policy : substrings_policies_k) {
-        substrings_engine_t engine(dictionary, policy, substrings_engine_init_cpu_, allocator);
+        substrings_prepared_t engine = compiled_substrings(dictionary, policy, substrings_engine_init_cpu_, allocator);
         std::string const cover = substrings_cover(vocabulary, policy);
         print(bench_unary(env, corpus, "sz_substrings_counts" + cover,
                           substrings_counts_from_sz {sz_substrings_counts, engine, staged, staged.haystacks()}));
@@ -102,12 +103,13 @@ void bench_substrings_slice(environment_t const &env, corpus_t const &corpus, su
                           substrings_find_from_sz {sz_substrings_find, engine, staged, staged.haystacks()}));
     }
     for (sz_substrings_overlap_policy_t const policy : substrings_leftmost_policies_k) {
-        substrings_engine_t engine(dictionary, policy, substrings_engine_init_cpu_, allocator);
+        substrings_prepared_t engine = compiled_substrings(dictionary, policy, substrings_engine_init_cpu_, allocator);
         print(bench_unary(env, corpus, "sz_substrings_replace" + substrings_cover(vocabulary, policy),
                           substrings_replace_from_sz {sz_substrings_replace, engine, staged, staged.haystacks(),
                                                       dictionary.replacements()}));
     }
-    substrings_engine_t engine(dictionary, sz_substrings_overlapping_k, substrings_engine_init_cpu_, allocator);
+    substrings_prepared_t engine = compiled_substrings(dictionary, sz_substrings_overlapping_k,
+                                                       substrings_engine_init_cpu_, allocator);
     print(bench_unary(env, corpus, "sz_substrings_bm25_scores" + suffix,
                       substrings_bm25_from_sz {sz_substrings_bm25_scores, engine, staged, staged.haystacks()}));
 }

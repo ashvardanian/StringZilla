@@ -19,7 +19,7 @@
 #define STRINGZILLA_UTF8_NORM_H_
 
 #include "stringzilla/types.h"        // `sz_normal_form_t`, `sz_size_t`, `sz_cptr_t`
-#include "stringzilla/capabilities.h" // `sz_capability_t`
+#include "stringzilla/capabilities.h" // `sz_kernel_kind_t`, `sz_kernel_punned_t`
 
 #ifdef __cplusplus
 extern "C" {

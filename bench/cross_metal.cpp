@@ -45,7 +45,7 @@ static void bench_ngrams_overlaps(environment_t const &env, corpus_t const &corp
                                        width,
                                        resident.host_candidates(),
                                        resident.views};
-    std::size_t const ordinal = runtime.selected.ordinal();
+    std::size_t const ordinal = runtime.selected.ordinal;
     std::string const metal_name = fmt::format("sz_ngrams_overlaps_metal:{}:w{}", ordinal, width);
     auto dispatched = overlaps_from_sz {ngrams_engine_init_cpu_,    sz_ngrams_overlaps, query, width,
                                         resident.host_candidates(), resident.views};
@@ -59,11 +59,11 @@ static void bench_ngrams_overlaps(environment_t const &env, corpus_t const &corp
 
 #endif
 
-int bench_cross_metal(environment_t &env, std::size_t ordinal) {
+void bench_cross_metal(environment_t &env, std::size_t ordinal) {
 #if STRINGZILLA_ARCH_METAL_
     stream_t queue(ordinal, sz_stream_init_metal, sz_stream_free_metal);
     device_backend_t runtime;
-    runtime.selected = sz::device_t::make(sz::device_kind_t::metal_k, ordinal).value;
+    runtime.selected = {sz::device_kind_t::metal_k, ordinal};
     runtime.capabilities = sz_cap_metal_k;
     runtime.stream = queue.handle;
     if (sz_allocator_init_unified_metal(&runtime.unified) != sz_success_k)
@@ -81,11 +81,9 @@ int bench_cross_metal(environment_t &env, std::size_t ordinal) {
 #else
     sz_unused_(env);
 #endif
-    return 0;
 #else
     sz_unused_(env);
     sz_unused_(ordinal);
-    return 0;
 #endif
 }
 

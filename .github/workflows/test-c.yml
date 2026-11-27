@@ -455,10 +455,10 @@ jobs:
           }
           EOF
 
-        # Every registry recipe depends on the smallest prefix, the headers and the archive, installing cleanly.
+        # Every registry recipe depends on the smallest prefix, the header targets alone, installing cleanly.
       - name: Install the Header-Only Package
         run: |
-          cmake -B build_header -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_INSTALL=ON -DSTRINGZILLA_BUILD_SHARED=OFF \
+          cmake -B build_header -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_INSTALL=ON -DSTRINGZILLA_BUILD_LIBRARIES=OFF \
             -DCMAKE_INSTALL_PREFIX="$HEADER_PREFIX"
           cmake --build build_header --parallel
           cmake --install build_header
@@ -478,7 +478,7 @@ jobs:
 
       - name: Install the Compiled Libraries
         run: |
-          cmake -B build_full -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_INSTALL=ON -DSTRINGZILLA_BUILD_SHARED=ON \
+          cmake -B build_full -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_INSTALL=ON -DSTRINGZILLA_BUILD_LIBRARIES=ON \
             -DCMAKE_INSTALL_PREFIX="$FULL_PREFIX"
           cmake --build build_full --parallel
           cmake --install build_full
@@ -515,7 +515,6 @@ jobs:
           cat > consumer/CMakeLists.txt <<EOF
           cmake_minimum_required(VERSION 3.21)
           project(consumer C CXX)
-          set(STRINGZILLA_BUILD_SHARED ON CACHE BOOL "" FORCE)
           add_subdirectory($GITHUB_WORKSPACE stringzilla_build)
           add_executable(consumer main.c)
           target_link_libraries(consumer PRIVATE stringzilla::header stringzilla::shared)

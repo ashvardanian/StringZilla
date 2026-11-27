@@ -67,8 +67,7 @@
 #define STRINGZILLA_CIPHER_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/capabilities.h"  // `sz_capability_t`
-#include "stringzilla/cipher/serial.h" // `sz_aes256_key_t`, `sz_aes256_gcm_encryptor_t` and their twins
+#include "stringzilla/capabilities.h" // `sz_kernel_kind_t`, `sz_kernel_punned_t`
 
 #ifdef __cplusplus
 extern "C" {
@@ -1102,6 +1101,7 @@ STRINGZILLA_API sz_status_t sz_cipher_find_kernel(sz_kernel_kind_t kind, sz_capa
 #pragma endregion Core API
 
 #if STRINGZILLA_HEADER_ONLY
+#include "stringzilla/cipher/serial.h"
 #include "stringzilla/cipher/westmere.h"
 #include "stringzilla/cipher/icelake.h"
 #include "stringzilla/cipher/neonaes.h"

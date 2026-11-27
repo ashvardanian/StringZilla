@@ -182,7 +182,7 @@ struct sha256_multistate_loop_from_sz {
         sz_sha256_state_t states[multistate_lanes_k];
         sz_u8_t digests[multistate_lanes_k * STRINGZILLA_SHA256_DIGEST_LENGTH];
         std::size_t bytes_passed = 0;
-        sz_capability_t const capabilities = sz::default_capabilities();
+        sz_capability_t const capabilities = cpu_capabilities_enabled();
         for (std::size_t lane_index = 0; lane_index != multistate_lanes_k; ++lane_index) {
             std::string_view const token = corpus.tokens[(token_index + lane_index) % corpus.tokens.size()];
             std::size_t const lane_length = lanes_::length(lane_index, token.size());

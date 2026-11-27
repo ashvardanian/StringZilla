@@ -18,7 +18,7 @@
 #include <stringzilla/stringzilla.h>
 
 #include <cctype>  // `std::toupper`
-#include <cmath>   // `std::fabs`, `std::nextafter`
+#include <cmath>   // `std::fabs`, `std::nextafter`, `std::lround`
 #include <cstdint> // `std::uint64_t`
 #include <cstring> // `std::memcmp`, `std::memset`
 
@@ -37,6 +37,11 @@
 #include "stringzilla/utf8_graphemes/serial.h"  // `sz_utf8_is_grapheme_boundary_serial`
 #include "stringzilla/utf8_norm/serial.h"       // `sz_utf8_norm_decomp_max_k`
 #include "stringzilla/utf8_wordbreaks/serial.h" // `sz_utf8_is_word_boundary_serial`, `sz_rune_is_word_char`
+#include "stringzilla/hash/serial.h"            // `sz_hash_serial_`
+#include "stringzilla/levenshtein/serial.h"     // `sz_levenshtein_engine_layout_`, `sz_levenshtein_length_bucket_`
+#include "stringzilla/ngrams/serial.h"          // `sz_ngrams_engine_query`, `sz_ngrams_overlap_counts_serial_`
+#include "stringzilla/regex/serial.h"           // `sz_regex_engine_compile_`, `sz_regex_forward_budget_k`
+#include "stringzilla/utf8_uncased/serial.h"    // `sz_rune_is_uncased_`, `sz_unicode_fold_codepoint_`
 
 #include "harness.hpp"
 #include "utf8.hpp"
@@ -1728,13 +1733,13 @@ inline void found_in_strings_(sz_kernel_find_strings_t find_strings, sz_strings_
                  sz_success_k);
 }
 
-/** The same offsets found one string at a time by the serial substring search, the oracle. */
+/** The same offsets found one string at a time by @c std::string_view::find, the oracle. */
 inline void found_alone_(std::vector<std::string> const &strings, std::vector<sz_size_t> const *order,
                          std::string_view needle, std::span<sz_size_t> positions) {
     for (std::size_t position = 0; position != positions.size(); ++position) {
-        std::string const &string = strings[order ? order->at(position) : position];
-        sz_cptr_t const match = sz_find_serial_(string.data(), string.size(), needle.data(), needle.size());
-        positions[position] = match ? (sz_size_t)(match - string.data()) : STRINGZILLA_SIZE_MAX;
+        std::string_view const string = strings[order ? order->at(position) : position];
+        std::size_t const match = string.find(needle);
+        positions[position] = match != std::string_view::npos ? (sz_size_t)match : STRINGZILLA_SIZE_MAX;
     }
 }
 
@@ -3502,23 +3507,27 @@ struct levenshtein_backend_t {
     sz_kernel_levenshtein_distances_t distances;
 };
 
-/** One prepared batch, released with the scope that named it. */
-struct levenshtein_engine_t {
-    handle_checked_heap_t heap;
-    sz_levenshtein_engine_t engine {};
+/** An engine a case prepared, freed when the case is done with it, over the C struct alone. */
+struct levenshtein_prepared_t {
+    sz_levenshtein_engine_t raw {};
 
-    levenshtein_engine_t(levenshtein_backend_t const &backend, sz_strings_view_t const &queries,
-                         sz_levenshtein_symbol_t symbol) {
-        if (backend.init(&engine, &queries, symbol, &heap.allocator, nullptr) != sz_success_k)
-            fail_backend_(backend.name, "the builder refused a well-formed batch of queries");
+    levenshtein_prepared_t() noexcept = default;
+    levenshtein_prepared_t(levenshtein_prepared_t &&other) noexcept : raw(std::exchange(other.raw, {})) {}
+    levenshtein_prepared_t &operator=(levenshtein_prepared_t &&other) noexcept {
+        std::swap(raw, other.raw);
+        return *this;
     }
-    ~levenshtein_engine_t() {
-        sz_levenshtein_engine_free(&engine, nullptr);
-        expect_equal(heap.live_allocations, 0);
-    }
-    levenshtein_engine_t(levenshtein_engine_t const &) = delete;
-    levenshtein_engine_t &operator=(levenshtein_engine_t const &) = delete;
+    ~levenshtein_prepared_t() noexcept { sz_levenshtein_engine_free(&raw, nullptr); }
 };
+
+/** Prepares @p queries through the builder of @p backend from @p heap, failing it on a refusal. */
+inline levenshtein_prepared_t levenshtein_prepare_(levenshtein_backend_t const &backend, handle_checked_heap_t &heap,
+                                                   sz_strings_view_t const &queries, sz_levenshtein_symbol_t symbol) {
+    levenshtein_prepared_t prepared;
+    if (backend.init(&prepared.raw, &queries, symbol, &heap.allocator, nullptr) != sz_success_k)
+        fail_backend_(backend.name, "the builder refused a well-formed batch of queries");
+    return prepared;
+}
 
 /** Runs @p queries against @p candidates through @p backend, asserting the matrix matches
  *  @p expected, which is @b [queries, candidates] row-major. */
@@ -3527,10 +3536,11 @@ inline void check_levenshtein_distances_(levenshtein_backend_t const &backend, s
                                          std::vector<sz_size_t> const &expected, sz_levenshtein_symbol_t symbol) {
     sz_strings_view_t const query_strings = strings_from_(queries);
     sz_strings_view_t const candidate_strings = strings_from_(candidates);
-    levenshtein_engine_t prepared(backend, query_strings, symbol);
+    handle_checked_heap_t heap;
+    levenshtein_prepared_t prepared = levenshtein_prepare_(backend, heap, query_strings, symbol);
     std::vector<sz_size_t> computed(queries.size() * candidates.size(), STRINGZILLA_SIZE_MAX);
-    if (backend.distances(&prepared.engine, &candidate_strings, nullptr, nullptr, STRINGZILLA_SIZE_MAX, computed.data(),
-                          candidates.size(), nullptr) != sz_success_k)
+    if (backend.distances(&prepared.raw, &candidate_strings, nullptr, nullptr, STRINGZILLA_SIZE_MAX, computed.data(),
+                          candidates.size() * sizeof(sz_size_t), nullptr) != sz_success_k)
         fail_backend_(backend.name, "the cross-product verb refused a well-formed batch");
     if (computed != expected)
         fail_backend_(backend.name, "the cross-product distances differ from the expected answers");
@@ -3549,13 +3559,16 @@ inline void check_levenshtein_distances_(levenshtein_backend_t const &backend, s
         for (sz_size_t const *order :
              {static_cast<sz_size_t const *>(nullptr), static_cast<sz_size_t const *>(reversed.data())}) {
             computed.assign(expected.size(), STRINGZILLA_SIZE_MAX);
-            if (backend.distances(&prepared.engine, &candidate_strings, order ? symbol_counts.data() : nullptr, order,
-                                  bound, computed.data(), candidates.size(), nullptr) != sz_success_k)
+            if (backend.distances(&prepared.raw, &candidate_strings, order ? symbol_counts.data() : nullptr, order,
+                                  bound, computed.data(), candidates.size() * sizeof(sz_size_t),
+                                  nullptr) != sz_success_k)
                 fail_backend_(backend.name, "the cross-product verb refused a bounded batch");
             for (std::size_t cell = 0; cell != expected.size(); ++cell)
                 if (computed[cell] != (expected[cell] > bound ? bound + 1 : expected[cell]))
                     fail_backend_(backend.name, "a bounded distance is not exact within its bound or bound+1 past it");
         }
+    prepared = {};
+    expect_equal(heap.live_allocations, 0);
 }
 
 /** Runs @p queries against @p candidates through @p backend, byte-level and rune-level alike,
@@ -3658,28 +3671,32 @@ inline void check_levenshtein_safety_(levenshtein_backend_t const &backend) {
     sz_strings_view_t const empty_strings = strings_from_(empty);
     sz_strings_view_t const none_strings = strings_from_(none);
     for (sz_levenshtein_symbol_t const symbol : {sz_levenshtein_bytes_k, sz_levenshtein_runes_k}) {
-        levenshtein_engine_t empty_queries(backend, none_strings, symbol);
-        if (backend.distances(&empty_queries.engine, &words_strings, nullptr, nullptr, STRINGZILLA_SIZE_MAX, nullptr, 2,
-                              nullptr) != sz_success_k)
+        handle_checked_heap_t heap;
+        levenshtein_prepared_t empty_queries = levenshtein_prepare_(backend, heap, none_strings, symbol);
+        if (backend.distances(&empty_queries.raw, &words_strings, nullptr, nullptr, STRINGZILLA_SIZE_MAX, nullptr,
+                              2 * sizeof(sz_size_t), nullptr) != sz_success_k)
             fail_backend_(backend.name, "an empty batch of queries was refused");
-        levenshtein_engine_t prepared(backend, query_strings, symbol);
+        levenshtein_prepared_t prepared = levenshtein_prepare_(backend, heap, query_strings, symbol);
         sz_size_t answers[4] = {STRINGZILLA_SIZE_MAX, STRINGZILLA_SIZE_MAX, STRINGZILLA_SIZE_MAX, STRINGZILLA_SIZE_MAX};
-        if (backend.distances(&prepared.engine, &words_strings, nullptr, nullptr, STRINGZILLA_SIZE_MAX, answers, 2,
-                              nullptr) != sz_success_k)
+        if (backend.distances(&prepared.raw, &words_strings, nullptr, nullptr, STRINGZILLA_SIZE_MAX, answers,
+                              2 * sizeof(sz_size_t), nullptr) != sz_success_k)
             fail_backend_(backend.name, "a batch holding an empty query was refused");
-        if (backend.distances(&prepared.engine, &empty_strings, nullptr, nullptr, STRINGZILLA_SIZE_MAX, answers, 1,
-                              nullptr) != sz_success_k)
+        if (backend.distances(&prepared.raw, &empty_strings, nullptr, nullptr, STRINGZILLA_SIZE_MAX, answers,
+                              1 * sizeof(sz_size_t), nullptr) != sz_success_k)
             fail_backend_(backend.name, "an empty candidate was refused");
-        if (backend.distances(&prepared.engine, &none_strings, nullptr, nullptr, STRINGZILLA_SIZE_MAX, answers, 0,
+        if (backend.distances(&prepared.raw, &none_strings, nullptr, nullptr, STRINGZILLA_SIZE_MAX, answers, 0,
                               nullptr) != sz_success_k)
             fail_backend_(backend.name, "an empty batch of candidates was refused");
         sz_size_t narrow[4] = {STRINGZILLA_SIZE_MAX, STRINGZILLA_SIZE_MAX, STRINGZILLA_SIZE_MAX, STRINGZILLA_SIZE_MAX};
-        if (backend.distances(&prepared.engine, &words_strings, nullptr, nullptr, STRINGZILLA_SIZE_MAX, narrow, 1,
-                              nullptr) != sz_unexpected_dimensions_k)
+        if (backend.distances(&prepared.raw, &words_strings, nullptr, nullptr, STRINGZILLA_SIZE_MAX, narrow,
+                              1 * sizeof(sz_size_t), nullptr) != sz_unexpected_dimensions_k)
             fail_backend_(backend.name, "a stride too narrow for one row was not refused");
         for (sz_size_t const written : narrow)
             if (written != STRINGZILLA_SIZE_MAX)
                 fail_backend_(backend.name, "a refused round still wrote the distances");
+        empty_queries = {};
+        prepared = {};
+        expect_equal(heap.live_allocations, 0);
     }
 
     sz_allocator_t refusing = refusing_c_allocator();
@@ -3786,16 +3803,20 @@ inline void check_levenshtein_equivalence_(split_mix_generator_t &generator, lev
             std::size_t const cells = queries.size() * candidates.size();
 
             for (sz_levenshtein_symbol_t const symbol : {sz_levenshtein_bytes_k, sz_levenshtein_runes_k}) {
-                levenshtein_engine_t prepared(backend, query_strings, symbol);
+                handle_checked_heap_t heap;
+                levenshtein_prepared_t prepared = levenshtein_prepare_(backend, heap, query_strings, symbol);
                 from_reference.assign(cells, STRINGZILLA_SIZE_MAX), from_candidate.assign(cells, STRINGZILLA_SIZE_MAX);
-                expect_equal(sz_levenshtein_distances_serial(&prepared.engine, &candidate_strings, nullptr, nullptr,
+                expect_equal(sz_levenshtein_distances_serial(&prepared.raw, &candidate_strings, nullptr, nullptr,
                                                              STRINGZILLA_SIZE_MAX, from_reference.data(),
-                                                             candidates.size(), nullptr),
+                                                             candidates.size() * sizeof(sz_size_t), nullptr),
                              sz_success_k);
-                if (backend.distances(&prepared.engine, &candidate_strings, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
-                                      from_candidate.data(), candidates.size(), nullptr) != sz_success_k)
+                if (backend.distances(&prepared.raw, &candidate_strings, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
+                                      from_candidate.data(), candidates.size() * sizeof(sz_size_t),
+                                      nullptr) != sz_success_k)
                     fail_backend_(backend.name, "a batch serial accepted was refused");
                 if (from_reference != from_candidate) fail_backend_(backend.name, "distances disagreed with serial");
+                prepared = {};
+                expect_equal(heap.live_allocations, 0);
             }
         }
 }
@@ -3804,8 +3825,9 @@ inline void check_levenshtein_equivalence_(split_mix_generator_t &generator, lev
 
 #pragma region Ngrams
 
-/** One backend's N-grams kernels: the engine constructor, its two verbs, and the per-text residues
- *  and sketch kernels, null at a dispatch point. */
+/** One backend's N-grams kernels: the engine constructor, its two verbs, the per-text residues and
+ *  sketch kernels, null at a dispatch point, and the inline counting entry, which only the serial
+ *  tier offers to every build, as the others compile only in header-only units. */
 struct ngrams_backend_t {
     char const *name;
     sz_kernel_ngrams_engine_init_t init;
@@ -3813,6 +3835,8 @@ struct ngrams_backend_t {
     sz_kernel_ngrams_sketches_t sketches;
     void (*residues)(sz_cptr_t, sz_size_t, sz_size_t const *, sz_size_t, sz_f64_t *, sz_u32_t *);
     sz_status_t (*sketch)(sz_cptr_t, sz_size_t, sz_size_t const *, sz_size_t, sz_u32_t *, sz_size_t, sz_u8_t *);
+    sz_status_t (*counts)(sz_ngrams_engine_t *, sz_strings_view_t const *, sz_f32_t, sz_u32_t *, sz_size_t,
+                          sz_size_t) = nullptr;
 };
 
 /** A window's residue by its definition: its bytes as one big-endian integer under the prime. */
@@ -3871,13 +3895,14 @@ inline std::set<std::uint32_t> ngrams_reference_residues_(std::string const &tex
     return residues;
 }
 
-/** The distinct @p query N-grams that @p candidate holds, by residue, through @c std::set. */
-inline sz_u32_t ngrams_reference_overlap_(std::string const &query, std::string const &candidate, std::size_t width) {
+/** The share of the distinct @p query N-grams that @p candidate holds, by residue, through
+ *  @c std::set, zero where the query holds none. */
+inline sz_f32_t ngrams_reference_overlap_(std::string const &query, std::string const &candidate, std::size_t width) {
     std::set<std::uint32_t> const present = ngrams_reference_residues_(candidate, width);
-    sz_u32_t matches = 0;
-    for (std::uint32_t const residue : ngrams_reference_residues_(query, width))
-        matches += (sz_u32_t)present.count(residue);
-    return matches;
+    std::set<std::uint32_t> const distinct = ngrams_reference_residues_(query, width);
+    sz_u32_t found = 0;
+    for (std::uint32_t const residue : distinct) found += (sz_u32_t)present.count(residue);
+    return distinct.empty() ? 0.0f : (sz_f32_t)found / (sz_f32_t)distinct.size();
 }
 
 /** Queries, candidates and widths that one check scores together. */
@@ -3898,11 +3923,11 @@ inline ngrams_case_t ngrams_past_query_case_() {
     return {{"ab", "abc"}, {"\0\0ab"s, "\0\0bc"s, "\0abc"s, "abc", ""}, {2, 4}};
 }
 
-/** The counts of every query, candidate and width @p backend scores within @p radius, into
- *  @p matches, one per triple, queries outermost and widths innermost. */
+/** The shares of every query, candidate and width @p backend scores within @p radius, into
+ *  @p shares, one per triple, queries outermost and widths innermost. */
 inline void ngrams_overlaps_tensor_(ngrams_backend_t const &backend, std::vector<std::string> const &queries,
                                     std::vector<std::string> const &candidates, std::vector<std::size_t> const &widths,
-                                    sz_f32_t radius, std::span<sz_u32_t> matches) {
+                                    sz_f32_t radius, std::span<sz_f32_t> shares) {
     handle_checked_heap_t heap;
     sz_strings_view_t const query_strings = strings_from_(queries);
     sz_strings_view_t const candidate_strings = strings_from_(candidates);
@@ -3910,45 +3935,49 @@ inline void ngrams_overlaps_tensor_(ngrams_backend_t const &backend, std::vector
     if (backend.init(&engine, &query_strings, widths.data(), widths.size(), 0, &heap.allocator, nullptr) !=
         sz_success_k)
         fail_backend_(backend.name, "the engine refused a well-formed batch of queries");
-    std::fill_n(matches.data(), matches.size(), 0xFFFFFFFFu); // an empty span may be null, which `memset` rejects
-    if (backend.overlaps(&engine, &candidate_strings, radius, matches.data(), candidates.size() * widths.size(),
-                         widths.size(), nullptr) != sz_success_k)
+    // An empty span may be null, which `memset` rejects.
+    std::fill_n(shares.data(), shares.size(), std::numeric_limits<sz_f32_t>::quiet_NaN());
+    if (backend.overlaps(&engine, &candidate_strings, radius, shares.data(),
+                         candidates.size() * widths.size() * sizeof(sz_f32_t), widths.size() * sizeof(sz_f32_t),
+                         nullptr) != sz_success_k)
         fail_backend_(backend.name, "the engine refused a well-formed batch of candidates");
     sz_ngrams_engine_free(&engine, nullptr);
     expect_equal(heap.live_allocations, 0);
 }
 
 /** Runs @p queries against @p candidates through @p backend at @p widths into @p computed,
- *  asserting each count is the oracle's. */
+ *  asserting each share is the oracle's. */
 inline void check_ngrams_oracle_(ngrams_backend_t const &backend, std::vector<std::string> const &queries,
                                  std::vector<std::string> const &candidates, std::vector<std::size_t> const &widths,
-                                 std::vector<sz_u32_t> &computed) {
+                                 std::vector<sz_f32_t> &computed) {
     computed.resize(queries.size() * candidates.size() * widths.size());
     // An empty tensor still reaches the engine as null, as the safety cases mean to check.
     ngrams_overlaps_tensor_(backend, queries, candidates, widths, 1.0f,
-                            computed.empty() ? std::span<sz_u32_t> {} : std::span<sz_u32_t> {computed});
+                            computed.empty() ? std::span<sz_f32_t> {} : std::span<sz_f32_t> {computed});
     std::size_t const candidate_stride = widths.size(), query_stride = candidates.size() * widths.size();
     for (std::size_t query = 0; query != queries.size(); ++query)
         for (std::size_t candidate = 0; candidate != candidates.size(); ++candidate)
             for (std::size_t width_index = 0; width_index != widths.size(); ++width_index)
                 if (computed[query * query_stride + candidate * candidate_stride + width_index] !=
                     ngrams_reference_overlap_(queries[query], candidates[candidate], widths[width_index]))
-                    fail_backend_(backend.name, "a count differs from the std::set oracle");
+                    fail_backend_(backend.name, "a share differs from the std::set oracle");
 }
 
-/** One backend's bounded rounds against @p exact, its own unbounded tensor, scored into
- *  @p bounded: at each radius, a pair within it keeps every exact count, a pair 2⁻²⁴ or more past
- *  it counts zero at every width, and a pair between may do either. */
+/** One backend's bounded rounds against @p exact, an unbounded tensor, scored into @p bounded: at
+ *  each radius, a pair within it keeps every exact share, a pair 2⁻²⁴ or more past it shares zero
+ *  at every width, and a pair between may do either. */
 inline void check_ngrams_bounds_(ngrams_backend_t const &backend, std::vector<std::string> const &queries,
                                  std::vector<std::string> const &candidates, std::vector<std::size_t> const &widths,
-                                 std::vector<sz_u32_t> const &exact, std::vector<sz_u32_t> &bounded) {
+                                 std::vector<sz_f32_t> const &exact, std::vector<sz_f32_t> &bounded) {
     std::vector<std::pair<sz_u64_t, sz_u64_t>> misses;
     for (std::size_t query = 0; query != queries.size(); ++query)
         for (std::size_t candidate = 0; candidate != candidates.size(); ++candidate) {
             sz_u64_t distinct = 0, found = 0;
             for (std::size_t width_index = 0; width_index != widths.size(); ++width_index) {
-                distinct += ngrams_reference_residues_(queries[query], widths[width_index]).size();
-                found += exact[(query * candidates.size() + candidate) * widths.size() + width_index];
+                std::set<std::uint32_t> const present = ngrams_reference_residues_(candidates[candidate],
+                                                                                   widths[width_index]);
+                for (std::uint32_t const residue : ngrams_reference_residues_(queries[query], widths[width_index]))
+                    ++distinct, found += present.count(residue);
             }
             misses.emplace_back(distinct - found, distinct);
         }
@@ -3966,11 +3995,42 @@ inline void check_ngrams_bounds_(ngrams_backend_t const &backend, std::vector<st
             bool const past = missed >= ((double)radius + 0x1p-24) * distinct;
             for (std::size_t width_index = 0; width_index != widths.size(); ++width_index) {
                 std::size_t const slot = pair * widths.size() + width_index;
-                bool const kept = bounded[slot] == exact[slot], dropped = bounded[slot] == 0;
+                bool const kept = bounded[slot] == exact[slot], dropped = bounded[slot] == 0.0f;
                 if (within ? !kept : past ? !dropped : !kept && !dropped)
-                    fail_backend_(backend.name, "a bounded count is neither the exact one nor zero past the radius");
+                    fail_backend_(backend.name, "a bounded share is neither the exact one nor zero past the radius");
             }
         }
+    }
+}
+
+/** One backend's counting entry, where it has one, against its own unbounded @p shares: every count
+ *  is its share times the query's distinct N-grams at that width, rounded. */
+inline void check_ngrams_counts_(ngrams_backend_t const &backend, std::vector<std::string> const &queries,
+                                 std::vector<std::string> const &candidates, std::vector<std::size_t> const &widths,
+                                 std::vector<sz_f32_t> const &shares) {
+    if (!backend.counts) return;
+    handle_checked_heap_t heap;
+    sz_strings_view_t const query_strings = strings_from_(queries);
+    sz_strings_view_t const candidate_strings = strings_from_(candidates);
+    sz_ngrams_engine_t engine {};
+    std::vector<sz_u32_t> counts(shares.size(), 0x55555555u);
+    if (backend.init(&engine, &query_strings, widths.data(), widths.size(), 0, &heap.allocator, nullptr) !=
+        sz_success_k)
+        fail_backend_(backend.name, "the engine refused a well-formed batch of queries");
+    std::size_t const row_bytes = widths.size() * sizeof(sz_u32_t);
+    if (backend.counts(&engine, &candidate_strings, 1.0f, counts.data(), candidates.size() * row_bytes, row_bytes) !=
+        sz_success_k)
+        fail_backend_(backend.name, "the counting entry refused a well-formed batch of candidates");
+    sz_ngrams_engine_free(&engine, nullptr);
+    expect_equal(heap.live_allocations, 0);
+    std::vector<double> distinct(widths.size());
+    for (std::size_t query = 0, slot = 0; query != queries.size(); ++query) {
+        for (std::size_t width_index = 0; width_index != widths.size(); ++width_index)
+            distinct[width_index] = (double)ngrams_reference_residues_(queries[query], widths[width_index]).size();
+        for (std::size_t candidate = 0; candidate != candidates.size(); ++candidate)
+            for (std::size_t width_index = 0; width_index != widths.size(); ++width_index, ++slot)
+                if (counts[slot] != (sz_u32_t)std::lround(shares[slot] * distinct[width_index]))
+                    fail_backend_(backend.name, "a count is not its share times the query's distinct N-grams");
     }
 }
 
@@ -3982,7 +4042,7 @@ inline void check_ngrams_bounds_(ngrams_backend_t const &backend, std::vector<st
  */
 inline void check_ngrams_overlaps_(split_mix_generator_t &generator, ngrams_backend_t const &backend) {
     std::vector<std::size_t> const widths = {1, 3, 4, 6, 8, 11, 32};
-    std::vector<sz_u32_t> computed, batched, lone, from_reference, from_candidate, bounded;
+    std::vector<sz_f32_t> computed, batched, lone, from_reference, from_candidate, bounded;
     for (std::size_t round = 0; round != scaled_iterations(8); ++round) {
         std::size_t const query_length = std::uniform_int_distribution<std::size_t>(0, 700)(generator);
         std::string query(query_length, '\0');
@@ -4004,7 +4064,7 @@ inline void check_ngrams_overlaps_(split_mix_generator_t &generator, ngrams_back
         for (std::size_t index = 0; index != queries.size(); ++index) {
             std::vector<std::string> const alone = {queries[index]};
             ngrams_overlaps_tensor_(backend, alone, candidates, widths, 1.0f, lone);
-            if (std::memcmp(batched.data() + index * query_stride, lone.data(), query_stride * sizeof(sz_u32_t)) != 0)
+            if (std::memcmp(batched.data() + index * query_stride, lone.data(), query_stride * sizeof(sz_f32_t)) != 0)
                 fail_backend_(backend.name, "a query's row differs between a batched engine and its own");
         }
     }
@@ -4014,7 +4074,8 @@ inline void check_ngrams_overlaps_(split_mix_generator_t &generator, ngrams_back
                                       sz_ngrams_overlaps_serial,
                                       sz_ngrams_sketches_serial,
                                       sz_ngrams_residues_serial,
-                                      sz_ngrams_sketch_serial};
+                                      sz_ngrams_sketch_serial,
+                                      sz_ngrams_overlap_counts_serial_};
     std::vector<std::string> candidates;
     for (std::size_t round = 0; round != scaled_iterations(8); ++round) {
         std::string query(std::uniform_int_distribution<std::size_t>(0, 700)(generator), '\0');
@@ -4040,7 +4101,9 @@ inline void check_ngrams_overlaps_(split_mix_generator_t &generator, ngrams_back
         from_candidate.resize(from_reference.size());
         ngrams_overlaps_tensor_(reference, queries, candidates, widths, 1.0f, from_reference);
         ngrams_overlaps_tensor_(backend, queries, candidates, widths, 1.0f, from_candidate);
-        if (from_reference != from_candidate) fail_backend_(backend.name, "the engine's counts disagreed with serial");
+        if (std::memcmp(from_reference.data(), from_candidate.data(), from_reference.size() * sizeof(sz_f32_t)) != 0)
+            fail_backend_(backend.name, "the engine's shares disagreed with serial");
+        check_ngrams_counts_(reference, queries, candidates, widths, from_reference);
         check_ngrams_bounds_(backend, queries, candidates, widths, from_reference, bounded);
     }
 }
@@ -4219,7 +4282,7 @@ inline void check_ngrams_safety_(ngrams_backend_t const &backend) {
     std::vector<std::string> const narrow = {"ab"};
     std::vector<std::string> const none;
     std::vector<std::size_t> const widths = {3, 8};
-    std::vector<sz_u32_t> computed;
+    std::vector<sz_f32_t> computed;
 
     check_ngrams_oracle_(backend, empty, words, widths, computed);
     check_ngrams_oracle_(backend, kitten, empty, widths, computed);
@@ -4253,35 +4316,38 @@ inline void check_ngrams_safety_(ngrams_backend_t const &backend) {
         sz_success_k)
         fail_backend_(backend.name, "the engine refused a well-formed batch of queries");
 
-    sz_u32_t refused[4] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
-    if (backend.overlaps(&engine, &words_strings, 1.0f, refused, words.size() * widths.size(), widths.size() - 1,
+    sz_f32_t const unwritten = std::numeric_limits<sz_f32_t>::quiet_NaN();
+    sz_size_t const candidate_stride = widths.size() * sizeof(sz_f32_t);
+    sz_size_t const query_stride = words.size() * candidate_stride;
+    sz_f32_t refused[4] = {unwritten, unwritten, unwritten, unwritten};
+    if (backend.overlaps(&engine, &words_strings, 1.0f, refused, query_stride, candidate_stride - sizeof(sz_f32_t),
                          nullptr) != sz_unexpected_dimensions_k)
         fail_backend_(backend.name, "the engine accepted a candidate stride under its widths");
-    if (backend.overlaps(&engine, &words_strings, 1.0f, refused, words.size() * widths.size() - 1, widths.size(),
+    if (backend.overlaps(&engine, &words_strings, 1.0f, refused, query_stride - sizeof(sz_f32_t), candidate_stride,
                          nullptr) != sz_unexpected_dimensions_k)
         fail_backend_(backend.name, "the engine accepted a query stride under its candidates");
 
     // "sitting" holds one of the four distinct N-grams of "kitten" at width three, "itt", so it
     // misses three of four, and "kitten" misses none of its four; no text holds a window of eight.
     sz_f32_t const three_quarters = 0.75f;
-    sz_u32_t bounded[4] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
-    expect_equal(
-        backend.overlaps(&engine, &words_strings, 0.0f, bounded, words.size() * widths.size(), widths.size(), nullptr),
-        sz_success_k);
-    if (bounded[0] != 0 || bounded[1] != 0 || bounded[2] != 4 || bounded[3] != 0)
+    sz_f32_t bounded[4] = {unwritten, unwritten, unwritten, unwritten};
+    expect_equal(backend.overlaps(&engine, &words_strings, 0.0f, bounded, query_stride, candidate_stride, nullptr),
+                 sz_success_k);
+    if (bounded[0] != 0.0f || bounded[1] != 0.0f || bounded[2] != 1.0f || bounded[3] != 0.0f)
         fail_backend_(backend.name, "a zero radius kept a pair past it or dropped an identical one");
-    expect_equal(backend.overlaps(&engine, &words_strings, std::nextafter(three_quarters, 0.0f), bounded,
-                                  words.size() * widths.size(), widths.size(), nullptr),
+    expect_equal(backend.overlaps(&engine, &words_strings, std::nextafter(three_quarters, 0.0f), bounded, query_stride,
+                                  candidate_stride, nullptr),
                  sz_success_k);
-    if (bounded[0] != 0 || bounded[1] != 0 || bounded[2] != 4 || bounded[3] != 0)
+    if (bounded[0] != 0.0f || bounded[1] != 0.0f || bounded[2] != 1.0f || bounded[3] != 0.0f)
         fail_backend_(backend.name, "a radius just short of three quarters kept a pair missing three of four");
-    expect_equal(backend.overlaps(&engine, &words_strings, three_quarters, bounded, words.size() * widths.size(),
-                                  widths.size(), nullptr),
-                 sz_success_k);
-    if (bounded[0] != 1 || bounded[1] != 0 || bounded[2] != 4 || bounded[3] != 0)
+    expect_equal(
+        backend.overlaps(&engine, &words_strings, three_quarters, bounded, query_stride, candidate_stride, nullptr),
+        sz_success_k);
+    if (bounded[0] != 0.25f || bounded[1] != 0.0f || bounded[2] != 1.0f || bounded[3] != 0.0f)
         fail_backend_(backend.name, "a radius of three quarters dropped a pair missing three of four");
-    for (sz_u32_t const untouched : refused)
-        if (untouched != 0xFFFFFFFFu) fail_backend_(backend.name, "a refused call still wrote a count");
+    for (sz_f32_t const &untouched : refused)
+        if (std::memcmp(&untouched, &unwritten, sizeof(unwritten)) != 0)
+            fail_backend_(backend.name, "a refused call still wrote a share");
 
     // The same engine sketches, refusing zero slots and a stride under them, and writes nothing for
     // an empty batch.
@@ -4544,7 +4610,7 @@ inline void check_bm25_(substrings_tier_t const &tier, sz_substrings_engine_t *e
             oracle_bm25_(overlapping, haystacks, needles_count, lengths, parameters, weights, expected);
             std::vector<sz_f32_t> scores(haystacks.size(), -1);
             expect_equal(tier.bm25_scores(engine, haystack_strings, lengths.empty() ? nullptr : lengths.data(),
-                                          &parameters, weights.data(), scores.data(), 1, nullptr),
+                                          &parameters, weights.data(), scores.data(), sizeof(sz_f32_t), nullptr),
                          sz_success_k);
             for (std::size_t index = 0; index != haystacks.size(); ++index)
                 expect_near(scores[index], expected[index], 1e-5 * max_of(1.0, std::fabs(expected[index])));
@@ -4602,7 +4668,7 @@ inline void check_corpus_(substrings_tier_t const &tier, std::vector<std::string
 
     // The per-haystack counts, which a separate walk answers and so can disagree with the matches.
     std::vector<sz_size_t> counts(haystacks.size(), 0);
-    expect_equal(tier.counts(&engine, &haystack_strings, counts.data(), 1, nullptr), sz_success_k);
+    expect_equal(tier.counts(&engine, &haystack_strings, counts.data(), sizeof(sz_size_t), nullptr), sz_success_k);
     for (std::size_t haystack_index = 0; haystack_index != haystacks.size(); ++haystack_index) {
         std::size_t owned = 0;
         for (substrings_case_t const &match : expected) owned += match.haystack_index == haystack_index;
@@ -4906,7 +4972,7 @@ inline std::vector<substrings_case_t> regex_matches_(regex_tier_t const &tier, s
 
     // A stride of two must leave every other entry alone.
     std::vector<sz_size_t> counts(haystacks.size() * 2, STRINGZILLA_SIZE_MAX);
-    expect_equal(tier.counts(engine, &strings, counts.data(), 2, nullptr), sz_success_k);
+    expect_equal(tier.counts(engine, &strings, counts.data(), 2 * sizeof(sz_size_t), nullptr), sz_success_k);
     for (std::size_t index = 0; index != haystacks.size(); ++index) {
         expect_equal(counts[index * 2], offsets[index + 1] - offsets[index]);
         expect_equal(counts[index * 2 + 1], STRINGZILLA_SIZE_MAX);
@@ -5488,8 +5554,9 @@ inline subdocuments_found_t subdocuments_find_(subdocuments_tier_t const &tier, 
                            &found.malformed_index, nullptr),
                  sz_success_k);
     expect_equal(found.offsets, sized);
-    expect_equal(tier.counts(engine, &document_strings, counts.data(), 1, &found.malformed_index, nullptr),
-                 sz_success_k);
+    expect_equal(
+        tier.counts(engine, &document_strings, counts.data(), sizeof(sz_size_t), &found.malformed_index, nullptr),
+        sz_success_k);
     for (std::size_t index = 0; index != documents.size(); ++index)
         expect_equal(counts[index], sized[index + 1] - sized[index]);
     return found;
@@ -5726,8 +5793,9 @@ inline void check_subdocuments_unit_(subdocuments_tier_t const &tier) {
         }
         // A strided count leaves the entries between its own alone.
         std::vector<sz_size_t> counts(documents.size() * 2, 7);
-        expect_equal(tier.counts(&engine, &document_strings, counts.data(), 2, &malformed_index, nullptr),
-                     sz_success_k);
+        expect_equal(
+            tier.counts(&engine, &document_strings, counts.data(), 2 * sizeof(sz_size_t), &malformed_index, nullptr),
+            sz_success_k);
         for (std::size_t index = 0; index != documents.size(); ++index) {
             expect_equal(counts[index * 2], full.offsets[index + 1] - full.offsets[index]);
             expect_equal(counts[index * 2 + 1], 7);

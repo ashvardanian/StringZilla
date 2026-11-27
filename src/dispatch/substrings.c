@@ -5,6 +5,7 @@
  *  @brief The multi-pattern search engine's dispatch points, their lists and finder.
  */
 #include <stringzilla/substrings.h>
+#include "stringzilla/substrings/serial.h" // `sz_substrings_engine_free_`
 
 #include "dispatch.h"
 
@@ -18,7 +19,7 @@ static sz_capability_kernels_t const *sz_substrings_engine_init_capabilities(voi
                    sz_cap_sve2_k * STRINGZILLA_TARGET_SVE2 | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV |
                    sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
                    sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
-                  !STRINGZILLA_MULTIVERSIONED
+        !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -56,7 +57,7 @@ static sz_capability_kernels_t const *sz_substrings_engine_init_capabilities(voi
         cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
                          sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
                         !STRINGZILLA_MULTIVERSIONED) >>
-                       48
+        48
     };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
@@ -77,7 +78,7 @@ static sz_capability_kernels_t const *sz_substrings_engine_init_capabilities(voi
         rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM | sz_cap_cdna3_k * STRINGZILLA_TARGET_CDNA3 |
                          sz_cap_cdna4_k * STRINGZILLA_TARGET_CDNA4 | sz_cap_cdna5_k * STRINGZILLA_TARGET_CDNA5) *
                         !STRINGZILLA_MULTIVERSIONED) >>
-                       48
+        48
     };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
@@ -131,7 +132,7 @@ static sz_capability_kernels_t const *sz_substrings_contains_capabilities(void) 
                    sz_cap_sve2_k * STRINGZILLA_TARGET_SVE2 | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV |
                    sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
                    sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
-                  !STRINGZILLA_MULTIVERSIONED
+        !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -167,7 +168,7 @@ static sz_capability_kernels_t const *sz_substrings_contains_capabilities(void) 
         cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
                          sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
                         !STRINGZILLA_MULTIVERSIONED) >>
-                       48
+        48
     };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
@@ -188,7 +189,7 @@ static sz_capability_kernels_t const *sz_substrings_contains_capabilities(void) 
         rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM | sz_cap_cdna3_k * STRINGZILLA_TARGET_CDNA3 |
                          sz_cap_cdna4_k * STRINGZILLA_TARGET_CDNA4 | sz_cap_cdna5_k * STRINGZILLA_TARGET_CDNA5) *
                         !STRINGZILLA_MULTIVERSIONED) >>
-                       48
+        48
     };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
@@ -242,7 +243,7 @@ static sz_capability_kernels_t const *sz_substrings_counts_capabilities(void) {
                    sz_cap_sve2_k * STRINGZILLA_TARGET_SVE2 | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV |
                    sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
                    sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
-                  !STRINGZILLA_MULTIVERSIONED
+        !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -277,7 +278,7 @@ static sz_capability_kernels_t const *sz_substrings_counts_capabilities(void) {
         cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
                          sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
                         !STRINGZILLA_MULTIVERSIONED) >>
-                       48
+        48
     };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
@@ -298,7 +299,7 @@ static sz_capability_kernels_t const *sz_substrings_counts_capabilities(void) {
         rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM | sz_cap_cdna3_k * STRINGZILLA_TARGET_CDNA3 |
                          sz_cap_cdna4_k * STRINGZILLA_TARGET_CDNA4 | sz_cap_cdna5_k * STRINGZILLA_TARGET_CDNA5) *
                         !STRINGZILLA_MULTIVERSIONED) >>
-                       48
+        48
     };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
@@ -352,7 +353,7 @@ static sz_capability_kernels_t const *sz_substrings_find_capabilities(void) {
                    sz_cap_sve2_k * STRINGZILLA_TARGET_SVE2 | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV |
                    sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
                    sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
-                  !STRINGZILLA_MULTIVERSIONED
+        !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -387,7 +388,7 @@ static sz_capability_kernels_t const *sz_substrings_find_capabilities(void) {
         cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
                          sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
                         !STRINGZILLA_MULTIVERSIONED) >>
-                       48
+        48
     };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
@@ -408,7 +409,7 @@ static sz_capability_kernels_t const *sz_substrings_find_capabilities(void) {
         rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM | sz_cap_cdna3_k * STRINGZILLA_TARGET_CDNA3 |
                          sz_cap_cdna4_k * STRINGZILLA_TARGET_CDNA4 | sz_cap_cdna5_k * STRINGZILLA_TARGET_CDNA5) *
                         !STRINGZILLA_MULTIVERSIONED) >>
-                       48
+        48
     };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
@@ -462,7 +463,7 @@ static sz_capability_kernels_t const *sz_substrings_replace_capabilities(void) {
                    sz_cap_sve2_k * STRINGZILLA_TARGET_SVE2 | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV |
                    sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
                    sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
-                  !STRINGZILLA_MULTIVERSIONED
+        !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -497,7 +498,7 @@ static sz_capability_kernels_t const *sz_substrings_replace_capabilities(void) {
         cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
                          sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
                         !STRINGZILLA_MULTIVERSIONED) >>
-                       48
+        48
     };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
@@ -518,7 +519,7 @@ static sz_capability_kernels_t const *sz_substrings_replace_capabilities(void) {
         rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM | sz_cap_cdna3_k * STRINGZILLA_TARGET_CDNA3 |
                          sz_cap_cdna4_k * STRINGZILLA_TARGET_CDNA4 | sz_cap_cdna5_k * STRINGZILLA_TARGET_CDNA5) *
                         !STRINGZILLA_MULTIVERSIONED) >>
-                       48
+        48
     };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
@@ -572,7 +573,7 @@ static sz_capability_kernels_t const *sz_substrings_bm25_scores_capabilities(voi
                    sz_cap_sve2_k * STRINGZILLA_TARGET_SVE2 | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV |
                    sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
                    sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX) *
-                  !STRINGZILLA_MULTIVERSIONED
+        !STRINGZILLA_MULTIVERSIONED
     };
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -610,7 +611,7 @@ static sz_capability_kernels_t const *sz_substrings_bm25_scores_capabilities(voi
         cuda_above_k = ((sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_ampere_k * STRINGZILLA_TARGET_AMPERE |
                          sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER) *
                         !STRINGZILLA_MULTIVERSIONED) >>
-                       48
+        48
     };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
@@ -631,7 +632,7 @@ static sz_capability_kernels_t const *sz_substrings_bm25_scores_capabilities(voi
         rocm_above_k = ((sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM | sz_cap_cdna3_k * STRINGZILLA_TARGET_CDNA3 |
                          sz_cap_cdna4_k * STRINGZILLA_TARGET_CDNA4 | sz_cap_cdna5_k * STRINGZILLA_TARGET_CDNA5) *
                         !STRINGZILLA_MULTIVERSIONED) >>
-                       48
+        48
     };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,

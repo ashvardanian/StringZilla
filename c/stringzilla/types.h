@@ -1470,6 +1470,125 @@ STRINGZILLA_CONSTEXPR sz_rune_t sz_rune_perfect_hash(sz_rune_t rune) {
     return rune;
 }
 
+/** The unsigned value of the byte at @p offset. A <tt>char const *</tt> cannot be reinterpreted as
+ *  <tt>sz_u8_t const *</tt> inside a constant expression, and that qualifier is what carries these helpers
+ *  into device code, so the sign is taken off one byte at a time instead. */
+STRINGZILLA_CONSTEXPR sz_u8_t sz_utf8_byte_at_(sz_cptr_t utf8, sz_size_t offset) { return (sz_u8_t)utf8[offset]; }
+
+/** Whether @p byte is a UTF-8 continuation byte (<tt>0x80..0xBF</tt>). The single low-level predicate
+ *  every decode path shares, so @c sz_rune_decode and @c sz_utf8_maximal_subpart_ can never
+ *  disagree on validity. */
+STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_is_continuation_(sz_u8_t byte) { return (sz_bool_t)((byte & 0xC0) == 0x80); }
+
+/** Whether @p second is a valid @b first continuation for lead byte @p lead: a continuation byte
+ *  that also satisfies the E0/ED/F0/F4 overlong/surrogate/range constraint (Unicode Table 3-7). For
+ *  C2..DF and the unconstrained 3/4-byte leads it is just the continuation test. Shared by
+ *  @c sz_rune_decode and @c sz_utf8_maximal_subpart_ so the "is byte 2 in range" rule lives in
+ *  exactly one place. */
+STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_first_continuation_ok_(sz_u8_t lead, sz_u8_t second) {
+    if ((second & 0xC0) != 0x80) return sz_false_k;
+    if (lead == 0xE0) return (sz_bool_t)(second >= 0xA0); // overlong 3-byte
+    if (lead == 0xED) return (sz_bool_t)(second < 0xA0);  // surrogate U+D800..U+DFFF
+    if (lead == 0xF0) return (sz_bool_t)(second >= 0x90); // overlong 4-byte
+    if (lead == 0xF4) return (sz_bool_t)(second < 0x90);  // > U+10FFFF
+    return sz_true_k;
+}
+
+/** Bounds-checked, validating UTF-8 decode. Returns the codepoint's 1-4 byte length in @p rune,
+ *  or @c sz_rune_invalid_k (0) when the bytes at @p utf8 do not begin a well-formed,
+ *  shortest-form, non-surrogate, in-range codepoint (a truncated trailing sequence before
+ *  @p utf8_end included). The single authority for "is this a foldable/normalizable rune"; the
+ *  decode-side mirror of @c sz_rune_encode. On failure use @c sz_utf8_maximal_subpart_ for how
+ *  many bytes the resulting U+FFFD consumes. */
+STRINGZILLA_CONSTEXPR sz_rune_length_t sz_rune_decode(sz_cptr_t utf8, sz_cptr_t utf8_end, sz_rune_t *rune) {
+    sz_size_t const available = (sz_size_t)(utf8_end - utf8);
+    sz_u8_t const lead = sz_utf8_byte_at_(utf8, 0);
+    if (lead < 0x80) {
+        *rune = lead;
+        return sz_rune_1byte_k;
+    }
+    if (lead < 0xC2) return sz_rune_invalid_k; // continuation byte, or C0/C1 (overlong 2-byte)
+    if (lead < 0xE0) {                         // C2..DF
+        if (available < 2 || !sz_utf8_first_continuation_ok_(lead, sz_utf8_byte_at_(utf8, 1))) return sz_rune_invalid_k;
+        *rune = (sz_rune_t)(lead & 0x1F) << 6 | (sz_utf8_byte_at_(utf8, 1) & 0x3F);
+        return sz_rune_2bytes_k;
+    }
+    if (lead < 0xF0) { // E0..EF
+        if (available < 3 || !sz_utf8_first_continuation_ok_(lead, sz_utf8_byte_at_(utf8, 1)) ||
+            !sz_utf8_is_continuation_(sz_utf8_byte_at_(utf8, 2)))
+            return sz_rune_invalid_k;
+        *rune = (sz_rune_t)(lead & 0x0F) << 12 | (sz_rune_t)(sz_utf8_byte_at_(utf8, 1) & 0x3F) << 6 |
+                (sz_utf8_byte_at_(utf8, 2) & 0x3F);
+        return sz_rune_3bytes_k;
+    }
+    if (lead <= 0xF4) { // F0..F4
+        if (available < 4 || !sz_utf8_first_continuation_ok_(lead, sz_utf8_byte_at_(utf8, 1)) ||
+            !sz_utf8_is_continuation_(sz_utf8_byte_at_(utf8, 2)) ||
+            !sz_utf8_is_continuation_(sz_utf8_byte_at_(utf8, 3)))
+            return sz_rune_invalid_k;
+        *rune = (sz_rune_t)(lead & 0x07) << 18 | (sz_rune_t)(sz_utf8_byte_at_(utf8, 1) & 0x3F) << 12 |
+                (sz_rune_t)(sz_utf8_byte_at_(utf8, 2) & 0x3F) << 6 | (sz_utf8_byte_at_(utf8, 3) & 0x3F);
+        return sz_rune_4bytes_k;
+    }
+    return sz_rune_invalid_k; // F5..FF
+}
+
+/**
+ *  @brief Encode a UTF-32 codepoint to UTF-8 (1-4 bytes).
+ *  @return Byte count, or @c sz_rune_invalid_k if invalid.
+ */
+STRINGZILLA_CONSTEXPR sz_rune_length_t sz_rune_encode(sz_rune_t rune, sz_u8_t *utf8s) {
+    if (rune <= 0x7F) {
+        utf8s[0] = (sz_u8_t)rune;
+        return sz_rune_1byte_k;
+    }
+    else if (rune <= 0x7FF) {
+        utf8s[0] = (sz_u8_t)(0xC0 | (rune >> 6));
+        utf8s[1] = (sz_u8_t)(0x80 | (rune & 0x3F));
+        return sz_rune_2bytes_k;
+    }
+    else if (rune <= 0xFFFF) {
+        if (rune >= 0xD800 && rune <= 0xDFFF) return sz_rune_invalid_k; // reject surrogates
+        utf8s[0] = (sz_u8_t)(0xE0 | (rune >> 12));
+        utf8s[1] = (sz_u8_t)(0x80 | ((rune >> 6) & 0x3F));
+        utf8s[2] = (sz_u8_t)(0x80 | (rune & 0x3F));
+        return sz_rune_3bytes_k;
+    }
+    else if (rune <= 0x10FFFF) {
+        utf8s[0] = (sz_u8_t)(0xF0 | (rune >> 18));
+        utf8s[1] = (sz_u8_t)(0x80 | ((rune >> 12) & 0x3F));
+        utf8s[2] = (sz_u8_t)(0x80 | ((rune >> 6) & 0x3F));
+        utf8s[3] = (sz_u8_t)(0x80 | (rune & 0x3F));
+        return sz_rune_4bytes_k;
+    }
+    return sz_rune_invalid_k;
+}
+
+/** Locate the first ill-formed byte in <tt>[text, text+length)</tt>; @c STRINGZILLA_NULL_CHAR if
+ *  entirely well-formed UTF-8. */
+STRINGZILLA_CONSTEXPR sz_cptr_t sz_utf8_find_malformed(sz_cptr_t text, sz_size_t length) {
+    sz_cptr_t const end = text + length;
+    while (text < end) {
+        sz_rune_t rune;
+        sz_rune_length_t const consumed = sz_rune_decode(text, end, &rune);
+        if (consumed == sz_rune_invalid_k) return text;
+        text += consumed;
+    }
+    return STRINGZILLA_NULL_CHAR;
+}
+
+/**
+ *  @brief Get the UTF-8 sequence length from a lead byte, branchlessly.
+ *
+ *  Three comparisons rather than a lookup: 0x00-0xBF is 1 (ASCII and, for robustness, stray
+ *  continuation bytes treated as single bytes), 0xC0-0xDF is 2, 0xE0-0xEF is 3, and 0xF0 and
+ *  above is 4. The same form @c sz_rune_decode_unchecked uses, so the two can never disagree on
+ *  how far a lead byte advances.
+ */
+STRINGZILLA_CONSTEXPR sz_size_t sz_utf8_lead_length(sz_u8_t lead_byte) {
+    return (sz_size_t)(1 + (lead_byte >= 0xC0U) + (lead_byte >= 0xE0U) + (lead_byte >= 0xF0U));
+}
+
 /**
  *  @brief Tiny string-view structure. It's a Plain-Old Datatype @b (POD) type, unlike the
  *      @c std::string_view.
@@ -2068,6 +2187,1135 @@ STRINGZILLA_INLINE void sz_strings_from_span(sz_strings_span_t const *span, sz_s
  *  @param[in] stream Null on the CPU, or the GPU stream the release waits behind.
  */
 STRINGZILLA_INLINE void sz_strings_span_free(sz_strings_span_t *span, sz_allocator_t *allocator, sz_stream_t stream);
+
+#pragma endregion
+
+#pragma region Engines and States
+
+/** 64-bit bitmask of the capabilities of one device. */
+typedef sz_u64_t sz_capability_t;
+
+/**
+ *  @brief The state for incremental construction of a hash.
+ *  @sa sz_hash_state_init_best, sz_hash_state_update_best, sz_hash_state_digest_best
+ *
+ *  @note Uses the @c packed attribute to allow placement at arbitrary addresses without UBSAN
+ *      warnings, and plain byte arrays to avoid implicit alignment requirements from SIMD types.
+ *      The layout matches @c sz_hash_state_aligned_t for safe casting between them.
+ *
+ *  @c aes, @c sum and @c ins each hold a @c sz_u512_vec_t, and @c key a @c sz_u128_vec_t.
+ */
+#if defined(_MSC_VER)
+#pragma pack(push, 1)
+typedef struct sz_hash_state_t {
+    sz_u8_t aes[64];
+    sz_u8_t sum[64];
+    sz_u8_t ins[64];
+    sz_u8_t key[16];
+    sz_size_t ins_length;
+} sz_hash_state_t;
+#pragma pack(pop)
+#else
+typedef struct __attribute__((packed)) sz_hash_state_t {
+    sz_u8_t aes[64];
+    sz_u8_t sum[64];
+    sz_u8_t ins[64];
+    sz_u8_t key[16];
+    sz_size_t ins_length;
+} sz_hash_state_t;
+#endif
+
+/** Bytes in a SHA256 digest, fixed by FIPS 180-4. */
+#define STRINGZILLA_SHA256_DIGEST_LENGTH (32)
+
+/** Bytes in a SHA256 message block, fixed by FIPS 180-4. */
+#define STRINGZILLA_SHA256_BLOCK_LENGTH (64)
+
+/**
+ *  @brief The state for incremental construction of a SHA256 hash.
+ *  @sa sz_sha256_state_init_best, sz_sha256_state_update_best, sz_sha256_state_digest_best
+ */
+typedef struct sz_sha256_state_t {
+
+    /** Message block buffer. */
+    sz_u8_t block[STRINGZILLA_SHA256_BLOCK_LENGTH];
+
+    /** Current hash state: 8x 32-bit values. */
+    sz_u32_t hash[8];
+
+    /** Total message length in bytes. */
+    sz_u64_t total_length;
+
+    /** Current bytes in block (0-63). */
+    sz_u8_t block_length;
+
+    /** Rounds the state to 128 bytes. */
+    sz_u8_t padding_[23];
+} sz_sha256_state_t;
+
+/*  The batched kernels walk an array of these, so the layout is load-bearing rather than
+ *  incidental. A power-of-two stride turns lane indexing into a shift, and putting @c block first
+ *  gives every lane the same cache-line phase as the array itself — at 112 bytes the phase rotated
+ *  per lane, splitting the 64-byte block read across two lines for most of them.
+ *  @c block_length is a byte because it never exceeds 63, which also makes the struct identical on
+ *  32- and 64-bit builds. Alignment stays natural on purpose: @c malloc only promises 16 bytes, so
+ *  demanding 64 would under-align every heap-allocated batch. */
+sz_static_assert_(sizeof(sz_sha256_state_t) == 128, sha256_state_is_two_cache_lines);
+
+/** Bytes in an AES block, fixed by FIPS 197. */
+#define STRINGZILLA_AES_BLOCK_LENGTH (16)
+
+/** Bytes in an AES-256 secret key. */
+#define STRINGZILLA_AES256_KEY_LENGTH (32)
+
+/** Bytes in the nonce both modes accept, as NIST SP 800-38D recommends for Galois/counter mode. */
+#define STRINGZILLA_AES256_NONCE_LENGTH (12)
+
+/** Bytes in a Galois/counter mode authentication tag. */
+#define STRINGZILLA_AES256_TAG_LENGTH (16)
+
+/** Round keys in an AES-256 schedule: 15 of them, four 32-bit words each. */
+#define STRINGZILLA_AES256_ROUND_KEYS (60)
+
+/**
+ *  @brief An expanded AES-256 round-key schedule, all that counter mode, or CTR, needs.
+ *  @sa sz_aes256_key_init_best, sz_aes256_ctr_xor_best
+ *
+ *  @note Deliberately separate from @c sz_aes256_gcm_key_t. Folding the Galois hash powers in here
+ *      would make every counter-mode caller carry 128 bytes it never reads, and pay eight field
+ *      multiplications at key setup for a mode that has no authentication tag.
+ */
+typedef struct sz_aes256_key_t {
+
+    /** 15 round keys of 4 words each, in encryption order. */
+    sz_u32_t round_keys[STRINGZILLA_AES256_ROUND_KEYS];
+} sz_aes256_key_t;
+
+/**
+ *  @brief An AES-256 schedule together with the Galois hash subkey powers, the key Galois/counter
+ *      mode needs. Galois/counter mode is abbreviated GCM, and its hash is GHASH.
+ *  @sa sz_aes256_gcm_key_init_best, sz_aes256_gcm_encrypt_best, sz_aes256_gcm_encryptor_init_best
+ *
+ *  The powers H¹ through H⁸ are derived once per key so the wide backends can aggregate eight
+ *  blocks between field reductions. Counter mode never touches them, which is why they live here
+ *  rather than in @c sz_aes256_key_t.
+ */
+typedef struct sz_aes256_gcm_key_t {
+
+    /** The round-key schedule. */
+    sz_aes256_key_t block;
+
+    /** H¹ through H⁸, ascending. */
+    sz_u8_t powers[8 * STRINGZILLA_AES_BLOCK_LENGTH];
+} sz_aes256_gcm_key_t;
+
+/**
+ *  @brief What both directions of a chunked transformation carry.
+ *  @sa sz_aes256_gcm_encryptor_t, sz_aes256_gcm_decryptor_t
+ *
+ *  Callers construct an encryptor or a decryptor, never this. It is public because the per-backend
+ *  kernels operate on it and the differential tests compare it field by field.
+ *
+ *  @note The key is embedded rather than referenced. A pointer would save the copy, but nothing in
+ *      a transparent C struct can stop a state from outliving the key it points at, and that
+ *      failure is silent. The copy costs about two percent of a 16 KB record.
+ */
+typedef struct sz_aes256_gcm_state_t {
+
+    /** Embedded, so the state cannot outlive its key. */
+    sz_aes256_gcm_key_t key;
+
+    /** Running Galois hash value. */
+    sz_u8_t accumulator[STRINGZILLA_AES_BLOCK_LENGTH];
+
+    /** Current counter block, big-endian in the low four bytes. */
+    sz_u8_t counter[STRINGZILLA_AES_BLOCK_LENGTH];
+
+    /** The encrypted initial counter, folded in at digest time. */
+    sz_u8_t tag_mask[STRINGZILLA_AES_BLOCK_LENGTH];
+
+    /** Hash bytes awaiting a full block, associated then ciphertext. */
+    sz_u8_t partial[STRINGZILLA_AES_BLOCK_LENGTH];
+
+    /** Current keystream block, carried across chunk boundaries. */
+    sz_u8_t keystream[STRINGZILLA_AES_BLOCK_LENGTH];
+
+    /** Total associated bytes absorbed. */
+    sz_u64_t associated_length;
+
+    /** Total message bytes transformed. */
+    sz_u64_t text_length;
+
+    /** Valid bytes in @c partial, 0 to 15. */
+    sz_u8_t buffered;
+
+    /** Bytes of @c keystream already spent, 0 to 16. */
+    sz_u8_t keystream_used;
+} sz_aes256_gcm_state_t;
+
+/**
+ *  @brief Seals a chunked message under Galois/counter mode, or GCM, emitting a tag at the end.
+ *  @sa sz_aes256_gcm_encryptor_init_best, sz_aes256_gcm_encryptor_update_best,
+ *      sz_aes256_gcm_encryptor_digest_best
+ *
+ *  Distinct from @c sz_aes256_gcm_decryptor_t so that the direction is carried by the type rather
+ *  than by a field. The Galois hash absorbs ciphertext either way - the output buffer when sealing,
+ *  the input buffer when opening - and a single state that could be pointed either way makes that a
+ *  runtime question the compiler cannot help with. Passing one of these where the other belongs
+ *  will not compile.
+ *
+ *  A chunk boundary must be invisible to the result. The keystream block and the hash block are
+ *  both sixteen bytes wide and a caller's chunks are not, so both have to survive between calls -
+ *  which is why @c keystream_used exists alongside @c buffered instead of one shared counter.
+ */
+typedef struct sz_aes256_gcm_encryptor_t {
+
+    /** The shared payload. */
+    sz_aes256_gcm_state_t state;
+} sz_aes256_gcm_encryptor_t;
+
+/**
+ *  @brief Opens a chunked message under Galois/counter mode, or GCM, checking its tag at the end.
+ *  @sa sz_aes256_gcm_decryptor_init_best, sz_aes256_gcm_decryptor_update_unverified_best,
+ *      sz_aes256_gcm_decryptor_verify_best
+ */
+typedef struct sz_aes256_gcm_decryptor_t {
+
+    /** The shared payload. */
+    sz_aes256_gcm_state_t state;
+} sz_aes256_gcm_decryptor_t;
+
+/** The text formats that the escape and unescape families convert strings to and from. */
+typedef enum sz_escape_kind_t {
+
+    /** RFC 8259 string bodies: <tt>\\"</tt>, <tt>\\\\</tt>, short forms like <tt>\\n</tt>, and <tt>\\u00XX</tt> for other bytes
+     *  below 0x20. */
+    sz_escape_json_k = 0,
+
+    /** Two lowercase hexadecimal digits per byte, decoding either case. */
+    sz_escape_hex_k = 1,
+
+    /** HTML and XML text and attribute values: <tt>&amp;amp;</tt>, <tt>&amp;lt;</tt>, <tt>&amp;gt;</tt>, <tt>&amp;quot;</tt> and <tt>&amp;#39;</tt>. */
+    sz_escape_html_k = 2,
+
+    /** RFC 3986 percent-encoding of every byte outside <tt>A-Z a-z 0-9 - _ ~</tt> and the dot. */
+    sz_escape_url_k = 3,
+
+    /** Terminal-safe logs: short forms like <tt>\\n</tt>, <tt>\\\\</tt> and <tt>\\"</tt>, <tt>\\xHH</tt> for other C0 control
+     *  bytes, DEL and ill-formed UTF-8, and <tt>\\uXXXX</tt> for C1 controls and the bidirectional
+     *  overrides U+202A to U+202E and U+2066 to U+2069, which reorder what a reader sees. */
+    sz_escape_console_k = 4,
+
+    /** RFC 4180 fields, quoted only when holding a comma, a quote, CR or LF, with every inner
+     *  quote doubled. */
+    sz_escape_csv_k = 5,
+
+    /** RFC 8259 string bodies in ASCII alone, as Python's <tt>json.dumps</tt> writes them by default:
+     *  every codepoint outside printable ASCII without a short form, DEL included, becomes
+     *  <tt>\\uXXXX</tt>, a surrogate pair beyond the Basic Multilingual Plane, and every ill-formed byte
+     *  becomes the escape of U+FFFD. */
+    sz_escape_json_ascii_k = 6,
+} sz_escape_kind_t;
+
+/** How a split ends its parts. */
+typedef enum sz_split_kind_t {
+
+    /** Every delimiter ends a part, so neighbouring delimiters leave empty parts, as
+     *  <tt>str.split(sep)</tt> does. */
+    sz_split_each_k = 0,
+
+    /** A run of delimiters ends one part and empty parts are skipped, as <tt>str.split()</tt> does. */
+    sz_split_runs_k = 1,
+} sz_split_kind_t;
+
+/**
+ *  @brief A needle analysed once by @c sz_utf8_uncased_needle_init_best for any number of
+ *      uncased searches, under any capabilities.
+ *
+ *  Preparing picks the per-script kernel for the needle in two steps:
+ *
+ *  1. locating the longest "safe" slice of the needle for the different SIMD folding kernels,
+ *  2. shrinking it to the most diverse slice that fits into @c folded_slice when case-folded.
+ *
+ *  Unlike the exact substring search kernels, it uses 4 probe positions instead of 3:
+ *
+ *  - first: implicit at <tt>folded_slice[0]</tt>
+ *  - second: @c probe_second
+ *  - third: @c probe_third
+ *  - last: implicit at <tt>folded_slice[folded_slice_length - 1]</tt>
+ *
+ *  The struct points at the needle rather than copying it, so the needle must outlive it.
+ */
+typedef struct sz_utf8_uncased_needle_t {
+
+    /** The needle's text, read by every search. */
+    sz_cptr_t start;
+    sz_size_t length;
+
+    /** Bytes of the needle before the slice that @c folded_slice holds folded. */
+    sz_size_t offset_in_unfolded;
+
+    /** Bytes of the needle that @c folded_slice holds folded. */
+    sz_size_t length_in_unfolded;
+    sz_u8_t folded_slice[16];
+    sz_u8_t folded_slice_length;
+
+    /** Offset of the second probe in @c folded_slice. */
+    sz_u8_t probe_second;
+
+    /** Offset of the third probe in @c folded_slice. */
+    sz_u8_t probe_third;
+
+    /** The @c sz_utf8_uncased_rune_*_k profile whose kernel searches this needle. */
+    sz_u8_t script;
+} sz_utf8_uncased_needle_t;
+
+/**
+ *  @brief A batch of prepared queries, the block it lives in, and the round's scratch beside it.
+ *
+ *  The first four members are @ref sz_levenshtein_query_t in tensor form: every query's mask plane
+ *  back to back, which a kernel indexes by arithmetic where an array of structs would need a
+ *  pointer chase. The launch geometry lives in @c memory 's head, which only the tier named by
+ *  @c capability reads.
+ */
+typedef struct sz_levenshtein_engine_t {
+
+    /** Every query's mask plane, back to back, @c masks_offsets addressing them. */
+    sz_u64_t const *masks;
+
+    /** The @b [count+1] word offsets into @c masks, the last being its length. */
+    sz_size_t const *masks_offsets;
+
+    /** The mask row each symbol reads, laid out as @c symbol spells it. */
+    void const *symbol_to_class;
+
+    /** The @b [count] symbols each query spans, which seeds its score bit. */
+    sz_u32_t const *lengths;
+
+    /** Queries prepared, which is the first axis of every output. */
+    sz_size_t count;
+
+    /** The alphabet the batch was prepared over, and how to read the class map. */
+    sz_levenshtein_symbol_t symbol;
+
+    /** The capability whose init kernel prepared the batch, which picks every round's kernel. */
+    sz_capability_t capability;
+
+    /** What built both blocks below and what grows the second. */
+    sz_allocator_t allocator;
+
+    /** The batch's block, fixed for the engine's life, its head tier-private. */
+    void *memory;
+
+    /** Bytes of that block. */
+    sz_size_t memory_bytes;
+
+    /** The round's block, grown by a compute verb and never shrunk. */
+    void *scratch;
+
+    /** Bytes of that block, zero until the first round sizes it. */
+    sz_size_t scratch_bytes;
+} sz_levenshtein_engine_t;
+
+/** Words a query of @p length symbols spans - every class's row holds that many, one
+ *  bit per symbol. */
+STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_query_words(sz_size_t length) {
+    return length / 64 + (length % 64 != 0);
+}
+
+/** Maximum query words held in registers by the fixed-width GPU kernels. */
+enum { sz_levenshtein_gpu_words_max_k = 256 };
+
+/** N-grams a text of @p length bytes holds, summed over @p widths_count @p widths; a width of zero
+ *  or past the text holds none. */
+STRINGZILLA_CONSTEXPR sz_size_t sz_ngrams_count(sz_size_t length, sz_size_t const *widths, sz_size_t widths_count) {
+    sz_size_t ngrams = 0;
+    for (sz_size_t index = 0; index != widths_count; ++index)
+        if (widths[index] && widths[index] <= length) ngrams += length - widths[index] + 1;
+    return ngrams;
+}
+
+/** One prepared query's table of distinct N-grams at every width, and what a candidate's share
+ *  needs beside it: what @ref sz_ngrams_engine_query reads off an engine, or what a device walk
+ *  prepares inside a span its caller owns. */
+typedef struct sz_ngrams_query_t {
+
+    /** Slots of the query's distinct N-grams, zero if empty, read by @ref sz_ngrams_query_probe. */
+    sz_u64_t const *slots;
+
+    /** A power of two, at least twice @c ngrams and at least 64. */
+    sz_size_t slots_count;
+
+    /** The miss filter after the slots, eight bits a slot, so most N-grams the query lacks are told
+     *  by one load. */
+    sz_u32_t const *filter;
+
+    /** The @b [widths_count] window widths, in bytes. */
+    sz_size_t const *widths;
+
+    /** The @b [widths_count] @ref sz_ngrams_power values. */
+    sz_u32_t const *powers;
+
+    /** Entries in @c widths and @c powers. */
+    sz_size_t widths_count;
+
+    /** The query's N-grams summed over every width, repeats included, which is the number of bits
+     *  a candidate's hits span. */
+    sz_size_t ngrams;
+
+    /** The query's distinct N-grams, the share's denominator. */
+    sz_size_t distinct;
+
+    /** The query's bytes, so a width past them probes nothing. */
+    sz_size_t length;
+} sz_ngrams_query_t;
+
+/**
+ *  @brief Every prepared query's table over one block, the widths every one of them holds, and the
+ *      scratch both verbs grow.
+ *
+ *  Only @c count, @c widths_count, @c capability and @c distinct_counts are public; the rest is the
+ *  family's own layout, read through @ref sz_ngrams_engine_query.
+ */
+typedef struct sz_ngrams_engine_t {
+
+    /** Every query's slots, back to back, @c slots_offsets addressing them. */
+    sz_u64_t const *slots;
+
+    /** The @b [count+1] slot offsets into @c slots, the last being its length. */
+    sz_size_t const *slots_offsets;
+
+    /** Every query's miss filter, eight bits a slot, the query @c i 's from word
+     *  @c slots_offsets[i]/4. */
+    sz_u32_t const *filters;
+
+    /** The @b [count,widths_count] distinct N-grams each query holds at each width, which is a
+     *  share's denominator. */
+    sz_u32_t const *distinct_counts;
+
+    /** The @b [widths_count] window widths, in bytes. */
+    sz_size_t const *widths;
+
+    /** The @b [widths_count] @ref sz_ngrams_power values. */
+    sz_u32_t const *powers;
+
+    /** The @b [count] bytes each query spans. */
+    sz_u32_t const *lengths;
+
+    /** Queries prepared, which is the first axis of every overlap output; zero for an engine that
+     *  only sketches. */
+    sz_size_t count;
+
+    /** Window widths, the last axis of an overlap output. */
+    sz_size_t widths_count;
+
+    /** The capability whose init kernel prepared the engine, which picks every verb's kernel. */
+    sz_capability_t capability;
+
+    /** What built both blocks below and what grows the second. */
+    sz_allocator_t allocator;
+
+    /** The tables' block, fixed for the engine's life, its head tier-private. */
+    void *memory;
+
+    /** Bytes of that block. */
+    sz_size_t memory_bytes;
+
+    /** A round's chains, residues and hit words, or a sketch's ranks, grown and never shrunk. */
+    void *scratch;
+
+    /** Bytes of that block, zero until a verb sizes it. */
+    sz_size_t scratch_bytes;
+} sz_ngrams_engine_t;
+
+/**
+ *  @brief One needle ending on one state, as the engine stores it.
+ *
+ *  The engine walks @b folded bytes, so this length is the folded one - the needle's own, identical
+ *  for every match of that needle. The @b source span it corresponds to is not: needle "k" matches
+ *  both the 1-byte "k" and the 3-byte Kelvin sign U+212A. Recovering that span is the walk's job.
+ */
+typedef struct sz_substrings_output_t {
+
+    /** Which needle ends here, as an index into the strings the engine was built from. */
+    sz_u32_t needle_index;
+
+    /** Folded bytes this match spans; a walk traverses one edge per byte, so it fits a state id. */
+    sz_u32_t folded_match_bytes;
+} sz_substrings_output_t;
+
+/**
+ *  @brief What a round found, written by the device and read after the caller's own join.
+ *
+ *  A device verb enqueues and returns, so nothing it discovers can reach the caller through a
+ *  status code. The sizing walk always runs, so @c matches_emitted is the truth whatever the
+ *  caller's output could hold, and a nonzero @c shortfall is the one signal that the output is
+ *  incomplete rather than wrong. Under a leftmost policy a cover thins the matches after that walk,
+ *  so for a round that stayed inside its budget the matches a caller could have read are
+ *  @c matches_stored plus @c shortfall, which is also what the last boundary of a
+ *  @ref sz_substrings_find names; a round that outran its budget ran no cover at all, and its
+ *  @c shortfall counts the matches the budget could not hold.
+ */
+typedef struct sz_substrings_report_t {
+
+    /** Matches the sizing walk found, which is the truth whatever the output held. */
+    sz_size_t matches_emitted;
+
+    /** Matches written out, which is @c matches_emitted clipped at the capacity. */
+    sz_size_t matches_stored;
+
+    /** Bytes a rewrite needs, which is the truth whatever the target held. */
+    sz_size_t target_length;
+
+    /** Matches or bytes the round could not hold, zero when everything fit. */
+    sz_size_t shortfall;
+} sz_substrings_report_t;
+
+/**
+ *  @brief The compiled vocabulary, its sizing policy, and the round's arena, in one lifetime.
+ *
+ *  Transitions are split into two tiers by how often a state is visited. Text keeps resetting the
+ *  walk toward the root, so a small set of states absorbs most byte steps whatever the dictionary
+ *  size, and the tiers are sized to that skew rather than to the vocabulary as a whole.
+ *
+ *  The @b hot tier is a dense goto-completed table, one row per state with one target per byte
+ *  @b class, so a step is a single load with no branch and no failure chasing. A class is a byte
+ *  some needle spells, or the one shared class of every byte none does, so a row is as wide as the
+ *  vocabulary's own alphabet: five targets for nucleotides, a few hundred for multilingual text,
+ *  and never more than 256. The @b cold tier is a double array: @c base and @c check encode
+ *  transitions as address arithmetic plus an ownership test, and @c fail restores the failure links
+ *  that goto completion would otherwise have folded away. States are numbered so the hot ones come
+ *  first, which makes the tier test state < hot_count with no lookup.
+ *
+ *  Both blocks are built by an init kernel and live until @ref sz_substrings_engine_free, so no
+ *  compute verb rebuilds them and a device backend has no host clone to stage.
+ */
+typedef struct sz_substrings_engine_t {
+
+    /** Hot tier: hot_count × classes_count goto-completed targets, row-major, shallow first. */
+    sz_u32_t const *hot_rows;
+
+    /** Each byte's column in @c hot_rows: its own if a needle spells it, else one shared column. */
+    sz_u8_t const *byte_to_class;
+
+    /** Cold tier: transition target for a state on a byte is base[state] + byte, if owned. */
+    sz_u32_t const *base;
+
+    /** Cold tier: owner of each slot, so a collision reads as a missing edge, not a wrong one. */
+    sz_u32_t const *check;
+
+    /** Cold tier: failure link, followed when @c check denies ownership. */
+    sz_u32_t const *fail;
+
+    /** One bit per slot: whether any needle ends there, so a non-matching byte touches no count. */
+    sz_u32_t const *accepts_words;
+
+    /** Matches ending at each state, flattened and merged along failure chains at build time. */
+    sz_substrings_output_t const *outputs;
+
+    /** Outputs per slot, in the published numbering. */
+    sz_u32_t const *outputs_counts;
+
+    /** Exclusive prefix sum of @c outputs_counts; a nested-suffix vocabulary drives the pool to
+     *  O(states²), so these stay pointer-wide where the counts do not. */
+    sz_size_t const *outputs_offsets;
+
+    /** Length of @c outputs, so a consumer never rescans the CSR to recover it. */
+    sz_size_t outputs_total;
+
+    /** Slots every cold-tier array holds: @c state_count plus the alphabet's address headroom. */
+    sz_size_t slots_count;
+
+    /** States below @c hot_count live in @c hot_rows; the rest live in the double array. */
+    sz_u32_t hot_count;
+
+    /** Columns of a hot row, at most 256. */
+    sz_u32_t classes_count;
+
+    /** Published state ceiling, above the trie's, as a packed child's id is address arithmetic. */
+    sz_u32_t state_count;
+
+    /** The root's published id, which is always zero. */
+    sz_u32_t root;
+
+    /** Needles the vocabulary holds, which bounds every reported @c needle_index. */
+    sz_u32_t needles_count;
+
+    /** Most @b haystack bytes one match can span, sizing every slice, halo and warm-up. */
+    sz_u32_t max_source_match_bytes;
+
+    /** Fewest haystack bytes one match can span; the mirror bound. */
+    sz_u32_t min_source_match_bytes;
+
+    /** Most merged outputs any state carries, so a consumer can bound one pass's match count. */
+    sz_u32_t max_outputs_per_state;
+
+    /** Whether a walk folds the haystack as it consumes it, or steps it byte for byte. */
+    sz_case_sensitivity_t case_sensitivity;
+
+    /** Bytes that move a walk off the root, which a byte search can skip to while it sits there. */
+    sz_byteset_t root_live;
+
+    /** The policy the arena was sized for, and the only one it runs. */
+    sz_substrings_overlap_policy_t overlap_policy;
+
+    /** Matches one round may emit; past it every later kernel retires. */
+    sz_size_t matches_budget;
+
+    /** Chunks one round may cut the haystacks into, fixed here, not discovered. */
+    sz_size_t chunk_budget;
+
+    /** Haystacks one round may carry, read by a device tier only; its arena is sized for them. */
+    sz_size_t haystacks_budget;
+
+    /** Device-resident counts every verb writes and no verb joins to read. */
+    sz_substrings_report_t *report;
+
+    /** The capability that compiled the vocabulary, whose kernels every round then runs. */
+    sz_capability_t capability;
+
+    /** What built both blocks below. */
+    sz_allocator_t allocator;
+
+    /** The automaton's block, fixed for the engine's life. */
+    void *memory;
+
+    /** Bytes of that block. */
+    sz_size_t memory_bytes;
+
+    /** The round's arena: ring, chunks, emitted, keep, scan scratch. */
+    void *scratch;
+
+    /** Bytes of that block. */
+    sz_size_t scratch_bytes;
+} sz_substrings_engine_t;
+
+/** BM25's continuous parameters. */
+typedef struct sz_substrings_bm25_t {
+
+    /** The literature's k₁: how slowly repeated occurrences stop adding score; 1.2 is customary. */
+    sz_f32_t term_frequency_saturation;
+
+    /** The literature's b, in [0, 1]: 0 ignores document length and 1 normalizes it fully, while
+     *  0.75 is the customary choice. */
+    sz_f32_t length_normalization;
+
+    /** The corpus-wide mean document length, in the unit of the lengths scored; read only when
+     *  @c length_normalization is positive. */
+    sz_f32_t average_document_length;
+} sz_substrings_bm25_t;
+
+/** The @c hot_states value that sizes the hot tier itself, so zero stays a genuine all-cold ask. */
+#define STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO (STRINGZILLA_SIZE_MAX)
+
+/** The kinds of NFA states. */
+typedef enum sz_regex_nfa_kind_t {
+
+    /** Consumes one byte along every link whose range holds it; with no links it never matches. */
+    sz_regex_nfa_ranges_k = 0,
+
+    /** Moves along every link without consuming, in link order. */
+    sz_regex_nfa_union_k = 1,
+
+    /** Moves along every link without consuming; links are prepended, so later patches go first. */
+    sz_regex_nfa_union_lazy_k = 2,
+
+    /** Moves to @c target without consuming. */
+    sz_regex_nfa_empty_k = 3,
+
+    /** Moves to @c target without consuming where its assertion holds. */
+    sz_regex_nfa_look_k = 4,
+
+    /** A pattern matched; @c target is the pattern's index. */
+    sz_regex_nfa_match_k = 5,
+} sz_regex_nfa_kind_t;
+
+/** One NFA state. */
+typedef struct sz_regex_nfa_state_t {
+
+    /** What the state does. */
+    sz_regex_nfa_kind_t kind;
+
+    /** An assertion's bit. */
+    sz_u32_t look;
+
+    /** The next state of an empty or look state, or a match state's pattern. */
+    sz_u32_t target;
+
+    /** The capture slot an empty state writes as a walk passes it, twice its group plus one where
+     *  the group closes, or @c sz_regex_none_k. */
+    sz_u32_t slot;
+
+    /** The first outgoing link of a ranges or union state, or @c sz_regex_none_k. */
+    sz_u32_t first_link;
+
+    /** The last outgoing link, which an appended link follows. */
+    sz_u32_t last_link;
+} sz_regex_nfa_state_t;
+
+/** How a lookaround reads its body around the position it is tested at. */
+typedef enum sz_regex_lookaround_kind_t {
+
+    /** <tt>(?=…)</tt>: the body matches from the position on. */
+    sz_regex_lookahead_k = 0,
+
+    /** <tt>(?</tt><tt>!</tt>…<tt>)</tt>: the body matches nowhere from the position on. */
+    sz_regex_lookahead_negated_k = 1,
+
+    /** <tt>(?</tt><tt>&lt;=…)</tt>: the body matches up to the position. */
+    sz_regex_lookbehind_k = 2,
+
+    /** <tt>(?</tt><tt>&lt;!</tt>…<tt>)</tt>: the body matches nowhere up to the position. */
+    sz_regex_lookbehind_negated_k = 3,
+} sz_regex_lookaround_kind_t;
+
+/** One lookaround: its body, compiled into the engine's NFA as a sub-vocabulary of its own, and how
+ *  it reads it. */
+typedef struct sz_regex_lookaround_t {
+
+    /** Where a walk of the body enters @c nfa_states, compiled forward for a lookbehind and
+     *  reversed for a lookahead; while the vocabulary builds, the root of its syntax tree. */
+    sz_u32_t start;
+
+    /** How the lookaround reads its body: odd kinds are negated, and those from
+     *  @c sz_regex_lookbehind_k look behind. */
+    sz_regex_lookaround_kind_t kind;
+
+    /** One past the highest level among the lookarounds of its body, so levels computed in
+     *  ascending order find every bit a body tests known. */
+    sz_u32_t level;
+} sz_regex_lookaround_t;
+
+/** One lookaround body's DFA, unanchored and keeping every match, which fills the table of where
+ *  its lookaround holds a byte per step instead of the PikeVM. */
+typedef struct sz_regex_body_t {
+
+    /** Rows of <tt>classes_count + 1</tt> next states, the last column taken at the far edge of a
+     *  haystack, ids being row offsets; null for a body over other lookarounds, of one byte, or
+     *  past its budget. */
+    sz_u32_t const *rows;
+
+    /** The state a pass starts from at the haystack's edge it walks from. */
+    sz_u32_t start;
+
+    /** Ids at or above this one accept, which the step over the unit after a match of the body
+     *  lands on. */
+    sz_u32_t accepts_begin;
+} sz_regex_body_t;
+
+/** One outgoing edge, chained per state. */
+typedef struct sz_regex_nfa_link_t {
+
+    /** The state the link leads to. */
+    sz_u32_t target;
+
+    /** The owner's next link, or @c sz_regex_none_k. */
+    sz_u32_t next;
+
+    /** The lowest byte a ranges state's link consumes. */
+    sz_u8_t low;
+
+    /** The highest byte a ranges state's link consumes. */
+    sz_u8_t high;
+} sz_regex_nfa_link_t;
+
+/** Bytes from a candidate start that the literal prefilter tests. */
+enum { sz_regex_prefixes_depth_k = 3 };
+
+/** Paths of byte sets the literal prefilter tells apart, one bucket bit each. */
+enum { sz_regex_prefixes_paths_k = 8 };
+
+/**
+ *  @brief The paths of byte sets the first bytes of every match follow, as the end-finding DFA's
+ *      first steps allow them under any lookaround, each path one bucket bit.
+ *
+ *  A search skips to the next position whose bytes keep some bucket at every offset, and the end
+ *  walk from there settles whether a match starts there, so a superset of the paths stays exact.
+ *  A path shorter than the deepest holds every byte past its end. Vector tiers test a byte's two
+ *  nibbles apart, which holds a superset of its bucket's bytes where a path's set has several.
+ */
+typedef struct sz_regex_prefixes_t {
+
+    /** Per offset from a candidate start, per byte, the buckets whose paths hold the byte there. */
+    sz_u8_t buckets[sz_regex_prefixes_depth_k][256];
+
+    /** Per offset, the buckets holding some byte of each low nibble, then of each high nibble;
+     *  every bucket at offsets past @c depth. */
+    sz_u8_t nibbles[sz_regex_prefixes_depth_k][32];
+
+    /** Offsets of the deepest path. */
+    sz_u32_t depth;
+} sz_regex_prefixes_t;
+
+/**
+ *  @brief A compiled vocabulary of regular expressions: two automata over one byte-class map.
+ *
+ *  Both automata are dense tables of <tt>classes_count + 1</tt> columns per block, the last column taken
+ *  at a haystack's edge, and one block per set of lookarounds that may hold at the boundary a step
+ *  crosses, as @c sz_regex_stride_ and @c sz_regex_looks_block_ lay them out. A state id is its
+ *  row's offset, so a step is one load with no multiply; the dead state is zero, and accepting
+ *  states are numbered last, so acceptance is one compare.
+ *
+ *  A start-finding DFA that would pass its state budget is replaced by a position automaton, with
+ *  @c reverse_rows null: a set of @c positions_words words over the classes of the reversed
+ *  patterns, stepped over whole codepoints. A boundary kind is the kind of the unit left of a
+ *  boundary times four plus the kind right of it, each zero at the haystack's edge, one for a line
+ *  feed, two for a word byte and three otherwise; a mask of them is a 16-bit word.
+ *
+ *  A lookaround is a look state testing bit <tt>sz_regex_look_lookaround_k << i</tt> of its index @c i,
+ *  which a table of the walk holds per haystack position, as @c lookarounds describes; a DFA step
+ *  reads it to pick its block, except within one codepoint's folds, which take the first block.
+ *
+ *  Both blocks are owned and live until @ref sz_regex_engine_free; the round's scratch grows on
+ *  demand and is never shrunk.
+ */
+typedef struct sz_regex_engine_t {
+
+    /** Each byte's column in both automata; bytes share one only if no pattern tells them apart. */
+    sz_u8_t const *byte_to_class;
+
+    /** Start-finding automaton: the reversed patterns, unanchored, keeping every match, walked
+     *  right to left. Rows of blocks of <tt>classes_count + 1</tt> next states, the last column taken at
+     *  the start of a haystack, ids being row offsets. A state at or above @c reverse_accepts_begin
+     *  after the byte at @c i starts a match at <tt>i + 1</tt>; that step takes the block of the
+     *  lookarounds holding at <tt>i + 1</tt>. */
+    sz_u32_t const *reverse_rows;
+
+    /** End-finding automaton: the patterns anchored and leftmost-first, walked left to right from
+     *  one start and laid out the same, a step over the byte at @c i taking the block of the
+     *  lookarounds holding at @c i. The last accepting state before it dies names the match's end
+     *  and pattern. Null past its state budget or past the lookarounds its capability takes as
+     *  columns, where end walks run a PikeVM over @c nfa_states. */
+    sz_u32_t const *forward_rows;
+
+    /** Per forward accepting state, in id order, the pattern leftmost-first priority picks. */
+    sz_u32_t const *forward_patterns;
+
+    /** Per forward state, in id order, the bytes that move it elsewhere under any block, which an
+     *  end walk searches ahead for where the state stays put on all but a few printable ASCII
+     *  bytes; every byte for other states. */
+    sz_byteset_t const *forward_escapes;
+
+    /** The paths every match's first bytes follow, which a search skips to instead of marking
+     *  starts; null where they would pass too many positions, where some match is empty, for an
+     *  uncased engine, and where end walks run the PikeVM. */
+    sz_regex_prefixes_t const *prefixes;
+
+    /** Forward start by the byte before a match: none, a line feed, a word byte, or another. */
+    sz_u32_t forward_starts[4];
+
+    /** Reverse start by the byte after a haystack: none, a line feed, a word byte, or another. */
+    sz_u32_t reverse_starts[4];
+
+    /** Forward ids at or above this one accept, so acceptance is a compare rather than a load. */
+    sz_u32_t forward_accepts_begin;
+
+    /** Reverse ids at or above this one mark a start. */
+    sz_u32_t reverse_accepts_begin;
+
+    /** Columns of a block before its haystack-edge column. */
+    sz_u32_t classes_count;
+
+    /** Rows of the end-finding automaton. */
+    sz_u32_t forward_states_count;
+
+    /** Rows of the start-finding automaton, all of which priming walks at once. */
+    sz_u32_t reverse_states_count;
+
+    /** Patterns the vocabulary holds, which bounds every reported @c needle_index. */
+    sz_u32_t patterns_count;
+
+    /** Bytes that move the start pass off its idle states, which a reverse byte-set search skips
+     *  to: for the DFA, the starts after a line feed, a word byte and another byte, which any other
+     *  byte maps into one another under every block; for positions, the loop alone, or every byte
+     *  when the loop alone can match. */
+    sz_byteset_t reverse_live;
+
+    /** Words of one position set of the bit-parallel start pass, which replaces @c reverse_rows
+     *  past their budget. */
+    sz_u32_t positions_words;
+
+    /** Records in @c positions_shifts: a signed distance word, then the positions moving by it
+     *  on every unit. */
+    sz_u32_t positions_shifts_count;
+
+    /** Records in @c positions_groups: a mask of boundary kinds, the source positions, then the
+     *  targets they enter. */
+    sz_u32_t positions_groups_count;
+
+    /** Pairs in @c positions_ranges. */
+    sz_u32_t positions_ranges_count;
+
+    /** Per unit class, the positions able to consume it; the loop and match positions are
+     *  in every row. */
+    sz_u64_t const *positions_reach;
+
+    /** The unconditional follows that a constant distance between positions covers,
+     *  one record per distance. */
+    sz_u64_t const *positions_shifts;
+
+    /** Every other follow, its sources grouped by the targets they share under one condition: a
+     *  mask of boundary kinds in the low 16 bits of the record's first word, then the look bits of
+     *  the lookarounds that must hold. */
+    sz_u64_t const *positions_groups;
+
+    /** Every position a walk can hold, which priming's upper run starts from. */
+    sz_u64_t const *positions_all;
+
+    /** Per boundary kind, the positions the always-live loop enters, itself among them,
+     *  @c positions_words each. */
+    sz_u64_t const *positions_initial;
+
+    /** Each ASCII codepoint's unit class. */
+    sz_u32_t const *positions_ascii;
+
+    /** Past ASCII, ascending pairs of a codepoint range's first codepoint and its unit class. */
+    sz_u32_t const *positions_ranges;
+
+    /** The Thompson NFA the end-finding automaton was built from, which a PikeVM walks where
+     *  @c forward_rows is null and which groups are read from; a capture is an empty state
+     *  carrying a slot. */
+    sz_regex_nfa_state_t const *nfa_states;
+
+    /** Every link of @c nfa_states, chained per state. */
+    sz_regex_nfa_link_t const *nfa_links;
+
+    /** States of @c nfa_states. */
+    sz_u32_t nfa_states_count;
+
+    /** Links of @c nfa_links. */
+    sz_u32_t nfa_links_count;
+
+    /** Where a walk of every pattern at once enters the NFA, the patterns as alternatives
+     *  in index order. */
+    sz_u32_t nfa_start;
+
+    /** Per pattern, where a walk of that pattern alone enters the NFA. */
+    sz_u32_t const *patterns_starts;
+
+    /** Per pattern, its first capturing group among all groups numbered pattern after pattern,
+     *  then their total; group @c g of a pattern, counting from one, writes slots @c 2g and
+     *  <tt>2g + 1</tt> of a walk. */
+    sz_u32_t const *patterns_groups;
+
+    /** Per lookaround, in the order of the look bits naming them, its body's entry into
+     *  @c nfa_states and its kind. */
+    sz_regex_lookaround_t const *lookarounds;
+
+    /** Per lookaround, its body's DFA, which fills the table where it is built; null without
+     *  lookarounds. */
+    sz_regex_body_t const *bodies;
+
+    /** The lookarounds whose bodies match one byte of a set and assert nothing, so the byte beside
+     *  a position alone decides whether they hold; then per byte, those holding right after it;
+     *  then per byte, those holding right before it. Null where no body is one byte, as in an
+     *  uncased engine, whose lookarounds hold between whole codepoints only. */
+    sz_u32_t const *looks_bytes;
+
+    /** Lookarounds the vocabulary holds, nested ones included; up to
+     *  @c sz_regex_columned_lookarounds_k of them widen the rows of both DFAs to a block per set,
+     *  and more leave walks on positions and the PikeVM. */
+    sz_u32_t lookarounds_count;
+
+    /** Every capturing group's name, in the order @c patterns_groups numbers them,
+     *  empty for an unnamed group. */
+    sz_strings_view_t groups_names;
+
+    /** Whether walks fold the haystack as they consume it, or step it byte for byte. */
+    sz_case_sensitivity_t case_sensitivity;
+
+    /** The capability that compiled the vocabulary, whose kernels every round then runs. */
+    sz_capability_t capability;
+
+    /** What built both blocks below. */
+    sz_allocator_t allocator;
+
+    /** Both automata and their side arrays, fixed for the engine's life. */
+    void *memory;
+
+    /** Bytes of that block. */
+    sz_size_t memory_bytes;
+
+    /** A round's start bits, priming sets and window edges,
+     *  grown on demand like @c levenshtein's. */
+    void *scratch;
+
+    /** Bytes of that block. */
+    sz_size_t scratch_bytes;
+} sz_regex_engine_t;
+
+/** The array positions one selector picks, RFC 9535's <tt>[begin:end:step]</tt>, an index @c n being
+ *  <tt>[n:n+1:1]</tt>, or <tt>[-1::1]</tt> for the last element; negative bounds count from the array's end. */
+typedef struct sz_subdocuments_slice_t {
+
+    /** The first position, or 2⁵³ past the end that a negative step walks from when omitted. */
+    sz_i64_t begin;
+
+    /** The position the slice stops before, or 2⁵³ past the end its step walks to when omitted. */
+    sz_i64_t end;
+
+    /** Distance between selected positions, negative walking backward; zero selects none. */
+    sz_i64_t step;
+} sz_subdocuments_slice_t;
+
+/** One instruction of a filter program. */
+typedef struct sz_subdocuments_instruction_t {
+
+    /** What it does, a @c sz_subdocuments_operation_t. */
+    sz_u32_t operation;
+
+    /** A step, a pattern, a comparison or a literal's kind, as @c operation reads it. */
+    sz_u32_t operand;
+
+    /** A number literal's value. */
+    sz_f64_t number;
+
+    /** Where a string literal or a <tt>match()</tt> or <tt>search()</tt> pattern starts in @c strings_data. */
+    sz_u32_t string_offset;
+
+    /** Its unescaped bytes. */
+    sz_u32_t string_length;
+} sz_subdocuments_instruction_t;
+
+/** The filters of one bracketed selection, joined by disjunction, and the program deciding them. */
+typedef struct sz_subdocuments_filter_t {
+
+    /** The step whose selection they decide. */
+    sz_u32_t step;
+
+    /** The program's first instruction in @c instructions. */
+    sz_u32_t instructions_begin;
+
+    /** One past its last. */
+    sz_u32_t instructions_end;
+} sz_subdocuments_filter_t;
+
+/**
+ *  @brief The compiled paths: one bit-parallel automaton over keys and positions, with no table.
+ *
+ *  A step is one segment of one path, numbered path after path, the first step of every path
+ *  being its root; "live" is a bitset of steps. Entering a member, an element, an attribute or a
+ *  text node advances every live step that is not final to the next one, keeps those whose
+ *  selectors accept the child's key, name, kind or position, and carries the steps a descendant
+ *  segment keeps live at every depth below.
+ */
+typedef struct sz_subdocuments_engine_t {
+
+    /** Bytes of every key, element or attribute name the paths spell, back to back, to
+     *  confirm a hash hit. */
+    sz_cptr_t names_data;
+
+    /** Offsets into @c names_data, one per name and one past the last. */
+    sz_u32_t const *names_offsets;
+
+    /** Open-addressed name hash table, each slot a name index or @c sz_subdocuments_no_name_k. */
+    sz_u32_t const *names_slots;
+
+    /** Per name, the steps whose selector is that name, @c words_count words each. */
+    sz_u64_t const *names_steps;
+
+    /** Steps any key or index enters: wildcards. */
+    sz_u64_t const *wildcard_steps;
+
+    /** Steps a descendant segment keeps live at every depth below: each one
+     *  precedes a <tt>..</tt> selector. */
+    sz_u64_t const *descendant_steps;
+
+    /** Steps with a slice the array's length settles: negative indices or bounds, or a step
+     *  under -1. An array such a step may enter opens a pending run, settled when it closes. */
+    sz_u64_t const *relative_steps;
+
+    /** XPath steps selecting attributes, <tt>\@name</tt> and <tt>\@*</tt>, which select no element. */
+    sz_u64_t const *attribute_steps;
+
+    /** XPath steps selecting text nodes, <tt>text()</tt>. */
+    sz_u64_t const *text_steps;
+
+    /** Steps with a filter selector, whose selection of a node waits for that node's close. */
+    sz_u64_t const *filter_steps;
+
+    /** Per filter, the root steps of its queries, @c words_count words each: the
+     *  steps <tt>\@</tt> stands for. */
+    sz_u64_t const *filters_roots;
+
+    /** Every filter, in the order compiled. */
+    sz_subdocuments_filter_t const *filters;
+
+    /** Every filter's program, back to back. */
+    sz_subdocuments_instruction_t const *instructions;
+
+    /** Bytes of every string literal and pattern the filters spell, unescaped. */
+    sz_cptr_t strings_data;
+
+    /** The last step of every path and filter query, which never advances. */
+    sz_u64_t const *final_steps;
+
+    /** The first step of every path, live at the document's root; a filter query's first step is
+     *  live only at the nodes its filter decides. */
+    sz_u64_t const *root_steps;
+
+    /** The first step of every bare filter path, live at a holder above the document's root whose
+     *  one element the root is, so the filter decides the root. */
+    sz_u64_t const *holder_steps;
+
+    /** The array positions of every index and slice selector, step after step. */
+    sz_subdocuments_slice_t const *slices;
+
+    /** Per step, where its slices start in @c slices, and one past the last step's. */
+    sz_u32_t const *slices_offsets;
+
+    /** Per step, the path it belongs to, reported as @c needle_index. */
+    sz_u32_t const *steps_paths;
+
+    /** Steps across all paths. */
+    sz_u32_t steps_count;
+
+    /** 64-bit words per step bitset. */
+    sz_u32_t words_count;
+
+    /** Slots of @c names_slots, a power of two, or zero when no step selects by name. */
+    sz_u32_t names_slots_count;
+
+    /** Paths the vocabulary holds; the queries of filters take steps after
+     *  theirs, and report nothing. */
+    sz_u32_t paths_count;
+
+    /** Filters the paths hold. */
+    sz_u32_t filters_count;
+
+    /** Patterns of <tt>match()</tt> and <tt>search()</tt>, each compiled behind a tag naming it, so
+     *  that one engine answers for each alone: a tested string carries the tag of its
+     *  pattern. Empty without any. */
+    sz_regex_engine_t regex;
+
+    /** Patterns @c regex holds, zero when it holds none and was never compiled. */
+    sz_u32_t patterns_count;
+
+    /** The document grammar and the path language that goes with it. */
+    sz_subdocuments_format_t format;
+
+    /** How the JSON walks read what RFC 8259 leaves open. */
+    sz_subdocuments_options_t options;
+
+    /** The capability that compiled the paths. */
+    sz_capability_t capability;
+
+    /** What built both blocks below. */
+    sz_allocator_t allocator;
+
+    /** The compiled paths. */
+    void *memory;
+
+    /** Bytes of that block. */
+    sz_size_t memory_bytes;
+
+    /** The host depth stack of live sets and the nodes of a pending run, grown on demand like the
+     *  round scratch of @c levenshtein. */
+    void *scratch;
+
+    /** Bytes of that block. */
+    sz_size_t scratch_bytes;
+} sz_subdocuments_engine_t;
 
 #pragma endregion
 

@@ -32,12 +32,12 @@ void test_utf8_sentences_unit() {
 
     // C++ range wrapper known-answer: the view must faithfully expose the kernel's sentence segments.
     std::vector<std::string> const sentences =
-        sz::string_view_t("Hi. Yo.").utf8_sentences().template to<std::vector<std::string>>();
+        sz::utf8_sentences(sz::string_view_t("Hi. Yo.")).template to<std::vector<std::string>>();
     expect_equal(sentences.size(), 2, "C++ utf8_sentences range");
 
     // Sentence counts for the shared prose fixtures; per-fixture rationale lives in test/utf8.hpp.
     auto count_sentences = [](std::string_view text) {
-        return sz::string_view_t(text).utf8_sentences().template to<std::vector<std::string>>().size();
+        return sz::utf8_sentences(sz::string_view_t(text)).template to<std::vector<std::string>>().size();
     };
     expect_equal(count_sentences(utf8_prose_hotel_review()), 5, "hotel_review sentences");
     expect_equal(count_sentences(utf8_prose_concert_post()), 4, "concert_post sentences");

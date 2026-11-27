@@ -11,7 +11,7 @@
 #ifndef STRINGZILLA_UTF8_UNCASED_FOLD_H_
 #define STRINGZILLA_UTF8_UNCASED_FOLD_H_
 
-#include "stringzilla/capabilities.h" // `sz_capability_t`
+#include "stringzilla/capabilities.h" // `sz_kernel_kind_t`, `sz_kernel_punned_t`
 
 #ifdef __cplusplus
 extern "C" {

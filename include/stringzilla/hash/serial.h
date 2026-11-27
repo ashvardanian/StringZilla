@@ -16,71 +16,6 @@
 extern "C" {
 #endif
 
-/**
- *  @brief The state for incremental construction of a hash.
- *  @sa sz_hash_state_init_best, sz_hash_state_update_best, sz_hash_state_digest_best
- *
- *  @note Uses the @c packed attribute to allow placement at arbitrary addresses without UBSAN
- *      warnings, and plain byte arrays to avoid implicit alignment requirements from SIMD types.
- *      The layout matches @c sz_hash_state_aligned_t for safe casting between them.
- */
-#if defined(_MSC_VER)
-#pragma pack(push, 1)
-typedef struct sz_hash_state_t {
-    sz_u8_t aes[64]; // 64 bytes, equivalent to sz_u512_vec_t
-    sz_u8_t sum[64]; // 64 bytes, equivalent to sz_u512_vec_t
-    sz_u8_t ins[64]; // 64 bytes, equivalent to sz_u512_vec_t
-    sz_u8_t key[16]; // 16 bytes, equivalent to sz_u128_vec_t
-    sz_size_t ins_length;
-} sz_hash_state_t;
-#pragma pack(pop)
-#else
-typedef struct __attribute__((packed)) sz_hash_state_t {
-    sz_u8_t aes[64]; // 64 bytes, equivalent to sz_u512_vec_t
-    sz_u8_t sum[64]; // 64 bytes, equivalent to sz_u512_vec_t
-    sz_u8_t ins[64]; // 64 bytes, equivalent to sz_u512_vec_t
-    sz_u8_t key[16]; // 16 bytes, equivalent to sz_u128_vec_t
-    sz_size_t ins_length;
-} sz_hash_state_t;
-#endif
-
-/** Bytes in a SHA256 digest, fixed by FIPS 180-4. */
-#define STRINGZILLA_SHA256_DIGEST_LENGTH (32)
-
-/** Bytes in a SHA256 message block, fixed by FIPS 180-4. */
-#define STRINGZILLA_SHA256_BLOCK_LENGTH (64)
-
-/**
- *  @brief The state for incremental construction of a SHA256 hash.
- *  @sa sz_sha256_state_init_best, sz_sha256_state_update_best, sz_sha256_state_digest_best
- */
-typedef struct sz_sha256_state_t {
-
-    /** Message block buffer. */
-    sz_u8_t block[STRINGZILLA_SHA256_BLOCK_LENGTH];
-
-    /** Current hash state: 8x 32-bit values. */
-    sz_u32_t hash[8];
-
-    /** Total message length in bytes. */
-    sz_u64_t total_length;
-
-    /** Current bytes in block (0-63). */
-    sz_u8_t block_length;
-
-    /** Rounds the state to 128 bytes. */
-    sz_u8_t padding_[23];
-} sz_sha256_state_t;
-
-/*  The batched kernels walk an array of these, so the layout is load-bearing rather than
- *  incidental. A power-of-two stride turns lane indexing into a shift, and putting @c block first
- *  gives every lane the same cache-line phase as the array itself — at 112 bytes the phase
- *  rotated per lane, splitting the 64-byte block read across two lines for most of them.
- *  @c block_length is a byte because it never exceeds 63, which also makes the struct identical on
- *  32- and 64-bit builds. Alignment stays natural on purpose: @c malloc only promises 16 bytes, so
- *  demanding 64 would under-align every heap-allocated batch. */
-sz_static_assert_(sizeof(sz_sha256_state_t) == 128, sha256_state_is_two_cache_lines);
-
 /*  Optimize this tier for size. It emulates the AES round in scalar code and runs only where no
  *  AES instruction exists, so what the unrolled form buys is footprint rather than throughput - 78
  *  KB of `.text` under GCC, 15 KB under Clang, against 7 KB and 6 KB once the compilers stop
@@ -116,7 +51,7 @@ typedef struct sz_hash_state_aligned_for_short_t {
 /*  The aligned full state must share the field offsets of the packed @c sz_hash_state_t: the
  *  one-shot path inits the aligned state through a `(sz_hash_state_t *)` cast, and
  *  `sz_hash_state_load_<isa>_` and `sz_hash_state_store_<isa>_` move it field-by-field. The packed
- *  @c sz_hash_state_t is defined in `hash.h`, which includes this header after that definition. */
+ *  @c sz_hash_state_t is defined in `types.h`. */
 #if STRINGZILLA_WITH_LIBC
 sz_static_assert_(offsetof(sz_hash_state_aligned_t, aes) == offsetof(sz_hash_state_t, aes), hash_aligned_aes_offset);
 sz_static_assert_(offsetof(sz_hash_state_aligned_t, sum) == offsetof(sz_hash_state_t, sum), hash_aligned_sum_offset);

@@ -140,7 +140,7 @@ void bench_ngrams(environment_t &env) {
     std::optional<double> const residues_baseline = bench_baseline(env, corpus, "sz_ngrams_residues_serial", {},
                                                                    serial_residues);
     for (ngrams_residues_kernel_t const &kernel : std::span(ngrams_residues_kernels_k).subspan(1)) {
-        if (!(kernel.capability & sz::default_capabilities())) continue;
+        if (!(kernel.capability & cpu_capabilities_enabled())) continue;
         char name[STRINGZILLA_CAPABILITIES_NAME_CAPACITY];
         sz_capabilities_name(kernel.capability, name, sizeof(name));
         print(bench_unary(env, corpus, fmt::format("sz_ngrams_residues_{}", name), serial_residues,
@@ -151,7 +151,7 @@ void bench_ngrams(environment_t &env) {
     fmt::println("Starting MinHash sketch benchmarks...");
     for (std::size_t const slots : {128, 512, 2048}) {
         print(bench_unary(env, corpus, fmt::format("sz_ngrams_sketches:s{}", slots),
-                          ngrams_sketches_callable_t {corpus, sz::default_capabilities(), slots, candidates}));
+                          ngrams_sketches_callable_t {corpus, cpu_capabilities_enabled(), slots, candidates}));
         ngrams_sketches_callable_t serial {corpus, sz_cap_serial_k, slots, candidates};
         std::optional<double> const baseline = bench_baseline(
             env, corpus, fmt::format("sz_ngrams_sketches_serial:s{}", slots), {}, serial);
@@ -159,7 +159,7 @@ void bench_ngrams(environment_t &env) {
             sz_kernel_punned_t kernel = nullptr;
             sz_capability_t picked = 0;
             // A capability without a kernel of its own would time the one below it again.
-            if (!(capability & sz::default_capabilities()) ||
+            if (!(capability & cpu_capabilities_enabled()) ||
                 sz_ngrams_find_kernel(sz_kernel_ngrams_sketches_k, capability, &kernel, &picked) != sz_success_k ||
                 picked != capability)
                 continue;

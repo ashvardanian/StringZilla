@@ -91,7 +91,7 @@ struct simt_backend_t {
 };
 
 inline std::string simt_arm(simt_backend_t const &backend, char const *verb) {
-    return std::string(verb) + "_" + backend.name + ":" + std::to_string(backend.runtime.selected.ordinal());
+    return std::string(verb) + "_" + backend.name + ":" + std::to_string(backend.runtime.selected.ordinal);
 }
 
 /**
@@ -272,7 +272,7 @@ inline void bench_levenshtein_cross_product(simt_backend_t const &backend, envir
     auto const queries = levenshtein_simt_queries(corpus, query_bytes);
     std::string const suffix = ":q" + std::to_string(query_bytes) + ":c" + std::to_string(resident.count());
     std::string const device_suffix = std::string(":") + backend.name + ":" +
-                                      std::to_string(backend.runtime.selected.ordinal());
+                                      std::to_string(backend.runtime.selected.ordinal);
     std::string const shuffled_name = simt_arm(backend, "sz_levenshtein_distances") + suffix + ":shuffled",
                       sorted_name = simt_arm(backend, "sz_levenshtein_distances") + suffix + ":sorted",
                       skewed_name = simt_arm(backend, "sz_levenshtein_distances") + suffix + ":skewed",
@@ -394,7 +394,7 @@ inline void bench_ngrams_overlaps(simt_backend_t const &backend, environment_t c
     auto const query = std::string_view(corpus.tokens[0]).substr(0, query_bytes);
     std::string const suffix = ":w" + std::to_string(width) + label;
     std::string const device_suffix = std::string(":") + backend.name + ":" +
-                                      std::to_string(backend.runtime.selected.ordinal());
+                                      std::to_string(backend.runtime.selected.ordinal);
     std::string const device_name = simt_arm(backend, "sz_ngrams_overlaps") + suffix;
     auto validator = overlaps_from_sz {sz_ngrams_engine_init_serial,
                                        sz_ngrams_overlaps_serial,
@@ -490,13 +490,13 @@ inline bool substrings_fits_the_device(simt_backend_t const &backend, sz_substri
 
 /** Per-haystack counts, the device arm logged against the CPU one. */
 inline void bench_substrings_counts(simt_backend_t const &backend, environment_t const &env, corpus_t const &corpus,
-                                    substrings_engine_t &host, substrings_engine_t &device,
+                                    substrings_prepared_t &host, substrings_prepared_t &device,
                                     substrings_corpus_t const &resident, sz_strings_view_t const &device_haystacks,
                                     std::string const &suffix) {
     auto dispatched = substrings_counts_from_sz {sz_substrings_counts, host, resident, resident.haystacks()};
     std::string const device_name = simt_arm(backend, "sz_substrings_counts") + suffix;
     std::string const device_suffix = std::string(":") + backend.name + ":" +
-                                      std::to_string(backend.runtime.selected.ordinal());
+                                      std::to_string(backend.runtime.selected.ordinal);
     std::optional<double> const base = bench_baseline(env, corpus, "sz_substrings_counts" + device_suffix + suffix,
                                                       {device_name}, dispatched);
     print(bench_unary(env, corpus, device_name, dispatched,
@@ -507,23 +507,24 @@ inline void bench_substrings_counts(simt_backend_t const &backend, environment_t
 
 /** Every match, the device arm logged against the CPU one. */
 inline void bench_substrings_find(simt_backend_t const &backend, environment_t const &env, corpus_t const &corpus,
-                                  substrings_engine_t &host, substrings_engine_t &device,
+                                  substrings_prepared_t &host, substrings_prepared_t &device,
                                   substrings_corpus_t const &resident, sz_strings_view_t const &device_haystacks,
                                   std::string const &suffix) {
     auto dispatched = substrings_find_from_sz {sz_substrings_find, host, resident, resident.haystacks()};
     std::string const device_name = simt_arm(backend, "sz_substrings_find") + suffix;
     std::string const device_suffix = std::string(":") + backend.name + ":" +
-                                      std::to_string(backend.runtime.selected.ordinal());
+                                      std::to_string(backend.runtime.selected.ordinal);
     std::optional<double> const base = bench_baseline(env, corpus, "sz_substrings_find" + device_suffix + suffix,
                                                       {device_name}, dispatched);
     print(bench_unary(env, corpus, device_name, dispatched,
-                      substrings_find_from_sz {backend.substrings_find, device, resident, device_haystacks}),
+                      substrings_find_from_sz {backend.substrings_find, device, resident, device_haystacks,
+                                               backend.runtime.stream}),
           base);
 }
 
 /** The rewrite, the device arm logged against the CPU one. */
 inline void bench_substrings_replace(simt_backend_t const &backend, environment_t const &env, corpus_t const &corpus,
-                                     substrings_engine_t &host, substrings_engine_t &device,
+                                     substrings_prepared_t &host, substrings_prepared_t &device,
                                      substrings_dictionary_t const &dictionary, substrings_corpus_t const &resident,
                                      sz_strings_view_t const &device_haystacks,
                                      sz_strings_view_t const &device_replacements, std::string const &suffix) {
@@ -531,24 +532,24 @@ inline void bench_substrings_replace(simt_backend_t const &backend, environment_
                                                   dictionary.replacements()};
     std::string const device_name = simt_arm(backend, "sz_substrings_replace") + suffix;
     std::string const device_suffix = std::string(":") + backend.name + ":" +
-                                      std::to_string(backend.runtime.selected.ordinal());
+                                      std::to_string(backend.runtime.selected.ordinal);
     std::optional<double> const base = bench_baseline(env, corpus, "sz_substrings_replace" + device_suffix + suffix,
                                                       {device_name}, dispatched);
     print(bench_unary(env, corpus, device_name, dispatched,
                       substrings_replace_from_sz {backend.substrings_replace, device, resident, device_haystacks,
-                                                  device_replacements}),
+                                                  device_replacements, backend.runtime.stream}),
           base);
 }
 
 /** BM25 scores, the device arm logged against the CPU one. */
 inline void bench_substrings_bm25(simt_backend_t const &backend, environment_t const &env, corpus_t const &corpus,
-                                  substrings_engine_t &host, substrings_engine_t &device,
+                                  substrings_prepared_t &host, substrings_prepared_t &device,
                                   substrings_corpus_t const &resident, sz_strings_view_t const &device_haystacks,
                                   std::string const &suffix) {
     auto dispatched = substrings_bm25_from_sz {sz_substrings_bm25_scores, host, resident, resident.haystacks()};
     std::string const device_name = simt_arm(backend, "sz_substrings_bm25_scores") + suffix;
     std::string const device_suffix = std::string(":") + backend.name + ":" +
-                                      std::to_string(backend.runtime.selected.ordinal());
+                                      std::to_string(backend.runtime.selected.ordinal);
     std::optional<double> const base = bench_baseline(env, corpus, "sz_substrings_bm25_scores" + device_suffix + suffix,
                                                       {device_name}, dispatched);
     print(bench_unary(env, corpus, device_name, dispatched,
@@ -576,41 +577,46 @@ inline void bench_substrings_slice(simt_backend_t const &backend, environment_t 
         return;
     }
     {
-        substrings_engine_t probe(dictionary, sz_substrings_overlapping_k, backend.substrings_engine_init, allocator,
-                                  matches_budget, resident.views.size(), backend.runtime.stream);
+        substrings_prepared_t probe = compiled_substrings(dictionary, sz_substrings_overlapping_k,
+                                                          backend.substrings_engine_init, allocator, matches_budget,
+                                                          resident.views.size(), backend.runtime.stream);
         fmt::println("Vocabulary {} holds {} needles over {} states, {} of them hot.", suffix.c_str(),
-                     dictionary.needles.size(), probe.engine.state_count, probe.engine.hot_count);
-        if (!substrings_fills_a_wave(probe.engine, resident, resident_candidates_per_call(env, backend.runtime)))
-            return;
+                     dictionary.needles.size(), probe.raw().state_count, probe.raw().hot_count);
+        if (!substrings_fills_a_wave(probe.raw(), resident, resident_candidates_per_call(env, backend.runtime))) return;
         // A benchmark round must keep every match it finds, whatever the default budget.
-        std::size_t const emitted = substrings_matches_emitted(backend, probe.engine, resident, device_haystacks);
-        if (emitted > probe.engine.matches_budget) matches_budget = emitted;
-        substrings_engine_t sized(dictionary, sz_substrings_overlapping_k, backend.substrings_engine_init, allocator,
-                                  matches_budget, resident.views.size(), backend.runtime.stream);
-        if (!substrings_fits_the_device(backend, sized.engine, emitted)) return;
+        std::size_t const emitted = substrings_matches_emitted(backend, probe.raw(), resident, device_haystacks);
+        if (emitted > probe.raw().matches_budget) matches_budget = emitted;
+        substrings_prepared_t sized = compiled_substrings(dictionary, sz_substrings_overlapping_k,
+                                                          backend.substrings_engine_init, allocator, matches_budget,
+                                                          resident.views.size(), backend.runtime.stream);
+        if (!substrings_fits_the_device(backend, sized.raw(), emitted)) return;
     }
 
     unified_strings_t const replacements_tape = resident_strings(backend.runtime, dictionary.replacements());
     sz_strings_view_t const device_replacements = replacements_tape.view().raw;
     for (sz_substrings_overlap_policy_t const policy : substrings_policies_k) {
-        substrings_engine_t host(dictionary, policy, substrings_engine_init_cpu_, heap);
-        substrings_engine_t device(dictionary, policy, backend.substrings_engine_init, allocator, matches_budget,
-                                   resident.views.size(), backend.runtime.stream);
+        substrings_prepared_t host = compiled_substrings(dictionary, policy, substrings_engine_init_cpu_, heap);
+        substrings_prepared_t device = compiled_substrings(dictionary, policy, backend.substrings_engine_init,
+                                                           allocator, matches_budget, resident.views.size(),
+                                                           backend.runtime.stream);
         std::string const cover = suffix + substrings_policy_name(policy);
         bench_substrings_counts(backend, env, corpus, host, device, resident, device_haystacks, cover);
         bench_substrings_find(backend, env, corpus, host, device, resident, device_haystacks, cover);
     }
     for (sz_substrings_overlap_policy_t const policy : substrings_leftmost_policies_k) {
-        substrings_engine_t host(dictionary, policy, substrings_engine_init_cpu_, heap);
-        substrings_engine_t device(dictionary, policy, backend.substrings_engine_init, allocator, matches_budget,
-                                   resident.views.size(), backend.runtime.stream);
+        substrings_prepared_t host = compiled_substrings(dictionary, policy, substrings_engine_init_cpu_, heap);
+        substrings_prepared_t device = compiled_substrings(dictionary, policy, backend.substrings_engine_init,
+                                                           allocator, matches_budget, resident.views.size(),
+                                                           backend.runtime.stream);
         bench_substrings_replace(backend, env, corpus, host, device, dictionary, resident, device_haystacks,
                                  device_replacements, suffix + substrings_policy_name(policy));
     }
     {
-        substrings_engine_t host(dictionary, sz_substrings_overlapping_k, substrings_engine_init_cpu_, heap);
-        substrings_engine_t device(dictionary, sz_substrings_overlapping_k, backend.substrings_engine_init, allocator,
-                                   matches_budget, resident.views.size(), backend.runtime.stream);
+        substrings_prepared_t host = compiled_substrings(dictionary, sz_substrings_overlapping_k,
+                                                         substrings_engine_init_cpu_, heap);
+        substrings_prepared_t device = compiled_substrings(dictionary, sz_substrings_overlapping_k,
+                                                           backend.substrings_engine_init, allocator, matches_budget,
+                                                           resident.views.size(), backend.runtime.stream);
         bench_substrings_bm25(backend, env, corpus, host, device, resident, device_haystacks, suffix);
     }
 }
@@ -639,9 +645,10 @@ inline void bench_substrings_small_batch(simt_backend_t const &backend, environm
     sz_strings_view_t const device_haystacks = haystacks_tape.view().raw;
     for (sz_substrings_overlap_policy_t const policy :
          {sz_substrings_overlapping_k, sz_substrings_leftmost_longest_k}) {
-        substrings_engine_t host(dictionary, policy, substrings_engine_init_cpu_, heap);
-        substrings_engine_t device(dictionary, policy, backend.substrings_engine_init, allocator, matches_budget,
-                                   resident.views.size(), backend.runtime.stream);
+        substrings_prepared_t host = compiled_substrings(dictionary, policy, substrings_engine_init_cpu_, heap);
+        substrings_prepared_t device = compiled_substrings(dictionary, policy, backend.substrings_engine_init,
+                                                           allocator, matches_budget, resident.views.size(),
+                                                           backend.runtime.stream);
         std::string const cover = suffix + substrings_policy_name(policy);
         bench_substrings_counts(backend, env, corpus, host, device, resident, device_haystacks, cover);
         bench_substrings_find(backend, env, corpus, host, device, resident, device_haystacks, cover);
@@ -676,9 +683,11 @@ inline void bench_substrings_documents(simt_backend_t const &backend, environmen
     substrings_corpus_t const resident(documents);
     unified_strings_t const haystacks_tape = resident_strings(backend.runtime, resident.haystacks());
     sz_strings_view_t const device_haystacks = haystacks_tape.view().raw;
-    substrings_engine_t host(dictionary, sz_substrings_overlapping_k, substrings_engine_init_cpu_, heap);
-    substrings_engine_t device(dictionary, sz_substrings_overlapping_k, backend.substrings_engine_init, allocator,
-                               matches_budget, resident.views.size(), backend.runtime.stream);
+    substrings_prepared_t host = compiled_substrings(dictionary, sz_substrings_overlapping_k,
+                                                     substrings_engine_init_cpu_, heap);
+    substrings_prepared_t device = compiled_substrings(dictionary, sz_substrings_overlapping_k,
+                                                       backend.substrings_engine_init, allocator, matches_budget,
+                                                       resident.views.size(), backend.runtime.stream);
     bench_substrings_bm25(backend, env, corpus, host, device, resident, device_haystacks, suffix);
 }
 
@@ -717,7 +726,7 @@ void bench_simt_against_cpu(simt_backend_t const &backend, environment_t const &
                             char const *verb, std::string const &suffix, dispatched_type_ dispatched,
                             device_type_ device) {
     std::string const device_name = simt_arm(backend, verb) + suffix;
-    std::string const baseline_name = fmt::format("{}:{}:{}{}", verb, backend.name, backend.runtime.selected.ordinal(),
+    std::string const baseline_name = fmt::format("{}:{}:{}{}", verb, backend.name, backend.runtime.selected.ordinal,
                                                   suffix);
     std::optional<double> const base = bench_baseline(env, corpus, baseline_name, {device_name}, dispatched);
     print(bench_unary(env, corpus, device_name, dispatched, device), base);
@@ -740,29 +749,33 @@ inline void bench_regex_simt(simt_backend_t const &backend, environment_t const 
     fmt::println("Starting regex benchmarks over {} resident haystacks...", resident.views.size());
     for (vocabulary_t const &vocabulary : regex_vocabularies_k) {
         if (!selects(vocabulary)) continue;
-        regex_engine_t host(vocabulary, regex_engine_init_cpu_, heap);
-        regex_engine_t device(vocabulary, backend.regex_engine_init, backend.runtime.unified, backend.runtime.stream);
+        regex_prepared_t host = compiled_regex(vocabulary, regex_engine_init_cpu_, heap);
+        regex_prepared_t device = compiled_regex(vocabulary, backend.regex_engine_init, backend.runtime.unified,
+                                                 backend.runtime.stream);
         unified_strings_t const replacements_tape = resident_strings(backend.runtime, regex_replacements(vocabulary));
         std::string const label = vocabulary.label;
         bench_simt_against_cpu(backend, env, corpus, "sz_regex_counts", label,
                                regex_counts_from_sz {sz_regex_counts, host, resident, resident.haystacks()},
                                regex_counts_from_sz {backend.regex_counts, device, resident, device_haystacks,
                                                      std::cref(backend.runtime)});
-        bench_simt_against_cpu(backend, env, corpus, "sz_regex_find", label,
-                               regex_find_from_sz {sz_regex_find, host, resident, resident.haystacks()},
-                               regex_find_from_sz {backend.regex_find, device, resident, device_haystacks});
+        bench_simt_against_cpu(
+            backend, env, corpus, "sz_regex_find", label,
+            regex_find_from_sz {sz_regex_find, host, resident, resident.haystacks()},
+            regex_find_from_sz {backend.regex_find, device, resident, device_haystacks, backend.runtime.stream});
         bench_simt_against_cpu(backend, env, corpus, "sz_regex_replace", label,
                                regex_replace_from_sz {sz_regex_replace, host, resident, resident.haystacks(),
                                                       regex_replacements(vocabulary)},
                                regex_replace_from_sz {backend.regex_replace, device, resident, device_haystacks,
-                                                      replacements_tape.view().raw});
+                                                      replacements_tape.view().raw, backend.runtime.stream});
     }
     if (!selects(regex_date_k)) return;
-    regex_engine_t host(regex_date_k, regex_engine_init_cpu_, heap);
-    regex_engine_t device(regex_date_k, backend.regex_engine_init, backend.runtime.unified, backend.runtime.stream);
-    bench_simt_against_cpu(backend, env, corpus, "sz_regex_extract", regex_date_k.label,
-                           regex_extract_from_sz {sz_regex_extract, host, resident, resident.haystacks()},
-                           regex_extract_from_sz {backend.regex_extract, device, resident, device_haystacks});
+    regex_prepared_t host = compiled_regex(regex_date_k, regex_engine_init_cpu_, heap);
+    regex_prepared_t device = compiled_regex(regex_date_k, backend.regex_engine_init, backend.runtime.unified,
+                                             backend.runtime.stream);
+    bench_simt_against_cpu(
+        backend, env, corpus, "sz_regex_extract", regex_date_k.label,
+        regex_extract_from_sz {sz_regex_extract, host, resident, resident.haystacks()},
+        regex_extract_from_sz {backend.regex_extract, device, resident, device_haystacks, backend.runtime.stream});
 }
 
 /** Every path query verb over the documents kept resident, under each vocabulary of their
@@ -779,19 +792,19 @@ inline void bench_subdocuments_simt(simt_backend_t const &backend, environment_t
     sz_strings_view_t const device_documents = documents_tape.view().raw;
     fmt::println("Starting path query benchmarks over {} resident documents...", resident.views.size());
     for (vocabulary_t const &vocabulary : subdocuments_vocabularies(format)) {
-        subdocuments_engine_t host(vocabulary, format, subdocuments_engine_init_cpu_, heap);
-        subdocuments_engine_t device(vocabulary, format, backend.subdocuments_engine_init, backend.runtime.unified,
-                                     backend.runtime.stream);
+        subdocuments_prepared_t host = compiled_subdocuments(vocabulary, format, subdocuments_engine_init_cpu_, heap);
+        subdocuments_prepared_t device = compiled_subdocuments(vocabulary, format, backend.subdocuments_engine_init,
+                                                               backend.runtime.unified, backend.runtime.stream);
         std::string const label = vocabulary.label;
         bench_simt_against_cpu(
             backend, env, corpus, "sz_subdocuments_counts", label,
             subdocuments_counts_from_sz {sz_subdocuments_counts, host, resident, resident.haystacks()},
             subdocuments_counts_from_sz {backend.subdocuments_counts, device, resident, device_documents,
                                          std::cref(backend.runtime)});
-        bench_simt_against_cpu(
-            backend, env, corpus, "sz_subdocuments_find", label,
-            subdocuments_find_from_sz {sz_subdocuments_find, host, resident, resident.haystacks()},
-            subdocuments_find_from_sz {backend.subdocuments_find, device, resident, device_documents});
+        bench_simt_against_cpu(backend, env, corpus, "sz_subdocuments_find", label,
+                               subdocuments_find_from_sz {sz_subdocuments_find, host, resident, resident.haystacks()},
+                               subdocuments_find_from_sz {backend.subdocuments_find, device, resident, device_documents,
+                                                          backend.runtime.stream});
     }
 }
 
@@ -802,7 +815,7 @@ inline void bench_subdocuments_simt(simt_backend_t const &backend, environment_t
 /** Case folding and NFC normalization of every token, each device arm against the dispatch. */
 inline void bench_utf8_norm_and_fold(simt_backend_t const &backend, environment_t const &env, corpus_t const &corpus) {
     std::string const device_suffix = std::string(":") + backend.name + ":" +
-                                      std::to_string(backend.runtime.selected.ordinal());
+                                      std::to_string(backend.runtime.selected.ordinal);
     {
         auto dispatched = utf8_uncased_fold_from_sz {cpu_best<sz_utf8_uncased_fold_best>, corpus};
         std::string const device_name = simt_arm(backend, "sz_utf8_uncased_fold");
@@ -883,77 +896,44 @@ inline void bench_sha256_multistate_simt(simt_backend_t const &backend, environm
 
 #pragma region Drivers
 
-/** Every family's rows over the multilingual lines, each on a corpus it keeps resident; a build
- *  host without a device logs as much and passes. */
-inline int bench_cross_simt(environment_t &env, simt_backend_t const &backend) {
-    try {
-        corpus_t const &corpus = env.corpora.multilingual_lines();
-        bench_levenshtein_simt(backend, env, corpus);
-        bench_ngrams_simt(backend, env, corpus);
-        bench_substrings_simt(backend, env, corpus);
-        bench_regex_simt(backend, env, env.corpora.multilingual_slice());
-        bench_subdocuments_simt(backend, env);
-        fmt::println("Starting UTF-8 normalization and case folding benchmarks...");
-        bench_utf8_norm_and_fold(backend, env, env.corpora.multilingual_slice());
-        bench_sha256_multistate_simt(backend, env);
-    }
-    catch (std::exception const &e) {
-        fmt::println(stderr, "Failed with: {}", e.what());
-        return 1;
-    }
-
-    return 0;
+/** Every family's rows over the multilingual lines, each on a corpus it keeps resident. */
+inline void bench_cross_simt(environment_t &env, simt_backend_t const &backend) {
+    corpus_t const &corpus = env.corpora.multilingual_lines();
+    bench_levenshtein_simt(backend, env, corpus);
+    bench_ngrams_simt(backend, env, corpus);
+    bench_substrings_simt(backend, env, corpus);
+    bench_regex_simt(backend, env, env.corpora.multilingual_slice());
+    bench_subdocuments_simt(backend, env);
+    fmt::println("Starting UTF-8 normalization and case folding benchmarks...");
+    bench_utf8_norm_and_fold(backend, env, env.corpora.multilingual_slice());
+    bench_sha256_multistate_simt(backend, env);
 }
 
 /** The engine families' rows of a later CUDA tier, whose UTF-8 and SHA-256 kernels are the CUDA
  *  tier's own. */
-inline int bench_cross_simt_engines(environment_t &env, simt_backend_t const &backend) {
-    try {
-        corpus_t const &corpus = env.corpora.multilingual_lines();
-        bench_levenshtein_simt(backend, env, corpus);
-        bench_ngrams_simt(backend, env, corpus);
-        bench_substrings_simt(backend, env, corpus);
-        bench_regex_simt(backend, env, env.corpora.multilingual_slice());
-        bench_subdocuments_simt(backend, env);
-    }
-    catch (std::exception const &e) {
-        fmt::println(stderr, "Failed with: {}", e.what());
-        return 1;
-    }
-
-    return 0;
+inline void bench_cross_simt_engines(environment_t &env, simt_backend_t const &backend) {
+    corpus_t const &corpus = env.corpora.multilingual_lines();
+    bench_levenshtein_simt(backend, env, corpus);
+    bench_ngrams_simt(backend, env, corpus);
+    bench_substrings_simt(backend, env, corpus);
+    bench_regex_simt(backend, env, env.corpora.multilingual_slice());
+    bench_subdocuments_simt(backend, env);
 }
 
 /** The substrings, regex and subdocuments rows of a later CUDA tier, which carries no Levenshtein
  *  or overlap kernels. */
-inline int bench_cross_simt_searches(environment_t &env, simt_backend_t const &backend) {
-    try {
-        bench_substrings_simt(backend, env, env.corpora.multilingual_lines());
-        bench_regex_simt(backend, env, env.corpora.multilingual_slice());
-        bench_subdocuments_simt(backend, env);
-    }
-    catch (std::exception const &e) {
-        fmt::println(stderr, "Failed with: {}", e.what());
-        return 1;
-    }
-
-    return 0;
+inline void bench_cross_simt_searches(environment_t &env, simt_backend_t const &backend) {
+    bench_substrings_simt(backend, env, env.corpora.multilingual_lines());
+    bench_regex_simt(backend, env, env.corpora.multilingual_slice());
+    bench_subdocuments_simt(backend, env);
 }
 
 /** The Levenshtein and overlap rows of a later CUDA tier, which carries no other family's
  *  kernels. */
-inline int bench_cross_simt_levenshtein_ngrams(environment_t &env, simt_backend_t const &backend) {
-    try {
-        corpus_t const &corpus = env.corpora.multilingual_lines();
-        bench_levenshtein_simt(backend, env, corpus);
-        bench_ngrams_simt(backend, env, corpus);
-    }
-    catch (std::exception const &e) {
-        fmt::println(stderr, "Failed with: {}", e.what());
-        return 1;
-    }
-
-    return 0;
+inline void bench_cross_simt_levenshtein_ngrams(environment_t &env, simt_backend_t const &backend) {
+    corpus_t const &corpus = env.corpora.multilingual_lines();
+    bench_levenshtein_simt(backend, env, corpus);
+    bench_ngrams_simt(backend, env, corpus);
 }
 
 #pragma endregion Drivers

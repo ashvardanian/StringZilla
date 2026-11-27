@@ -33,9 +33,7 @@
 #define STRINGZILLA_LEVENSHTEIN_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/capabilities.h" // `sz_capability_t`
-#include "stringzilla/metal.h"
-#include "stringzilla/levenshtein/serial.h" // `sz_levenshtein_engine_t`, `sz_levenshtein_symbol_t`
+#include "stringzilla/capabilities.h" // `sz_kernel_kind_t`, `sz_kernel_punned_t`
 
 #ifdef __cplusplus
 extern "C" {
@@ -354,6 +352,7 @@ STRINGZILLA_API sz_status_t sz_levenshtein_find_kernel(sz_kernel_kind_t kind, sz
 #pragma endregion Core API
 
 #if STRINGZILLA_HEADER_ONLY
+#include "stringzilla/levenshtein/serial.h"
 #include "stringzilla/levenshtein/haswell.h"
 #include "stringzilla/levenshtein/skylake.h"
 #include "stringzilla/levenshtein/icelake.h"

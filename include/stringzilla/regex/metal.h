@@ -1085,7 +1085,7 @@ STRINGZILLA_API sz_status_t sz_regex_engine_init_metal(sz_regex_engine_t *engine
     if (status == sz_success_k) status = sz_stream_synchronize_metal_(call.queue);
     if (status != sz_success_k) return sz_metal_commit_(&call, status);
     if (allocator) unified = *allocator;
-    else sz_allocator_init_unified_metal(&unified);
+    else sz_allocator_init_unified_metal_(&unified);
     status = sz_regex_engine_compile_(engine, patterns, case_sensitivity, malformed_index, sz_cap_metal_k, &unified,
                                       sz_regex_reverse_budget_k, sz_regex_forward_budget_k, stream);
     if (status != sz_success_k) return sz_metal_commit_(&call, status);

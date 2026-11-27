@@ -83,10 +83,7 @@
 #define STRINGZILLA_HASH_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/capabilities.h" // `sz_capability_t`
-
-#include "stringzilla/compare/serial.h" // `sz_equal_serial_`
-#include "stringzilla/hash/serial.h"    // `sz_hash_state_t`, `sz_sha256_state_t`
+#include "stringzilla/capabilities.h" // `sz_kernel_kind_t`, `sz_kernel_punned_t`
 
 #ifdef __cplusplus
 extern "C" {
@@ -1071,15 +1068,18 @@ STRINGZILLA_API sz_status_t sz_hash_find_kernel(sz_kernel_kind_t kind, sz_capabi
  */
 STRINGZILLA_INLINE sz_bool_t sz_hash_state_equal(sz_hash_state_t const *lhs, sz_hash_state_t const *rhs) {
     // Compare byte-by-byte (safe for packed struct)
-    if (!sz_equal_serial_((sz_cptr_t)lhs->aes, (sz_cptr_t)rhs->aes, 64)) return sz_false_k;
-    if (!sz_equal_serial_((sz_cptr_t)lhs->sum, (sz_cptr_t)rhs->sum, 64)) return sz_false_k;
-    if (!sz_equal_serial_((sz_cptr_t)lhs->key, (sz_cptr_t)rhs->key, 16)) return sz_false_k;
+    for (sz_size_t byte_index = 0; byte_index != 64; ++byte_index)
+        if (lhs->aes[byte_index] != rhs->aes[byte_index] || lhs->sum[byte_index] != rhs->sum[byte_index])
+            return sz_false_k;
+    for (sz_size_t byte_index = 0; byte_index != 16; ++byte_index)
+        if (lhs->key[byte_index] != rhs->key[byte_index]) return sz_false_k;
     return sz_true_k;
 }
 
 #pragma endregion Helper Methods
 
 #if STRINGZILLA_HEADER_ONLY
+#include "stringzilla/hash/serial.h"
 #include "stringzilla/hash/westmere.h"
 #include "stringzilla/hash/goldmont.h"
 #include "stringzilla/hash/haswell.h"

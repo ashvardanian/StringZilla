@@ -46,9 +46,7 @@
 #define STRINGZILLA_NGRAMS_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/capabilities.h" // `sz_capability_t`
-#include "stringzilla/metal.h"
-#include "stringzilla/ngrams/serial.h" // `sz_ngrams_engine_t`, `sz_ngrams_query_t`
+#include "stringzilla/capabilities.h" // `sz_kernel_kind_t`, `sz_kernel_punned_t`
 
 #ifdef __cplusplus
 extern "C" {
@@ -473,6 +471,7 @@ STRINGZILLA_API sz_status_t sz_ngrams_find_kernel(sz_kernel_kind_t kind, sz_capa
 #pragma endregion Core API
 
 #if STRINGZILLA_HEADER_ONLY
+#include "stringzilla/ngrams/serial.h"
 #include "stringzilla/ngrams/haswell.h"
 #include "stringzilla/ngrams/skylake.h"
 #include "stringzilla/ngrams/neon.h"

@@ -9,25 +9,23 @@
  *  every kernel the library defines, @b stringzilla_shared_test links the shared library with
  *  every capability off, so only the dispatch points run, and @b stringzilla_cpu_header_test
  *  compiles the kernels inline, where the dispatch points are stubs, running the cross-checks and
- *  the stubs alone.
+ *  the stubs alone. The header-only one reaches the library only through the C ABI and the
+ *  containers, as the C++ SDK links the library.
  */
 #undef NDEBUG // ! A test's oracle must stay live in every build
 
 #undef STRINGZILLA_DEBUG
 #define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
-/*  Include the StringZilla headers before anything else, to intercept missing @c #include
- *  directives and other issues. */
-#include "stringzilla/stringzilla.h"   // Primary C API
-#include "stringzilla/stringzilla.hpp" // C++ string class replacement
-
-#include <map>           // `std::map`
-#include <string>        // `std::string` baseline
-#include <string_view>   // `std::string_view` baseline
-#include <unordered_map> // `std::unordered_map`
-#include <vector>        // `std::vector`
+#include <map>         // `std::map`
+#include <string>      // `std::string` baseline
+#include <string_view> // `std::string_view` baseline
+#include <vector>      // `std::vector`
 
 #include <fmt/format.h>
+
+#include "stringzilla/stringzilla.h" // Primary C API
+#include "stringzilla/string.hpp"    // `sz::string_view_t`, `sz::string`, the containers header-only runners keep
 
 #include "harness.hpp" // `start_test_run`, `run_test_case`, `finish_test_run`
 
@@ -43,127 +41,18 @@ template class sz::string_slice<char const>;
 
 template class std::vector<sz::string_view_t>;
 template class std::map<sz::string_view_t, int>;
-template class std::unordered_map<sz::string_view_t, int>;
 
 namespace ashvardanian::stringzilla::test {
 
-#if !STRINGZILLA_HEADER_ONLY
-/** The CPU device answers as the C queries do and prepares its own threads, while every kind
- *  refuses the ordinal past its last device and a GPU refuses to configure a CPU thread. */
-void test_device_unit() {
-    sz::device_t const cpu = sz::device_t::cpu();
-    auto const [detected, detected_status] = cpu.capabilities_detected();
-    auto const [enabled, enabled_status] = cpu.capabilities_enabled();
-    auto const [compiled, compiled_status] = cpu.capabilities_compiled();
-    expect_true(sz::succeeded(detected_status) && sz::succeeded(enabled_status) && sz::succeeded(compiled_status));
-    expect_true((enabled & sz_cap_serial_k) && !(enabled & ~(detected | sz_cap_serial_k)));
-    expect_true(!(enabled & ~compiled));
-    expect_true(sz::succeeded(cpu.configure_thread(enabled)));
-    for (sz::device_kind_t kind :
-         {sz::device_kind_t::cpu_k, sz::device_kind_t::cuda_k, sz::device_kind_t::rocm_k, sz::device_kind_t::metal_k}) {
-        auto const [devices, count_status] = sz::device_t::count(kind);
-        if (sz::failed(count_status)) continue; // No device of this kind answers
-        expect_true(kind != sz::device_kind_t::cpu_k || devices == 1);
-        expect_equal(sz::device_t::make(kind, devices).status, sz::status_t::missing_gpu_k);
-        if (kind == sz::device_kind_t::cpu_k) continue;
-        auto const [gpu, make_status] = sz::device_t::make(kind, 0);
-        if (!expect_true(sz::succeeded(make_status))) continue;
-        auto const [gpu_compiled, gpu_compiled_status] = gpu.capabilities_compiled();
-        expect_true(sz::succeeded(gpu_compiled_status) && !(gpu_compiled & sz_cap_cpus_k));
-        expect_equal(gpu.configure_thread(sz_cap_any_k), sz::status_t::missing_kernel_k);
-    }
+/** The header-only stub of @p best_, called with value-initialized operands, which it never reads,
+ *  reports the missing library. */
+template <auto best_>
+void test_missing_library() {
+    sz_status_t const status = []<typename... arguments_types_>(sz_status_t (*best)(arguments_types_...)) {
+        return best(arguments_types_ {}...);
+    }(best_);
+    expect_equal(status, sz_missing_library_k, "a header-only dispatch point ran a kernel");
 }
-
-#else
-
-/** Calls @p best with every operand value-initialized, which a header-only stub never reads. */
-template <typename... arguments_types_>
-sz_status_t call_stub_(sz_status_t (*best)(arguments_types_...)) noexcept {
-    return best(arguments_types_ {}...);
-}
-
-/** Every dispatch point reports the missing library in a header-only build. */
-void test_dispatch_stubs_unit() {
-    sz_status_t const statuses[] = {
-        call_stub_(sz_stream_synchronize_best),
-        call_stub_(sz_equal_best),
-        call_stub_(sz_order_best),
-        call_stub_(sz_strings_to_tape_best),
-        call_stub_(sz_strings_to_rows_best),
-        call_stub_(sz_strings_escape_best),
-        call_stub_(sz_strings_unescape_best),
-        call_stub_(sz_strings_lookup_best),
-        call_stub_(sz_strings_normalize_best),
-        call_stub_(sz_strings_split_best),
-        call_stub_(sz_strings_split_lines_best),
-        call_stub_(sz_strings_join_best),
-        call_stub_(sz_allocator_init_unified_best),
-        call_stub_(sz_allocator_init_device_best),
-        call_stub_(sz_allocator_init_pinned_best),
-        call_stub_(sz_find_byte_best),
-        call_stub_(sz_rfind_byte_best),
-        call_stub_(sz_find_best),
-        call_stub_(sz_rfind_best),
-        call_stub_(sz_find_byteset_best),
-        call_stub_(sz_rfind_byteset_best),
-        call_stub_(sz_find_strings_best),
-        call_stub_(sz_bytesum_best),
-        call_stub_(sz_hash_best),
-        call_stub_(sz_hash_multiseed_best),
-        call_stub_(sz_hash_strings_best),
-        call_stub_(sz_hash_state_init_best),
-        call_stub_(sz_hash_state_update_best),
-        call_stub_(sz_hash_state_digest_best),
-        call_stub_(sz_fill_random_best),
-        call_stub_(sz_sha256_state_init_best),
-        call_stub_(sz_sha256_state_update_best),
-        call_stub_(sz_sha256_state_digest_best),
-        call_stub_(sz_sha256_multistate_update_best),
-        call_stub_(sz_sha256_multistate_digest_best),
-        call_stub_(sz_aes256_key_init_best),
-        call_stub_(sz_aes256_ctr_xor_best),
-        call_stub_(sz_aes256_gcm_key_init_best),
-        call_stub_(sz_aes256_gcm_encrypt_best),
-        call_stub_(sz_aes256_gcm_decrypt_best),
-        call_stub_(sz_aes256_gcm_encryptor_init_best),
-        call_stub_(sz_aes256_gcm_encryptor_associate_best),
-        call_stub_(sz_aes256_gcm_encryptor_update_best),
-        call_stub_(sz_aes256_gcm_encryptor_digest_best),
-        call_stub_(sz_aes256_gcm_decryptor_init_best),
-        call_stub_(sz_aes256_gcm_decryptor_associate_best),
-        call_stub_(sz_aes256_gcm_decryptor_update_unverified_best),
-        call_stub_(sz_aes256_gcm_decryptor_verify_best),
-        call_stub_(sz_sort_order_best),
-        call_stub_(sz_sort_uncased_order_best),
-        call_stub_(sz_intersect_best),
-        call_stub_(sz_utf8_count_best),
-        call_stub_(sz_utf8_count_strings_best),
-        call_stub_(sz_utf8_seek_best),
-        call_stub_(sz_utf8_decode_best),
-        call_stub_(sz_utf8_newlines_best),
-        call_stub_(sz_utf8_whitespaces_best),
-        call_stub_(sz_utf8_delimiters_best),
-        call_stub_(sz_utf8_wordbreaks_best),
-        call_stub_(sz_utf8_graphemes_best),
-        call_stub_(sz_utf8_sentences_best),
-        call_stub_(sz_utf8_linebreaks_best),
-        call_stub_(sz_utf8_norm_best),
-        call_stub_(sz_utf8_find_denormalized_best),
-        call_stub_(sz_utf8_uncased_fold_best),
-        call_stub_(sz_utf8_uncased_needle_init_best),
-        call_stub_(sz_utf8_uncased_search_best),
-        call_stub_(sz_utf8_uncased_order_best),
-        call_stub_(sz_utf8_find_cased_best),
-    };
-    for (sz_status_t status : statuses) expect_equal(status, sz_missing_library_k);
-
-    // The C++ layer runs the serial kernels over the empty default mask instead.
-    sz::string_view_t const text = "a quick brown fox";
-    expect_equal(text.find("brown"), 8);
-    expect_equal(text.utf8_count(), 17);
-}
-
-#endif // !STRINGZILLA_HEADER_ONLY
 
 /** Each family's finder picks what @c sz_find_kernel_punned picks for the family's kinds and misses
  *  every other kind, while a header-only build reports the missing library from all of them. */
@@ -216,9 +105,9 @@ void test_find_kernel_unit() {
 
 /** The GPUs @c STRINGZILLA_DEVICES names, exiting when one is unavailable, or else the first of
  *  each kind present. */
-std::vector<sz::device_t> selected_devices() {
+std::vector<device_selection_t> selected_devices() {
     std::optional<std::vector<device_selection_t>> const &requested = test_run.settings.devices;
-    std::vector<sz::device_t> devices;
+    std::vector<device_selection_t> devices;
     if constexpr (STRINGZILLA_HEADER_ONLY) {
         if (requested) {
             fmt::println(stderr, "This header-only executable accepts only CPU workloads");
@@ -228,19 +117,19 @@ std::vector<sz::device_t> selected_devices() {
     }
     if (requested) {
         for (device_selection_t const &selection : *requested) {
-            auto const device = sz::device_t::make(selection.backend, selection.ordinal);
-            if (!device) {
+            sz_status_t const status = check_device(selection);
+            if (status != sz_success_k) {
                 fmt::println(stderr, "Device {}:{} is unavailable (status {})", device_name(selection.backend),
-                             selection.ordinal, static_cast<int>(device.status));
+                             selection.ordinal, static_cast<int>(status));
                 std::exit(1);
             }
-            devices.push_back(device.value);
+            devices.push_back(selection);
         }
     }
     else {
         for (sz::device_kind_t kind :
              {sz::device_kind_t::cuda_k, sz::device_kind_t::rocm_k, sz::device_kind_t::metal_k})
-            if (auto device = sz::device_t::make(kind, 0)) devices.push_back(device.value);
+            if (check_device({kind, 0}) == sz_success_k) devices.push_back({kind, 0});
     }
     return devices;
 }
@@ -249,12 +138,100 @@ std::vector<sz::device_t> selected_devices() {
 
 int main(int argc, char **argv) {
     start_test_run(argc, argv);
-    std::vector<sz::device_t> const devices = selected_devices();
+    std::vector<device_selection_t> const devices = selected_devices();
 
     run_test_case("test_find_kernel_unit", test_find_kernel_unit);
 
 #if STRINGZILLA_HEADER_ONLY
-    run_test_case("test_dispatch_stubs_unit", test_dispatch_stubs_unit);
+    run_test_case("test_missing_library<sz_stream_synchronize_best>", test_missing_library<sz_stream_synchronize_best>);
+    run_test_case("test_missing_library<sz_equal_best>", test_missing_library<sz_equal_best>);
+    run_test_case("test_missing_library<sz_order_best>", test_missing_library<sz_order_best>);
+    run_test_case("test_missing_library<sz_strings_to_tape_best>", test_missing_library<sz_strings_to_tape_best>);
+    run_test_case("test_missing_library<sz_strings_to_rows_best>", test_missing_library<sz_strings_to_rows_best>);
+    run_test_case("test_missing_library<sz_strings_escape_best>", test_missing_library<sz_strings_escape_best>);
+    run_test_case("test_missing_library<sz_strings_unescape_best>", test_missing_library<sz_strings_unescape_best>);
+    run_test_case("test_missing_library<sz_strings_lookup_best>", test_missing_library<sz_strings_lookup_best>);
+    run_test_case("test_missing_library<sz_strings_normalize_best>", test_missing_library<sz_strings_normalize_best>);
+    run_test_case("test_missing_library<sz_strings_split_best>", test_missing_library<sz_strings_split_best>);
+    run_test_case("test_missing_library<sz_strings_split_lines_best>",
+                  test_missing_library<sz_strings_split_lines_best>);
+    run_test_case("test_missing_library<sz_strings_join_best>", test_missing_library<sz_strings_join_best>);
+    run_test_case("test_missing_library<sz_allocator_init_unified_best>",
+                  test_missing_library<sz_allocator_init_unified_best>);
+    run_test_case("test_missing_library<sz_allocator_init_device_best>",
+                  test_missing_library<sz_allocator_init_device_best>);
+    run_test_case("test_missing_library<sz_allocator_init_pinned_best>",
+                  test_missing_library<sz_allocator_init_pinned_best>);
+    run_test_case("test_missing_library<sz_find_byte_best>", test_missing_library<sz_find_byte_best>);
+    run_test_case("test_missing_library<sz_rfind_byte_best>", test_missing_library<sz_rfind_byte_best>);
+    run_test_case("test_missing_library<sz_find_best>", test_missing_library<sz_find_best>);
+    run_test_case("test_missing_library<sz_rfind_best>", test_missing_library<sz_rfind_best>);
+    run_test_case("test_missing_library<sz_find_byteset_best>", test_missing_library<sz_find_byteset_best>);
+    run_test_case("test_missing_library<sz_rfind_byteset_best>", test_missing_library<sz_rfind_byteset_best>);
+    run_test_case("test_missing_library<sz_find_strings_best>", test_missing_library<sz_find_strings_best>);
+    run_test_case("test_missing_library<sz_bytesum_best>", test_missing_library<sz_bytesum_best>);
+    run_test_case("test_missing_library<sz_hash_best>", test_missing_library<sz_hash_best>);
+    run_test_case("test_missing_library<sz_hash_multiseed_best>", test_missing_library<sz_hash_multiseed_best>);
+    run_test_case("test_missing_library<sz_hash_strings_best>", test_missing_library<sz_hash_strings_best>);
+    run_test_case("test_missing_library<sz_hash_state_init_best>", test_missing_library<sz_hash_state_init_best>);
+    run_test_case("test_missing_library<sz_hash_state_update_best>", test_missing_library<sz_hash_state_update_best>);
+    run_test_case("test_missing_library<sz_hash_state_digest_best>", test_missing_library<sz_hash_state_digest_best>);
+    run_test_case("test_missing_library<sz_fill_random_best>", test_missing_library<sz_fill_random_best>);
+    run_test_case("test_missing_library<sz_sha256_state_init_best>", test_missing_library<sz_sha256_state_init_best>);
+    run_test_case("test_missing_library<sz_sha256_state_update_best>",
+                  test_missing_library<sz_sha256_state_update_best>);
+    run_test_case("test_missing_library<sz_sha256_state_digest_best>",
+                  test_missing_library<sz_sha256_state_digest_best>);
+    run_test_case("test_missing_library<sz_sha256_multistate_update_best>",
+                  test_missing_library<sz_sha256_multistate_update_best>);
+    run_test_case("test_missing_library<sz_sha256_multistate_digest_best>",
+                  test_missing_library<sz_sha256_multistate_digest_best>);
+    run_test_case("test_missing_library<sz_aes256_key_init_best>", test_missing_library<sz_aes256_key_init_best>);
+    run_test_case("test_missing_library<sz_aes256_ctr_xor_best>", test_missing_library<sz_aes256_ctr_xor_best>);
+    run_test_case("test_missing_library<sz_aes256_gcm_key_init_best>",
+                  test_missing_library<sz_aes256_gcm_key_init_best>);
+    run_test_case("test_missing_library<sz_aes256_gcm_encrypt_best>", test_missing_library<sz_aes256_gcm_encrypt_best>);
+    run_test_case("test_missing_library<sz_aes256_gcm_decrypt_best>", test_missing_library<sz_aes256_gcm_decrypt_best>);
+    run_test_case("test_missing_library<sz_aes256_gcm_encryptor_init_best>",
+                  test_missing_library<sz_aes256_gcm_encryptor_init_best>);
+    run_test_case("test_missing_library<sz_aes256_gcm_encryptor_associate_best>",
+                  test_missing_library<sz_aes256_gcm_encryptor_associate_best>);
+    run_test_case("test_missing_library<sz_aes256_gcm_encryptor_update_best>",
+                  test_missing_library<sz_aes256_gcm_encryptor_update_best>);
+    run_test_case("test_missing_library<sz_aes256_gcm_encryptor_digest_best>",
+                  test_missing_library<sz_aes256_gcm_encryptor_digest_best>);
+    run_test_case("test_missing_library<sz_aes256_gcm_decryptor_init_best>",
+                  test_missing_library<sz_aes256_gcm_decryptor_init_best>);
+    run_test_case("test_missing_library<sz_aes256_gcm_decryptor_associate_best>",
+                  test_missing_library<sz_aes256_gcm_decryptor_associate_best>);
+    run_test_case("test_missing_library<sz_aes256_gcm_decryptor_update_unverified_best>",
+                  test_missing_library<sz_aes256_gcm_decryptor_update_unverified_best>);
+    run_test_case("test_missing_library<sz_aes256_gcm_decryptor_verify_best>",
+                  test_missing_library<sz_aes256_gcm_decryptor_verify_best>);
+    run_test_case("test_missing_library<sz_sort_order_best>", test_missing_library<sz_sort_order_best>);
+    run_test_case("test_missing_library<sz_sort_uncased_order_best>", test_missing_library<sz_sort_uncased_order_best>);
+    run_test_case("test_missing_library<sz_intersect_best>", test_missing_library<sz_intersect_best>);
+    run_test_case("test_missing_library<sz_utf8_count_best>", test_missing_library<sz_utf8_count_best>);
+    run_test_case("test_missing_library<sz_utf8_count_strings_best>", test_missing_library<sz_utf8_count_strings_best>);
+    run_test_case("test_missing_library<sz_utf8_seek_best>", test_missing_library<sz_utf8_seek_best>);
+    run_test_case("test_missing_library<sz_utf8_decode_best>", test_missing_library<sz_utf8_decode_best>);
+    run_test_case("test_missing_library<sz_utf8_newlines_best>", test_missing_library<sz_utf8_newlines_best>);
+    run_test_case("test_missing_library<sz_utf8_whitespaces_best>", test_missing_library<sz_utf8_whitespaces_best>);
+    run_test_case("test_missing_library<sz_utf8_delimiters_best>", test_missing_library<sz_utf8_delimiters_best>);
+    run_test_case("test_missing_library<sz_utf8_wordbreaks_best>", test_missing_library<sz_utf8_wordbreaks_best>);
+    run_test_case("test_missing_library<sz_utf8_graphemes_best>", test_missing_library<sz_utf8_graphemes_best>);
+    run_test_case("test_missing_library<sz_utf8_sentences_best>", test_missing_library<sz_utf8_sentences_best>);
+    run_test_case("test_missing_library<sz_utf8_linebreaks_best>", test_missing_library<sz_utf8_linebreaks_best>);
+    run_test_case("test_missing_library<sz_utf8_norm_best>", test_missing_library<sz_utf8_norm_best>);
+    run_test_case("test_missing_library<sz_utf8_find_denormalized_best>",
+                  test_missing_library<sz_utf8_find_denormalized_best>);
+    run_test_case("test_missing_library<sz_utf8_uncased_fold_best>", test_missing_library<sz_utf8_uncased_fold_best>);
+    run_test_case("test_missing_library<sz_utf8_uncased_needle_init_best>",
+                  test_missing_library<sz_utf8_uncased_needle_init_best>);
+    run_test_case("test_missing_library<sz_utf8_uncased_search_best>",
+                  test_missing_library<sz_utf8_uncased_search_best>);
+    run_test_case("test_missing_library<sz_utf8_uncased_order_best>", test_missing_library<sz_utf8_uncased_order_best>);
+    run_test_case("test_missing_library<sz_utf8_find_cased_best>", test_missing_library<sz_utf8_find_cased_best>);
 #else
     run_test_case("test_device_unit", test_device_unit);
     run_test_case("test_arithmetic_unit", test_arithmetic_unit);
@@ -367,12 +344,12 @@ int main(int argc, char **argv) {
     test_cross_ppc64();
     test_cross_wasm();
     if constexpr (!STRINGZILLA_HEADER_ONLY) {
-        for (sz::device_t device : devices) {
+        for (device_selection_t device : devices) {
             print(device);
-            switch (device.kind()) {
-            case sz::device_kind_t::cuda_k: test_cross_cuda(device.ordinal()); break;
-            case sz::device_kind_t::rocm_k: test_cross_rocm(device.ordinal()); break;
-            case sz::device_kind_t::metal_k: test_cross_metal(device.ordinal()); break;
+            switch (device.backend) {
+            case sz::device_kind_t::cuda_k: test_cross_cuda(device.ordinal); break;
+            case sz::device_kind_t::rocm_k: test_cross_rocm(device.ordinal); break;
+            case sz::device_kind_t::metal_k: test_cross_metal(device.ordinal); break;
             case sz::device_kind_t::cpu_k: break;
             }
         }

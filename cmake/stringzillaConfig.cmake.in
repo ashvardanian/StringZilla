@@ -11,10 +11,10 @@ endif ()
 
 include("${CMAKE_CURRENT_LIST_DIR}/stringzillaTargets.cmake")
 
-# The export defines `stringzilla::abi`, `stringzilla::cpp`, `stringzilla::header`, `stringzilla::static`, and
-# `stringzilla::shared`. Flavors as components, so `check_required_components` accepts `COMPONENTS shared` and rejects
-# only what is absent.
-foreach (stringzilla_flavor_ abi cpp header static shared)
+# The export defines `stringzilla::abi`, `stringzilla::types` and `stringzilla::header`, and with the libraries
+# `stringzilla::static`, `stringzilla::shared` and `stringzilla::cpp`. Flavors as components, so
+# `check_required_components` accepts `COMPONENTS shared` and rejects only what is absent.
+foreach (stringzilla_flavor_ abi types cpp header static shared)
     if (TARGET stringzilla::${stringzilla_flavor_})
         set(stringzilla_${stringzilla_flavor_}_FOUND TRUE)
     endif ()

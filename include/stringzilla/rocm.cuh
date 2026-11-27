@@ -519,52 +519,6 @@ STRINGZILLA_DEVICE sz_i32_t sz_i32_rows_prefix_min_rocm_(sz_i32_t value) {
 
 #pragma endregion Row Scans
 
-/*  The library defines these once, in `src/capabilities/rocm.hip`; header-only builds define them
- *  here. */
-#if STRINGZILLA_HEADER_ONLY
-
-STRINGZILLA_API sz_status_t sz_count_devices_rocm(sz_size_t *count) {
-    *count = sz_count_devices_rocm_();
-    return *count ? sz_success_k : sz_missing_gpu_k;
-}
-
-STRINGZILLA_API sz_status_t sz_capabilities_detected_rocm(sz_size_t ordinal, sz_capability_t *capabilities) {
-    return sz_capabilities_detected_rocm_(ordinal, capabilities);
-}
-
-STRINGZILLA_API sz_status_t sz_stream_init_rocm(sz_size_t ordinal, sz_stream_t *stream) {
-    return sz_stream_init_rocm_(ordinal, stream);
-}
-
-STRINGZILLA_API sz_status_t sz_stream_free_rocm(sz_stream_t stream) { return sz_stream_free_rocm_(stream); }
-
-STRINGZILLA_API sz_status_t sz_allocator_init_unified_rocm(sz_allocator_t *allocator) {
-    sz_allocator_init_unified_rocm_(allocator);
-    return sz_success_k;
-}
-
-STRINGZILLA_API sz_status_t sz_allocator_init_device_rocm(sz_allocator_t *allocator) {
-    allocator->allocate = sz_allocate_device_rocm_;
-    allocator->reallocate = sz_reallocate_device_rocm_;
-    allocator->free = sz_free_device_rocm_;
-    allocator->handle = STRINGZILLA_NULL;
-    return sz_success_k;
-}
-
-STRINGZILLA_API sz_status_t sz_allocator_init_pinned_rocm(sz_allocator_t *allocator) {
-    allocator->allocate = sz_allocate_pinned_rocm_;
-    allocator->reallocate = sz_reallocate_pinned_rocm_;
-    allocator->free = sz_free_pinned_rocm_;
-    allocator->handle = STRINGZILLA_NULL;
-    return sz_success_k;
-}
-
-STRINGZILLA_API sz_status_t sz_stream_synchronize_rocm(sz_stream_t stream) {
-    return sz_stream_synchronize_rocm_(stream);
-}
-
-#endif // STRINGZILLA_HEADER_ONLY
-
 #ifdef __cplusplus
 }
 #endif

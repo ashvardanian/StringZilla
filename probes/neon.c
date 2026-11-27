@@ -6,7 +6,7 @@
  */
 #define STRINGZILLA_HEADER_ONLY 1
 #define STRINGZILLA_ARCH_ARM64_NEON_ 1
-#include <stringzilla/find/neon.h>
+#include "stringzilla/find.h" // the hub, whose header-only tail defines the tier
 
 int main(void) {
     char haystack[64] = {'x'};

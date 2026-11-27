@@ -33,11 +33,11 @@ void test_cross_cuda(std::size_t ordinal) {
         expect_true(sz_capabilities_compiled_cuda(ordinal, &reported) == sz_success_k && reported == (tiers & held));
         expect_equal(sz_capabilities_compiled_cuda(devices, &reported), sz_missing_gpu_k);
     });
-    auto const selected = sz::device_t::make(sz::device_kind_t::cuda_k, ordinal);
-    if (!expect_equal(selected.status, status_t::success_k)) return;
+    device_selection_t const selected {sz::device_kind_t::cuda_k, ordinal};
+    if (!expect_equal(check_device(selected), sz_success_k)) return;
     stream_t stream(ordinal, sz_stream_init_cuda, sz_stream_free_cuda);
     device_backend_t runtime;
-    runtime.selected = selected.value;
+    runtime.selected = selected;
     runtime.stream = stream.handle;
     if (!expect_equal(sz_capabilities_detected_cuda(ordinal, &runtime.capabilities), sz_success_k)) return;
     if (!expect_equal(sz_allocator_init_pinned_cuda(&runtime.pinned), sz_success_k)) return;

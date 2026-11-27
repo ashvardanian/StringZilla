@@ -30,6 +30,7 @@
 #define STRINGZILLA_METAL_H_
 
 #include "stringzilla/types.h"
+#include "stringzilla/capabilities.h"   // `sz_cap_metal_k`, `sz_count_devices_metal`
 #include "stringzilla/compare/serial.h" // `sz_equal_serial_`
 
 #if STRINGZILLA_ARCH_METAL_
@@ -694,38 +695,44 @@ STRINGZILLA_INLINE sz_status_t sz_metal_tape_call_(sz_metal_call_t *call, sz_str
 
 #pragma endregion Context
 
-#pragma region Public API
+#pragma region Producers
 
-/**
- *  @brief Initializes @p allocator to hand back shared buffers on the device of each call's
- *      stream, which both the host and device address.
- *
- *  Encoded work retains buffers until completion. The allocator is stateless, so its
- *  handle is null.
- */
-STRINGZILLA_API sz_status_t sz_allocator_init_unified_metal(sz_allocator_t *allocator);
-
-/**
- *  @brief Waits for every call committed to @p stream before the synchronization begins.
- *
- *  @par Statuses:
- *  - @c sz_missing_gpu_k Without a device.
- */
-STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(sz_stream_t stream);
-
-#pragma endregion Public API
-
-#if STRINGZILLA_HEADER_ONLY
-
-STRINGZILLA_API sz_status_t sz_allocator_init_unified_metal(sz_allocator_t *allocator) {
-    return sz_allocator_init_unified_metal_(allocator);
+/** The capabilities Metal device @p ordinal runs, in the order the system lists them. The baseline
+ *  needs Apple7, whose threadgroup atomics and simdgroup scans the kernels use. */
+STRINGZILLA_INLINE sz_status_t sz_capabilities_detected_metal_(sz_size_t ordinal, sz_capability_t *capabilities) {
+    *capabilities = 0;
+    if (ordinal >= sz_metal_list_devices_()) return sz_missing_gpu_k;
+    void *const metal_device = sz_metal_device_(ordinal);
+    if (!metal_device) return sz_device_code_mismatch_k;
+    SEL const supports = sel_registerName("supportsFamily:");
+    sz_size_t const apple7 = 1007; // `MTLGPUFamilyApple7`
+    if (((signed char (*)(void *, SEL, sz_size_t))objc_msgSend)(metal_device, supports, apple7))
+        *capabilities = sz_cap_metal_k;
+    sz_metal_do_(metal_device, "release");
+    return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(sz_stream_t stream) {
-    return sz_stream_synchronize_metal_(stream);
+/** Opens a command queue on Metal device @p ordinal, in the order the system lists them. */
+STRINGZILLA_INLINE sz_status_t sz_stream_init_metal_(sz_size_t ordinal, sz_stream_t *stream) {
+    *stream = STRINGZILLA_NULL;
+    if (ordinal >= sz_metal_list_devices_()) return sz_missing_gpu_k;
+    void *const metal_device = sz_metal_device_(ordinal);
+    if (!metal_device) return sz_device_code_mismatch_k;
+    *stream = sz_metal_get_(metal_device, "newCommandQueue");
+    sz_metal_do_(metal_device, "release");
+    if (!*stream) return sz_bad_alloc_k;
+    return sz_success_k;
 }
 
-#endif // STRINGZILLA_HEADER_ONLY
+/** Waits for @p stream, so its command buffers and the frees deferred behind it drain, then
+ *  releases it; a null stream is the default one, which is only waited for. */
+STRINGZILLA_INLINE sz_status_t sz_stream_free_metal_(sz_stream_t stream) {
+    sz_status_t const status = sz_stream_synchronize_metal_(stream);
+    sz_metal_do_(stream, "release");
+    return status;
+}
+
+#pragma endregion Producers
 
 #ifdef __cplusplus
 }

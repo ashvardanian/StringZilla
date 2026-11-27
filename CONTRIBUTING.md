@@ -10,7 +10,7 @@ Depending on the type of contribution, you may need to follow different steps.
 
 ```
 c/stringzilla/                 The C interface: one .h per kernel family declaring its dispatch points, kernels and finder, beside types.h and capabilities.h
-include/stringzilla/           The GPU runtimes, like cuda.cuh, rocm.cuh and metal.h, and the device prelude types.cuh and types.metal
+include/stringzilla/           The GPU runtimes, like cuda.cuh, rocm.cuh and metal.h, the device prelude types.cuh and types.metal, and the CPU detection in cpu.h
 include/stringzilla/*/         Kernels, one file per CPU capability — serial, haswell, neon, rvv, etc. — plus the engines' GPU simt.cuh and metal.* sources
 cpp/stringzilla/               The C++ interface over the C one: stringzilla.hpp and its types.hpp
 src/stringzilla.c              Library exports shared by every family — versions, statuses, capability queries, the kernel finder
@@ -26,6 +26,7 @@ src/capabilities/cdna3.hip     The engines' cdna3 kernels, for gfx942 where the 
 src/capabilities/cdna4.hip     The engines' cdna4 kernels, for gfx950 where the build carries it
 src/capabilities/cdna5.hip     The engines' cdna5 kernels, for the targets the build carries among gfx1250 and gfx1251
 src/capabilities/metal.c       The engines' metal kernels and the Metal device exports, under STRINGZILLA_METAL_ARCH
+src/missing/*.c                One per GPU vendor, its device exports answering sz_missing_gpu_k in a build without it
 src/parallel.h, .c             Tile-parallel runs on each platform's thread pool, compiled into the Python and Node extensions only
 probes/                        ISA probe sources, one per capability mirroring src/capabilities/, each calling one of its kernels as the library compiles it
 test/                          C++ and Python tests — see test/README.md
@@ -41,6 +42,13 @@ cmake/                         ISA probe modules, package config templates, and 
 ```
 
 A file never includes both a library's SDK umbrella `<X/X.hpp>` and its native umbrella `<X.hpp>`, for this library and every sibling, and nothing under `include/` includes a header that resolves under `cpp/`; C headers are the ABI every SDK sits on, so they are free everywhere. `.githooks/pre-commit` refuses both.
+
+Each library keeps its containers in `include/<lib>/*.hpp` behind its `::types` target, which links only the C ABI, carries no define, includes no kernel and calls nothing the library exports.
+ForkUnion and SmashTable define nothing for header-only builds, so their `::header` is also their container layer.
+Every operation one of a library's kernels backs is a verb under `cpp/`, which links the library, calls only `_best` exports and includes only C and `::types` headers.
+No relative header path sits in two of `c/`, `include/` and `cpp/`.
+A product's `include/` takes a sibling's `::types` and C headers, never its `cpp/` verbs, and no binding calls a `_serial` kernel.
+`.githooks/pre-commit` refuses each of these.
 
 For minimal test coverage, check the following scripts:
 
@@ -104,6 +112,7 @@ Modern IDEs, like VS Code, can be configured to automatically format the code on
 - For color-coded comments start the line with `!` for warnings or `?` for questions.
 - Sort the includes: standard libraries, third-party libraries, and only then internal project headers.
 - List in a `@par Statuses:` block only the statuses a function's contract adds, while resource failures, cancellation, deferral and defects are covered once by the categories in the `sz_status_t` docblock.
+- Markdown and Rust doc comments never set two code spans side by side; name one in prose and keep one span, as `.githooks/pre-commit` checks.
 
 Every all-caps name starts with the full project name, `STRINGZILLA_`.
 A trailing `_` marks a name as internal: it may change in any release, and nothing outside this repository may define or test it.
@@ -420,10 +429,10 @@ Alternatively, you may want to compare the performance of the code compiled with
 On x86_64, you may want to compare GCC, Clang, and ICX.
 
 ```bash
-cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCH=1 -D STRINGZILLA_BUILD_SHARED=1 \
+cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCH=1 -D STRINGZILLA_BUILD_LIBRARIES=1 \
     -D CMAKE_CXX_COMPILER=g++ -D CMAKE_C_COMPILER=gcc \
     -B build_release/gcc && cmake --build build_release/gcc --config Release --parallel
-cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCH=1 -D STRINGZILLA_BUILD_SHARED=1 \
+cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCH=1 -D STRINGZILLA_BUILD_LIBRARIES=1 \
     -D CMAKE_CXX_COMPILER=clang++-18 -D CMAKE_C_COMPILER=clang-18 \
     -B build_release/clang && cmake --build build_release/clang --config Release --parallel
 ```
@@ -436,7 +445,7 @@ Here is an example for profiling the hashing benchmarks of `stringzilla_bench`.
 ```bash
 cmake -D STRINGZILLA_BUILD_BENCH=1 \
     -D STRINGZILLA_BUILD_TEST=1 \
-    -D STRINGZILLA_BUILD_SHARED=1 \
+    -D STRINGZILLA_BUILD_LIBRARIES=1 \
     -D CMAKE_BUILD_TYPE=RelWithDebInfo \
     -B build_profile
 cmake --build build_profile --config Release --target stringzilla_bench --parallel
@@ -563,7 +572,7 @@ Point either file at the SDK with `-DWASI_SDK_PREFIX=...` or the `WASI_SDK_PATH`
 ```sh
 export WASI_SDK_PATH=~/wasi-sdk
 cmake -B build_wasm -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-wasm32-wasi.cmake \
-    -DSTRINGZILLA_BUILD_TEST=1 -DSTRINGZILLA_BUILD_SHARED=0 -DCMAKE_BUILD_TYPE=Release
+    -DSTRINGZILLA_BUILD_TEST=1 -DSTRINGZILLA_BUILD_LIBRARIES=0 -DCMAKE_BUILD_TYPE=Release
 cmake --build build_wasm --target stringzilla_test
 ctest --test-dir build_wasm # runs each .wasm under Wasmtime
 ```
@@ -578,7 +587,8 @@ Shared libraries stay off in both configurations, since WASI has no dynamic load
 
 Tests reach the library through its public surface: the C ABI in `c/stringzilla/`, `stringzilla.hpp`, the capability kernels the public headers declare by name, and the `pub` items of the Python module and the Rust crate.
 The few private includes are listed under [Private Surface Waivers](#private-surface-waivers), each with what the public surface lacks.
-A kernel is never its own oracle: each capability is held to the serial kernels or to known answers, and the inputs are never drawn through the kernels under test.
+A kernel is never its own oracle: each capability is held to its reference or to known answers, and the inputs are never drawn through the kernels under test.
+Tests never read a library's internal layouts, and each family's oracle is the `<verb>_reference` beside it, never a serial kernel or a helper named `_oracle`, `_naive` or `_golden`.
 Oracles never compile out, so a test checks with `expect_true` and its siblings, never `assert`, and every test unit opens with `#undef NDEBUG // ! A test's oracle must stay live in every build`.
 Benchmarks never include `test/`, each tree keeps its own harness, and neither uses a test or benchmark framework.
 One test binary carries every vendor's GPU shard, and the devices it checks are picked at runtime.
@@ -777,6 +787,8 @@ A vendor the build lacks compiles its shard as plain C++ into a stub, so the run
 The checks themselves live once, in `test/cross_device.hpp`, templated over `device_kernels`, and a shard only binds its vendor's kernels to them.
 
 A vendor switch, `STRINGZILLA_ARCH_CUDA_`, `STRINGZILLA_ARCH_ROCM_` or `STRINGZILLA_ARCH_METAL_`, is a fact about the unit, so each takes its own `#if`, never an `#elif` after another vendor's, nor a negation beside it.
+Only `include/stringzilla/` reads one, and there the compiler's own predefines decide it, so a consumer's nvcc or hipcc unit including a family's `cuda.cuh` needs no define from this build.
+`c/stringzilla/` declares every vendor's producers and twins in every build, and `src/` never asks which vendors it holds: CMake compiles each vendor's unit, or its `src/missing/` stand-in answering `sz_missing_gpu_k`.
 A header that assumes a single vendor says so, as `include/stringzilla/types.cuh` does with `#if STRINGZILLA_ARCH_CUDA_ + STRINGZILLA_ARCH_ROCM_ > 1` and an `#error`.
 Anything in a shared header whose meaning depends on the vendor takes internal linkage or the vendor's name, since the shards link into one binary, where two inline definitions of one name would silently merge into one.
 
@@ -790,6 +802,8 @@ The benchmarks pick theirs the same way, through `STRINGWARS_DEVICES`.
 These test files include a header the public surface does not cover, each for what that surface lacks:
 
 - `test/cross.hpp` includes `stringzilla/utf8_graphemes/serial.h`, `stringzilla/utf8_norm/serial.h` and `stringzilla/utf8_wordbreaks/serial.h` for the per-position rule oracles `sz_utf8_is_grapheme_boundary_serial`, `sz_utf8_is_word_boundary_serial` and `sz_rune_is_word_char`, and the decomposition bound `sz_utf8_norm_decomp_max_k`, which the C ABI does not export.
+- `test/cross.hpp` includes `stringzilla/hash/serial.h`, `stringzilla/levenshtein/serial.h`, `stringzilla/regex/serial.h` and `stringzilla/utf8_uncased/serial.h` for the one-string hash `sz_hash_serial_` the column hashes are held to, the engine layout and length buckets `sz_levenshtein_engine_layout_` and `sz_levenshtein_length_bucket_`, the budgeted `sz_regex_engine_compile_` that forces the bit-parallel start pass and the PikeVM, and the per-rune case helpers `sz_unicode_fold_codepoint_` and `sz_rune_is_uncased_`, none of which the C ABI exports.
+- `test/cross.hpp` includes `stringzilla/ngrams/serial.h` for the `STRINGZILLA_INLINE` counting entries, such as `sz_ngrams_overlap_counts_serial_`, in its header-only N-gram cross tests, because the CPU kits are their only users and no export reaches them.
 - `test/parallel.cpp` includes `src/parallel.h`, the tile scheduler the Python and Node extensions share, which no public header declares.
 
 The Python and Rust tests need no waiver.
@@ -797,6 +811,7 @@ The Python and Rust tests need no waiver.
 ## CUDA
 
 `STRINGZILLA_CUDA_ARCH` adds `src/capabilities/cuda.cu` to `stringzilla_static` and `stringzilla_shared`: the engines' `cuda` kernels, compiled from each family's `simt.cuh`, and the CUDA device exports: the producers `sz_count_devices_cuda`, `sz_capabilities_detected_cuda` and `sz_stream_init_cuda`, and the twins behind the `_best` dispatch points in `strings.h`, like `sz_allocator_init_unified_cuda` and `sz_strings_to_tape_cuda`.
+Without it, `src/missing/cuda.c` exports the same producers and allocator twins, each answering `sz_missing_gpu_k`, and a header-only unit answers `sz_missing_library_k` from every one, even compiled by nvcc.
 `STRINGZILLA_CUDA_ARCH=all` compiles each GPU unit once, as PTX at the lowest code its capability needs: `compute_75` for the CUDA baseline, `compute_80` for Ampere's warp reductions and asynchronous copies, `compute_90` for Hopper's clusters, and `compute_100` for Blackwell's cluster launch control.
 A named code, like `100f`, or `native` compiles as SASS alone.
 `stringzilla_test` includes CUDA checks from `test/cross_cuda.cu` alongside the CPU checks and other enabled vendors:
@@ -820,6 +835,7 @@ cuda-memcheck ./build_debug/stringzilla_test
 
 `STRINGZILLA_METAL_ARCH` adds `src/capabilities/metal.c` to the same libraries on Apple platforms: the engines' `metal` kernels, whose `metal.metal` shaders travel as embedded source and compile on the device at first use, and the Metal device exports, the producers and the `_metal` twins behind the `strings.h` dispatch points, like `sz_stream_synchronize_metal`.
 `STRINGZILLA_ROCM_ARCH` adds `src/capabilities/rocm.hip` the same way, with the `rocm` kernels and the `sz_rocm_*` device exports, and every vendor asked for sits side by side in one library.
+A vendor left out gets `src/missing/metal.c` or `src/missing/rocm.c` instead, as CUDA does.
 `src/capabilities/cdna3.hip` joins it where the targets include gfx942, `src/capabilities/cdna4.hip` where they include gfx950, and `src/capabilities/cdna5.hip` where they include gfx1250 or gfx1251, each compiled for those targets alone.
 
 The Metal backends of all three engine families build into `stringzilla_test` on Apple platforms, which needs `STRINGZILLA_METAL_ARCH` set and checks them against the serial answers:

@@ -68,8 +68,7 @@
 #define STRINGZILLA_REGEX_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/capabilities.h" // `sz_capability_t`
-#include "stringzilla/regex/serial.h" // `sz_regex_engine_t`
+#include "stringzilla/capabilities.h" // `sz_kernel_kind_t`, `sz_kernel_punned_t`
 
 #ifdef __cplusplus
 extern "C" {
@@ -536,6 +535,7 @@ STRINGZILLA_API sz_status_t sz_regex_find_kernel(sz_kernel_kind_t kind, sz_capab
 #pragma endregion Core API
 
 #if STRINGZILLA_HEADER_ONLY
+#include "stringzilla/regex/serial.h"
 #include "stringzilla/regex/haswell.h"
 #include "stringzilla/regex/icelake.h"
 #include "stringzilla/regex/neon.h"

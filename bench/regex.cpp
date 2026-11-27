@@ -72,7 +72,7 @@ void bench_regex(environment_t &env) {
         std::string const label = vocabulary.label;
         print(bench_unary(env, corpus, "sz_regex_engine_init" + label,
                           regex_build_from_sz_t {vocabulary, env.machine.enabled}));
-        regex_engine_t engine(vocabulary, regex_engine_init_cpu_, allocator);
+        regex_prepared_t engine = compiled_regex(vocabulary, regex_engine_init_cpu_, allocator);
         print(bench_unary(env, corpus, "sz_regex_counts" + label,
                           regex_counts_from_sz {sz_regex_counts, engine, staged, staged.haystacks()}));
         print(bench_unary(env, corpus, "sz_regex_find" + label,
@@ -82,7 +82,7 @@ void bench_regex(environment_t &env) {
                                                  regex_replacements(vocabulary)}));
     }
     if (!regex_selects(env, "", regex_date_k)) return;
-    regex_engine_t engine(regex_date_k, regex_engine_init_cpu_, allocator);
+    regex_prepared_t engine = compiled_regex(regex_date_k, regex_engine_init_cpu_, allocator);
     print(bench_unary(env, corpus, std::string("sz_regex_extract") + regex_date_k.label,
                       regex_extract_from_sz {sz_regex_extract, engine, staged, staged.haystacks()}));
 }

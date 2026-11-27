@@ -9,7 +9,7 @@
  */
 #define STRINGZILLA_HEADER_ONLY 1
 #define STRINGZILLA_ARCH_RISCV64_RVV_ 1
-#include <stringzilla/utf8_runes/rvv.h>
+#include "stringzilla/utf8_runes.h" // the hub, whose header-only tail defines the tier
 
 int main(void) {
     char text[64] = {'x'};

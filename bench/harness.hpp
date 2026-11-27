@@ -94,7 +94,7 @@
 
 #include "stringzilla/metal.h" // The Metal layer the Metal benchmarks drive
 #include "stringzilla/stringzilla.h"
-#include "stringzilla/types.hpp"
+#include "stringzilla/strings.hpp" // `strings`, `strings_view_t`, `unified_alloc`
 
 #if defined(_MSC_VER)
 #include <intrin.h> // `_ReadWriteBarrier`
@@ -370,14 +370,38 @@ sz_status_t call_best(sz_capability_t capabilities, arguments_types_... argument
     }(std::make_index_sequence<sizeof...(arguments_types_) - 1> {});
 }
 
+/** The CPU capabilities this process enables, asked through the C query, as header-only runners
+ *  link no C++ SDK. */
+inline sz_capability_t cpu_capabilities_enabled() noexcept {
+    sz_capability_t enabled = 0;
+    sz_capabilities_enabled_cpu(&enabled);
+    return enabled;
+}
+
 /** The dispatch point @p best_ in the shape of its capability kernels, over the CPU capabilities
  *  this process enables: callable like them, and convertible to their function pointers. */
 template <auto best_>
 inline constexpr auto cpu_best =
-    [](auto... arguments) noexcept { return call_best<best_>(default_capabilities(), arguments...); };
+    [](auto... arguments) noexcept { return call_best<best_>(cpu_capabilities_enabled(), arguments...); };
+
+/** A requested GPU, before checking whether its runtime and ordinal are available. */
+struct device_selection_t {
+    sz::device_kind_t backend;
+    std::size_t ordinal;
+};
+
+inline std::string_view device_name(sz::device_kind_t kind) noexcept {
+    switch (kind) {
+    case sz::device_kind_t::cpu_k: return "cpu";
+    case sz::device_kind_t::cuda_k: return "cuda";
+    case sz::device_kind_t::rocm_k: return "rocm";
+    case sz::device_kind_t::metal_k: return "metal";
+    }
+    return "unrecognized";
+}
 
 struct device_backend_t {
-    sz::device_t selected = sz::device_t::cpu();
+    device_selection_t selected {sz::device_kind_t::cpu_k, 0};
     sz_capability_t capabilities = 0;
     sz_stream_t stream = nullptr;
     sz_allocator_t unified {}, device {}, pinned {};
@@ -389,6 +413,26 @@ struct device_backend_t {
      *  Metal's don't. */
     bool separate() const noexcept { return device.allocate && pinned.allocate && copy; }
 };
+
+/** A prepared C engine a benchmark owns, freed through @p free_ once the benchmark is done. */
+template <typename engine_type_, void (*free_)(engine_type_ *, sz_stream_t)>
+struct prepared_engine {
+    engine_type_ engine {};
+
+    prepared_engine() noexcept = default;
+    prepared_engine(prepared_engine &&other) noexcept : engine(std::exchange(other.engine, {})) {}
+    prepared_engine &operator=(prepared_engine &&other) noexcept {
+        std::swap(engine, other.engine);
+        return *this;
+    }
+    ~prepared_engine() noexcept { free_(&engine, nullptr); }
+
+    engine_type_ &raw() noexcept { return engine; }
+};
+
+using substrings_prepared_t = prepared_engine<sz_substrings_engine_t, sz_substrings_engine_free>;
+using regex_prepared_t = prepared_engine<sz_regex_engine_t, sz_regex_engine_free>;
+using subdocuments_prepared_t = prepared_engine<sz_subdocuments_engine_t, sz_subdocuments_engine_free>;
 
 struct stream_t {
     sz_stream_t handle = nullptr;
@@ -411,11 +455,15 @@ using unified_vector = std::vector<value_type_, unified_alloc<value_type_>>;
 /** Gathers @p strings into unified memory and waits until the @p runtime device can read them. */
 inline unified_strings_t resident_strings(device_backend_t const &runtime, sz_strings_view_t strings) {
     unified_alloc<char> const allocator(runtime.unified, runtime.stream);
-    auto [gathered, gather_status] = strings_view_t(strings).gather(allocator);
+    unified_strings_t gathered(allocator);
+    status_t const gather_status = with_allocator_(gathered.allocator, [&](sz_allocator_t &c_allocator) {
+        return sz_strings_to_tape_best(&strings, nullptr, strings.count, &c_allocator, &gathered.raw,
+                                       runtime.capabilities, runtime.stream);
+    });
     if (failed(gather_status)) throw std::runtime_error("Unified memory could not hold the tape.");
     if (sz_stream_synchronize_best(runtime.capabilities, runtime.stream) != sz_success_k)
         throw std::runtime_error("The tape would not reach the device.");
-    return std::move(gathered);
+    return gathered;
 }
 
 /**
@@ -913,22 +961,6 @@ inline std::optional<stress_t> parse_stress(std::string_view text) noexcept {
     return std::nullopt;
 }
 
-/** A requested GPU, before checking whether its runtime and ordinal are available. */
-struct device_selection_t {
-    sz::device_kind_t backend;
-    std::size_t ordinal;
-};
-
-inline std::string_view device_name(sz::device_kind_t kind) noexcept {
-    switch (kind) {
-    case sz::device_kind_t::cpu_k: return "cpu";
-    case sz::device_kind_t::cuda_k: return "cuda";
-    case sz::device_kind_t::rocm_k: return "rocm";
-    case sz::device_kind_t::metal_k: return "metal";
-    }
-    return "unrecognized";
-}
-
 inline std::optional<std::vector<device_selection_t>> parse_devices(std::string_view text) {
     std::vector<device_selection_t> devices;
     do {
@@ -951,6 +983,21 @@ inline std::optional<std::vector<device_selection_t>> parse_devices(std::string_
         text.remove_prefix(comma + 1);
     } while (!text.empty());
     return std::nullopt;
+}
+
+/** Whether the runtime of @p device answers and holds its ordinal, asked through the C queries, so
+ *  header-only runners check devices as linked ones do. */
+inline sz_status_t check_device(device_selection_t device) noexcept {
+    sz_size_t count = 1;
+    sz_status_t status = sz_success_k;
+    switch (device.backend) {
+    case sz::device_kind_t::cpu_k: break;
+    case sz::device_kind_t::cuda_k: status = sz_count_devices_cuda(&count); break;
+    case sz::device_kind_t::rocm_k: status = sz_count_devices_rocm(&count); break;
+    case sz::device_kind_t::metal_k: status = sz_count_devices_metal(&count); break;
+    }
+    if (status != sz_success_k) return status;
+    return device.ordinal < count ? sz_success_k : sz_missing_gpu_k;
 }
 
 /** Every benchmark setting, its default as the initializer, filled once by @c read_bench_settings.
@@ -1079,7 +1126,8 @@ struct machine_t {
     sz_capability_t compiled = 0;
     sz_capability_t detected = 0;
     sz_capability_t enabled = 0;
-    sz::cpu_specs_t specs;
+    std::size_t l1_bytes = 32 * 1024;
+    std::size_t l3_bytes = 8 * 1024 * 1024;
 };
 
 /** Probes the capabilities @c machine_t reports. */
@@ -1117,8 +1165,8 @@ inline void print(machine_t const &machine) {
     fmt::println("StringZilla {}.{}.{}", machine.version[0], machine.version[1], machine.version[2]);
     fmt::println("- Compiled for: {}", capability_names_t {machine.compiled});
     fmt::println("- This machine: {}", capability_names_t {machine.detected});
-    fmt::println("- Caches: {} first-level, assumed, and {} confined to a compute domain",
-                 bytes_t {machine.specs.l1_bytes}, bytes_t {machine.specs.l3_bytes});
+    fmt::println("- Caches: {} first-level, assumed, and {} confined to a compute domain", bytes_t {machine.l1_bytes},
+                 bytes_t {machine.l3_bytes});
 }
 
 /** Loads one corpus: @p default_dataset split by @p default_tokenization and cut at
@@ -1264,7 +1312,7 @@ inline std::size_t median_token_bytes(corpus_t const &corpus) {
  *  median tokens of @p corpus as fill the first-level cache. */
 inline std::size_t candidates_per_call(environment_t const &env, corpus_t const &corpus) {
     if (env.settings.candidates_per_core) return *env.settings.candidates_per_core;
-    return max_of<std::size_t>(1, env.machine.specs.l1_bytes / median_token_bytes(corpus));
+    return max_of<std::size_t>(1, env.machine.l1_bytes / median_token_bytes(corpus));
 }
 
 /** Candidates per device call, using reported geometry or one group of 2048 when unavailable. */
@@ -1479,8 +1527,8 @@ void bench_cross_riscv64(environment_t &env);
 void bench_cross_loongarch64(environment_t &env);
 void bench_cross_ppc64(environment_t &env);
 void bench_cross_wasm(environment_t &env);
-int bench_cross_cuda(environment_t &env, std::size_t ordinal);
-int bench_cross_rocm(environment_t &env, std::size_t ordinal);
-int bench_cross_metal(environment_t &env, std::size_t ordinal);
+void bench_cross_cuda(environment_t &env, std::size_t ordinal);
+void bench_cross_rocm(environment_t &env, std::size_t ordinal);
+void bench_cross_metal(environment_t &env, std::size_t ordinal);
 
 } // namespace ashvardanian::stringzilla::bench

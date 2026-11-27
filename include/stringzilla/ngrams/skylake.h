@@ -365,9 +365,25 @@ STRINGZILLA_API sz_status_t sz_ngrams_overlaps_skylake(sz_ngrams_engine_t *engin
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_ngrams_round_t round;
     sz_size_t longest_candidate = 0;
-    sz_status_t const prepared = sz_ngrams_overlaps_round_(engine, candidates, radius, shares, shares_query_stride,
-                                                           shares_candidate_stride, sz_ngrams_interleaved_chains_k,
-                                                           stream, &round, &longest_candidate);
+    sz_status_t const prepared = sz_ngrams_overlaps_round_(
+        engine, candidates, radius, STRINGZILLA_NULL, shares, shares_query_stride, shares_candidate_stride,
+        sz_ngrams_interleaved_chains_k, stream, &round, &longest_candidate);
+    if (prepared != sz_success_k) return prepared;
+    sz_ngrams_round_skylake_(engine, candidates, longest_candidate, &round);
+    return sz_success_k;
+}
+
+/** Counts what @ref sz_ngrams_overlaps_skylake shares: each query's distinct N-grams each candidate
+ *  holds, at every width, @p counts_query_stride and @p counts_candidate_stride bytes apart. */
+STRINGZILLA_INLINE sz_status_t sz_ngrams_overlap_counts_skylake_(sz_ngrams_engine_t *engine,
+                                                                 sz_strings_view_t const *candidates, sz_f32_t radius,
+                                                                 sz_u32_t *counts, sz_size_t counts_query_stride,
+                                                                 sz_size_t counts_candidate_stride) {
+    sz_ngrams_round_t round;
+    sz_size_t longest_candidate = 0;
+    sz_status_t const prepared = sz_ngrams_overlaps_round_(
+        engine, candidates, radius, counts, STRINGZILLA_NULL, counts_query_stride, counts_candidate_stride,
+        sz_ngrams_interleaved_chains_k, STRINGZILLA_NULL, &round, &longest_candidate);
     if (prepared != sz_success_k) return prepared;
     sz_ngrams_round_skylake_(engine, candidates, longest_candidate, &round);
     return sz_success_k;

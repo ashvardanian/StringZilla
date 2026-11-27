@@ -19,48 +19,6 @@ extern "C" {
 #endif
 
 /**
- *  @brief A needle analysed once by @c sz_utf8_uncased_needle_init_best for any number of
- *      uncased searches, under any capabilities.
- *
- *  Preparing picks the per-script kernel for the needle in two steps:
- *
- *  1. locating the longest "safe" slice of the needle for the different SIMD folding kernels,
- *  2. shrinking it to the most diverse slice that fits into @c folded_slice when case-folded.
- *
- *  Unlike the exact substring search kernels, it uses 4 probe positions instead of 3:
- *
- *  - first: implicit at <tt>folded_slice[0]</tt>
- *  - second: @c probe_second
- *  - third: @c probe_third
- *  - last: implicit at <tt>folded_slice[folded_slice_length - 1]</tt>
- *
- *  The struct points at the needle rather than copying it, so the needle must outlive it.
- */
-typedef struct sz_utf8_uncased_needle_t {
-
-    /** The needle's text, read by every search. */
-    sz_cptr_t start;
-    sz_size_t length;
-
-    /** Bytes of the needle before the slice that @c folded_slice holds folded. */
-    sz_size_t offset_in_unfolded;
-
-    /** Bytes of the needle that @c folded_slice holds folded. */
-    sz_size_t length_in_unfolded;
-    sz_u8_t folded_slice[16];
-    sz_u8_t folded_slice_length;
-
-    /** Offset of the second probe in @c folded_slice. */
-    sz_u8_t probe_second;
-
-    /** Offset of the third probe in @c folded_slice. */
-    sz_u8_t probe_third;
-
-    /** The @c sz_utf8_uncased_rune_*_k profile whose kernel searches this needle. */
-    sz_u8_t script;
-} sz_utf8_uncased_needle_t;
-
-/**
  *  @brief Safety profile for a single character across all script paths.
  *
  *  A safety profile for a "needle" is a set of conditions that allow simpler haystack on-the-fly

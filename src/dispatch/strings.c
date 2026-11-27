@@ -679,47 +679,29 @@ STRINGZILLA_API sz_status_t sz_strings_find_kernel(sz_kernel_kind_t kind, sz_cap
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_best(sz_allocator_t *allocator, sz_capability_t capabilities) {
     switch (sz_capability_group_of_(capabilities)) {
     case sz_capability_group_cpu_k: return sz_allocator_init_unified_serial(allocator);
-#if STRINGZILLA_ARCH_CUDA_
     case sz_capability_group_cuda_k: return sz_allocator_init_unified_cuda(allocator);
-#endif
-#if STRINGZILLA_ARCH_ROCM_
     case sz_capability_group_rocm_k: return sz_allocator_init_unified_rocm(allocator);
-#endif
-#if STRINGZILLA_ARCH_METAL_
     case sz_capability_group_metal_k: return sz_allocator_init_unified_metal(allocator);
-#endif
     default: return sz_missing_gpu_k;
     }
 }
 
 STRINGZILLA_API sz_status_t sz_allocator_init_device_best(sz_allocator_t *allocator, sz_capability_t capabilities) {
-    sz_unused_(allocator);
     switch (sz_capability_group_of_(capabilities)) {
     case sz_capability_group_cpu_k: return sz_missing_kernel_k;
-#if STRINGZILLA_ARCH_CUDA_
     case sz_capability_group_cuda_k: return sz_allocator_init_device_cuda(allocator);
-#endif
-#if STRINGZILLA_ARCH_ROCM_
     case sz_capability_group_rocm_k: return sz_allocator_init_device_rocm(allocator);
-#endif
-#if STRINGZILLA_ARCH_METAL_
     case sz_capability_group_metal_k: return sz_allocator_init_unified_metal(allocator);
-#endif
     default: return sz_missing_gpu_k;
     }
 }
 
 STRINGZILLA_API sz_status_t sz_allocator_init_pinned_best(sz_allocator_t *allocator, sz_capability_t capabilities) {
-    sz_unused_(allocator);
     switch (sz_capability_group_of_(capabilities)) {
     case sz_capability_group_cpu_k:
     case sz_capability_group_metal_k: return sz_missing_kernel_k;
-#if STRINGZILLA_ARCH_CUDA_
     case sz_capability_group_cuda_k: return sz_allocator_init_pinned_cuda(allocator);
-#endif
-#if STRINGZILLA_ARCH_ROCM_
     case sz_capability_group_rocm_k: return sz_allocator_init_pinned_rocm(allocator);
-#endif
     default: return sz_missing_gpu_k;
     }
 }

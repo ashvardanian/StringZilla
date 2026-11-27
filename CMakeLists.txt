@@ -3,18 +3,21 @@
 # This file defines several library build & installation targets:
 #
 # * stringzilla_abi: The C headers of `c/`, declaring the public interface, with nothing to link.
-# * stringzilla_cpp: The C++ SDK of `cpp/`, over `stringzilla_abi` and `stringzilla_static`.
-# * stringzilla_header: A header-only library with the StringZilla C and C++ headers and the kernels they inline.
+# * stringzilla_types: The containers of `include/stringzilla/*.hpp`, calling nothing the library exports.
+# * stringzilla_cpp: The C++ SDK of `cpp/`, over `stringzilla_types` and `stringzilla_static`.
+# * stringzilla_header: A header-only library with the C headers, the containers and the kernels they inline.
 # * stringzilla_static: A static library with dynamic SIMD dispatch, and the GPU backends STRINGZILLA_CUDA_ARCH,
 #   STRINGZILLA_ROCM_ARCH and STRINGZILLA_METAL_ARCH ask for, side by side.
-# * stringzilla_shared: The same as a shared library.
+# * stringzilla_shared: The same as a shared library, on every platform but WASI. Both are always declared, and
+#   STRINGZILLA_BUILD_LIBRARIES builds them by default and installs them.
 # * stringzilla_python: The CPython extension over `stringzilla_static`, with STRINGZILLA_BUILD_PYTHON.
 # * stringzilla_node: The Node addon over `stringzilla_static`, with STRINGZILLA_BUILD_NODE, which cmake-js sets.
 # * stringzilla_swift: `stringzilla_static` packaged for SwiftPM, with STRINGZILLA_BUILD_SWIFT.
 #
 # Consumers link the same namespaced spellings whether pulled in with `add_subdirectory` or found with `find_package`:
 #
-# * stringzilla::abi, stringzilla::cpp, stringzilla::header, stringzilla::static, stringzilla::shared.
+# * stringzilla::abi, stringzilla::types, stringzilla::cpp, stringzilla::header, stringzilla::static,
+#   stringzilla::shared.
 #
 # Tests:
 #
@@ -92,7 +95,10 @@ endif ()
 option(STRINGZILLA_INSTALL "Install CMake targets" ${PROJECT_IS_TOP_LEVEL})
 option(STRINGZILLA_BUILD_TEST "Compile a native unit test in C++" OFF)
 option(STRINGZILLA_BUILD_BENCH "Compile a native benchmark in C++" OFF)
-option(STRINGZILLA_BUILD_SHARED "Compile a dynamic library" ${PROJECT_IS_TOP_LEVEL})
+option(STRINGZILLA_BUILD_LIBRARIES
+       "Compile stringzilla_static and stringzilla_shared in the default build and install them"
+       ${PROJECT_IS_TOP_LEVEL}
+)
 option(STRINGZILLA_BUILD_PYTHON "Compile the CPython extension over the static library" OFF)
 option(STRINGZILLA_BUILD_NODE "Compile the Node addon over the static library; cmake-js switches it on" OFF)
 option(STRINGZILLA_BUILD_SWIFT "Package the static library for SwiftPM, as an XCFramework or an artifact bundle" OFF)
@@ -247,18 +253,33 @@ target_include_directories(
               $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-# The whole library header-only: the C headers, the kernels of `include/` and the C++ SDK of `cpp/`. The three roots are
-# listed here, not only inherited from `stringzilla::abi`, as `$<TARGET_PROPERTY:...,INTERFACE_INCLUDE_DIRECTORIES>`
-# does not follow links.
+# The containers, which need no define and link nothing beyond `stringzilla::abi`, as `cmake/stringzilla_types.cmake`
+# checks. The roots are listed here, not only inherited from `stringzilla::abi`, as
+# `$<TARGET_PROPERTY:...,INTERFACE_INCLUDE_DIRECTORIES>` does not follow links.
+add_library(stringzilla_types INTERFACE)
+add_library(${PROJECT_NAME}::types ALIAS stringzilla_types)
+set_target_properties(stringzilla_types PROPERTIES EXPORT_NAME types)
+file(GLOB stringzilla_types_sources_ include/stringzilla/*.hpp include/stringzilla/small_string.h)
+target_sources(stringzilla_types INTERFACE "$<BUILD_INTERFACE:${stringzilla_types_sources_}>")
+target_include_directories(
+    stringzilla_types
+    INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/c> $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+              $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+target_link_libraries(stringzilla_types INTERFACE stringzilla_abi)
+
+# The whole library header-only: the C headers and the kernels of `include/`, beside the containers. The C++ SDK of
+# `cpp/` links the library, so it stays out. The roots are listed here, not only inherited, as
+# `$<TARGET_PROPERTY:...,INTERFACE_INCLUDE_DIRECTORIES>` does not follow links.
 add_library(stringzilla_header INTERFACE)
 add_library(${PROJECT_NAME}::header ALIAS stringzilla_header)
 set_target_properties(stringzilla_header PROPERTIES EXPORT_NAME header)
 target_include_directories(
     stringzilla_header
     INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/c> $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-              $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/cpp> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+              $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
-target_link_libraries(stringzilla_header INTERFACE stringzilla_abi)
+target_link_libraries(stringzilla_header INTERFACE stringzilla_types)
 # Consumers of the header target compile every kernel themselves, and link no dispatch points.
 target_compile_definitions(stringzilla_header INTERFACE STRINGZILLA_HEADER_ONLY=1)
 if (APPLE)
@@ -277,6 +298,8 @@ if (APPLE)
     target_compile_options(stringzilla_header INTERFACE ${stringzilla_embed_options_})
 endif ()
 
+include(cmake/stringzilla_types.cmake)
+
 # The compiled core: `src/stringzilla.c` owns the cross-family exports (versions, capabilities, the kernel finder), each
 # enabled capability's `src/capabilities/<capability>.c` defines that capability's kernels once, and each
 # `src/dispatch/<family>.c` holds its family's lists, dispatch points and finder. Globbed, so a new unit needs no entry;
@@ -287,7 +310,12 @@ file(
     RELATIVE ${PROJECT_SOURCE_DIR}
     ${PROJECT_SOURCE_DIR}/src/capabilities/*.c ${PROJECT_SOURCE_DIR}/src/dispatch/*.c
 )
-set(stringzilla_shim_sources_ src/stringzilla.c)
+# A GPU vendor the build lacks still exports its device queries, each answering `sz_missing_gpu_k`.
+set(stringzilla_shim_sources_
+    src/stringzilla.c $<$<NOT:$<BOOL:${STRINGZILLA_CUDA_ARCH}>>:src/missing/cuda.c>
+    $<$<NOT:$<BOOL:${STRINGZILLA_ROCM_ARCH}>>:src/missing/rocm.c>
+    $<$<NOT:$<BOOL:${STRINGZILLA_METAL_ARCH}>>:src/missing/metal.c>
+)
 foreach (unit_ IN LISTS stringzilla_globbed_units_)
     if (unit_ MATCHES "^src/capabilities/([a-z0-9]+)")
         set(capability_ ${CMAKE_MATCH_1})
@@ -346,13 +374,16 @@ function (stringzilla_add_library target_ public_name_ library_type_)
 endfunction ()
 
 # The dispatch core as an archive, which the tests, the benchmarks, and the Go and Python bindings link - the
-# cross-compiled test runs are `-static` executables, which cannot take a `.so` at all - and as a shared library. A
-# parent project builds the archive only if it links it.
-stringzilla_add_library(stringzilla_static static STATIC ${stringzilla_shim_sources_})
-if (NOT PROJECT_IS_TOP_LEVEL)
-    set_target_properties(stringzilla_static PROPERTIES EXCLUDE_FROM_ALL ON)
+# cross-compiled test runs are `-static` executables, which cannot take a `.so` at all - and as a shared library, which
+# WASI, without a dynamic loader, skips. Without `STRINGZILLA_BUILD_LIBRARIES`, they build only for the targets that
+# link them.
+if (NOT STRINGZILLA_BUILD_LIBRARIES)
+    set(stringzilla_library_exclusion_ EXCLUDE_FROM_ALL)
 endif ()
-if (STRINGZILLA_BUILD_SHARED)
+stringzilla_add_library(stringzilla_static static STATIC ${stringzilla_library_exclusion_} ${stringzilla_shim_sources_})
+if (CMAKE_SYSTEM_NAME STREQUAL "WASI")
+    set(stringzilla_libraries_ stringzilla_static)
+else ()
     # Both compile alike, so the shared library links the archive's objects, except where sanitizers, a monoversioned
     # build's link-time optimization, or MSVC's debug checks apply to the archive alone.
     set(shared_sources_ $<TARGET_OBJECTS:stringzilla_static>)
@@ -362,19 +393,16 @@ if (STRINGZILLA_BUILD_SHARED)
     )
         set(shared_sources_ ${stringzilla_shim_sources_})
     endif ()
-    stringzilla_add_library(stringzilla_shared shared SHARED ${shared_sources_})
+    stringzilla_add_library(stringzilla_shared shared SHARED ${stringzilla_library_exclusion_} ${shared_sources_})
     set(stringzilla_libraries_ stringzilla_static stringzilla_shared)
-else ()
-    set(stringzilla_libraries_ stringzilla_static)
 endif ()
 
 foreach (library_ IN LISTS stringzilla_libraries_)
     target_compile_definitions(${library_} PRIVATE "STRINGZILLA_WITH_LIBC=${stringzilla_with_libc_}")
     target_link_libraries(${library_} PUBLIC stringzilla_abi)
     target_include_directories(
-        ${library_}
-        PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include> $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/cpp>
-               $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+        ${library_} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+                           $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
 
     # Force aggressive inlining for SHA-256 functions to avoid stack overflow in Go CGO (-mno-red-zone) The SHA-256
@@ -703,7 +731,7 @@ if (STRINGZILLA_BUILD_BENCH)
         bench/utf8_uncased.cpp
         ${stringzilla_cross_bench_sources_}
     )
-    stringzilla_add_cpu_launcher(stringzilla_bench stringzilla_static COMPILE ${stringzilla_cpu_bench_sources_})
+    stringzilla_add_cpu_launcher(stringzilla_bench stringzilla_cpp COMPILE ${stringzilla_cpu_bench_sources_})
     # Header-only builds have no dispatch points to time, but their kernels compile inline, which also reaches the
     # private helpers the library keeps to itself, like the SIMD sorts of pgrams.
     stringzilla_add_cpu_launcher(
@@ -747,11 +775,16 @@ if (STRINGZILLA_BUILD_TEST)
         ${stringzilla_cross_test_sources_}
     )
 
-    stringzilla_add_cpu_launcher(stringzilla_test stringzilla_static COMPILE ${stringzilla_cpu_test_sources_})
+    stringzilla_add_cpu_launcher(stringzilla_test stringzilla_cpp COMPILE ${stringzilla_cpu_test_sources_})
     add_test(NAME stringzilla_test COMMAND stringzilla_test)
     # Cross builds link their executables statically, to run them under an emulator without the target's loader.
-    if (TARGET stringzilla_shared AND NOT CMAKE_CROSSCOMPILING)
+    if (STRINGZILLA_BUILD_LIBRARIES
+        AND TARGET stringzilla_shared
+        AND NOT CMAKE_CROSSCOMPILING
+    )
         stringzilla_add_cpu_launcher(stringzilla_shared_test stringzilla_shared SERIAL ${stringzilla_cpu_test_sources_})
+        # The SDK's verbs reach the shared library, which `stringzilla::cpp` would swap for the archive.
+        target_include_directories(stringzilla_shared_test PRIVATE ${PROJECT_SOURCE_DIR}/cpp)
         add_test(NAME stringzilla_shared_test COMMAND stringzilla_shared_test)
     endif ()
     # The family files drive `stringzilla.hpp`, which always goes through the library, so the header-only test keeps

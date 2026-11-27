@@ -50,8 +50,8 @@
 
 #include "stringzilla/types.cuh"
 
-#include "stringzilla/subdocuments.h" // `sz_subdocuments_engine_t`, `sz_subdocuments_frame_t`
-#include "stringzilla/regex/simt.cuh" // `sz_regex_engine_rebase_simt_`
+#include "stringzilla/subdocuments/serial.h" // `sz_subdocuments_engine_t`, `sz_subdocuments_frame_t`
+#include "stringzilla/regex/simt.cuh"        // `sz_regex_engine_rebase_simt_`
 
 #ifdef __cplusplus
 extern "C" {

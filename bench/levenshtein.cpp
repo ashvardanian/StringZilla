@@ -68,7 +68,7 @@ struct levenshtein_pair_from_sz {
         sz_strings_from_string_views(&candidate_view, 1, &candidates);
 
         sz_levenshtein_engine_t engine {};
-        if (sz_levenshtein_engine_init(&engine, &queries, symbol, sz::default_capabilities(), nullptr, nullptr) !=
+        if (sz_levenshtein_engine_init(&engine, &queries, symbol, cpu_capabilities_enabled(), nullptr, nullptr) !=
             sz_success_k)
             throw std::runtime_error("The engine could not be prepared.");
         sz_size_t distance = 0;

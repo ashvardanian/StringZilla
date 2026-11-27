@@ -73,7 +73,7 @@ void test_utf8_wordbreaks_unit() {
     // (words and the separators between them); concatenating them reconstructs the input.
     {
         sz::string_view_t const text("Hello, world!");
-        auto segments = text.utf8_wordbreaks().template to<std::vector<std::string>>();
+        auto segments = sz::utf8_wordbreaks(text).template to<std::vector<std::string>>();
         expect_true(segments.size() == 5 && segments[0] == "Hello" && segments[3] == "world", "C++ utf8_wordbreaks");
         std::string rejoined;
         for (auto const &s : segments) rejoined += s;
@@ -82,7 +82,7 @@ void test_utf8_wordbreaks_unit() {
 
     // Word-break counts for the shared prose fixtures; per-fixture rationale lives in test/utf8.hpp.
     auto count_wordbreaks = [](std::string_view text) {
-        return sz::string_view_t(text).utf8_wordbreaks().template to<std::vector<std::string>>().size();
+        return sz::utf8_wordbreaks(sz::string_view_t(text)).template to<std::vector<std::string>>().size();
     };
     expect_equal(count_wordbreaks(utf8_prose_hotel_review()), 100, "hotel_review wordbreaks");
     expect_equal(count_wordbreaks(utf8_prose_news_lede()), 83, "news_lede wordbreaks");

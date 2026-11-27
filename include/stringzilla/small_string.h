@@ -30,8 +30,6 @@
 
 #include "stringzilla/types.h"
 
-#include "stringzilla/compare/serial.h" // `sz_equal_serial_`, `sz_order_serial_`
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -279,7 +277,10 @@ STRINGZILLA_INLINE sz_bool_t sz_string_equal(sz_string_t const *a, sz_string_t c
     sz_size_t a_length, b_length;
     sz_string_range(a, &a_start, &a_length);
     sz_string_range(b, &b_start, &b_length);
-    return (sz_bool_t)(a_length == b_length && sz_equal_serial_(a_start, b_start, b_length));
+    if (a_length != b_length) return sz_false_k;
+    for (sz_size_t offset = 0; offset != a_length; ++offset)
+        if (a_start[offset] != b_start[offset]) return sz_false_k;
+    return sz_true_k;
 }
 
 STRINGZILLA_INLINE sz_ordering_t sz_string_order(sz_string_t const *a, sz_string_t const *b) {
@@ -293,7 +294,11 @@ STRINGZILLA_INLINE sz_ordering_t sz_string_order(sz_string_t const *a, sz_string
     sz_size_t a_length, b_length;
     sz_string_range(a, &a_start, &a_length);
     sz_string_range(b, &b_start, &b_length);
-    return sz_order_serial_(a_start, a_length, b_start, b_length);
+    sz_size_t const shorter_length = a_length < b_length ? a_length : b_length;
+    for (sz_size_t offset = 0; offset != shorter_length; ++offset)
+        if (a_start[offset] != b_start[offset])
+            return sz_order_scalars_((sz_u8_t)a_start[offset], (sz_u8_t)b_start[offset]);
+    return sz_order_scalars_(a_length, b_length);
 }
 
 STRINGZILLA_INLINE void sz_string_init(sz_string_t *string) {

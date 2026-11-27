@@ -277,15 +277,15 @@ void test_strings_columns_unit() {
                     sz::strings_t {}.empty());
         expect_true(std::equal(narrow.begin(), narrow.end(), wide.begin(), wide.end()));
         sz_u64_t hashes[3];
-        expect_true(wide.hashes(hashes) == sz::status_t::success_k && hashes[2] == wide[2].hash());
+        expect_true(sz::hashes(wide, hashes) == sz::status_t::success_k && hashes[2] == sz::hash(wide[2]));
         char upper_table[256];
         sz_strings_lookup_init_upper(upper_table);
-        auto const [upper, lookup_status] = wide.lookup(sz::look_up_table_t(upper_table));
+        auto const [upper, lookup_status] = sz::lookup(wide, sz::look_up_table_t(upper_table));
         expect_true(lookup_status == sz::status_t::success_k && upper[0] == "ALPHA"_sv);
 
         sz::strings_view_t const slice(payload, narrow_offsets + 1, 2);
         expect_true(slice[0] == "beta"_sv && slice[1] == "gamma"_sv);
-        auto const [gathered, gather_status] = slice.gather();
+        auto const [gathered, gather_status] = sz::gather(slice);
         expect_true(gather_status == sz::status_t::success_k && gathered.size() == 2);
         expect_true(gathered.raw.data.u32_tape.offsets[0] == 0 && gathered[1] == "gamma"_sv);
     }
@@ -296,16 +296,16 @@ void test_strings_columns_unit() {
         sz::strings_view_t const strings(views);
         expect_true(strings.raw.layout == sz_strings_accessor_k && strings[2] == "a\"b\n"_sv);
         std::size_t positions[3];
-        expect_equal(strings.find("a"_sv, positions), sz::status_t::success_k);
+        expect_equal(sz::find(strings, "a"_sv, positions), sz::status_t::success_k);
         expect_true(positions[0] == 4 && positions[1] == STRINGZILLA_SIZE_MAX && positions[2] == 0);
-        expect_equal(strings.find("a"_sv, std::span(positions).first(2)), sz::status_t::unexpected_dimensions_k);
-        auto const [folded, normalize_status] = strings.normalize(sz_normal_form_nfkc_casefold_k);
+        expect_equal(sz::find(strings, "a"_sv, std::span(positions).first(2)), sz::status_t::unexpected_dimensions_k);
+        auto const [folded, normalize_status] = sz::normalize(strings, sz_normal_form_nfkc_casefold_k);
         expect_true(normalize_status == sz::status_t::success_k && folded[0] == "alpha"_sv);
 
-        auto const [escaped, escape_status] = strings.escape(sz_escape_json_k);
+        auto const [escaped, escape_status] = sz::escape(strings, sz_escape_json_k);
         expect_true(escape_status == sz::status_t::success_k && escaped[2] == "a\\\"b\\n"_sv);
         std::size_t malformed_index = 0;
-        auto const [unescaped, unescape_status] = escaped.view().unescape(sz_escape_json_k, malformed_index);
+        auto const [unescaped, unescape_status] = sz::unescape(escaped.view(), sz_escape_json_k, malformed_index);
         expect_equal(unescape_status, sz::status_t::success_k);
         expect_true(std::equal(unescaped.begin(), unescaped.end(), views.begin(), views.end()));
     }
@@ -313,21 +313,21 @@ void test_strings_columns_unit() {
     // Splits cut a text like `bytes.split` and `str.splitlines`, and joins frame the columns back
     // into one string, alone or side by side as CSV, as long as all the columns are equally long.
     {
-        auto const [each, each_status] = sz::strings_t::split(",a,,b"_sv, ","_bs, sz_split_each_k);
+        auto const [each, each_status] = sz::split_into(",a,,b"_sv, ","_bs, sz_split_each_k);
         expect_true(each_status == sz::status_t::success_k && each.size() == 4 && each[0].empty() && each[3] == "b"_sv);
-        auto const [runs, runs_status] = sz::strings_t::split(" a \t b "_sv, " \t"_bs, sz_split_runs_k);
+        auto const [runs, runs_status] = sz::split_into(" a \t b "_sv, " \t"_bs, sz_split_runs_k);
         expect_true(runs_status == sz::status_t::success_k && runs.size() == 2 && runs[1] == "b"_sv);
-        auto const [lines, lines_status] = sz::strings_t::split_lines("one\r\ntwo\xC2\x85three\n"_sv);
+        auto const [lines, lines_status] = sz::split_lines("one\r\ntwo\xC2\x85three\n"_sv);
         expect_true(lines_status == sz::status_t::success_k && lines.size() == 3 && lines[2] == "three"_sv);
 
-        auto const [joined, join_status] = each.view().join("|"_sv);
+        auto const [joined, join_status] = sz::join(each.view(), "|"_sv);
         expect_true(join_status == sz::status_t::success_k && joined == "|a||b"_sv);
         sz_strings_view_t const columns[] {lines.view().raw, sz::strings_view_t(payload, narrow_offsets, 3).raw};
         sz_string_view_t const frames[] {{"\"", 1}, {"\",", 2}, {"", 0}};
-        auto const [csv, csv_status] = sz::strings_view_t::join(columns, frames, "\n"_sv);
+        auto const [csv, csv_status] = sz::join(columns, frames, "\n"_sv);
         expect_true(csv_status == sz::status_t::success_k && csv == "\"one\",alpha\n\"two\",beta\n\"three\",gamma"_sv);
         sz_strings_view_t const ragged[] {lines.view().raw, each.view().raw};
-        auto const [rejected, rejected_status] = sz::strings_view_t::join(ragged, frames, "\n"_sv);
+        auto const [rejected, rejected_status] = sz::join(ragged, frames, "\n"_sv);
         expect_true(rejected_status == sz::status_t::unexpected_dimensions_k && rejected.empty());
     }
 
@@ -335,10 +335,10 @@ void test_strings_columns_unit() {
     {
         std::array<sz::string_view_t, 3> const texts {"héllo"_sv, "ok"_sv, "\xC3("_sv};
         std::size_t runes[3], malformed_index = 0;
-        expect_equal(sz::strings_view_t(std::span(texts).first(2)).utf8_count(runes, malformed_index),
+        expect_equal(sz::utf8_count(sz::strings_view_t(std::span(texts).first(2)), runes, malformed_index),
                      sz::status_t::success_k);
         expect_true(runes[0] == 5 && runes[1] == 2 && malformed_index == 2);
-        expect_equal(sz::strings_view_t(texts).utf8_count({}, malformed_index), sz::status_t::invalid_utf8_k);
+        expect_equal(sz::utf8_count(sz::strings_view_t(texts), {}, malformed_index), sz::status_t::invalid_utf8_k);
         expect_equal(malformed_index, 2);
     }
 
@@ -369,13 +369,13 @@ void test_strings_columns_unit() {
             std::array<sz::string_view_t, 2> const hex {"6869"_sv, "6g"_sv};
             std::size_t malformed_index = 0;
             sz::strings_view_t const escaped(hex);
-            auto const [decoded, decode_status] = escaped.unescape(sz_escape_hex_k, malformed_index, allocator);
+            auto const [decoded, decode_status] = sz::unescape(escaped, sz_escape_hex_k, malformed_index, allocator);
             expect_true(decode_status == sz::status_t::invalid_utf8_k && malformed_index == 1);
             expect_true(decoded.size() == 0 && decoded.raw.data.u32_tape.offsets == nullptr && state.live_bytes == 0);
 
             sz::strings_view_t const column(payload, narrow_offsets, 3);
-            auto [first, first_status] = column.gather(allocator);
-            auto [second, second_status] = column.gather(allocator);
+            auto [first, first_status] = sz::gather(column, allocator);
+            auto [second, second_status] = sz::gather(column, allocator);
             expect_true(first_status == sz::status_t::success_k && second_status == sz::status_t::success_k);
             sz_cptr_t const first_payload = first.raw.data.u32_tape.data;
             sz::strings<sz::unified_alloc<char>> moved(std::move(first));
@@ -450,13 +450,39 @@ void test_allocator_unit() {
                     allocator.handle == original.handle);
     }
     {
-        auto const [allocator, status] = sz::unified_alloc<char, sz_cap_serial_k>::make();
+        auto const [allocator, status] = sz::make_unified_alloc<char, sz_cap_serial_k>();
         expect_equal(status, sz::status_t::success_k);
         char *empty = allocator.allocate(0);
         expect_true(empty != nullptr);
         allocator.deallocate(empty, 0);
         sz::unified_alloc<sz_size_t, sz_cap_serial_k> words(allocator);
         expect_equal(words.allocate(STRINGZILLA_SIZE_MAX), nullptr);
+    }
+}
+
+/** The CPU device answers as the C queries do and prepares its own threads, while every kind
+ *  refuses the ordinal past its last device and a GPU refuses to configure a CPU thread. */
+void test_device_unit() {
+    sz::device_t const cpu = sz::device_t::cpu();
+    auto const [detected, detected_status] = cpu.capabilities_detected();
+    auto const [enabled, enabled_status] = cpu.capabilities_enabled();
+    auto const [compiled, compiled_status] = cpu.capabilities_compiled();
+    expect_true(sz::succeeded(detected_status) && sz::succeeded(enabled_status) && sz::succeeded(compiled_status));
+    expect_true((enabled & sz_cap_serial_k) && !(enabled & ~(detected | sz_cap_serial_k)));
+    expect_true(!(enabled & ~compiled));
+    expect_true(sz::succeeded(cpu.configure_thread(enabled)));
+    for (sz::device_kind_t kind :
+         {sz::device_kind_t::cpu_k, sz::device_kind_t::cuda_k, sz::device_kind_t::rocm_k, sz::device_kind_t::metal_k}) {
+        auto const [devices, count_status] = sz::device_t::count(kind);
+        if (sz::failed(count_status)) continue; // No device of this kind answers
+        expect_true(kind != sz::device_kind_t::cpu_k || devices == 1);
+        expect_equal(sz::device_t::make(kind, devices).status, sz::status_t::missing_gpu_k);
+        if (kind == sz::device_kind_t::cpu_k) continue;
+        auto const [gpu, make_status] = sz::device_t::make(kind, 0);
+        if (!expect_true(sz::succeeded(make_status))) continue;
+        auto const [gpu_compiled, gpu_compiled_status] = gpu.capabilities_compiled();
+        expect_true(sz::succeeded(gpu_compiled_status) && !(gpu_compiled & sz_cap_cpus_k));
+        expect_equal(gpu.configure_thread(sz_cap_any_k), sz::status_t::missing_kernel_k);
     }
 }
 
@@ -494,46 +520,46 @@ void test_ascii_unit() {
     expect_equal("a\0bc"_bs.size(), 4ull);
 
     expect_true(!"abc"_bs.contains('\0'));
-    expect_true(str("bca").contains_only("abc"_bs));
+    expect_true(sz::contains_only(str("bca"), "abc"_bs));
 
-    expect_true(!str("").is_alpha());
-    expect_true(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ").is_alpha());
-    expect_true(!str("abc9").is_alpha());
+    expect_true(!sz::is_alpha(str("")));
+    expect_true(sz::is_alpha(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")));
+    expect_true(!sz::is_alpha(str("abc9")));
 
-    expect_true(!str("").is_alnum());
-    expect_true(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789").is_alnum());
-    expect_true(!str("abc!").is_alnum());
+    expect_true(!sz::is_alnum(str("")));
+    expect_true(sz::is_alnum(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")));
+    expect_true(!sz::is_alnum(str("abc!")));
 
-    expect_true(str("").is_ascii());
-    expect_true(str("\x00x7F").is_ascii());
-    expect_true(!str("abc123🔥").is_ascii());
+    expect_true(sz::is_ascii(str("")));
+    expect_true(sz::is_ascii(str("\x00x7F")));
+    expect_true(!sz::is_ascii(str("abc123🔥")));
 
-    expect_true(!str("").is_digit());
-    expect_true(str("0123456789").is_digit());
-    expect_true(!str("012a").is_digit());
+    expect_true(!sz::is_digit(str("")));
+    expect_true(sz::is_digit(str("0123456789")));
+    expect_true(!sz::is_digit(str("012a")));
 
-    expect_true(!str("").is_lower());
-    expect_true(str("abcdefghijklmnopqrstuvwxyz").is_lower());
-    expect_true(!str("abcA").is_lower());
-    expect_true(!str("abc\n").is_lower());
+    expect_true(!sz::is_lower(str("")));
+    expect_true(sz::is_lower(str("abcdefghijklmnopqrstuvwxyz")));
+    expect_true(!sz::is_lower(str("abcA")));
+    expect_true(!sz::is_lower(str("abc\n")));
 
-    expect_true(!str("").is_space());
-    expect_true(str(" \t\n\r\f\v").is_space());
-    expect_true(!str(" \t\r\na").is_space());
+    expect_true(!sz::is_space(str("")));
+    expect_true(sz::is_space(str(" \t\n\r\f\v")));
+    expect_true(!sz::is_space(str(" \t\r\na")));
 
-    expect_true(!str("").is_upper());
-    expect_true(str("ABCDEFGHIJKLMNOPQRSTUVWXYZ").is_upper());
-    expect_true(!str("ABCa").is_upper());
+    expect_true(!sz::is_upper(str("")));
+    expect_true(sz::is_upper(str("ABCDEFGHIJKLMNOPQRSTUVWXYZ")));
+    expect_true(!sz::is_upper(str("ABCa")));
 
-    expect_true(str("").is_printable());
-    expect_true(str("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&" // `&*` is no dereference
-                    "*()_+")
-                    .is_printable());
-    expect_true(!str("012🔥").is_printable());
+    expect_true(sz::is_printable(str("")));
+    expect_true(sz::is_printable(
+        str("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&" // `&*` is no dereference
+            "*()_+")));
+    expect_true(!sz::is_printable(str("012🔥")));
 
-    expect_true(str("").contains_only("abc"_bs));
-    expect_true(str("abc").contains_only("abc"_bs));
-    expect_true(!str("abcd").contains_only("abc"_bs));
+    expect_true(sz::contains_only(str(""), "abc"_bs));
+    expect_true(sz::contains_only(str("abc"), "abc"_bs));
+    expect_true(!sz::contains_only(str("abcd"), "abc"_bs));
 }
 
 #pragma endregion Byteset
@@ -642,132 +668,132 @@ void test_stl_reads_unit() {
 #endif
 
     // Character search in normal and reverse directions.
-    expect_equal(str("hello").find('e'), 1);
-    expect_equal(str("hello").find('e', 1), 1);
-    expect_equal(str("hello").find('e', 2), str::npos);
-    expect_equal(str("hello").rfind('l'), 3);
-    expect_equal(str("hello").rfind('l', 2), 2);
-    expect_equal(str("hello").rfind('l', 1), str::npos);
+    expect_equal(sz::find(str("hello"), 'e'), 1);
+    expect_equal(sz::find(str("hello"), 'e', 1), 1);
+    expect_equal(sz::find(str("hello"), 'e', 2), str::npos);
+    expect_equal(sz::rfind(str("hello"), 'l'), 3);
+    expect_equal(sz::rfind(str("hello"), 'l', 2), 2);
+    expect_equal(sz::rfind(str("hello"), 'l', 1), str::npos);
 
     // Substring search in normal and reverse directions.
-    expect_equal(str().find(""), 0);
-    expect_equal(str().rfind(""), 0);
-    expect_equal(str("hello").find("ell"), 1);
-    expect_equal(str("hello").find("ell", 1), 1);
-    expect_equal(str("hello").find("ell", 2), str::npos);
-    expect_equal(str("hello").find("el", 1), 1);
-    expect_equal(str("hello").find("ell", 1, 2), 1);
-    expect_equal(str("hello").rfind("l"), 3);
-    expect_equal(str("hello").rfind("l", 2), 2);
-    expect_equal(str("hello").rfind("l", 1), str::npos);
+    expect_equal(sz::find(str(), ""), 0);
+    expect_equal(sz::rfind(str(), ""), 0);
+    expect_equal(sz::find(str("hello"), "ell"), 1);
+    expect_equal(sz::find(str("hello"), "ell", 1), 1);
+    expect_equal(sz::find(str("hello"), "ell", 2), str::npos);
+    expect_equal(sz::find(str("hello"), "el", 1), 1);
+    expect_equal(sz::find(str("hello"), str("ell", 2), 1), 1);
+    expect_equal(sz::rfind(str("hello"), "l"), 3);
+    expect_equal(sz::rfind(str("hello"), "l", 2), 2);
+    expect_equal(sz::rfind(str("hello"), "l", 1), str::npos);
 
     // The second argument is the last possible value of the returned offset.
-    expect_equal(str("hello").rfind("el", 1), 1);
-    expect_equal(str("hello").rfind("ell", 1), 1);
-    expect_equal(str("hello").rfind("ello", 1), 1);
-    expect_equal(str("hello").rfind("ell", 1, 2), 1);
+    expect_equal(sz::rfind(str("hello"), "el", 1), 1);
+    expect_equal(sz::rfind(str("hello"), "ell", 1), 1);
+    expect_equal(sz::rfind(str("hello"), "ello", 1), 1);
+    expect_equal(sz::rfind(str("hello"), str("ell", 2), 1), 1);
 
     // More complex queries.
-    expect_equal(str("abbabbaaaaaa").find("aa"), 6);
-    expect_equal(str("abbabbaaaaaa").find("ba"), 2);
-    expect_equal(str("abbabbaaaaaa").find("bb"), 1);
-    expect_equal(str("abbabbaaaaaa").find("bab"), 2);
-    expect_equal(str("abbabbaaaaaa").find("babb"), 2);
-    expect_equal(str("abbabbaaaaaa").find("babba"), 2);
-    expect_equal(str("abcdabcd").substr(2, 4).find("abc"), str::npos);
-    expect_equal(str("hello, world!").substr(0, 11).find("world"), str::npos);
-    expect_equal(str("axabbcxcaaabbccc").find("aaabbccc"), 8);
-    expect_equal(str("abcdabcdabc________").find("abcd"), 0);
-    expect_equal(str("________abcdabcdabc").find("abcd"), 8);
+    expect_equal(sz::find(str("abbabbaaaaaa"), "aa"), 6);
+    expect_equal(sz::find(str("abbabbaaaaaa"), "ba"), 2);
+    expect_equal(sz::find(str("abbabbaaaaaa"), "bb"), 1);
+    expect_equal(sz::find(str("abbabbaaaaaa"), "bab"), 2);
+    expect_equal(sz::find(str("abbabbaaaaaa"), "babb"), 2);
+    expect_equal(sz::find(str("abbabbaaaaaa"), "babba"), 2);
+    expect_equal(sz::find(str("abcdabcd").substr(2, 4), "abc"), str::npos);
+    expect_equal(sz::find(str("hello, world!").substr(0, 11), "world"), str::npos);
+    expect_equal(sz::find(str("axabbcxcaaabbccc"), "aaabbccc"), 8);
+    expect_equal(sz::find(str("abcdabcdabc________"), "abcd"), 0);
+    expect_equal(sz::find(str("________abcdabcdabc"), "abcd"), 8);
 
     // Cover every SWAR case for unique string sequences.
     auto lowercase_alphabet = str("abcdefghijklmnopqrstuvwxyz");
     for (std::size_t one_byte_offset = 0; one_byte_offset + 1 <= lowercase_alphabet.size(); ++one_byte_offset)
-        expect_equal(lowercase_alphabet.find(lowercase_alphabet.substr(one_byte_offset, 1)), one_byte_offset,
+        expect_equal(sz::find(lowercase_alphabet, lowercase_alphabet.substr(one_byte_offset, 1)), one_byte_offset,
                      "1-byte SWAR needle matched at the wrong offset");
     for (std::size_t two_byte_offset = 0; two_byte_offset + 2 <= lowercase_alphabet.size(); ++two_byte_offset)
-        expect_equal(lowercase_alphabet.find(lowercase_alphabet.substr(two_byte_offset, 2)), two_byte_offset,
+        expect_equal(sz::find(lowercase_alphabet, lowercase_alphabet.substr(two_byte_offset, 2)), two_byte_offset,
                      "2-byte SWAR needle matched at the wrong offset");
     for (std::size_t four_byte_offset = 0; four_byte_offset + 4 <= lowercase_alphabet.size(); ++four_byte_offset)
-        expect_equal(lowercase_alphabet.find(lowercase_alphabet.substr(four_byte_offset, 4)), four_byte_offset,
+        expect_equal(sz::find(lowercase_alphabet, lowercase_alphabet.substr(four_byte_offset, 4)), four_byte_offset,
                      "4-byte SWAR needle matched at the wrong offset");
     for (std::size_t three_byte_offset = 0; three_byte_offset + 3 <= lowercase_alphabet.size(); ++three_byte_offset)
-        expect_equal(lowercase_alphabet.find(lowercase_alphabet.substr(three_byte_offset, 3)), three_byte_offset,
+        expect_equal(sz::find(lowercase_alphabet, lowercase_alphabet.substr(three_byte_offset, 3)), three_byte_offset,
                      "3-byte SWAR needle matched at the wrong offset");
     for (std::size_t five_byte_offset = 0; five_byte_offset + 5 <= lowercase_alphabet.size(); ++five_byte_offset)
-        expect_equal(lowercase_alphabet.find(lowercase_alphabet.substr(five_byte_offset, 5)), five_byte_offset,
+        expect_equal(sz::find(lowercase_alphabet, lowercase_alphabet.substr(five_byte_offset, 5)), five_byte_offset,
                      "5-byte SWAR needle matched at the wrong offset");
 
     // Simple repeating patterns - with one "almost match" before an actual match in each direction.
-    expect_equal(str("_ab_abc_").find("abc"), 4);
-    expect_equal(str("_abc_ab_").rfind("abc"), 1);
-    expect_equal(str("_abc_abcd_").find("abcd"), 5);
-    expect_equal(str("_abcd_abc_").rfind("abcd"), 1);
-    expect_equal(str("_abcd_abcde_").find("abcde"), 6);
-    expect_equal(str("_abcde_abcd_").rfind("abcde"), 1);
-    expect_equal(str("_abcde_abcdef_").find("abcdef"), 7);
-    expect_equal(str("_abcdef_abcde_").rfind("abcdef"), 1);
-    expect_equal(str("_abcdef_abcdefg_").find("abcdefg"), 8);
-    expect_equal(str("_abcdefg_abcdef_").rfind("abcdefg"), 1);
+    expect_equal(sz::find(str("_ab_abc_"), "abc"), 4);
+    expect_equal(sz::rfind(str("_abc_ab_"), "abc"), 1);
+    expect_equal(sz::find(str("_abc_abcd_"), "abcd"), 5);
+    expect_equal(sz::rfind(str("_abcd_abc_"), "abcd"), 1);
+    expect_equal(sz::find(str("_abcd_abcde_"), "abcde"), 6);
+    expect_equal(sz::rfind(str("_abcde_abcd_"), "abcde"), 1);
+    expect_equal(sz::find(str("_abcde_abcdef_"), "abcdef"), 7);
+    expect_equal(sz::rfind(str("_abcdef_abcde_"), "abcdef"), 1);
+    expect_equal(sz::find(str("_abcdef_abcdefg_"), "abcdefg"), 8);
+    expect_equal(sz::rfind(str("_abcdefg_abcdef_"), "abcdefg"), 1);
 
     // ! `rfind` and `find_last_of` are not consistent in meaning of their arguments.
-    expect_equal(str("hello").find_first_of("le"), 1);
-    expect_equal(str("hello").find_first_of("le", 1), 1);
-    expect_equal(str("hello").find_last_of("le"), 3);
-    expect_equal(str("hello").find_last_of("le", 2), 2);
-    expect_equal(str("hello").find_first_not_of("hel"), 4);
-    expect_equal(str("hello").find_first_not_of("hel", 1), 4);
-    expect_equal(str("hello").find_last_not_of("hel"), 4);
-    expect_equal(str("hello").find_last_not_of("hel", 4), 4);
+    expect_equal(sz::find_first_of(str("hello"), "le"), 1);
+    expect_equal(sz::find_first_of(str("hello"), "le", 1), 1);
+    expect_equal(sz::find_last_of(str("hello"), "le"), 3);
+    expect_equal(sz::find_last_of(str("hello"), "le", 2), 2);
+    expect_equal(sz::find_first_not_of(str("hello"), "hel"), 4);
+    expect_equal(sz::find_first_not_of(str("hello"), "hel", 1), 4);
+    expect_equal(sz::find_last_not_of(str("hello"), "hel"), 4);
+    expect_equal(sz::find_last_not_of(str("hello"), "hel", 4), 4);
 
     // Try longer strings to enforce SIMD.
-    expect_equal(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find('x'), 23);
-    expect_equal(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find('X'), 49);
-    expect_equal(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind('x'), 23);
-    expect_equal(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind('X'), 49);
+    expect_equal(sz::find(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-"), 'x'), 23);
+    expect_equal(sz::find(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-"), 'X'), 49);
+    expect_equal(sz::rfind(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-"), 'x'), 23);
+    expect_equal(sz::rfind(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-"), 'X'), 49);
 
-    expect_equal(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("xy"), 23);
-    expect_equal(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("XY"), 49);
-    expect_equal(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("yz"), 24);
-    expect_equal(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("YZ"), 50);
-    expect_equal(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("xy"), 23);
-    expect_equal(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("XY"), 49);
+    expect_equal(sz::find(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-"), "xy"), 23);
+    expect_equal(sz::find(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-"), "XY"), 49);
+    expect_equal(sz::find(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-"), "yz"), 24);
+    expect_equal(sz::find(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-"), "YZ"), 50);
+    expect_equal(sz::rfind(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-"), "xy"), 23);
+    expect_equal(sz::rfind(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-"), "XY"), 49);
 
-    expect_equal(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("xyz"), 23);
-    expect_equal(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("XYZ"), 49);
-    expect_equal(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("xyz"), 23);
-    expect_equal(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("XYZ"), 49);
+    expect_equal(sz::find(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-"), "xyz"), 23);
+    expect_equal(sz::find(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-"), "XYZ"), 49);
+    expect_equal(sz::rfind(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-"), "xyz"), 23);
+    expect_equal(sz::rfind(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-"), "XYZ"), 49);
 
-    expect_equal(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("xyzA"), 23);
-    expect_equal(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("XYZ0"), 49);
-    expect_equal(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("xyzA"), 23);
-    expect_equal(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("XYZ0"), 49);
+    expect_equal(sz::find(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-"), "xyzA"), 23);
+    expect_equal(sz::find(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-"), "XYZ0"), 49);
+    expect_equal(sz::rfind(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-"), "xyzA"), 23);
+    expect_equal(sz::rfind(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-"), "XYZ0"), 49);
 
-    expect_equal(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_first_of("xyz"), 23);
-    expect_equal(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_first_of("XYZ"), 49);
-    expect_equal(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_last_of("xyz"), 25);
-    expect_equal(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_last_of("XYZ"), 51);
+    expect_equal(sz::find_first_of(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-"), "xyz"), 23);
+    expect_equal(sz::find_first_of(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-"), "XYZ"), 49);
+    expect_equal(sz::find_last_of(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-"), "xyz"), 25);
+    expect_equal(sz::find_last_of(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-"), "XYZ"), 51);
 
     // Using single-byte non-ASCII values, e.g., À (0xC0), Æ (0xC6). The `\xFA`/`0` boundary is
     // load-bearing: a literal hex digit after `\xFA` would extend the escape, so keep it split.
     {
         char const *non_ascii_set = "abcdefgh\x01\xC6ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\xC0\xFA" //
                                     "0123456789+-";                                                        // 68 bytes
-        expect_equal(str(non_ascii_set, 68).find_first_of("\xC6\xC7"), 9);
-        expect_equal(str(non_ascii_set, 68).find_first_of("\xC0\xC1"), 54);
-        expect_equal(str(non_ascii_set, 68).find_last_of("\xC6\xC7"), 9);
-        expect_equal(str(non_ascii_set, 68).find_last_of("\xC0\xC1"), 54);
+        expect_equal(sz::find_first_of(str(non_ascii_set, 68), "\xC6\xC7"), 9);
+        expect_equal(sz::find_first_of(str(non_ascii_set, 68), "\xC0\xC1"), 54);
+        expect_equal(sz::find_last_of(str(non_ascii_set, 68), "\xC6\xC7"), 9);
+        expect_equal(sz::find_last_of(str(non_ascii_set, 68), "\xC0\xC1"), 54);
     }
 
     // Boundary conditions.
-    expect_equal(str("hello").rfind("ell", str::npos), 1);
-    expect_equal(str("hello").find_last_of("le", str::npos), 3);
-    expect_equal(str("hello").find_first_of("ox", 4), 4);
-    expect_equal(str("hello").find_first_of("ox", 5), str::npos);
-    expect_equal(str("hello").find_last_of("ox", 4), 4);
-    expect_equal(str("hello").find_last_of("ox", 5), 4);
-    expect_equal(str("hello").find_first_of("hx", 0), 0);
-    expect_equal(str("hello").find_last_of("hx", 0), 0);
+    expect_equal(sz::rfind(str("hello"), "ell", str::npos), 1);
+    expect_equal(sz::find_last_of(str("hello"), "le", str::npos), 3);
+    expect_equal(sz::find_first_of(str("hello"), "ox", 4), 4);
+    expect_equal(sz::find_first_of(str("hello"), "ox", 5), str::npos);
+    expect_equal(sz::find_last_of(str("hello"), "ox", 4), 4);
+    expect_equal(sz::find_last_of(str("hello"), "ox", 5), 4);
+    expect_equal(sz::find_first_of(str("hello"), "hx", 0), 0);
+    expect_equal(sz::find_last_of(str("hello"), "hx", 0), 0);
 
     // More complex relative patterns
     expect_true(str("0123456789012345678901234567890123456789012345678901234567890123") <=
@@ -842,22 +868,22 @@ void test_stl_reads_unit() {
     expect_true(str("hello world").compare(6, 5, "worlds", 6) < 0);
 
     // Prefix and suffix checks against strings.
-    expect_equal(str("https://cppreference.com").starts_with(str("http")), true);
-    expect_equal(str("https://cppreference.com").starts_with(str("ftp")), false);
-    expect_equal(str("https://cppreference.com").ends_with(str("com")), true);
-    expect_equal(str("https://cppreference.com").ends_with(str("org")), false);
+    expect_equal(sz::starts_with(str("https://cppreference.com"), str("http")), true);
+    expect_equal(sz::starts_with(str("https://cppreference.com"), str("ftp")), false);
+    expect_equal(sz::ends_with(str("https://cppreference.com"), str("com")), true);
+    expect_equal(sz::ends_with(str("https://cppreference.com"), str("org")), false);
 
     // Prefix and suffix checks against characters.
-    expect_equal(str("C++20").starts_with('C'), true);
-    expect_equal(str("C++20").starts_with('J'), false);
-    expect_equal(str("C++20").ends_with('0'), true);
-    expect_equal(str("C++20").ends_with('3'), false);
+    expect_equal(sz::starts_with(str("C++20"), 'C'), true);
+    expect_equal(sz::starts_with(str("C++20"), 'J'), false);
+    expect_equal(sz::ends_with(str("C++20"), '0'), true);
+    expect_equal(sz::ends_with(str("C++20"), '3'), false);
 
     // Prefix and suffix checks against C-style strings.
-    expect_equal(str("string_view").starts_with("string"), true);
-    expect_equal(str("string_view").starts_with("String"), false);
-    expect_equal(str("string_view").ends_with("view"), true);
-    expect_equal(str("string_view").ends_with("View"), false);
+    expect_equal(sz::starts_with(str("string_view"), "string"), true);
+    expect_equal(sz::starts_with(str("string_view"), "String"), false);
+    expect_equal(sz::ends_with(str("string_view"), "view"), true);
+    expect_equal(sz::ends_with(str("string_view"), "View"), false);
 
 #if defined(__cpp_lib_string_contains)
     // Checking basic substring presence.
@@ -944,7 +970,7 @@ void test_stl_updates_unit() {
     }
     {
         str s;
-        expect_true(ok(s.assign(258, '0')) && s.find(std::string(256, '1')) == str::npos);
+        expect_true(ok(s.assign(258, '0')) && sz::find(s, std::string(256, '1')) == str::npos);
     }
 
     // Assignments.
@@ -1266,9 +1292,9 @@ void test_stl_containers_unit() {
     // and each prefix precedes its own extension.
     char const *const ascending_keys[] = {"Zebra", "app", "apple", "apples", "banana"};
 
-    // Both maps order through the transparent `sz::less`, which also finds owning keys by views.
-    std::map<sz::string_t, int, sz::less> sorted_words_sz;
-    std::map<std::string, int, sz::less> sorted_words_stl;
+    // Both maps order through the transparent `sz::less_t`, which also finds owning keys by views.
+    std::map<sz::string_t, int, sz::less_t> sorted_words_sz;
+    std::map<std::string, int, sz::less_t> sorted_words_stl;
     for (int insertion = 4; insertion >= 0; --insertion) { // Reverse order, so sorting has work to do
         sorted_words_sz.emplace(owned_(ascending_keys[insertion]), insertion);
         sorted_words_stl.emplace(ascending_keys[insertion], insertion);
@@ -1288,9 +1314,9 @@ void test_stl_containers_unit() {
     std::size_t rank_stl = 0;
     for (auto const &entry : sorted_words_stl) {
         expect_equal(entry.first, ascending_keys[rank_stl],
-                     "std::string map via sz::less produced the wrong key at sorted rank_stl");
+                     "std::string map via sz::less_t produced the wrong key at sorted rank_stl");
         expect_equal(entry.second, static_cast<int>(rank_stl),
-                     "std::string map via sz::less produced the wrong value at sorted rank_stl");
+                     "std::string map via sz::less_t produced the wrong value at sorted rank_stl");
         ++rank_stl;
     }
     expect_equal(rank_stl, 5);
@@ -1338,8 +1364,8 @@ void test_stl_containers_unit() {
     expect_equal(words_stl.find("xyz"), words_stl.end());
 
     // Empty keys are valid, and order before everything else.
-    expect_true(sz::less {}("", "a"));
-    expect_equal(sz::less {}("a", ""), false);
+    expect_true(sz::less_t {}("", "a"));
+    expect_equal(sz::less_t {}("a", ""), false);
     expect_true(sz::equal_to_t {}("", ""));
     sorted_words_sz.emplace(owned_(""), -1);
     expect_equal(sorted_words_sz.begin()->first, "");
@@ -1403,18 +1429,18 @@ void test_extensions_reads_unit() {
         return std::accumulate(s.begin(), s.end(), (std::size_t)0,
                                [](std::size_t sum, char c) { return sum + static_cast<unsigned char>(c); });
     };
-    expect_equal(str("a").bytesum(), (std::size_t)'a');
-    expect_equal(str("0").bytesum(), (std::size_t)'0');
-    expect_equal(str("0123456789").bytesum(), arithmetic_sum('0', '9'));
-    expect_equal(str("abcdefghijklmnopqrstuvwxyz").bytesum(), arithmetic_sum('a', 'z'));
-    expect_equal(str("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz").bytesum(),
+    expect_equal(sz::bytesum(str("a")), (std::size_t)'a');
+    expect_equal(sz::bytesum(str("0")), (std::size_t)'0');
+    expect_equal(sz::bytesum(str("0123456789")), arithmetic_sum('0', '9'));
+    expect_equal(sz::bytesum(str("abcdefghijklmnopqrstuvwxyz")), arithmetic_sum('a', 'z'));
+    expect_equal(sz::bytesum(str("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz")),
                  arithmetic_sum('a', 'z') * 3);
     {
         str s = "近来，加文出席微博之夜时对着镜头频繁摆出假笑表情、一度累" //
                 "瘫睡倒在沙发上的照片被广泛转发，引发对他失去童年、被过度" //
                 "消费的担忧。八岁的加文，已当网红近六年了，可以说，自懂事" //
                 "以来，他没有过过一天没有名气的日子。";
-        expect_equal(s.bytesum(), accumulate_bytes(s));
+        expect_equal(sz::bytesum(s), accumulate_bytes(s));
     }
 }
 
@@ -1558,8 +1584,8 @@ void test_extensions_updates_unit() {
         {
             sz::string<accounting_allocator_t> s(allocator);
             expect_true(sz::succeeded(s.assign("STRASSE AND STRASSE")));
-            expect_true(sz::succeeded(s.utf8_uncased_fold()) && s == "strasse and strasse");
-            expect_true(sz::succeeded(s.utf8_normalize(sz_normal_form_nfd_k)) && s == "strasse and strasse");
+            expect_true(sz::succeeded(sz::utf8_uncased_fold(s)) && s == "strasse and strasse");
+            expect_true(sz::succeeded(sz::utf8_normalize(s, sz_normal_form_nfd_k)) && s == "strasse and strasse");
             expect_true(s.get_allocator() == allocator && live_bytes != 0);
         }
         expect_equal(live_bytes, 0);
@@ -1568,87 +1594,87 @@ void test_extensions_updates_unit() {
     // Same length replacements.
     {
         str s = owned_("hello");
-        expect_true(sz::succeeded(s.replace_all("xx", "xx")) && s == "hello");
+        expect_true(sz::succeeded(sz::replace_all(s, "xx", "xx")) && s == "hello");
     }
     {
         str s = owned_("hello");
-        expect_true(sz::succeeded(s.replace_all("l", "1")) && s == "he11o");
+        expect_true(sz::succeeded(sz::replace_all(s, "l", "1")) && s == "he11o");
     }
     {
         str s = owned_("hello");
-        expect_true(sz::succeeded(s.replace_all("he", "al")) && s == "alllo");
+        expect_true(sz::succeeded(sz::replace_all(s, "he", "al")) && s == "alllo");
     }
     {
         str s = owned_("hello");
-        expect_true(sz::succeeded(s.replace_all("x"_bs, "!")) && s == "hello");
+        expect_true(sz::succeeded(sz::replace_all(s, "x"_bs, "!")) && s == "hello");
     }
     {
         str s = owned_("hello");
-        expect_true(sz::succeeded(s.replace_all("o"_bs, "!")) && s == "hell!");
+        expect_true(sz::succeeded(sz::replace_all(s, "o"_bs, "!")) && s == "hell!");
     }
     {
         str s = owned_("hello");
-        expect_true(sz::succeeded(s.replace_all("ho"_bs, "!")) && s == "!ell!");
+        expect_true(sz::succeeded(sz::replace_all(s, "ho"_bs, "!")) && s == "!ell!");
     }
 
     // Shorter replacements.
     {
         str s = owned_("hello");
-        expect_true(sz::succeeded(s.replace_all("xx", "x")) && s == "hello");
+        expect_true(sz::succeeded(sz::replace_all(s, "xx", "x")) && s == "hello");
     }
     {
         str s = owned_("hello");
-        expect_true(sz::succeeded(s.replace_all("l", "")) && s == "heo");
+        expect_true(sz::succeeded(sz::replace_all(s, "l", "")) && s == "heo");
     }
     {
         str s = owned_("hello");
-        expect_true(sz::succeeded(s.replace_all("h", "")) && s == "ello");
+        expect_true(sz::succeeded(sz::replace_all(s, "h", "")) && s == "ello");
     }
     {
         str s = owned_("hello");
-        expect_true(sz::succeeded(s.replace_all("o", "")) && s == "hell");
+        expect_true(sz::succeeded(sz::replace_all(s, "o", "")) && s == "hell");
     }
     {
         str s = owned_("hello");
-        expect_true(sz::succeeded(s.replace_all("llo", "!")) && s == "he!");
+        expect_true(sz::succeeded(sz::replace_all(s, "llo", "!")) && s == "he!");
     }
     {
         str s = owned_("hello");
-        expect_true(sz::succeeded(s.replace_all("x"_bs, "")) && s == "hello");
+        expect_true(sz::succeeded(sz::replace_all(s, "x"_bs, "")) && s == "hello");
     }
     {
         str s = owned_("hello");
-        expect_true(sz::succeeded(s.replace_all("lo"_bs, "")) && s == "he");
+        expect_true(sz::succeeded(sz::replace_all(s, "lo"_bs, "")) && s == "he");
     }
 
     // Longer replacements.
     {
         str s = owned_("hello");
-        expect_true(sz::succeeded(s.replace_all("xx", "xxx")) && s == "hello");
+        expect_true(sz::succeeded(sz::replace_all(s, "xx", "xxx")) && s == "hello");
     }
     {
         str s = owned_("hello");
-        expect_true(sz::succeeded(s.replace_all("l", "ll")) && s == "hellllo");
+        expect_true(sz::succeeded(sz::replace_all(s, "l", "ll")) && s == "hellllo");
     }
     {
         str s = owned_("hello");
-        expect_true(sz::succeeded(s.replace_all("h", "hh")) && s == "hhello");
+        expect_true(sz::succeeded(sz::replace_all(s, "h", "hh")) && s == "hhello");
     }
     {
         str s = owned_("hello");
-        expect_true(sz::succeeded(s.replace_all("o", "oo")) && s == "helloo");
+        expect_true(sz::succeeded(sz::replace_all(s, "o", "oo")) && s == "helloo");
     }
     {
         str s = owned_("hello");
-        expect_true(sz::succeeded(s.replace_all("llo", "llo!")) && s == "hello!");
+        expect_true(sz::succeeded(sz::replace_all(s, "llo", "llo!")) && s == "hello!");
     }
     {
         str s = owned_("hello");
-        expect_true(sz::succeeded(s.replace_all("x"_bs, "xx")) && s == "hello");
+        expect_true(sz::succeeded(sz::replace_all(s, "x"_bs, "xx")) && s == "hello");
     }
     {
         str s = owned_("hello");
-        expect_true(sz::succeeded(s.replace_all("lo"_bs, "lo")) && s == "helololo");
+        expect_true(sz::succeeded(sz::replace_all(s, "lo"_bs, "lo")) && s == "helololo");
     }
 
     // Directly mapping bytes using a Look-Up Table.
@@ -1657,17 +1683,17 @@ void test_extensions_updates_unit() {
     for (char c = 'A'; c <= 'Z'; c++) invert_case[c] = c - 'A' + 'a';
     {
         str s = owned_("hello");
-        s.lookup(invert_case);
+        expect_true(sz::succeeded(sz::lookup(s.span(), invert_case)));
         expect_equal(s, "HELLO");
     }
     {
         str s = owned_("HeLLo");
-        s.lookup(invert_case);
+        expect_true(sz::succeeded(sz::lookup(s.span(), invert_case)));
         expect_equal(s, "hEllO");
     }
     {
         str s = owned_("H-lL0");
-        s.lookup(invert_case);
+        expect_true(sz::succeeded(sz::lookup(s.span(), invert_case)));
         expect_equal(s, "h-Ll0");
     }
 
@@ -1695,26 +1721,26 @@ void test_extensions_updates_unit() {
     // Range members slice the string they were called on, so offsets stay inside its own buffer.
     {
         str text = owned_("hello brave new world");
-        expect_equal(offsets_within(text, text.utf8_wordbreaks()),
+        expect_equal(offsets_within(text, sz::utf8_wordbreaks(text)),
                      std::vector<std::ptrdiff_t> {0, 5, 6, 11, 12, 15, 16},
                      "utf8_wordbreaks segment landed outside the caller's own buffer");
-        expect_equal(offsets_within(text, text.utf8_split_whitespaces()), std::vector<std::ptrdiff_t> {0, 6, 12, 16},
+        expect_equal(offsets_within(text, sz::utf8_split_whitespaces(text)), std::vector<std::ptrdiff_t> {0, 6, 12, 16},
                      "utf8_split_whitespaces token landed outside the caller's own buffer");
-        expect_equal(offsets_within(text, text.utf8_split_delimiters()), std::vector<std::ptrdiff_t> {0, 6, 12, 16},
+        expect_equal(offsets_within(text, sz::utf8_split_delimiters(text)), std::vector<std::ptrdiff_t> {0, 6, 12, 16},
                      "utf8_split_delimiters field landed outside the caller's own buffer");
         str sso = owned_("a b c");
-        expect_equal(offsets_within(sso, sso.utf8_split_whitespaces()), std::vector<std::ptrdiff_t> {0, 2, 4},
+        expect_equal(offsets_within(sso, sz::utf8_split_whitespaces(sso)), std::vector<std::ptrdiff_t> {0, 2, 4},
                      "utf8_split_whitespaces token landed outside the small-string-optimized buffer");
     }
 
     // Randomization fills a string the caller sized.
     {
         str s;
-        expect_true(sz::succeeded(s.resize(4)) && s.fill_random(42).size() == 4);
+        expect_true(sz::succeeded(s.resize(4)) && sz::succeeded(sz::fill_random(s.span(), 42)) && s.size() == 4);
     }
     {
         str s;
-        expect_true(s.fill_random().empty());
+        expect_true(sz::succeeded(sz::fill_random(s.span())) && s.empty());
     }
 }
 
@@ -1733,89 +1759,89 @@ void test_extensions_updates_unit() {
  */
 void test_extensions_ranges_unit() {
     // Searching for a set of characters
-    expect_equal(sz::string_view_t("a").find_first_of("az"), 0);
-    expect_equal(sz::string_view_t("a").find_last_of("az"), 0);
-    expect_equal(sz::string_view_t("a").find_first_of("xz"), sz::string_view_t::npos);
-    expect_equal(sz::string_view_t("a").find_last_of("xz"), sz::string_view_t::npos);
+    expect_equal(sz::find_first_of(sz::string_view_t("a"), "az"), 0);
+    expect_equal(sz::find_last_of(sz::string_view_t("a"), "az"), 0);
+    expect_equal(sz::find_first_of(sz::string_view_t("a"), "xz"), sz::string_view_t::npos);
+    expect_equal(sz::find_last_of(sz::string_view_t("a"), "xz"), sz::string_view_t::npos);
 
-    expect_equal(sz::string_view_t("a").find_first_not_of("xz"), 0);
-    expect_equal(sz::string_view_t("a").find_last_not_of("xz"), 0);
-    expect_equal(sz::string_view_t("a").find_first_not_of("az"), sz::string_view_t::npos);
-    expect_equal(sz::string_view_t("a").find_last_not_of("az"), sz::string_view_t::npos);
+    expect_equal(sz::find_first_not_of(sz::string_view_t("a"), "xz"), 0);
+    expect_equal(sz::find_last_not_of(sz::string_view_t("a"), "xz"), 0);
+    expect_equal(sz::find_first_not_of(sz::string_view_t("a"), "az"), sz::string_view_t::npos);
+    expect_equal(sz::find_last_not_of(sz::string_view_t("a"), "az"), sz::string_view_t::npos);
 
-    expect_equal(sz::string_view_t("aXbYaXbY").find_first_of("XY"), 1);
-    expect_equal(sz::string_view_t("axbYaxbY").find_first_of("Y"), 3);
-    expect_equal(sz::string_view_t("YbXaYbXa").find_last_of("XY"), 6);
-    expect_equal(sz::string_view_t("YbxaYbxa").find_last_of("Y"), 4);
-    expect_equal(sz::string_view_t(sz::base64(), sizeof(sz::base64())).find_first_of("_"), sz::string_view_t::npos);
-    expect_equal(sz::string_view_t(sz::base64(), sizeof(sz::base64())).find_first_of("+"), 62);
-    expect_true(sz::string_view_t(sz::ascii_printables(), sizeof(sz::ascii_printables())).find_first_of("~") !=
+    expect_equal(sz::find_first_of(sz::string_view_t("aXbYaXbY"), "XY"), 1);
+    expect_equal(sz::find_first_of(sz::string_view_t("axbYaxbY"), "Y"), 3);
+    expect_equal(sz::find_last_of(sz::string_view_t("YbXaYbXa"), "XY"), 6);
+    expect_equal(sz::find_last_of(sz::string_view_t("YbxaYbxa"), "Y"), 4);
+    expect_equal(sz::find_first_of(sz::string_view_t(sz::base64(), sizeof(sz::base64())), "_"),
+                 sz::string_view_t::npos);
+    expect_equal(sz::find_first_of(sz::string_view_t(sz::base64(), sizeof(sz::base64())), "+"), 62);
+    expect_true(sz::find_first_of(sz::string_view_t(sz::ascii_printables(), sizeof(sz::ascii_printables())), "~") !=
                 sz::string_view_t::npos);
 
     // Forward searches starting past the end find nothing, even for an empty needle
-    expect_equal("abc"_sv.find("", 3), 3);
-    expect_equal("abc"_sv.find("", 4), sz::string_view_t::npos);
-    expect_equal("abc"_sv.find("b", 4), sz::string_view_t::npos);
-    expect_equal("abc"_sv.find('b', 4), sz::string_view_t::npos);
-    expect_equal("abc"_sv.find_first_of("b", 4), sz::string_view_t::npos);
-    expect_equal("abc"_sv.find_first_not_of("b", 4), sz::string_view_t::npos);
-    expect_equal("abc"_sv.find('b', sz::string_view_t::npos), sz::string_view_t::npos); // Largest position
-    expect_equal(sz::string_view_t().find("", 1), sz::string_view_t::npos);             // Default view has no data
+    expect_equal(sz::find("abc"_sv, "", 3), 3);
+    expect_equal(sz::find("abc"_sv, "", 4), sz::string_view_t::npos);
+    expect_equal(sz::find("abc"_sv, "b", 4), sz::string_view_t::npos);
+    expect_equal(sz::find("abc"_sv, 'b', 4), sz::string_view_t::npos);
+    expect_equal(sz::find_first_of("abc"_sv, "b", 4), sz::string_view_t::npos);
+    expect_equal(sz::find_first_not_of("abc"_sv, "b", 4), sz::string_view_t::npos);
+    expect_equal(sz::find("abc"_sv, 'b', sz::string_view_t::npos), sz::string_view_t::npos); // Largest position
+    expect_equal(sz::find(sz::string_view_t(), "", 1), sz::string_view_t::npos);             // Default view has no data
 
-    expect_equal("aabaa"_sv.remove_prefix("a"), "abaa");
-    expect_equal("aabaa"_sv.remove_suffix("a"), "aaba");
-    expect_equal("aabaa"_sv.lstrip("a"_bs), "baa");
-    expect_equal("aabaa"_sv.rstrip("a"_bs), "aab");
-    expect_equal("aabaa"_sv.strip("a"_bs), "b");
+    expect_equal(sz::remove_prefix("aabaa"_sv, "a"), "abaa");
+    expect_equal(sz::remove_suffix("aabaa"_sv, "a"), "aaba");
+    expect_equal(sz::lstrip("aabaa"_sv, "a"_bs), "baa");
+    expect_equal(sz::rstrip("aabaa"_sv, "a"_bs), "aab");
+    expect_equal(sz::strip("aabaa"_sv, "a"_bs), "b");
 
     // Check more advanced composite operations
-    expect_equal("abbccc"_sv.partition('b').before.size(), 1);
-    expect_equal("abbccc"_sv.partition("bb").before.size(), 1);
-    expect_equal("abbccc"_sv.partition("bb").match.size(), 2);
-    expect_equal("abbccc"_sv.partition("bb").after.size(), 3);
-    expect_equal("abbccc"_sv.partition("bb").before, "a");
-    expect_equal("abbccc"_sv.partition("bb").match, "bb");
-    expect_equal("abbccc"_sv.partition("bb").after, "ccc");
-    expect_equal("abb ccc"_sv.partition(sz::whitespaces_set()).after, "ccc");
+    expect_equal(sz::partition("abbccc"_sv, 'b').before.size(), 1);
+    expect_equal(sz::partition("abbccc"_sv, "bb").before.size(), 1);
+    expect_equal(sz::partition("abbccc"_sv, "bb").match.size(), 2);
+    expect_equal(sz::partition("abbccc"_sv, "bb").after.size(), 3);
+    expect_equal(sz::partition("abbccc"_sv, "bb").before, "a");
+    expect_equal(sz::partition("abbccc"_sv, "bb").match, "bb");
+    expect_equal(sz::partition("abbccc"_sv, "bb").after, "ccc");
+    expect_equal(sz::partition("abb ccc"_sv, sz::whitespaces_set()).after, "ccc");
 
     // Check ranges of search matches
-    expect_equal("hello"_sv.find_all("l").size(), 2);
-    expect_equal("hello"_sv.rfind_all("l").size(), 2);
+    expect_equal(sz::find_all("hello"_sv, "l").size(), 2);
+    expect_equal(sz::rfind_all("hello"_sv, "l").size(), 2);
 
-    expect_equal(""_sv.find_all(".", sz::include_overlaps_t {}).size(), 0);
-    expect_equal(""_sv.find_all(".", sz::exclude_overlaps_t {}).size(), 0);
-    expect_equal("."_sv.find_all(".", sz::include_overlaps_t {}).size(), 1);
-    expect_equal("."_sv.find_all(".", sz::exclude_overlaps_t {}).size(), 1);
-    expect_equal(".."_sv.find_all(".", sz::include_overlaps_t {}).size(), 2);
-    expect_equal(".."_sv.find_all(".", sz::exclude_overlaps_t {}).size(), 2);
-    expect_equal(""_sv.rfind_all(".", sz::include_overlaps_t {}).size(), 0);
-    expect_equal(""_sv.rfind_all(".", sz::exclude_overlaps_t {}).size(), 0);
-    expect_equal("."_sv.rfind_all(".", sz::include_overlaps_t {}).size(), 1);
-    expect_equal("."_sv.rfind_all(".", sz::exclude_overlaps_t {}).size(), 1);
-    expect_equal(".."_sv.rfind_all(".", sz::include_overlaps_t {}).size(), 2);
-    expect_equal(".."_sv.rfind_all(".", sz::exclude_overlaps_t {}).size(), 2);
+    expect_equal(sz::find_all(""_sv, ".", sz::include_overlaps_t {}).size(), 0);
+    expect_equal(sz::find_all(""_sv, ".", sz::exclude_overlaps_t {}).size(), 0);
+    expect_equal(sz::find_all("."_sv, ".", sz::include_overlaps_t {}).size(), 1);
+    expect_equal(sz::find_all("."_sv, ".", sz::exclude_overlaps_t {}).size(), 1);
+    expect_equal(sz::find_all(".."_sv, ".", sz::include_overlaps_t {}).size(), 2);
+    expect_equal(sz::find_all(".."_sv, ".", sz::exclude_overlaps_t {}).size(), 2);
+    expect_equal(sz::rfind_all(""_sv, ".", sz::include_overlaps_t {}).size(), 0);
+    expect_equal(sz::rfind_all(""_sv, ".", sz::exclude_overlaps_t {}).size(), 0);
+    expect_equal(sz::rfind_all("."_sv, ".", sz::include_overlaps_t {}).size(), 1);
+    expect_equal(sz::rfind_all("."_sv, ".", sz::exclude_overlaps_t {}).size(), 1);
+    expect_equal(sz::rfind_all(".."_sv, ".", sz::include_overlaps_t {}).size(), 2);
+    expect_equal(sz::rfind_all(".."_sv, ".", sz::exclude_overlaps_t {}).size(), 2);
 
     // An empty needle matches at every offset from 0 to `size()` inclusive, in either direction.
-    expect_equal("abc"_sv.find_all("").size(), 4);
-    expect_equal("abc"_sv.find_all("", sz::exclude_overlaps_t {}).size(), 4);
-    expect_equal("abc"_sv.rfind_all("").size(), 4);
-    expect_equal(""_sv.find_all("").size(), 1);
-    expect_equal(sz::find_all(owned_("abc"), "").size(), 4);
+    expect_equal(sz::find_all("abc"_sv, "").size(), 4);
+    expect_equal(sz::find_all("abc"_sv, "", sz::exclude_overlaps_t {}).size(), 4);
+    expect_equal(sz::rfind_all("abc"_sv, "").size(), 4);
+    expect_equal(sz::find_all(""_sv, "").size(), 1);
 
-    expect_equal("a.b.c.d"_sv.find_all(".").size(), 3);
-    expect_equal("a.,b.,c.,d"_sv.find_all(".,").size(), 3);
-    expect_equal("a.,b.,c.,d"_sv.rfind_all(".,").size(), 3);
-    expect_equal("a.b,c.d"_sv.find_all(".,"_bs).size(), 3);
-    expect_equal("a...b...c"_sv.rfind_all("..").size(), 4);
-    expect_equal("a...b...c"_sv.rfind_all("..", sz::include_overlaps_t {}).size(), 4);
-    expect_equal("a...b...c"_sv.rfind_all("..", sz::exclude_overlaps_t {}).size(), 2);
+    expect_equal(sz::find_all("a.b.c.d"_sv, ".").size(), 3);
+    expect_equal(sz::find_all("a.,b.,c.,d"_sv, ".,").size(), 3);
+    expect_equal(sz::rfind_all("a.,b.,c.,d"_sv, ".,").size(), 3);
+    expect_equal(sz::find_all_characters("a.b,c.d"_sv, ".,"_bs).size(), 3);
+    expect_equal(sz::rfind_all("a...b...c"_sv, "..").size(), 4);
+    expect_equal(sz::rfind_all("a...b...c"_sv, "..", sz::include_overlaps_t {}).size(), 4);
+    expect_equal(sz::rfind_all("a...b...c"_sv, "..", sz::exclude_overlaps_t {}).size(), 2);
 
     {
-        auto finds = "a.b.c"_sv.find_all("abcd"_bs).template to<std::vector<std::string>>();
+        auto finds = sz::find_all_characters("a.b.c"_sv, "abcd"_bs).template to<std::vector<std::string>>();
         expect_true(finds.size() == 3 && finds[0] == "a");
     }
     {
-        auto rfinds = "a.b.c"_sv.rfind_all("abcd"_bs).template to<std::vector<std::string>>();
+        auto rfinds = sz::rfind_all_characters("a.b.c"_sv, "abcd"_bs).template to<std::vector<std::string>>();
         expect_true(rfinds.size() == 3 && rfinds[0] == "c");
     }
 
@@ -1837,10 +1863,6 @@ void test_extensions_ranges_unit() {
         expect_equal(sz::rfind_all(h, n).size(), 1);
     }
 
-    expect_equal(sz::find_all(owned_("abc"), owned_("b")).size(), 1);
-    expect_equal(sz::find_all(owned_("hello"), owned_("l")).size(), 2);
-    expect_equal(sz::rfind_all(owned_("abc"), owned_("b")).size(), 1);
-
     // Lvalue haystacks are borrowed, so slices land inside the caller's own buffer. A copied
     // haystack would offset into a private copy - and under SSO those offsets look plausible.
     {
@@ -1851,9 +1873,6 @@ void test_extensions_ranges_unit() {
         expect_equal(offsets_within(sso, sz::find_all(sso, "a")), std::vector<std::ptrdiff_t> {0, 4},
                      "Match offsets did not land inside the small-string-optimized haystack's own buffer");
     }
-
-    // Needles are copied into the matcher, so a temporary one outlives the expression that built it.
-    expect_equal(sz::find_all(owned_("hello world, hello cpp"), owned_("hello")).size(), 2);
 
     // Haystack and needle need not share a type - literals, views, and owning strings mix.
     {
@@ -1871,42 +1890,43 @@ void test_extensions_ranges_unit() {
 
     // Check splitting - the inverse of `find_all` ranges
     {
-        auto splits = ".a..c."_sv.split("."_bs).template to<std::vector<std::string>>();
+        auto splits = sz::split_characters(".a..c."_sv, "."_bs).template to<std::vector<std::string>>();
         expect_true(splits.size() == 5 && splits[0] == "" && splits[1] == "a" && splits[4] == "");
     }
     {
-        auto line_splits = "line1\nline2\nline3"_sv.split("line3").template to<std::vector<std::string>>();
+        auto line_splits = sz::split("line1\nline2\nline3"_sv, "line3").template to<std::vector<std::string>>();
         expect_true(line_splits.size() == 2 && line_splits[0] == "line1\nline2\n" && line_splits[1] == "");
     }
 
-    expect_equal(""_sv.split(".").size(), 1);
-    expect_equal(""_sv.rsplit(".").size(), 1);
-    expect_true("a.b"_sv.split("").size() == 1 && *"a.b"_sv.split("").begin() == "a.b"); // Empty separators never split
-    expect_equal("a.b"_sv.rsplit("").size(), 1);
-    expect_true(sz::string_view_t {}.split(",").size() == 1 && sz::string_view_t {}.rsplit(",").size() == 1);
+    expect_equal(sz::split(""_sv, ".").size(), 1);
+    expect_equal(sz::rsplit(""_sv, ".").size(), 1);
+    expect_true(sz::split("a.b"_sv, "").size() == 1 &&
+                *sz::split("a.b"_sv, "").begin() == "a.b"); // Empty separators never split
+    expect_equal(sz::rsplit("a.b"_sv, "").size(), 1);
+    expect_true(sz::split(sz::string_view_t {}, ",").size() == 1 && sz::rsplit(sz::string_view_t {}, ",").size() == 1);
 
-    expect_equal("hello"_sv.split("l").size(), 3);
-    expect_equal("hello"_sv.rsplit("l").size(), 3);
-    expect_equal(*advanced("hello"_sv.split("l").begin(), 0), "he");
-    expect_equal(*advanced("hello"_sv.rsplit("l").begin(), 0), "o");
-    expect_equal(*advanced("hello"_sv.split("l").begin(), 1), "");
-    expect_equal(*advanced("hello"_sv.rsplit("l").begin(), 1), "");
-    expect_equal(*advanced("hello"_sv.split("l").begin(), 2), "o");
-    expect_equal(*advanced("hello"_sv.rsplit("l").begin(), 2), "he");
+    expect_equal(sz::split("hello"_sv, "l").size(), 3);
+    expect_equal(sz::rsplit("hello"_sv, "l").size(), 3);
+    expect_equal(*std::next(sz::split("hello"_sv, "l").begin(), 0), "he");
+    expect_equal(*std::next(sz::rsplit("hello"_sv, "l").begin(), 0), "o");
+    expect_equal(*std::next(sz::split("hello"_sv, "l").begin(), 1), "");
+    expect_equal(*std::next(sz::rsplit("hello"_sv, "l").begin(), 1), "");
+    expect_equal(*std::next(sz::split("hello"_sv, "l").begin(), 2), "o");
+    expect_equal(*std::next(sz::rsplit("hello"_sv, "l").begin(), 2), "he");
 
-    expect_equal("a.b.c.d"_sv.split(".").size(), 4);
-    expect_equal("a.b.c.d"_sv.rsplit(".").size(), 4);
-    expect_equal(*("a.b.c.d"_sv.split(".").begin()), "a");
-    expect_equal(*("a.b.c.d"_sv.rsplit(".").begin()), "d");
-    expect_equal(*advanced("a.b.c.d"_sv.split(".").begin(), 1), "b");
-    expect_equal(*advanced("a.b.c.d"_sv.rsplit(".").begin(), 1), "c");
-    expect_equal(*advanced("a.b.c.d"_sv.split(".").begin(), 3), "d");
-    expect_equal(*advanced("a.b.c.d"_sv.rsplit(".").begin(), 3), "a");
-    expect_equal("a.b.,c,d"_sv.split(".,").size(), 2);
-    expect_equal("a.b,c.d"_sv.split(".,"_bs).size(), 4);
+    expect_equal(sz::split("a.b.c.d"_sv, ".").size(), 4);
+    expect_equal(sz::rsplit("a.b.c.d"_sv, ".").size(), 4);
+    expect_equal(*(sz::split("a.b.c.d"_sv, ".").begin()), "a");
+    expect_equal(*(sz::rsplit("a.b.c.d"_sv, ".").begin()), "d");
+    expect_equal(*std::next(sz::split("a.b.c.d"_sv, ".").begin(), 1), "b");
+    expect_equal(*std::next(sz::rsplit("a.b.c.d"_sv, ".").begin(), 1), "c");
+    expect_equal(*std::next(sz::split("a.b.c.d"_sv, ".").begin(), 3), "d");
+    expect_equal(*std::next(sz::rsplit("a.b.c.d"_sv, ".").begin(), 3), "a");
+    expect_equal(sz::split("a.b.,c,d"_sv, ".,").size(), 2);
+    expect_equal(sz::split_characters("a.b,c.d"_sv, ".,"_bs).size(), 4);
 
     {
-        auto rsplits = ".a..c."_sv.rsplit("."_bs).template to<std::vector<std::string>>();
+        auto rsplits = sz::rsplit_characters(".a..c."_sv, "."_bs).template to<std::vector<std::string>>();
         expect_true(rsplits.size() == 5 && rsplits[0] == "" && rsplits[1] == "c" && rsplits[4] == "");
     }
 }
@@ -2140,3 +2160,6 @@ template void test_extensions_reads_unit<sz::string_view_t>();
 /*  The owning string forwards its reads to its view, so the view runs the read tests, and this
  *  instantiation compiles every member of the owning string. */
 template class ashvardanian::stringzilla::string<std::allocator<char>>;
+
+/*  Hashed containers key on views through the SDK's @c std::hash specialization. */
+template class std::unordered_map<ashvardanian::stringzilla::string_view_t, int>;

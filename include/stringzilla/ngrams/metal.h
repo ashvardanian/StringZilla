@@ -122,7 +122,7 @@ STRINGZILLA_API sz_status_t sz_ngrams_engine_init_metal(sz_ngrams_engine_t *engi
 
     sz_allocator_t unified;
     if (allocator) unified = *allocator;
-    else sz_allocator_init_unified_metal(&unified);
+    else sz_allocator_init_unified_metal_(&unified);
     sz_status_t const opened = sz_ngrams_engine_open_(queries, window_widths, window_widths_count,
                                                       sizeof(sz_ngrams_geometry_metal_t), &unified, stream, engine);
     if (opened != sz_success_k) return sz_metal_commit_(&call, opened);

@@ -23,7 +23,7 @@
 #define STRINGZILLA_SUBSTRINGS_SERIAL_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/capabilities.h" // `sz_capability_t`, `sz_cap_cpus_k`
+#include "stringzilla/capabilities.h" // `sz_cap_cpus_k`
 
 #include "stringzilla/utf8_runes/serial.h"        // `sz_rune_decode`, `sz_rune_encode`
 #include "stringzilla/utf8_uncased_fold/serial.h" // `sz_unicode_fold_codepoint_`, the folded iterators
@@ -33,22 +33,6 @@ extern "C" {
 #endif
 
 #pragma region Engine
-
-/**
- *  @brief One needle ending on one state, as the engine stores it.
- *
- *  The engine walks @b folded bytes, so this length is the folded one - the needle's own, identical
- *  for every match of that needle. The @b source span it corresponds to is not: needle "k" matches
- *  both the 1-byte "k" and the 3-byte Kelvin sign U+212A. Recovering that span is the walk's job.
- */
-typedef struct sz_substrings_output_t {
-
-    /** Which needle ends here, as an index into the strings the engine was built from. */
-    sz_u32_t needle_index;
-
-    /** Folded bytes this match spans; a walk traverses one edge per byte, so it fits a state id. */
-    sz_u32_t folded_match_bytes;
-} sz_substrings_output_t;
 
 /**
  *  @brief One start position's incumbent match while a leftmost policy is still deciding it.
@@ -64,152 +48,6 @@ typedef struct sz_substrings_pending_start_t {
     /** Haystack bytes that match spans; zero means no match has claimed the start yet. */
     sz_u32_t source_match_bytes;
 } sz_substrings_pending_start_t;
-
-/**
- *  @brief What a round found, written by the device and read after the caller's own join.
- *
- *  A device verb enqueues and returns, so nothing it discovers can reach the caller through a
- *  status code. The sizing walk always runs, so @c matches_emitted is the truth whatever the
- *  caller's output could hold, and a nonzero @c shortfall is the one signal that the output is
- *  incomplete rather than wrong. Under a leftmost policy a cover thins the matches after that walk,
- *  so for a round that stayed inside its budget the matches a caller could have read are
- *  @c matches_stored plus @c shortfall, which is also what the last boundary of a
- *  @ref sz_substrings_find names; a round that outran its budget ran no cover at all, and its
- *  @c shortfall counts the matches the budget could not hold.
- */
-typedef struct sz_substrings_report_t {
-
-    /** Matches the sizing walk found, which is the truth whatever the output held. */
-    sz_size_t matches_emitted;
-
-    /** Matches written out, which is @c matches_emitted clipped at the capacity. */
-    sz_size_t matches_stored;
-
-    /** Bytes a rewrite needs, which is the truth whatever the target held. */
-    sz_size_t target_length;
-
-    /** Matches or bytes the round could not hold, zero when everything fit. */
-    sz_size_t shortfall;
-} sz_substrings_report_t;
-
-/**
- *  @brief The compiled vocabulary, its sizing policy, and the round's arena, in one lifetime.
- *
- *  Transitions are split into two tiers by how often a state is visited. Text keeps resetting the
- *  walk toward the root, so a small set of states absorbs most byte steps whatever the dictionary
- *  size, and the tiers are sized to that skew rather than to the vocabulary as a whole.
- *
- *  The @b hot tier is a dense goto-completed table, one row per state with one target per byte
- *  @b class, so a step is a single load with no branch and no failure chasing. A class is a byte
- *  some needle spells, or the one shared class of every byte none does, so a row is as wide as the
- *  vocabulary's own alphabet: five targets for nucleotides, a few hundred for multilingual text,
- *  and never more than 256. The @b cold tier is a double array: @c base and @c check encode
- *  transitions as address arithmetic plus an ownership test, and @c fail restores the failure links
- *  that goto completion would otherwise have folded away. States are numbered so the hot ones come
- *  first, which makes the tier test state < hot_count with no lookup.
- *
- *  Both blocks are built by an init kernel and live until @ref sz_substrings_engine_free, so no
- *  compute verb rebuilds them and a device backend has no host clone to stage.
- */
-typedef struct sz_substrings_engine_t {
-
-    /** Hot tier: hot_count × classes_count goto-completed targets, row-major, shallow first. */
-    sz_u32_t const *hot_rows;
-
-    /** Each byte's column in @c hot_rows: its own if a needle spells it, else one shared column. */
-    sz_u8_t const *byte_to_class;
-
-    /** Cold tier: transition target for a state on a byte is base[state] + byte, if owned. */
-    sz_u32_t const *base;
-
-    /** Cold tier: owner of each slot, so a collision reads as a missing edge, not a wrong one. */
-    sz_u32_t const *check;
-
-    /** Cold tier: failure link, followed when @c check denies ownership. */
-    sz_u32_t const *fail;
-
-    /** One bit per slot: whether any needle ends there, so a non-matching byte touches no count. */
-    sz_u32_t const *accepts_words;
-
-    /** Matches ending at each state, flattened and merged along failure chains at build time. */
-    sz_substrings_output_t const *outputs;
-
-    /** Outputs per slot, in the published numbering. */
-    sz_u32_t const *outputs_counts;
-
-    /** Exclusive prefix sum of @c outputs_counts; a nested-suffix vocabulary drives the pool to
-     *  O(states²), so these stay pointer-wide where the counts do not. */
-    sz_size_t const *outputs_offsets;
-
-    /** Length of @c outputs, so a consumer never rescans the CSR to recover it. */
-    sz_size_t outputs_total;
-
-    /** Slots every cold-tier array holds: @c state_count plus the alphabet's address headroom. */
-    sz_size_t slots_count;
-
-    /** States below @c hot_count live in @c hot_rows; the rest live in the double array. */
-    sz_u32_t hot_count;
-
-    /** Columns of a hot row, at most 256. */
-    sz_u32_t classes_count;
-
-    /** Published state ceiling, above the trie's, as a packed child's id is address arithmetic. */
-    sz_u32_t state_count;
-
-    /** The root's published id, which is always zero. */
-    sz_u32_t root;
-
-    /** Needles the vocabulary holds, which bounds every reported @c needle_index. */
-    sz_u32_t needles_count;
-
-    /** Most @b haystack bytes one match can span, sizing every slice, halo and warm-up. */
-    sz_u32_t max_source_match_bytes;
-
-    /** Fewest haystack bytes one match can span; the mirror bound. */
-    sz_u32_t min_source_match_bytes;
-
-    /** Most merged outputs any state carries, so a consumer can bound one pass's match count. */
-    sz_u32_t max_outputs_per_state;
-
-    /** Whether a walk folds the haystack as it consumes it, or steps it byte for byte. */
-    sz_case_sensitivity_t case_sensitivity;
-
-    /** Bytes that move a walk off the root, which a byte search can skip to while it sits there. */
-    sz_byteset_t root_live;
-
-    /** The policy the arena was sized for, and the only one it runs. */
-    sz_substrings_overlap_policy_t overlap_policy;
-
-    /** Matches one round may emit; past it every later kernel retires. */
-    sz_size_t matches_budget;
-
-    /** Chunks one round may cut the haystacks into, fixed here, not discovered. */
-    sz_size_t chunk_budget;
-
-    /** Haystacks one round may carry, read by a device tier only; its arena is sized for them. */
-    sz_size_t haystacks_budget;
-
-    /** Device-resident counts every verb writes and no verb joins to read. */
-    sz_substrings_report_t *report;
-
-    /** The capability that compiled the vocabulary, whose kernels every round then runs. */
-    sz_capability_t capability;
-
-    /** What built both blocks below. */
-    sz_allocator_t allocator;
-
-    /** The automaton's block, fixed for the engine's life. */
-    void *memory;
-
-    /** Bytes of that block. */
-    sz_size_t memory_bytes;
-
-    /** The round's arena: ring, chunks, emitted, keep, scan scratch. */
-    void *scratch;
-
-    /** Bytes of that block. */
-    sz_size_t scratch_bytes;
-} sz_substrings_engine_t;
 
 /** What a GPU chunk walk does at each match: size the output so the caller can scan it, write it,
  *  tally it, or stop. */
@@ -246,24 +84,6 @@ enum {
     sz_substrings_gpu_matches_budget_default_k = 1u << 20,
     sz_substrings_gpu_haystacks_budget_default_k = 1u << 20,
 };
-
-/** BM25's continuous parameters. */
-typedef struct sz_substrings_bm25_t {
-
-    /** The literature's k₁: how slowly repeated occurrences stop adding score; 1.2 is customary. */
-    sz_f32_t term_frequency_saturation;
-
-    /** The literature's b, in [0, 1]: 0 ignores document length and 1 normalizes it fully, while
-     *  0.75 is the customary choice. */
-    sz_f32_t length_normalization;
-
-    /** The corpus-wide mean document length, in the unit of the lengths scored; read only when
-     *  @c length_normalization is positive. */
-    sz_f32_t average_document_length;
-} sz_substrings_bm25_t;
-
-/** The @c hot_states value that sizes the hot tier itself, so zero stays a genuine all-cold ask. */
-#define STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO (STRINGZILLA_SIZE_MAX)
 
 #pragma endregion Engine
 

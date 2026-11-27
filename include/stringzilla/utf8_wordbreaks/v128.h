@@ -468,7 +468,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_wordbreaks_v128_( //
             sz_size_t limit = straddle ? (sz_size_t)(63 - sz_u64_clz(straddle & (~straddle + 1ull))) : loaded;
             if ((text_u8[position + loaded] & 0xC0) == 0x80) {
                 sz_size_t const last_lead = (sz_size_t)(63 - sz_u64_clz(start_bytes_all));
-                sz_size_t const last_lead_length = sz_utf8_lead_length_(text_u8[position + last_lead]);
+                sz_size_t const last_lead_length = sz_utf8_lead_length(text_u8[position + last_lead]);
                 if (last_lead + last_lead_length > loaded && last_lead < limit) limit = last_lead;
             }
             if (limit > 0) complete_limit = limit;

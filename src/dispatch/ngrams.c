@@ -5,6 +5,7 @@
  *  @brief The ngrams engine's dispatch points, their lists and finder.
  */
 #include "stringzilla/ngrams.h"
+#include "stringzilla/ngrams/serial.h" // `sz_ngrams_engine_close_`
 
 #include "dispatch.h"
 

@@ -50,43 +50,43 @@ void test_utf8_runes_unit() {
     check_utf8_runes_unit_(utf8_runes_dispatched);
 
     // C++ API: character counting vs byte length through the `sz::string_view_t` wrappers.
-    expect_equal(sz::string_view_t("a\xC3\x9F\xE4\xB8\xAD").utf8_count(), 3u); // `a` + U+00DF + U+4E2D
-    expect_equal("hello"_sv.utf8_count(), 5);
+    expect_equal(sz::utf8_count(sz::string_view_t("a\xC3\x9F\xE4\xB8\xAD")), 3u); // `a` + U+00DF + U+4E2D
+    expect_equal(sz::utf8_count("hello"_sv), 5);
     expect_equal("hello"_sv.size(), 5);
-    expect_equal("Hello World"_sv.utf8_count(), 11);
-    expect_equal(sz::string_view_t("").utf8_count(), 0);
-    expect_equal(sz::string_view_t("Hello \xE4\xB8\x96\xE7\x95\x8C").utf8_count(), 8); // "Hello " (6) + 2 CJK chars
-    expect_equal(sz::string_view_t("Hello \xE4\xB8\x96\xE7\x95\x8C").size(), 12);      // "Hello " (6) + 6 bytes
-    expect_equal(sz::string_view_t("Hello \xF0\x9F\x98\x80").utf8_count(), 7);         // "Hello " (6) + 1 emoji
-    expect_equal(sz::string_view_t("Hello \xF0\x9F\x98\x80").size(), 10);              // "Hello " (6) + 4 bytes
-    expect_equal(sz::string_view_t("\xF0\x9F\x98\x80\xF0\x9F\x98\x81\xF0\x9F\x98\x82").utf8_count(), 3);
+    expect_equal(sz::utf8_count("Hello World"_sv), 11);
+    expect_equal(sz::utf8_count(sz::string_view_t("")), 0);
+    expect_equal(sz::utf8_count(sz::string_view_t("Hello \xE4\xB8\x96\xE7\x95\x8C")), 8); // "Hello " (6) + 2 CJK chars
+    expect_equal(sz::string_view_t("Hello \xE4\xB8\x96\xE7\x95\x8C").size(), 12);         // "Hello " (6) + 6 bytes
+    expect_equal(sz::utf8_count(sz::string_view_t("Hello \xF0\x9F\x98\x80")), 7);         // "Hello " (6) + 1 emoji
+    expect_equal(sz::string_view_t("Hello \xF0\x9F\x98\x80").size(), 10);                 // "Hello " (6) + 4 bytes
+    expect_equal(sz::utf8_count(sz::string_view_t("\xF0\x9F\x98\x80\xF0\x9F\x98\x81\xF0\x9F\x98\x82")), 3);
     expect_equal(sz::string_view_t("\xF0\x9F\x98\x80\xF0\x9F\x98\x81\xF0\x9F\x98\x82").size(), 12);
-    expect_equal(sz::string_view_t("\xD0\x9F\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82").utf8_count(), 6);
+    expect_equal(sz::utf8_count(sz::string_view_t("\xD0\x9F\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82")), 6);
     expect_equal(sz::string_view_t("\xD0\x9F\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82").size(), 12);
 
     // C++ API: byte offset of the nth character (and the npos beyond-end sentinel).
     {
         sz::string_view_t text = "Hello";
-        expect_equal(text.utf8_seek(0), 0);
-        expect_equal(text.utf8_seek(1), 1);
-        expect_equal(text.utf8_seek(4), 4);
-        expect_equal(text.utf8_seek(5), sz::string_view_t::npos);
-        expect_equal(text.utf8_seek(100), sz::string_view_t::npos);
+        expect_equal(sz::utf8_seek(text, 0), 0);
+        expect_equal(sz::utf8_seek(text, 1), 1);
+        expect_equal(sz::utf8_seek(text, 4), 4);
+        expect_equal(sz::utf8_seek(text, 5), sz::string_view_t::npos);
+        expect_equal(sz::utf8_seek(text, 100), sz::string_view_t::npos);
     }
     {
         sz::string_view_t text = "Hello \xE4\xB8\x96\xE7\x95\x8C";
-        expect_equal(text.utf8_seek(0), 0); // 'H' at byte 0
-        expect_equal(text.utf8_seek(5), 5); // ' ' at byte 5
-        expect_equal(text.utf8_seek(6), 6); // '世' at byte 6
-        expect_equal(text.utf8_seek(7), 9); // '界' at byte 9
-        expect_equal(text.utf8_seek(8), sz::string_view_t::npos);
+        expect_equal(sz::utf8_seek(text, 0), 0); // 'H' at byte 0
+        expect_equal(sz::utf8_seek(text, 5), 5); // ' ' at byte 5
+        expect_equal(sz::utf8_seek(text, 6), 6); // '世' at byte 6
+        expect_equal(sz::utf8_seek(text, 7), 9); // '界' at byte 9
+        expect_equal(sz::utf8_seek(text, 8), sz::string_view_t::npos);
     }
     {
         sz::string_view_t text = "\xF0\x9F\x98\x80\xF0\x9F\x98\x81\xF0\x9F\x98\x82";
-        expect_equal(text.utf8_seek(0), 0); // First emoji at byte 0
-        expect_equal(text.utf8_seek(1), 4); // Second emoji at byte 4
-        expect_equal(text.utf8_seek(2), 8); // Third emoji at byte 8
-        expect_equal(text.utf8_seek(3), sz::string_view_t::npos);
+        expect_equal(sz::utf8_seek(text, 0), 0); // First emoji at byte 0
+        expect_equal(sz::utf8_seek(text, 1), 4); // Second emoji at byte 4
+        expect_equal(sz::utf8_seek(text, 2), 8); // Third emoji at byte 8
+        expect_equal(sz::utf8_seek(text, 3), sz::string_view_t::npos);
     }
 
     // 64-byte chunk boundaries and batch limits, materialized via the vector wrapper.
@@ -94,99 +94,99 @@ void test_utf8_runes_unit() {
         // Critical 63, 64, 65 byte boundaries
         {
             std::string s63(63, 'x');
-            expect_equal(sz::string_view_t(s63).utf8_runes().size(), 63);
+            expect_equal(sz::utf8_runes(sz::string_view_t(s63)).size(), 63);
         }
         {
             std::string s64(64, 'x');
-            expect_equal(sz::string_view_t(s64).utf8_runes().size(), 64);
+            expect_equal(sz::utf8_runes(sz::string_view_t(s64)).size(), 64);
         }
         {
             std::string s65(65, 'x');
-            expect_equal(sz::string_view_t(s65).utf8_runes().size(), 65);
+            expect_equal(sz::utf8_runes(sz::string_view_t(s65)).size(), 65);
         }
 
         // ASCII batch limit: 16 characters max per Ice Lake iteration
         {
             std::string s17(17, 'x');
-            expect_equal(sz::string_view_t(s17).utf8_runes().size(), 17);
+            expect_equal(sz::utf8_runes(sz::string_view_t(s17)).size(), 17);
         }
         {
             std::string s20(20, 'x');
-            expect_equal(sz::string_view_t(s20).utf8_runes().size(), 20);
+            expect_equal(sz::utf8_runes(sz::string_view_t(s20)).size(), 20);
         }
 
         // 2-byte batch limit: 32 characters (64 bytes) max per iteration
         {
             std::string cyr32;
             for (int i = 0; i < 32; ++i) cyr32 += "\xD0\x9F";
-            expect_equal(sz::string_view_t(cyr32).utf8_count(), 32);
+            expect_equal(sz::utf8_count(sz::string_view_t(cyr32)), 32);
         }
         {
             std::string cyr33;
             for (int i = 0; i < 33; ++i) cyr33 += "\xD0\x9F";
-            expect_equal(sz::string_view_t(cyr33).utf8_count(), 33);
+            expect_equal(sz::utf8_count(sz::string_view_t(cyr33)), 33);
         }
 
         // 3-byte batch limit: 16 characters (48 bytes) max per iteration
         {
             std::string cjk16;
             for (int i = 0; i < 16; ++i) cjk16 += "\xE4\xB8\x96";
-            expect_equal(sz::string_view_t(cjk16).utf8_count(), 16);
+            expect_equal(sz::utf8_count(sz::string_view_t(cjk16)), 16);
         }
         {
             std::string cjk17;
             for (int i = 0; i < 17; ++i) cjk17 += "\xE4\xB8\x96";
-            expect_equal(sz::string_view_t(cjk17).utf8_count(), 17);
+            expect_equal(sz::utf8_count(sz::string_view_t(cjk17)), 17);
         }
 
         // 4-byte batch limit: 16 characters (64 bytes) max per iteration
         {
             std::string emoji16;
             for (int i = 0; i < 16; ++i) emoji16 += "\xF0\x9F\x98\x80";
-            expect_equal(sz::string_view_t(emoji16).utf8_count(), 16);
+            expect_equal(sz::utf8_count(sz::string_view_t(emoji16)), 16);
         }
         {
             std::string emoji17;
             for (int i = 0; i < 17; ++i) emoji17 += "\xF0\x9F\x98\x80";
-            expect_equal(sz::string_view_t(emoji17).utf8_count(), 17);
+            expect_equal(sz::utf8_count(sz::string_view_t(emoji17)), 17);
         }
 
         // Asymmetric at chunk boundary: 60 ASCII + "ПП世" = 63 chars, 67 bytes
         {
             std::string boundary_asym(60, 'x');
             boundary_asym += "\xD0\x9F\xD0\x9F\xE4\xB8\x96";
-            expect_equal(sz::string_view_t(boundary_asym).utf8_count(), 63);
+            expect_equal(sz::utf8_count(sz::string_view_t(boundary_asym)), 63);
         }
 
         // Sequences exceeding batch limits
         {
             std::string cyr100;
             for (int i = 0; i < 100; ++i) cyr100 += "\xD0\x9F";
-            expect_equal(sz::string_view_t(cyr100).utf8_runes().size(), 100);
+            expect_equal(sz::utf8_runes(sz::string_view_t(cyr100)).size(), 100);
         }
         {
             std::string cjk50;
             for (int i = 0; i < 50; ++i) cjk50 += "\xE4\xB8\x96";
-            expect_equal(sz::string_view_t(cjk50).utf8_runes().size(), 50);
+            expect_equal(sz::utf8_runes(sz::string_view_t(cjk50)).size(), 50);
         }
         {
             std::string emoji50;
             for (int i = 0; i < 50; ++i) emoji50 += "\xF0\x9F\x98\x80";
-            expect_equal(sz::string_view_t(emoji50).utf8_runes().size(), 50);
+            expect_equal(sz::utf8_runes(sz::string_view_t(emoji50)).size(), 50);
         }
 
         // Asymmetric overflow: 20x (2 ASCII + 3 Cyrillic) = 100 chars, 140 bytes
         {
             std::string overflow_asym;
             for (int i = 0; i < 20; ++i) overflow_asym += "aa\xD0\x9F\xD0\xA0\xD0\xA1";
-            expect_equal(sz::string_view_t(overflow_asym).utf8_count(), 100);
+            expect_equal(sz::utf8_count(sz::string_view_t(overflow_asym)), 100);
         }
 
         // Transitions at chunk boundaries
         {
             std::string boundary_test(63, 'x');
             boundary_test += "\xD0\x9F";
-            expect_equal(sz::string_view_t(boundary_test).utf8_runes().size(), 64);
+            expect_equal(sz::utf8_runes(sz::string_view_t(boundary_test)).size(), 64);
         }
         {
             std::string span_asym;
@@ -194,18 +194,18 @@ void test_utf8_runes_unit() {
                 for (int i = 0; i < 30; ++i) span_asym += "aa";
                 for (int i = 0; i < 8; ++i) span_asym += "\xD0\x9F\xD0\xA0\xD0\xA1";
             };
-            expect_equal(sz::string_view_t(span_asym).utf8_count(), 84);
+            expect_equal(sz::utf8_count(sz::string_view_t(span_asym)), 84);
         }
         {
             std::string exact_boundary(64, 'x');
             exact_boundary += "\xD0\x9F\xE4\xB8\x96\xF0\x9F\x98\x80";
-            expect_equal(sz::string_view_t(exact_boundary).utf8_count(), 67);
+            expect_equal(sz::utf8_count(sz::string_view_t(exact_boundary)), 67);
         }
     }
 
     // `+=` counts from the current rune, both inside the decoded batch and past it.
     {
-        auto rune = "abcdefgh"_sv.utf8_runes().begin();
+        auto rune = sz::utf8_runes("abcdefgh"_sv).begin();
         expect_equal(*(++rune += 2), 'd');
         sz::utf8_runes_view<sz::string_view_t, 2> pairs("a\xD0\x9F\xE4\xB8\x96\xF0\x9F\x98\x80xy"_sv);
         auto paired = pairs.begin();
@@ -225,7 +225,7 @@ void test_utf8_runes_scripts_unit() {
     // C++ API: codepoint iteration materialized as a vector, since every check below indexes by position.
     {
         auto runes_of = [](char const *t) {
-            return sz::string_view_t(t).utf8_runes().template to<std::vector<sz_rune_t>>();
+            return sz::utf8_runes(sz::string_view_t(t)).template to<std::vector<sz_rune_t>>();
         };
 
         // Basic ASCII and edge cases
@@ -444,7 +444,7 @@ void test_utf8_runes_scripts_unit() {
         {
             std::string asym_long;
             for (int i = 0; i < 30; ++i) asym_long += "xx\xD0\x9F\xD0\x9F\xD0\x9F";
-            expect_equal(sz::string_view_t(asym_long).utf8_count(), 150);
+            expect_equal(sz::utf8_count(sz::string_view_t(asym_long)), 150);
         }
     }
 }
@@ -468,7 +468,7 @@ static void check_utf8_runes_large_count_() {
     sz_size_t const count_serial = kernel_result<sz_size_t>(sz_utf8_count_serial, mixed.data(), mixed.size());
     expect_equal(count_serial, expected_codepoints);
     expect_equal(kernel_result<sz_size_t>(cpu_best<sz_utf8_count_best>, mixed.data(), mixed.size()), count_serial);
-    expect_equal(sz::string_view_t(mixed).utf8_count(), count_serial); // C++ wrapper matches serial
+    expect_equal(sz::utf8_count(sz::string_view_t(mixed)), count_serial); // C++ wrapper matches serial
 }
 
 #pragma endregion Equivalence

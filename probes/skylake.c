@@ -6,7 +6,7 @@
  */
 #define STRINGZILLA_HEADER_ONLY 1
 #define STRINGZILLA_ARCH_X8664_SKYLAKE_ 1
-#include <stringzilla/find/skylake.h>
+#include "stringzilla/find.h" // the hub, whose header-only tail defines the tier
 
 int main(void) {
     char haystack[64] = {'x'};

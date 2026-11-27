@@ -6,7 +6,7 @@
  */
 #define STRINGZILLA_HEADER_ONLY 1
 #define STRINGZILLA_ARCH_X8664_HASWELL_ 1
-#include <stringzilla/find/haswell.h>
+#include "stringzilla/find.h" // the hub, whose header-only tail defines the tier
 
 int main(void) {
     char haystack[64] = {'x'};

@@ -25,7 +25,7 @@
 #if STRINGZILLA_ARCH_METAL_
 
 #include "stringzilla/metal.h"
-#include "stringzilla/subdocuments.h"
+#include "stringzilla/subdocuments/serial.h"
 
 #if defined(__cplusplus)
 extern "C" {
@@ -636,7 +636,7 @@ STRINGZILLA_API sz_status_t sz_subdocuments_engine_init_metal(
     status = sz_stream_synchronize_metal_(stream);
     if (status != sz_success_k) return status;
     if (allocator) unified = *allocator;
-    else sz_allocator_init_unified_metal(&unified);
+    else sz_allocator_init_unified_metal_(&unified);
     status = sz_subdocuments_engine_compile_(engine, paths, format, options, malformed_index, sz_cap_metal_k, &unified,
                                              stream);
     if (status != sz_success_k) return status;

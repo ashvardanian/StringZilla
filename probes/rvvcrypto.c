@@ -6,8 +6,8 @@
  */
 #define STRINGZILLA_HEADER_ONLY 1
 #define STRINGZILLA_ARCH_RISCV64_RVVCRYPTO_ 1
-#include "stringzilla/hash/rvvcrypto.h"
-#include "stringzilla/cipher/rvvcrypto.h"
+#include "stringzilla/hash.h"   // the hub, whose header-only tail defines the tier
+#include "stringzilla/cipher.h" // the hub, whose header-only tail defines the tier
 
 int main(void) {
     char text[64] = {'x'};

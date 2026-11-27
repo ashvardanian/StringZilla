@@ -32,12 +32,12 @@ void test_utf8_graphemes_unit() {
 
     // C++ range wrapper known-answer: the view must faithfully expose the kernel's clusters.
     std::vector<std::string> const clusters =
-        sz::string_view_t("ab").utf8_graphemes().template to<std::vector<std::string>>();
+        sz::utf8_graphemes(sz::string_view_t("ab")).template to<std::vector<std::string>>();
     expect_true(clusters.size() == 2 && clusters[0] == "a" && clusters[1] == "b", "C++ utf8_graphemes range");
 
     // Grapheme-cluster counts for the shared prose fixtures; per-fixture rationale lives in test/utf8.hpp.
     auto count_graphemes = [](std::string_view text) {
-        return sz::string_view_t(text).utf8_graphemes().template to<std::vector<std::string>>().size();
+        return sz::utf8_graphemes(sz::string_view_t(text)).template to<std::vector<std::string>>().size();
     };
     expect_equal(count_graphemes(utf8_prose_pride_caption()), 206, "pride_caption graphemes");
     expect_equal(count_graphemes(utf8_prose_devanagari_tip()), 252, "devanagari_tip graphemes");
@@ -47,7 +47,7 @@ void test_utf8_graphemes_unit() {
 
     // Codepoints are not clusters: the emoji paragraph has more runes than grapheme clusters.
     std::size_t const pride_caption_runes =
-        sz::string_view_t(utf8_prose_pride_caption()).utf8_runes().template to<std::vector<sz_rune_t>>().size();
+        sz::utf8_runes(sz::string_view_t(utf8_prose_pride_caption())).template to<std::vector<sz_rune_t>>().size();
     expect_equal(pride_caption_runes, 222, "pride_caption runes");
     expect_true(pride_caption_runes > count_graphemes(utf8_prose_pride_caption()),
                 "pride_caption runes exceed graphemes");

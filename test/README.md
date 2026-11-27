@@ -6,6 +6,7 @@ Each C++ translation unit exercises one kernel family, and the Python suite mirr
 ## C++ on CPUs
 
 The family files test the dispatch points and `stringzilla.hpp`, and the cross files hold every capability's kernels to known answers and to the serial kernels.
+Engine tests and benchmarks drive the C++ SDK's engine classes, like `sz::levenshtein_engine_t`, so they use the library as users do, and the SDK keeps no reference path of its own.
 
 - `main_cpu.cpp` — the entry point, registering the family suites and the cross-checks of every architecture.
 - `hash.cpp`, `cipher.cpp`, `sort.cpp`, `string.cpp`, `find.cpp` — hashing, ciphers, sorting and intersection, the string class and memory, search and comparison.

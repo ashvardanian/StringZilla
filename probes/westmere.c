@@ -6,7 +6,7 @@
  */
 #define STRINGZILLA_HEADER_ONLY 1
 #define STRINGZILLA_ARCH_X8664_WESTMERE_ 1
-#include <stringzilla/hash/westmere.h>
+#include "stringzilla/hash.h" // the hub, whose header-only tail defines the tier
 
 int main(void) {
     char text[64] = {'x'};

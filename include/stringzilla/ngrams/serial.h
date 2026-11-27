@@ -12,7 +12,7 @@
 #define STRINGZILLA_NGRAMS_SERIAL_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/capabilities.h" // `sz_capability_t`, `sz_cap_cpus_k`
+#include "stringzilla/capabilities.h" // `sz_cap_cpus_k`
 
 #ifdef __cplusplus
 extern "C" {
@@ -72,15 +72,6 @@ STRINGZILLA_CONSTEXPR sz_u32_t sz_ngrams_power(sz_size_t width) {
         exponent >>= 1;
     }
     return (sz_u32_t)result;
-}
-
-/** N-grams a text of @p length bytes holds, summed over @p widths_count @p widths; a width of zero
- *  or past the text holds none. */
-STRINGZILLA_CONSTEXPR sz_size_t sz_ngrams_count(sz_size_t length, sz_size_t const *widths, sz_size_t widths_count) {
-    sz_size_t ngrams = 0;
-    for (sz_size_t index = 0; index != widths_count; ++index)
-        if (widths[index] && widths[index] <= length) ngrams += length - widths[index] + 1;
-    return ngrams;
 }
 
 /**
@@ -159,41 +150,6 @@ STRINGZILLA_INLINE sz_size_t sz_ngrams_slot_insert_(sz_u64_t *slots, sz_u32_t *f
         }
     }
 }
-
-/** One prepared query's table of distinct N-grams at every width, and what a candidate's share
- *  needs beside it: what @ref sz_ngrams_engine_query reads off an engine, or what a device walk
- *  prepares inside a span its caller owns. */
-typedef struct sz_ngrams_query_t {
-
-    /** Slots of the query's distinct N-grams, zero if empty, read by @ref sz_ngrams_query_probe. */
-    sz_u64_t const *slots;
-
-    /** A power of two, at least twice @c ngrams and at least 64. */
-    sz_size_t slots_count;
-
-    /** The miss filter after the slots, eight bits a slot, so most N-grams the query lacks are told
-     *  by one load. */
-    sz_u32_t const *filter;
-
-    /** The @b [widths_count] window widths, in bytes. */
-    sz_size_t const *widths;
-
-    /** The @b [widths_count] @ref sz_ngrams_power values. */
-    sz_u32_t const *powers;
-
-    /** Entries in @c widths and @c powers. */
-    sz_size_t widths_count;
-
-    /** The query's N-grams summed over every width, repeats included, which is the number of bits
-     *  a candidate's hits span. */
-    sz_size_t ngrams;
-
-    /** The query's distinct N-grams, the share's denominator. */
-    sz_size_t distinct;
-
-    /** The query's bytes, so a width past them probes nothing. */
-    sz_size_t length;
-} sz_ngrams_query_t;
 
 /** Bytes of the span a device walk prepares one query of @p length bytes into at @p widths: the
  *  table's slots over every width's N-grams, its miss filter, then a power per width. */
@@ -339,64 +295,6 @@ STRINGZILLA_CONSTEXPR sz_f64_t sz_ngrams_prefix_serial_(sz_cptr_t text, sz_size_
 #pragma endregion Sketch Helpers
 
 #pragma region Engine
-
-/**
- *  @brief Every prepared query's table over one block, the widths every one of them holds, and the
- *      scratch both verbs grow.
- *
- *  Only @c count, @c widths_count, @c capability and @c distinct_counts are public; the rest is the
- *  family's own layout, read through @ref sz_ngrams_engine_query.
- */
-typedef struct sz_ngrams_engine_t {
-
-    /** Every query's slots, back to back, @c slots_offsets addressing them. */
-    sz_u64_t const *slots;
-
-    /** The @b [count+1] slot offsets into @c slots, the last being its length. */
-    sz_size_t const *slots_offsets;
-
-    /** Every query's miss filter, eight bits a slot, the query @c i 's from word
-     *  @c slots_offsets[i]/4. */
-    sz_u32_t const *filters;
-
-    /** The @b [count,widths_count] distinct N-grams each query holds at each width, which is a
-     *  share's denominator. */
-    sz_u32_t const *distinct_counts;
-
-    /** The @b [widths_count] window widths, in bytes. */
-    sz_size_t const *widths;
-
-    /** The @b [widths_count] @ref sz_ngrams_power values. */
-    sz_u32_t const *powers;
-
-    /** The @b [count] bytes each query spans. */
-    sz_u32_t const *lengths;
-
-    /** Queries prepared, which is the first axis of every overlap output; zero for an engine that
-     *  only sketches. */
-    sz_size_t count;
-
-    /** Window widths, the last axis of an overlap output. */
-    sz_size_t widths_count;
-
-    /** The capability whose init kernel prepared the engine, which picks every verb's kernel. */
-    sz_capability_t capability;
-
-    /** What built both blocks below and what grows the second. */
-    sz_allocator_t allocator;
-
-    /** The tables' block, fixed for the engine's life, its head tier-private. */
-    void *memory;
-
-    /** Bytes of that block. */
-    sz_size_t memory_bytes;
-
-    /** A round's chains, residues and hit words, or a sketch's ranks, grown and never shrunk. */
-    void *scratch;
-
-    /** Bytes of that block, zero until a verb sizes it. */
-    sz_size_t scratch_bytes;
-} sz_ngrams_engine_t;
 
 /** The tier's own record at the head of @p engine 's block, where @ref sz_ngrams_engine_open_
  *  reserved it. */
@@ -633,22 +531,22 @@ STRINGZILLA_INLINE sz_size_t sz_ngrams_engine_round_bytes_(sz_ngrams_engine_t co
 }
 
 /** Turns both byte strides into entries, refusing one under the axis it spans, so no row can be
- *  written into its neighbour's. */
+ *  written into its neighbour's. Counts and shares are 4 bytes each, so one conversion serves
+ *  both of them. */
 STRINGZILLA_INLINE sz_status_t sz_ngrams_engine_strides_(sz_ngrams_engine_t const *engine, sz_size_t candidates_count,
-                                                         sz_size_t shares_query_stride,
-                                                         sz_size_t shares_candidate_stride,
+                                                         sz_size_t query_stride, sz_size_t candidate_stride,
                                                          sz_size_t *query_stride_entries,
                                                          sz_size_t *candidate_stride_entries) {
-    sz_status_t const candidate = sz_stride_entries_(shares_candidate_stride, sizeof(sz_f32_t), engine->widths_count,
+    sz_status_t const candidate = sz_stride_entries_(candidate_stride, sizeof(sz_f32_t), engine->widths_count,
                                                      candidate_stride_entries);
     if (candidate != sz_success_k) return candidate;
-    return sz_stride_entries_(shares_query_stride, sizeof(sz_f32_t), candidates_count * *candidate_stride_entries,
+    return sz_stride_entries_(query_stride, sizeof(sz_f32_t), candidates_count * *candidate_stride_entries,
                               query_stride_entries);
 }
 
 /**
- *  @brief Shares one query's distinct N-grams that one candidate holds, at every width, as
- *      @ref sz_ngrams_overlaps shares them.
+ *  @brief Counts one query's distinct N-grams that one candidate holds, at every width, which
+ *      @ref sz_ngrams_overlaps divides into shares.
  *
  *  Every window of the candidate probes the query's table, and a hit sets the bit of the window's
  *  first byte in the query, offset by the N-grams of the widths before, so a window the candidate
@@ -658,15 +556,14 @@ STRINGZILLA_INLINE sz_status_t sz_ngrams_engine_strides_(sz_ngrams_engine_t cons
  *
  *  @param[in] residues The candidate's N-gram residues, as @ref sz_ngrams_count counts them.
  *  @param[in] hit_words Scratch of at least the query's N-grams in bits, overwritten.
- *  @param[out] row The pair's share at width zero, the other widths following it.
+ *  @param[out] found The pair's count at width zero, the other widths following it.
  */
 STRINGZILLA_INLINE void sz_ngrams_pair_overlaps_(sz_ngrams_engine_t const *engine, sz_size_t query,
                                                  sz_u32_t const *residues, sz_size_t length, sz_u32_t misses_bound,
-                                                 sz_u64_t *hit_words, sz_f32_t *row) {
+                                                 sz_u64_t *hit_words, sz_u32_t *found) {
     sz_size_t const widths_count = engine->widths_count;
     sz_size_t const query_length = engine->lengths[query];
     sz_size_t const distinct = sz_ngrams_engine_distinct_(engine, query);
-    sz_u32_t const *const query_distinct_counts = engine->distinct_counts + query * widths_count;
     sz_u64_t const *const slots = engine->slots + engine->slots_offsets[query];
     sz_u32_t const *const filter = engine->filters + engine->slots_offsets[query] / 4;
     sz_size_t const slots_count = engine->slots_offsets[query + 1] - engine->slots_offsets[query];
@@ -675,7 +572,7 @@ STRINGZILLA_INLINE void sz_ngrams_pair_overlaps_(sz_ngrams_engine_t const *engin
         sz_size_t const width = engine->widths[width_index];
         sz_size_t const ngrams = width <= length ? length - width + 1 : 0;
         reachable += width <= query_length ? ngrams : 0;
-        row[width_index] = 0.0f;
+        found[width_index] = 0;
     }
 
     sz_size_t const bound = (sz_size_t)(((sz_u64_t)misses_bound * distinct) >> 24);
@@ -689,24 +586,23 @@ STRINGZILLA_INLINE void sz_ngrams_pair_overlaps_(sz_ngrams_engine_t const *engin
         sz_size_t const width = engine->widths[width_index];
         sz_size_t const ngrams = width <= length ? length - width + 1 : 0;
         sz_size_t const own_ngrams = width <= query_length ? query_length - width + 1 : 0;
-        sz_size_t found = 0;
+        sz_u32_t hits = 0;
         for (sz_size_t window = 0; own_ngrams && window != ngrams; ++window) {
             sz_u64_t const entry = sz_ngrams_slot_probe_(slots, filter, slots_count, keys[window], width_index);
             if (!entry) continue;
             sz_size_t const bit = base + sz_ngrams_slot_first(entry);
             sz_u64_t const mask = (sz_u64_t)1 << (bit & 63);
-            found += (hit_words[bit >> 6] & mask) == 0;
+            hits += (hit_words[bit >> 6] & mask) == 0;
             hit_words[bit >> 6] |= mask;
         }
-        sz_u32_t const width_distinct = query_distinct_counts[width_index];
-        row[width_index] = width_distinct ? (sz_f32_t)found / (sz_f32_t)width_distinct : 0.0f;
-        held += found;
+        found[width_index] = hits;
+        held += hits;
         keys += ngrams;
         base += own_ngrams;
     }
-    // Past its budget after counting, every width shares zero.
+    // Past its budget after counting, every width holds none.
     if (distinct - held > bound)
-        for (width_index = 0; width_index != widths_count; ++width_index) row[width_index] = 0.0f;
+        for (width_index = 0; width_index != widths_count; ++width_index) found[width_index] = 0;
 }
 
 /** What one round hashes, and where it counts each hashed candidate against every query. */
@@ -724,23 +620,36 @@ typedef struct sz_ngrams_round_t {
     /** One pair's hit words, as many as the widest query's N-grams in bits. */
     sz_u64_t *hit_words;
 
-    /** Where the shares go. */
+    /** Where the counts go, or null when the round writes none. */
+    sz_u32_t *counts;
+
+    /** Where the shares go, or null when the round writes none. */
     sz_f32_t *shares;
 
-    /** Entries from one query's plane of @c shares to the next. */
-    sz_size_t shares_query_stride;
+    /** Entries from one query's plane of @c counts or @c shares to the next. */
+    sz_size_t query_stride;
 
-    /** Entries from one candidate's row of @c shares to the next. */
-    sz_size_t shares_candidate_stride;
+    /** Entries from one candidate's row of @c counts or @c shares to the next. */
+    sz_size_t candidate_stride;
 } sz_ngrams_round_t;
 
-/** Counts @p candidate of @p round 's batch against every query, from its @p residues. */
+/** Counts @p candidate of @p round 's batch against every query, from its @p residues, and writes
+ *  the counts, the shares, or both, while the matches are hot. */
 STRINGZILLA_INLINE void sz_ngrams_round_score_(sz_ngrams_engine_t const *engine, sz_ngrams_round_t const *round,
                                                sz_size_t candidate, sz_u32_t const *residues, sz_size_t length) {
-    for (sz_size_t query = 0; query != engine->count; ++query)
-        sz_ngrams_pair_overlaps_(
-            engine, query, residues, length, round->misses_bound, round->hit_words,
-            round->shares + query * round->shares_query_stride + candidate * round->shares_candidate_stride);
+    sz_size_t const widths = engine->widths_count;
+    sz_u32_t found[sz_ngrams_widths_max_k];
+    for (sz_size_t query = 0; query != engine->count; ++query) {
+        sz_ngrams_pair_overlaps_(engine, query, residues, length, round->misses_bound, round->hit_words, found);
+        sz_size_t const offset = query * round->query_stride + candidate * round->candidate_stride;
+        sz_u32_t const *distinct = engine->distinct_counts + query * widths;
+        for (sz_size_t width = 0; width != widths; ++width) {
+            if (round->counts) round->counts[offset + width] = found[width];
+            if (round->shares)
+                round->shares[offset + width] = distinct[width] ? (sz_f32_t)found[width] / (sz_f32_t)distinct[width]
+                                                                : 0.0f;
+        }
+    }
 }
 
 /**
@@ -748,19 +657,19 @@ STRINGZILLA_INLINE void sz_ngrams_round_score_(sz_ngrams_engine_t const *engine,
  *      @p round that hashes them ascending by length, so the chains one group interleaves end
  *      together and no long remainder steps alone.
  *  @param[out] longest_candidate The longest of @p candidates, which strides the chains.
+ *  @param[in] counts Where the counts go, or null; @p shares likewise, at the same byte strides.
  *  @return @c sz_success_k, with an empty @p round when either batch is empty; @c sz_bad_alloc_k;
  *      or @c sz_unexpected_dimensions_k when either stride is under the axis it spans.
  */
 STRINGZILLA_INLINE sz_status_t sz_ngrams_overlaps_round_(sz_ngrams_engine_t *engine,
                                                          sz_strings_view_t const *candidates, sz_f32_t radius,
-                                                         sz_f32_t *shares, sz_size_t shares_query_stride,
-                                                         sz_size_t shares_candidate_stride, sz_size_t chains,
+                                                         sz_u32_t *counts, sz_f32_t *shares, sz_size_t query_stride,
+                                                         sz_size_t candidate_stride, sz_size_t chains,
                                                          sz_stream_t stream, sz_ngrams_round_t *round,
                                                          sz_size_t *longest_candidate) {
     sz_size_t query_stride_entries, candidate_stride_entries;
-    sz_status_t const dimensions = sz_ngrams_engine_strides_(engine, candidates->count, shares_query_stride,
-                                                             shares_candidate_stride, &query_stride_entries,
-                                                             &candidate_stride_entries);
+    sz_status_t const dimensions = sz_ngrams_engine_strides_(engine, candidates->count, query_stride, candidate_stride,
+                                                             &query_stride_entries, &candidate_stride_entries);
     if (dimensions != sz_success_k) return dimensions;
     round->count = 0;
     if (!candidates->count || !engine->count) return sz_success_k;
@@ -776,8 +685,8 @@ STRINGZILLA_INLINE sz_status_t sz_ngrams_overlaps_round_(sz_ngrams_engine_t *eng
     round->count = candidates->count;
     round->misses_bound = sz_ngrams_misses_bound_(radius);
     round->hit_words = (sz_u64_t *)((sz_ptr_t)engine->scratch + hit_words_offset);
-    round->shares = shares;
-    round->shares_query_stride = query_stride_entries, round->shares_candidate_stride = candidate_stride_entries;
+    round->counts = counts, round->shares = shares;
+    round->query_stride = query_stride_entries, round->candidate_stride = candidate_stride_entries;
     return sz_success_k;
 }
 
@@ -930,31 +839,6 @@ STRINGZILLA_INLINE void sz_ngrams_sketch_segment_serial_(sz_size_t first, sz_siz
     }
 }
 
-#if STRINGZILLA_TARGET_SERIAL
-
-STRINGZILLA_API void sz_ngrams_residues_serial(sz_cptr_t text, sz_size_t length, sz_size_t const *widths,
-                                               sz_size_t widths_count, sz_f64_t *prefixes, sz_u32_t *residues) {
-    sz_ngrams_residues_serial_(text, length, widths, widths_count, prefixes, residues);
-}
-
-STRINGZILLA_API sz_status_t sz_ngrams_engine_init_serial(sz_ngrams_engine_t *engine, sz_strings_view_t const *queries,
-                                                         sz_size_t const *window_widths, sz_size_t window_widths_count,
-                                                         sz_size_t candidates_budget, sz_allocator_t *allocator,
-                                                         sz_stream_t stream) {
-    sz_assert_(stream == STRINGZILLA_NULL);
-    sz_unused_(candidates_budget);
-    sz_status_t const opened = sz_ngrams_engine_open_host_(queries, window_widths, window_widths_count, allocator,
-                                                           engine);
-    if (opened != sz_success_k) return opened;
-    sz_f64_t *prefixes;
-    sz_u32_t *residues;
-    sz_status_t const grown = sz_ngrams_engine_query_scratch_(engine, stream, &prefixes, &residues);
-    if (grown != sz_success_k) return grown;
-    sz_ngrams_engine_fill_serial_(engine, queries, prefixes, residues);
-    engine->capability = sz_cap_serial_k;
-    return sz_success_k;
-}
-
 /** Hashes the candidates of @p round, four chains at a time, and scores each as @p round says. */
 STRINGZILLA_INLINE void sz_ngrams_round_serial_(sz_ngrams_engine_t *engine, sz_strings_view_t const *candidates,
                                                 sz_size_t longest_candidate, sz_ngrams_round_t const *round) {
@@ -1011,15 +895,56 @@ STRINGZILLA_INLINE void sz_ngrams_round_serial_(sz_ngrams_engine_t *engine, sz_s
     }
 }
 
+/** Counts what @ref sz_ngrams_overlaps_serial shares: each query's distinct N-grams each candidate
+ *  holds, at every width, @p counts_query_stride and @p counts_candidate_stride bytes apart. */
+STRINGZILLA_INLINE sz_status_t sz_ngrams_overlap_counts_serial_(sz_ngrams_engine_t *engine,
+                                                                sz_strings_view_t const *candidates, sz_f32_t radius,
+                                                                sz_u32_t *counts, sz_size_t counts_query_stride,
+                                                                sz_size_t counts_candidate_stride) {
+    sz_ngrams_round_t round;
+    sz_size_t longest_candidate = 0;
+    sz_status_t const prepared = sz_ngrams_overlaps_round_(
+        engine, candidates, radius, counts, STRINGZILLA_NULL, counts_query_stride, counts_candidate_stride,
+        sz_ngrams_interleaved_chains_k, STRINGZILLA_NULL, &round, &longest_candidate);
+    if (prepared != sz_success_k) return prepared;
+    sz_ngrams_round_serial_(engine, candidates, longest_candidate, &round);
+    return sz_success_k;
+}
+
+#if STRINGZILLA_TARGET_SERIAL
+
+STRINGZILLA_API void sz_ngrams_residues_serial(sz_cptr_t text, sz_size_t length, sz_size_t const *widths,
+                                               sz_size_t widths_count, sz_f64_t *prefixes, sz_u32_t *residues) {
+    sz_ngrams_residues_serial_(text, length, widths, widths_count, prefixes, residues);
+}
+
+STRINGZILLA_API sz_status_t sz_ngrams_engine_init_serial(sz_ngrams_engine_t *engine, sz_strings_view_t const *queries,
+                                                         sz_size_t const *window_widths, sz_size_t window_widths_count,
+                                                         sz_size_t candidates_budget, sz_allocator_t *allocator,
+                                                         sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_unused_(candidates_budget);
+    sz_status_t const opened = sz_ngrams_engine_open_host_(queries, window_widths, window_widths_count, allocator,
+                                                           engine);
+    if (opened != sz_success_k) return opened;
+    sz_f64_t *prefixes;
+    sz_u32_t *residues;
+    sz_status_t const grown = sz_ngrams_engine_query_scratch_(engine, stream, &prefixes, &residues);
+    if (grown != sz_success_k) return grown;
+    sz_ngrams_engine_fill_serial_(engine, queries, prefixes, residues);
+    engine->capability = sz_cap_serial_k;
+    return sz_success_k;
+}
+
 STRINGZILLA_API sz_status_t sz_ngrams_overlaps_serial(sz_ngrams_engine_t *engine, sz_strings_view_t const *candidates,
                                                       sz_f32_t radius, sz_f32_t *shares, sz_size_t shares_query_stride,
                                                       sz_size_t shares_candidate_stride, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_ngrams_round_t round;
     sz_size_t longest_candidate = 0;
-    sz_status_t const prepared = sz_ngrams_overlaps_round_(engine, candidates, radius, shares, shares_query_stride,
-                                                           shares_candidate_stride, sz_ngrams_interleaved_chains_k,
-                                                           stream, &round, &longest_candidate);
+    sz_status_t const prepared = sz_ngrams_overlaps_round_(
+        engine, candidates, radius, STRINGZILLA_NULL, shares, shares_query_stride, shares_candidate_stride,
+        sz_ngrams_interleaved_chains_k, stream, &round, &longest_candidate);
     if (prepared != sz_success_k) return prepared;
     sz_ngrams_round_serial_(engine, candidates, longest_candidate, &round);
     return sz_success_k;

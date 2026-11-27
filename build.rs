@@ -109,7 +109,7 @@ fn build_library(manifest: &Path, enabled: impl Fn(&str) -> bool) -> PathBuf {
     }
 
     let mut library = cmake::Config::new(manifest);
-    library.profile("Release").define("STRINGZILLA_BUILD_SHARED", "OFF").build_target("stringzilla_static");
+    library.profile("Release").define("STRINGZILLA_BUILD_LIBRARIES", "OFF").build_target("stringzilla_static");
     for (feature, variable) in FEATURE_OPTIONS {
         println!("cargo:rerun-if-env-changed={variable}");
         let codes = match enabled(feature) {

@@ -6,7 +6,7 @@ This package is a thin `cgo` binding, the `sz` package, over the precompiled Str
 Unlike the standard `strings` package, StringZilla primarily targets byte-level binary data processing, with less emphasis on UTF-8 and locale-specific tasks.
 Where it does expose UTF-8 helpers, they are documented as such below.
 
-It requires Go 1.24 or newer to leverage the `cgo` `noescape` and `nocallback` directives.
+It requires Go 1.24 or newer to leverage the cgo directives `noescape` and `nocallback`.
 Without those the latency of calling C functions from Go would be too high to be useful for string processing.
 
 ## Installation

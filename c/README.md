@@ -53,11 +53,11 @@ target_link_libraries(your_app PRIVATE stringzilla::static)
 ```
 
 `add_subdirectory(stringzilla)` works the same way.
-Pulled in as a subproject, the static library is compiled only once something links it, and `STRINGZILLA_BUILD_SHARED` defaults to off.
+Pulled in as a subproject, the static library is compiled only once something links it, and `STRINGZILLA_BUILD_LIBRARIES` defaults to off.
 Turn that on for the shared target `stringzilla::shared`:
 
 ```cmake
-set(STRINGZILLA_BUILD_SHARED ON)
+set(STRINGZILLA_BUILD_LIBRARIES ON)
 FetchContent_MakeAvailable(stringzilla)
 
 target_link_libraries(your_app PRIVATE stringzilla::shared)
@@ -87,7 +87,7 @@ find_package(stringzilla REQUIRED)
 target_link_libraries(your_app PRIVATE stringzilla::shared)
 ```
 
-`stringzilla::shared` joins the package whenever `STRINGZILLA_BUILD_SHARED` was on for the install.
+`stringzilla::shared` joins the package whenever `STRINGZILLA_BUILD_LIBRARIES` was on for the install.
 `stringzilla::header` always does, as it needs no submodules and compiles nothing, so it works straight out of a release tarball.
 
 A shared-library install also writes `lib/pkgconfig/stringzilla.pc`, for build systems that read pkg-config rather than CMake:

@@ -20,8 +20,9 @@
 #include <string>      // `std::string`
 #include <vector>      // `std::vector`
 
-#include "stringzilla/stringzilla.h"   // Primary C API
-#include "stringzilla/stringzilla.hpp" // `strings<>::view`, which `types.hpp` only declares
+#include "stringzilla/stringzilla.h"     // Primary C API
+#include "stringzilla/strings.hpp"       // `strings<>::view`
+#include "stringzilla/strings_verbs.hpp" // `sz::gather`
 
 #include "harness.hpp" // `capability_gate_t`, `pinned_vector`, `expect_true`
 #include "cross.hpp"   // `check_uncased_fold_equivalence_`, `for_each_adversarial_utf8_input_`
@@ -84,7 +85,7 @@ inline void join_(device_backend_t const &runtime, sz_stream_t stream) {
 /** @p strings as one tape in pinned memory, gathered on the host, which the serial oracle walks and
  *  the device gathers its own copy from. */
 inline pinned_strings_t staged_(device_backend_t const &runtime, sz_strings_view_t const &strings) {
-    auto [gathered, status] = strings_view_t(strings).gather(pinned_alloc_<char>(runtime));
+    auto [gathered, status] = sz::gather(strings_view_t(strings), pinned_alloc_<char>(runtime));
     expect_equal(status, status_t::success_k);
     return std::move(gathered);
 }
@@ -297,7 +298,7 @@ inline void levenshtein_serial_reference_(levenshtein_device_corpus_t const &cor
     std::memset(expected.data(), 0, expected.size_bytes());
     sz_strings_view_t const candidates = corpus.pinned.view().raw;
     expect_equal(sz_levenshtein_distances_serial(&engine, &candidates, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
-                                                 expected.data(), corpus.count(), nullptr),
+                                                 expected.data(), corpus.count() * sizeof(sz_size_t), nullptr),
                  sz_success_k);
     sz_levenshtein_engine_free(&engine, nullptr);
     expect_equal(heap.live_allocations, 0);
@@ -354,9 +355,9 @@ inline void check_levenshtein_device_equivalence_(auto const &backend, levenshte
             levenshtein_serial_reference_(corpus, symbol, expected);
             // Unbounded, then half the query's length, which leaves candidates on both sides.
             for (sz_size_t const bound : {STRINGZILLA_SIZE_MAX, (sz_size_t)(query_symbols / 2)}) {
-                sz_status_t const produced = backend.levenshtein_distances(&engine, &candidates, nullptr, nullptr,
-                                                                           bound, corpus.distances.data(),
-                                                                           corpus.count(), backend.runtime.stream);
+                sz_status_t const produced = backend.levenshtein_distances(
+                    &engine, &candidates, nullptr, nullptr, bound, corpus.distances.data(),
+                    corpus.count() * sizeof(sz_size_t), backend.runtime.stream);
                 join_(backend.runtime, backend.runtime.stream);
                 if (produced != sz_success_k) fail_backend_(backend.name, "a device-resident round was refused");
                 for (std::size_t index = 0; index != expected.size(); ++index)
@@ -399,8 +400,8 @@ inline void check_levenshtein_device_short_queries_(split_mix_generator_t &gener
                                                 STRINGZILLA_NULL, backend.runtime.stream),
                      sz_success_k);
         sz_status_t const produced = backend.levenshtein_distances(&engine, &candidate_strings, nullptr, nullptr,
-                                                                   STRINGZILLA_SIZE_MAX, distances.data(), count,
-                                                                   backend.runtime.stream);
+                                                                   STRINGZILLA_SIZE_MAX, distances.data(),
+                                                                   count * sizeof(sz_size_t), backend.runtime.stream);
         // The planes the round reads live in the engine's block, so the join comes before
         // it is released.
         join_(backend.runtime, backend.runtime.stream);
@@ -412,9 +413,10 @@ inline void check_levenshtein_device_short_queries_(split_mix_generator_t &gener
             sz_levenshtein_engine_init_serial(&host_engine, &queries, sz_levenshtein_bytes_k, &heap.allocator, nullptr),
             sz_success_k);
         std::vector<sz_size_t> expected(count);
-        expect_equal(sz_levenshtein_distances_serial(&host_engine, &host_candidates, nullptr, nullptr,
-                                                     STRINGZILLA_SIZE_MAX, expected.data(), count, nullptr),
-                     sz_success_k);
+        expect_equal(
+            sz_levenshtein_distances_serial(&host_engine, &host_candidates, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
+                                            expected.data(), count * sizeof(sz_size_t), nullptr),
+            sz_success_k);
         sz_levenshtein_engine_free(&host_engine, nullptr);
         for (std::size_t index = 0; index != count; ++index)
             if (distances[index] != expected[index])
@@ -446,9 +448,9 @@ inline void check_levenshtein_device_skewed_(split_mix_generator_t &generator, a
                                                     STRINGZILLA_NULL, backend.runtime.stream),
                          sz_success_k);
             sz_strings_view_t const candidates = corpus.device;
-            sz_status_t const produced = backend.levenshtein_distances(&engine, &candidates, nullptr, nullptr,
-                                                                       STRINGZILLA_SIZE_MAX, corpus.distances.data(),
-                                                                       corpus.count(), backend.runtime.stream);
+            sz_status_t const produced = backend.levenshtein_distances(
+                &engine, &candidates, nullptr, nullptr, STRINGZILLA_SIZE_MAX, corpus.distances.data(),
+                corpus.count() * sizeof(sz_size_t), backend.runtime.stream);
             join_(backend.runtime, backend.runtime.stream);
             sz_levenshtein_engine_free(&engine, backend.runtime.stream);
             if (produced != sz_success_k) fail_backend_(backend.name, "a skewed batch was refused");
@@ -519,15 +521,16 @@ inline void check_levenshtein_device_mixed_(auto const &backend) {
             std::fill(distances.begin(), distances.end(), STRINGZILLA_SIZE_MAX);
             if (!reverse)
                 expect_equal(sz_levenshtein_distances_serial(&host, &reference, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
-                                                             expected.data(), stride, nullptr),
+                                                             expected.data(), stride * sizeof(sz_size_t), nullptr),
                              sz_success_k);
             else
                 for (std::size_t row = 0; row != texts.size(); ++row)
                     std::reverse(expected.begin() + row * stride,
                                  expected.begin() + row * stride + candidate_views.size());
-            expect_equal(backend.levenshtein_distances(&device, &candidates, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
-                                                       distances.data(), stride, backend.runtime.stream),
-                         sz_success_k);
+            expect_equal(
+                backend.levenshtein_distances(&device, &candidates, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
+                                              distances.data(), stride * sizeof(sz_size_t), backend.runtime.stream),
+                sz_success_k);
             join_(backend.runtime, backend.runtime.stream);
             expect_true(std::equal(distances.begin(), distances.end(), expected.begin()));
         }
@@ -554,9 +557,10 @@ inline void check_levenshtein_device_mixed_(auto const &backend) {
         expect_equal(sz_levenshtein_engine_init(&engine, &queries, sz_levenshtein_bytes_k, backend.runtime.capabilities,
                                                 nullptr, backend.runtime.stream),
                      sz_success_k);
-        expect_equal(backend.levenshtein_distances(&engine, &candidates, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
-                                                   distances.data(), stride, backend.runtime.stream),
-                     sz_success_k);
+        expect_equal(
+            backend.levenshtein_distances(&engine, &candidates, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
+                                          distances.data(), stride * sizeof(sz_size_t), backend.runtime.stream),
+            sz_success_k);
         join_(backend.runtime, backend.runtime.stream);
         for (std::size_t row = 0; row != texts.size(); ++row) {
             for (std::size_t column = 0; column != candidate_views.size(); ++column) {
@@ -590,19 +594,23 @@ inline void check_levenshtein_device_memory_safety_(split_mix_generator_t &gener
     std::vector<sz_size_t> host_distances(corpus.distances.size(), STRINGZILLA_SIZE_MAX);
     sz_strings_view_t const candidates = corpus.device;
     expect_equal(backend.levenshtein_distances(&engine, &candidates, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
-                                               host_distances.data(), corpus.count(), backend.runtime.stream),
+                                               host_distances.data(), corpus.count() * sizeof(sz_size_t),
+                                               backend.runtime.stream),
                  sz_device_memory_mismatch_k);
     expect_equal(backend.levenshtein_distances(&engine, &host_candidates, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
-                                               corpus.distances.data(), corpus.count(), backend.runtime.stream),
+                                               corpus.distances.data(), corpus.count() * sizeof(sz_size_t),
+                                               backend.runtime.stream),
                  sz_device_memory_mismatch_k);
     expect_equal(backend.levenshtein_distances(&engine, &candidates, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
-                                               corpus.distances.data(), corpus.count() - 1, backend.runtime.stream),
+                                               corpus.distances.data(), (corpus.count() - 1) * sizeof(sz_size_t),
+                                               backend.runtime.stream),
                  sz_unexpected_dimensions_k);
     // An accessor is host code, so it is refused even over bytes the device reaches.
     std::vector<sz_string_view_t> const resident_views = views_of_(corpus.pinned);
     sz_strings_view_t const resident_accessor = strings_from_(resident_views);
     expect_equal(backend.levenshtein_distances(&engine, &resident_accessor, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
-                                               corpus.distances.data(), corpus.count(), backend.runtime.stream),
+                                               corpus.distances.data(), corpus.count() * sizeof(sz_size_t),
+                                               backend.runtime.stream),
                  sz_device_memory_mismatch_k);
     join_(backend.runtime, backend.runtime.stream);
     sz_levenshtein_engine_free(&engine, backend.runtime.stream);
@@ -614,7 +622,7 @@ inline void check_levenshtein_device_memory_safety_(split_mix_generator_t &gener
  *  live per call, and the device's shared state sits under one lock. */
 inline void check_levenshtein_device_threads_(auto const &backend) {
     sz_stream_t const queue = backend.runtime.stream;
-    stream_t const second(backend.runtime.selected.ordinal(), backend.runtime.init, backend.runtime.free);
+    stream_t const second(backend.runtime.selected.ordinal, backend.runtime.init, backend.runtime.free);
     levenshtein_device_corpus_t corpus(backend.runtime, 3, 16385, 2, levenshtein_device_alphabet_t::bytes_k);
     sz_strings_view_t const queries = corpus.query_strings(), candidates = corpus.device;
     sz_levenshtein_engine_t engine {};
@@ -638,7 +646,7 @@ inline void check_levenshtein_device_threads_(auto const &backend) {
     auto const round = [&](sz_stream_t stream, sz_strings_view_t const &inputs, sz_size_t *output,
                            std::vector<sz_size_t> const &reference) {
         expect_equal(sz_levenshtein_distances(&engine, &inputs, nullptr, nullptr, STRINGZILLA_SIZE_MAX, output,
-                                              corpus.count(), stream),
+                                              corpus.count() * sizeof(sz_size_t), stream),
                      sz_success_k);
         join_(backend.runtime, stream);
         if (!std::equal(reference.begin(), reference.end(), output))
@@ -665,7 +673,7 @@ inline void check_levenshtein_device_deferred_free_(auto const &backend) {
                  sz_success_k);
     sz_strings_view_t const freed = corpus.pinned.view().raw;
     expect_equal(sz_levenshtein_distances(&engine, &freed, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
-                                          corpus.distances.data(), corpus.count(), queue),
+                                          corpus.distances.data(), corpus.count() * sizeof(sz_size_t), queue),
                  sz_success_k);
     corpus.pinned = pinned_strings_t {};
     expect_equal(sz_stream_synchronize_best(backend.runtime.capabilities, queue), sz_success_k);
@@ -697,8 +705,8 @@ struct ngrams_overlaps_corpus_t {
     /** The candidates gathered on the device, which every device round reads. */
     sz_strings_view_t device {};
 
-    /** @b [queries,candidates,widths], written by whichever verb ran. */
-    pinned_vector<sz_u32_t> matches;
+    /** @b [queries,candidates,widths] shares, written by whichever verb ran. */
+    pinned_vector<sz_f32_t> shares;
 
     /** Host accessors, which is what an engine's builder calls. */
     sz_strings_view_t query_strings() const { return strings_from_(queries); }
@@ -706,7 +714,7 @@ struct ngrams_overlaps_corpus_t {
     ngrams_overlaps_corpus_t(device_backend_t const &runtime, split_mix_generator_t &generator,
                              std::size_t queries_count, std::size_t count, std::size_t query_length,
                              std::size_t widths_count)
-        : matches(queries_count * count * widths_count, pinned_alloc_<sz_u32_t>(runtime)) {
+        : shares(queries_count * count * widths_count, pinned_alloc_<sz_f32_t>(runtime)) {
         fill_queries_(generator, queries_count, query_length);
         std::vector<std::string> candidates(count);
         for (std::size_t index = 0; index != count; ++index) {
@@ -722,7 +730,7 @@ struct ngrams_overlaps_corpus_t {
     ngrams_overlaps_corpus_t(device_backend_t const &runtime, split_mix_generator_t &generator,
                              std::size_t queries_count, std::vector<std::size_t> const &lengths,
                              std::size_t query_length, std::size_t widths_count)
-        : matches(queries_count * lengths.size() * widths_count, pinned_alloc_<sz_u32_t>(runtime)) {
+        : shares(queries_count * lengths.size() * widths_count, pinned_alloc_<sz_f32_t>(runtime)) {
         fill_queries_(generator, queries_count, query_length);
         std::size_t total = 0;
         for (std::size_t const length : lengths) total += length;
@@ -757,14 +765,16 @@ struct ngrams_overlaps_corpus_t {
         device = uploaded_(runtime, pinned.view().raw);
     }
 
-    std::size_t candidate_stride() const noexcept { return matches.size() / (queries.size() * pinned.size()); }
+    std::size_t candidate_stride() const noexcept {
+        return shares.size() / (queries.size() * pinned.size()) * sizeof(sz_f32_t);
+    }
     std::size_t query_stride() const noexcept { return pinned.size() * candidate_stride(); }
 };
 
 /** The serial backend's answers for the same corpus, read off the pinned tape the device copied,
- *  into @p expected, one per count the corpus holds. */
+ *  into @p expected, one per share the corpus holds. */
 inline void ngrams_overlaps_serial_reference_(ngrams_overlaps_corpus_t const &corpus, std::span<sz_size_t const> widths,
-                                              sz_f32_t radius, std::span<sz_u32_t> expected) {
+                                              sz_f32_t radius, std::span<sz_f32_t> expected) {
     sz_strings_view_t const query_strings = corpus.query_strings();
     handle_checked_heap_t heap;
     sz_ngrams_engine_t engine {};
@@ -784,11 +794,11 @@ inline void ngrams_overlaps_serial_reference_(ngrams_overlaps_corpus_t const &co
 
 #pragma region Ngrams Overlaps Checks
 
-/** One backend's counts against serial's, on a corpus that never leaves the device, unbounded and
- *  at radii that keep every pair, some, and only identical ones. */
+/** One backend's shares against serial's, bit for bit, on a corpus that never leaves the device,
+ *  unbounded and at radii that keep every pair, some, and only identical ones. */
 inline void check_ngrams_overlaps_device_equivalence_(split_mix_generator_t &generator, auto const &backend) {
     std::array<sz_size_t, 3> const widths {4, 6, 8};
-    std::vector<sz_u32_t> expected;
+    std::vector<sz_f32_t> expected;
 
     for (std::size_t queries_count : {1u, 3u})
         for (std::size_t count : {1u, 129u, 4096u})
@@ -802,17 +812,16 @@ inline void check_ngrams_overlaps_device_equivalence_(split_mix_generator_t &gen
                                           backend.runtime.stream) != sz_success_k)
                     fail_backend_(backend.name, "a device engine was refused for a well-formed batch");
                 sz_strings_view_t const candidates = corpus.device;
-                expected.resize(corpus.matches.size());
+                expected.resize(corpus.shares.size());
                 for (sz_f32_t const radius : {1.0f, 0.0f, 0.5f}) {
                     ngrams_overlaps_serial_reference_(corpus, widths, radius, expected);
-                    if (backend.ngrams_overlaps(&engine, &candidates, radius, corpus.matches.data(),
+                    if (backend.ngrams_overlaps(&engine, &candidates, radius, corpus.shares.data(),
                                                 corpus.query_stride(), corpus.candidate_stride(),
                                                 backend.runtime.stream) != sz_success_k)
                         fail_backend_(backend.name, "a device-resident batch was refused");
                     join_(backend.runtime, backend.runtime.stream);
-                    for (std::size_t slot = 0; slot != expected.size(); ++slot)
-                        if (corpus.matches[slot] != expected[slot])
-                            fail_backend_(backend.name, "a count differs from serial");
+                    if (std::memcmp(corpus.shares.data(), expected.data(), expected.size() * sizeof(sz_f32_t)) != 0)
+                        fail_backend_(backend.name, "a share differs from serial");
                 }
                 sz_ngrams_engine_free(&engine, backend.runtime.stream);
             }
@@ -822,12 +831,12 @@ inline void check_ngrams_overlaps_device_equivalence_(split_mix_generator_t &gen
  *  lone-long batch's candidates are too short to hold. */
 inline void check_ngrams_overlaps_device_skewed_(split_mix_generator_t &generator, auto const &backend) {
     std::array<sz_size_t, 4> const widths {3, 8, 33, 100};
-    std::vector<sz_u32_t> expected;
+    std::vector<sz_f32_t> expected;
     for (device_skew_t const skew : {device_skew_t::lone_long_k, device_skew_t::log_uniform_k}) {
         std::vector<std::size_t> const lengths = device_skewed_lengths_(generator, skew);
         ngrams_overlaps_corpus_t corpus(backend.runtime, generator, 2, lengths, 777, widths.size());
         sz_strings_view_t const query_strings = corpus.query_strings();
-        expected.resize(corpus.matches.size());
+        expected.resize(corpus.shares.size());
         ngrams_overlaps_serial_reference_(corpus, widths, 1.0f, expected);
         // The lone-long batch carries more candidates than Metal's default round budget.
         sz_ngrams_engine_t engine {};
@@ -836,14 +845,13 @@ inline void check_ngrams_overlaps_device_skewed_(split_mix_generator_t &generato
                                   backend.runtime.stream) != sz_success_k)
             fail_backend_(backend.name, "a device engine was refused for a well-formed batch");
         sz_strings_view_t const candidates = corpus.device;
-        if (backend.ngrams_overlaps(&engine, &candidates, 1.0f, corpus.matches.data(), corpus.query_stride(),
+        if (backend.ngrams_overlaps(&engine, &candidates, 1.0f, corpus.shares.data(), corpus.query_stride(),
                                     corpus.candidate_stride(), backend.runtime.stream) != sz_success_k)
             fail_backend_(backend.name, "a skewed batch was refused");
         join_(backend.runtime, backend.runtime.stream);
         sz_ngrams_engine_free(&engine, backend.runtime.stream);
-        for (std::size_t slot = 0; slot != expected.size(); ++slot)
-            if (corpus.matches[slot] != expected[slot])
-                fail_backend_(backend.name, "a skewed batch's count differs from serial");
+        if (std::memcmp(corpus.shares.data(), expected.data(), expected.size() * sizeof(sz_f32_t)) != 0)
+            fail_backend_(backend.name, "a skewed batch's share differs from serial");
     }
 }
 
@@ -851,7 +859,8 @@ inline void check_ngrams_overlaps_device_skewed_(split_mix_generator_t &generato
 inline void check_ngrams_overlaps_device_memory_safety_(split_mix_generator_t &generator, auto const &backend) {
     std::array<sz_size_t, 2> const widths {4, 6};
     ngrams_overlaps_corpus_t corpus(backend.runtime, generator, 1, 8, 333, widths.size());
-    std::fill(corpus.matches.begin(), corpus.matches.end(), 0xFFFFFFFFu);
+    sz_f32_t const unwritten = std::numeric_limits<sz_f32_t>::quiet_NaN();
+    std::fill(corpus.shares.begin(), corpus.shares.end(), unwritten);
     sz_strings_view_t const query_strings = corpus.query_strings();
     sz_ngrams_engine_t engine {};
     if (sz_ngrams_engine_init(&engine, &query_strings, widths.data(), widths.size(), 0, backend.runtime.capabilities,
@@ -865,36 +874,38 @@ inline void check_ngrams_overlaps_device_memory_safety_(split_mix_generator_t &g
     sz_strings_view_t host_candidates {};
     sz_strings_from_string_views(host_views.data(), host_views.size(), &host_candidates);
 
-    std::vector<sz_u32_t> host_matches(corpus.matches.size(), 0xFFFFFFFFu);
+    std::vector<sz_f32_t> host_shares(corpus.shares.size(), unwritten);
     sz_strings_view_t const candidates = corpus.device;
-    if (backend.ngrams_overlaps(&engine, &candidates, 1.0f, host_matches.data(), corpus.query_stride(),
+    if (backend.ngrams_overlaps(&engine, &candidates, 1.0f, host_shares.data(), corpus.query_stride(),
                                 corpus.candidate_stride(), backend.runtime.stream) != sz_device_memory_mismatch_k)
-        fail_backend_(backend.name, "host counts were not refused");
-    if (backend.ngrams_overlaps(&engine, &host_candidates, 1.0f, corpus.matches.data(), corpus.query_stride(),
+        fail_backend_(backend.name, "host shares were not refused");
+    if (backend.ngrams_overlaps(&engine, &host_candidates, 1.0f, corpus.shares.data(), corpus.query_stride(),
                                 corpus.candidate_stride(), backend.runtime.stream) != sz_device_memory_mismatch_k)
         fail_backend_(backend.name, "host-resident candidates were not refused");
     // An accessor is host code, so it is refused even over bytes the device reaches.
     std::vector<sz_string_view_t> const resident_views = views_of_(corpus.pinned);
     sz_strings_view_t const resident_accessor = strings_from_(resident_views);
-    expect_equal(backend.ngrams_overlaps(&engine, &resident_accessor, 1.0f, corpus.matches.data(),
-                                         corpus.query_stride(), corpus.candidate_stride(), backend.runtime.stream),
+    expect_equal(backend.ngrams_overlaps(&engine, &resident_accessor, 1.0f, corpus.shares.data(), corpus.query_stride(),
+                                         corpus.candidate_stride(), backend.runtime.stream),
                  sz_device_memory_mismatch_k);
     // Metal reserves per-candidate storage; CUDA and ROCm ignore this budget.
-    if (backend.runtime.selected.kind() == sz::device_kind_t::metal_k) {
+    if (backend.runtime.selected.backend == sz::device_kind_t::metal_k) {
         sz_ngrams_engine_t narrow {};
         expect_equal(
             sz_ngrams_engine_init(&narrow, &query_strings, widths.data(), widths.size(), corpus.pinned.size() - 1,
                                   backend.runtime.capabilities, STRINGZILLA_NULL, backend.runtime.stream),
             sz_success_k);
-        expect_equal(backend.ngrams_overlaps(&narrow, &candidates, 1.0f, corpus.matches.data(), corpus.query_stride(),
+        expect_equal(backend.ngrams_overlaps(&narrow, &candidates, 1.0f, corpus.shares.data(), corpus.query_stride(),
                                              corpus.candidate_stride(), backend.runtime.stream),
                      sz_unexpected_dimensions_k);
         sz_ngrams_engine_free(&narrow, backend.runtime.stream);
     }
     join_(backend.runtime, backend.runtime.stream);
-    for (sz_u32_t const untouched : corpus.matches) expect_equal(untouched, 0xFFFFFFFFu);
-    for (sz_u32_t const untouched : host_matches)
-        if (untouched != 0xFFFFFFFFu) fail_backend_(backend.name, "a refused call still wrote a count");
+    for (sz_f32_t const &untouched : corpus.shares)
+        expect_equal(std::memcmp(&untouched, &unwritten, sizeof(unwritten)), 0);
+    for (sz_f32_t const &untouched : host_shares)
+        if (std::memcmp(&untouched, &unwritten, sizeof(unwritten)) != 0)
+            fail_backend_(backend.name, "a refused call still wrote a share");
     sz_ngrams_engine_free(&engine, backend.runtime.stream);
 }
 
@@ -915,14 +926,14 @@ inline void check_ngrams_overlaps_device_width_safety_(split_mix_generator_t &ge
                               STRINGZILLA_NULL, backend.runtime.stream) != sz_success_k)
         fail_backend_(backend.name, "a device engine refused widths the host takes");
     sz_strings_view_t const itself_strings = corpus.device;
-    if (backend.ngrams_overlaps(&engine, &itself_strings, 1.0f, corpus.matches.data(), corpus.query_stride(),
+    if (backend.ngrams_overlaps(&engine, &itself_strings, 1.0f, corpus.shares.data(), corpus.query_stride(),
                                 corpus.candidate_stride(), backend.runtime.stream) != sz_success_k)
         fail_backend_(backend.name, "a device-resident batch was refused");
     join_(backend.runtime, backend.runtime.stream);
     sz_ngrams_engine_free(&engine, backend.runtime.stream);
     for (std::size_t candidate = 0; candidate != 2; ++candidate)
         for (std::size_t index = 0; index != widths.size(); ++index)
-            if (corpus.matches[candidate * widths.size() + index] !=
+            if (corpus.shares[candidate * widths.size() + index] !=
                 ngrams_reference_overlap_(query, candidates[candidate], widths[index]))
                 fail_backend_(backend.name, "a text and its half do not overlap it as the oracle says");
 }
@@ -941,7 +952,7 @@ inline void check_ngrams_overlaps_device_past_query_(split_mix_generator_t &gene
     if (sz_ngrams_engine_init(&engine, &query_strings, widths.data(), widths.size(), 0, backend.runtime.capabilities,
                               STRINGZILLA_NULL, backend.runtime.stream) != sz_success_k)
         fail_backend_(backend.name, "a device engine refused widths the host takes");
-    if (backend.ngrams_overlaps(&engine, &corpus.device, 1.0f, corpus.matches.data(), corpus.query_stride(),
+    if (backend.ngrams_overlaps(&engine, &corpus.device, 1.0f, corpus.shares.data(), corpus.query_stride(),
                                 corpus.candidate_stride(), backend.runtime.stream) != sz_success_k)
         fail_backend_(backend.name, "a device-resident batch was refused");
     join_(backend.runtime, backend.runtime.stream);
@@ -949,7 +960,7 @@ inline void check_ngrams_overlaps_device_past_query_(split_mix_generator_t &gene
     for (std::size_t query = 0; query != corpus.queries.size(); ++query)
         for (std::size_t candidate = 0; candidate != past_query.candidates.size(); ++candidate)
             for (std::size_t index = 0; index != widths.size(); ++index)
-                if (corpus.matches[query * corpus.query_stride() + candidate * corpus.candidate_stride() + index] !=
+                if (corpus.shares[(query * past_query.candidates.size() + candidate) * widths.size() + index] !=
                     ngrams_reference_overlap_(corpus.queries[query], past_query.candidates[candidate], widths[index]))
                     fail_backend_(backend.name, "a width past the query counted a window");
 }
@@ -959,18 +970,18 @@ inline void check_ngrams_overlaps_device_streams_(split_mix_generator_t &generat
     std::array<sz_size_t, 3> const widths {4, 6, 8};
     ngrams_overlaps_corpus_t corpus(backend.runtime, generator, 8, 4096, 777, widths.size());
     sz_strings_view_t const query_strings = corpus.query_strings();
-    std::vector<sz_u32_t> expected(corpus.matches.size());
+    std::vector<sz_f32_t> expected(corpus.shares.size());
     ngrams_overlaps_serial_reference_(corpus, widths, 1.0f, expected);
-    pinned_vector<sz_u32_t> second(corpus.matches.size(), 0xFFFFFFFFu, pinned_alloc_<sz_u32_t>(backend.runtime));
-    stream_t const first_stream(backend.runtime.selected.ordinal(), backend.runtime.init, backend.runtime.free);
-    stream_t const second_stream(backend.runtime.selected.ordinal(), backend.runtime.init, backend.runtime.free);
+    pinned_vector<sz_f32_t> second(corpus.shares.size(), -1.0f, pinned_alloc_<sz_f32_t>(backend.runtime));
+    stream_t const first_stream(backend.runtime.selected.ordinal, backend.runtime.init, backend.runtime.free);
+    stream_t const second_stream(backend.runtime.selected.ordinal, backend.runtime.init, backend.runtime.free);
 
     sz_ngrams_engine_t engine {};
     expect_equal(sz_ngrams_engine_init(&engine, &query_strings, widths.data(), widths.size(), 0,
                                        backend.runtime.capabilities, STRINGZILLA_NULL, backend.runtime.stream),
                  sz_success_k);
     sz_strings_view_t const candidates = corpus.device;
-    expect_equal(sz_ngrams_overlaps(&engine, &candidates, 1.0f, corpus.matches.data(), corpus.query_stride(),
+    expect_equal(sz_ngrams_overlaps(&engine, &candidates, 1.0f, corpus.shares.data(), corpus.query_stride(),
                                     corpus.candidate_stride(), first_stream.handle),
                  sz_success_k);
     expect_equal(sz_ngrams_overlaps(&engine, &candidates, 1.0f, second.data(), corpus.query_stride(),
@@ -979,9 +990,10 @@ inline void check_ngrams_overlaps_device_streams_(split_mix_generator_t &generat
     join_(backend.runtime, first_stream.handle);
     join_(backend.runtime, second_stream.handle);
     sz_ngrams_engine_free(&engine, backend.runtime.stream);
-    for (std::size_t slot = 0; slot != expected.size(); ++slot)
-        if (corpus.matches[slot] != expected[slot] || second[slot] != expected[slot])
-            fail_backend_("dispatched", "two streams scoring one engine disagreed with serial");
+    std::size_t const bytes = expected.size() * sizeof(sz_f32_t);
+    if (std::memcmp(corpus.shares.data(), expected.data(), bytes) != 0 ||
+        std::memcmp(second.data(), expected.data(), bytes) != 0)
+        fail_backend_("dispatched", "two streams scoring one engine disagreed with serial");
 }
 
 #pragma endregion Ngrams Overlaps Checks
@@ -1276,20 +1288,21 @@ inline void check_against_serial_(auto const &backend, device_corpus_t &corpus, 
     // disagree with it.
     pinned_vector<sz_size_t> device_counts(haystacks.size(), 0, pinned_alloc_<sz_size_t>(backend.runtime));
     std::vector<sz_size_t> serial_counts(haystacks.size(), 0);
-    expect_equal(sz_substrings_counts_serial(&engines.host, &pinned_tape, serial_counts.data(), 1, nullptr),
-                 sz_success_k);
     expect_equal(
-        backend.substrings_counts(&engines.device, &device_tape, device_counts.data(), 1, backend.runtime.stream),
+        sz_substrings_counts_serial(&engines.host, &pinned_tape, serial_counts.data(), sizeof(sz_size_t), nullptr),
         sz_success_k);
+    expect_equal(backend.substrings_counts(&engines.device, &device_tape, device_counts.data(), sizeof(sz_size_t),
+                                           backend.runtime.stream),
+                 sz_success_k);
     join_(backend.runtime, backend.runtime.stream);
     for (std::size_t index = 0; index != haystacks.size(); ++index)
         expect_equal(device_counts[index], serial_counts[index]);
 
     // The dispatched verb picks the same kernel by the engine's recorded capability, so both agree.
     pinned_vector<sz_size_t> dispatched_counts(haystacks.size(), 0, pinned_alloc_<sz_size_t>(backend.runtime));
-    expect_equal(
-        sz_substrings_counts(&engines.device, &device_tape, dispatched_counts.data(), 1, backend.runtime.stream),
-        sz_success_k);
+    expect_equal(sz_substrings_counts(&engines.device, &device_tape, dispatched_counts.data(), sizeof(sz_size_t),
+                                      backend.runtime.stream),
+                 sz_success_k);
     join_(backend.runtime, backend.runtime.stream);
     for (std::size_t index = 0; index != haystacks.size(); ++index)
         expect_equal(dispatched_counts[index], device_counts[index]);
@@ -1379,10 +1392,10 @@ inline void check_bm25_against_serial_(auto const &backend, device_corpus_t &cor
         pinned_vector<sz_f32_t> device_scores(haystacks.size(), -1, pinned_alloc_<sz_f32_t>(backend.runtime));
         sz_strings_view_t const pinned_tape = corpus.pinned.view().raw, device_tape = corpus.device;
         expect_equal(sz_substrings_bm25_scores_serial(&engines.host, &pinned_tape, lengths, &parameters, weights.data(),
-                                                      serial_scores.data(), 1, nullptr),
+                                                      serial_scores.data(), sizeof(sz_f32_t), nullptr),
                      sz_success_k);
         expect_equal(backend.substrings_bm25_scores(&engines.device, &device_tape, lengths, &parameters, weights.data(),
-                                                    device_scores.data(), 1, backend.runtime.stream),
+                                                    device_scores.data(), sizeof(sz_f32_t), backend.runtime.stream),
                      sz_success_k);
         join_(backend.runtime, backend.runtime.stream);
         for (std::size_t index = 0; index != haystacks.size(); ++index) {
@@ -1548,9 +1561,9 @@ inline void check_substrings_device_safety_(auto const &backend) {
     {
         std::vector<sz_size_t> host_counts(haystacks.size(), 0);
         sz_strings_view_t const device_tape = corpus.device;
-        expect_equal(
-            backend.substrings_counts(&engines.device, &device_tape, host_counts.data(), 1, backend.runtime.stream),
-            sz_device_memory_mismatch_k);
+        expect_equal(backend.substrings_counts(&engines.device, &device_tape, host_counts.data(), sizeof(sz_size_t),
+                                               backend.runtime.stream),
+                     sz_device_memory_mismatch_k);
     }
 
     // A host bitmap is refused too, and an empty batch writes none.
@@ -1579,7 +1592,8 @@ inline void check_substrings_device_safety_(auto const &backend) {
     {
         pinned_vector<sz_size_t> counts(haystacks.size(), 0, pinned_alloc_<sz_size_t>(backend.runtime));
         sz_strings_view_t const device_tape = corpus.device;
-        expect_equal(backend.substrings_counts(&engines.device, &device_tape, counts.data(), 1, backend.runtime.stream),
+        expect_equal(backend.substrings_counts(&engines.device, &device_tape, counts.data(), sizeof(sz_size_t),
+                                               backend.runtime.stream),
                      sz_success_k);
         join_(backend.runtime, backend.runtime.stream);
         expect_equal(counts[0], 4);
@@ -1735,8 +1749,10 @@ inline void check_regex_against_serial_(auto const &backend, std::vector<std::st
     // The dispatched verb runs the kernel of the capability the engine recorded, so both agree.
     pinned_vector<sz_size_t> device_counts(count, 0, pinned_alloc_<sz_size_t>(backend.runtime)),
         dispatched_counts(count, 0, pinned_alloc_<sz_size_t>(backend.runtime));
-    expect_equal(backend.regex_counts(&engines.device, &device_tape, device_counts.data(), 1, stream), sz_success_k);
-    expect_equal(sz_regex_counts(&engines.device, &device_tape, dispatched_counts.data(), 1, stream), sz_success_k);
+    expect_equal(backend.regex_counts(&engines.device, &device_tape, device_counts.data(), sizeof(sz_size_t), stream),
+                 sz_success_k);
+    expect_equal(sz_regex_counts(&engines.device, &device_tape, dispatched_counts.data(), sizeof(sz_size_t), stream),
+                 sz_success_k);
     join_(backend.runtime, stream);
     for (std::size_t index = 0; index != count; ++index)
         expect_true(device_counts[index] == serial_offsets[index + 1] - serial_offsets[index] &&
@@ -2012,7 +2028,7 @@ inline void check_regex_device_safety_(auto const &backend) {
     sz_strings_view_t const device_tape = corpus.device;
 
     std::vector<sz_size_t> host_counts(1, 0);
-    expect_equal(backend.regex_counts(&engines.device, &device_tape, host_counts.data(), 1, stream),
+    expect_equal(backend.regex_counts(&engines.device, &device_tape, host_counts.data(), sizeof(sz_size_t), stream),
                  sz_device_memory_mismatch_k);
     if (backend.regex_contains) {
         std::vector<sz_u1x8_t> host_contained(1, 0);
@@ -2153,12 +2169,12 @@ inline void check_subdocuments_against_serial_(auto const &backend, std::vector<
     // The dispatched verb runs the kernel of the capability the engine recorded, so both agree.
     pinned_vector<sz_size_t> device_counts(count, 0, pinned_alloc_<sz_size_t>(backend.runtime)),
         dispatched_counts(count, 0, pinned_alloc_<sz_size_t>(backend.runtime));
-    expect_equal(
-        backend.subdocuments_counts(&engines.device, &device_tape, device_counts.data(), 1, &device_malformed, stream),
-        sz_success_k);
-    expect_equal(
-        sz_subdocuments_counts(&engines.device, &device_tape, dispatched_counts.data(), 1, &device_malformed, stream),
-        sz_success_k);
+    expect_equal(backend.subdocuments_counts(&engines.device, &device_tape, device_counts.data(), sizeof(sz_size_t),
+                                             &device_malformed, stream),
+                 sz_success_k);
+    expect_equal(sz_subdocuments_counts(&engines.device, &device_tape, dispatched_counts.data(), sizeof(sz_size_t),
+                                        &device_malformed, stream),
+                 sz_success_k);
     join_(backend.runtime, stream);
     for (std::size_t index = 0; index != count; ++index)
         expect_true(device_counts[index] == serial_offsets[index + 1] - serial_offsets[index] &&
@@ -2392,7 +2408,8 @@ inline void check_subdocuments_device_safety_(auto const &backend) {
     sz_strings_view_t const device_tape = corpus.device;
     sz_size_t malformed = STRINGZILLA_SIZE_MAX;
     std::vector<sz_size_t> host_counts(1, 0);
-    expect_equal(backend.subdocuments_counts(&engines.device, &device_tape, host_counts.data(), 1, &malformed, stream),
+    expect_equal(backend.subdocuments_counts(&engines.device, &device_tape, host_counts.data(), sizeof(sz_size_t),
+                                             &malformed, stream),
                  sz_device_memory_mismatch_k);
     if (backend.subdocuments_contains) {
         std::vector<sz_u1x8_t> host_contained(1, 0);
